@@ -1,14 +1,10 @@
 [build]
 builder = "nixpacks"
-buildCommand = "npm install && npm run server:build"
- 
+buildCommand = "npm install --legacy-peer-deps && npx esbuild server/index.ts --platform=node --packages=external --bundle --format=cjs --outdir=server_dist"
+
 [deploy]
-startCommand = "npm run server:prod"
+startCommand = "node server_dist/index.js"
 healthcheckPath = "/api/health"
 healthcheckTimeout = 30
 restartPolicyType = "on_failure"
 restartPolicyMaxRetries = 3
- 
-[[services]]
-name = "dhanraj-backend"
- 
