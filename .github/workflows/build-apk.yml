@@ -4,7 +4,7 @@ on:
   push:
     branches:
       - main
-  workflow_dispatch: # Allow manual trigger from GitHub Actions tab
+  workflow_dispatch:
 
 jobs:
   build:
@@ -30,13 +30,6 @@ jobs:
           token: ${{ secrets.EXPO_TOKEN }}
 
       - name: Build APK
-        run: eas build --platform android --profile production --non-interactive --local --output ./build/app-release.apk
+        run: eas build --platform android --profile production --non-interactive
         env:
           EXPO_PUBLIC_API_URL: https://dhanraj-production-09c4.up.railway.app
-
-      - name: Upload APK as artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: dhanraj-apk
-          path: ./build/app-release.apk
-          retention-days: 30
