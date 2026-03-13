@@ -12,6 +12,244 @@ export async function query(sql: string, params?: any[]) {
   }
 }
 
+// ============================================================
+// AUTO-MIGRATION: runs on every startup, safe to re-run
+// ============================================================
+export async function initDatabase() {
+  const migrations = [
+    // FOS Agents
+    `CREATE TABLE IF NOT EXISTS fos_agents (
+      id         SERIAL PRIMARY KEY,
+      name       TEXT NOT NULL,
+      username   TEXT NOT NULL UNIQUE,
+      password   TEXT NOT NULL,
+      role       TEXT NOT NULL DEFAULT 'fos',
+      phone      TEXT,
+      photo_url  TEXT,
+      push_token TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+
+    // Sessions
+    `CREATE TABLE IF NOT EXISTS user_sessions (
+      sid    VARCHAR NOT NULL PRIMARY KEY,
+      sess   JSON NOT NULL,
+      expire TIMESTAMPTZ NOT NULL
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_user_sessions_expire ON user_sessions(expire)`,
+
+    // Loan Cases
+    `CREATE TABLE IF NOT EXISTS loan_cases (
+      id                  SERIAL PRIMARY KEY,
+      agent_id            INTEGER REFERENCES fos_agents(id),
+      fos_name            TEXT,
+      loan_no             TEXT NOT NULL UNIQUE,
+      customer_name       TEXT NOT NULL,
+      bkt                 INTEGER,
+      app_id              TEXT,
+      address             TEXT,
+      mobile_no           TEXT,
+      reference_address   TEXT,
+      pos                 NUMERIC,
+      asset_make          TEXT,
+      registration_no     TEXT,
+      engine_no           TEXT,
+      chassis_no          TEXT,
+      emi_amount          NUMERIC,
+      emi_due             NUMERIC,
+      cbc                 NUMERIC,
+      lpp                 NUMERIC,
+      cbc_lpp             NUMERIC,
+      rollback            NUMERIC,
+      clearance           NUMERIC,
+      first_emi_due_date  DATE,
+      loan_maturity_date  DATE,
+      tenor               INTEGER,
+      pro                 TEXT,
+      status              TEXT DEFAULT 'Unpaid',
+      latest_feedback     TEXT,
+      feedback_comments   TEXT,
+      feedback_date       TIMESTAMPTZ,
+      ptp_date            DATE,
+      telecaller_ptp_date DATE,
+      rollback_yn         BOOLEAN,
+      created_at          TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_loan_cases_agent  ON loan_cases(agent_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_loan_cases_status ON loan_cases(status)`,
+
+    // BKT / Penal Cases
+    `CREATE TABLE IF NOT EXISTS bkt_cases (
+      id                  SERIAL PRIMARY KEY,
+      case_category       TEXT NOT NULL,
+      agent_id            INTEGER REFERENCES fos_agents(id),
+      fos_name            TEXT,
+      customer_name       TEXT NOT NULL,
+      loan_no             TEXT NOT NULL UNIQUE,
+      bkt                 INTEGER,
+      app_id              TEXT,
+      address             TEXT,
+      mobile_no           TEXT,
+      ref1_name           TEXT,
+      ref1_mobile         TEXT,
+      ref2_name           TEXT,
+      ref2_mobile         TEXT,
+      reference_address   TEXT,
+      pos                 NUMERIC,
+      asset_name          TEXT,
+      asset_make          TEXT,
+      registration_no     TEXT,
+      engine_no           TEXT,
+      chassis_no          TEXT,
+      emi_amount          NUMERIC,
+      emi_due             NUMERIC,
+      cbc                 NUMERIC,
+      lpp                 NUMERIC,
+      cbc_lpp             NUMERIC,
+      rollback            NUMERIC,
+      clearance           NUMERIC,
+      first_emi_due_date  DATE,
+      loan_maturity_date  DATE,
+      tenor               INTEGER,
+      pro                 TEXT,
+      status              TEXT DEFAULT 'Unpaid',
+      latest_feedback     TEXT,
+      feedback_comments   TEXT,
+      feedback_date       TIMESTAMPTZ,
+      ptp_date            DATE,
+      telecaller_ptp_date DATE,
+      rollback_yn         BOOLEAN,
+      created_at          TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_bkt_cases_agent    ON bkt_cases(agent_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_bkt_cases_category ON bkt_cases(case_category)`,
+
+    // Attendance
+    `CREATE TABLE IF NOT EXISTS attendance (
+      id        SERIAL PRIMARY KEY,
+      agent_id  INTEGER NOT NULL REFERENCES fos_agents(id),
+      date      DATE NOT NULL,
+      check_in  TIMESTAMPTZ,
+      check_out TIMESTAMPTZ,
+      UNIQUE(agent_id, date)
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_attendance_agent ON attendance(agent_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_attendance_date  ON attendance(date)`,
+
+    // Salary Details
+    `CREATE TABLE IF NOT EXISTS salary_details (
+      id               SERIAL PRIMARY KEY,
+      agent_id         INTEGER NOT NULL REFERENCES fos_agents(id),
+      month            INTEGER NOT NULL,
+      year             INTEGER NOT NULL,
+      present_days     INTEGER DEFAULT 0,
+      payment_amount   NUMERIC DEFAULT 0,
+      incentive_amount NUMERIC DEFAULT 0,
+      petrol_expense   NUMERIC DEFAULT 0,
+      mobile_expense   NUMERIC DEFAULT 0,
+      gross_payment    NUMERIC DEFAULT 0,
+      advance          NUMERIC DEFAULT 0,
+      other_deductions NUMERIC DEFAULT 0,
+      total            NUMERIC DEFAULT 0,
+      net_salary       NUMERIC DEFAULT 0,
+      created_at       TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_salary_agent ON salary_details(agent_id)`,
+
+    // Depositions
+    `CREATE TABLE IF NOT EXISTS depositions (
+      id              SERIAL PRIMARY KEY,
+      agent_id        INTEGER NOT NULL REFERENCES fos_agents(id),
+      loan_case_id    INTEGER REFERENCES loan_cases(id),
+      amount          NUMERIC NOT NULL,
+      deposition_date DATE,
+      receipt_no      TEXT,
+      notes           TEXT,
+      created_at      TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_depositions_agent ON depositions(agent_id)`,
+
+    // Required Deposits
+    `CREATE TABLE IF NOT EXISTS required_deposits (
+      id                     SERIAL PRIMARY KEY,
+      agent_id               INTEGER NOT NULL REFERENCES fos_agents(id),
+      amount                 NUMERIC NOT NULL,
+      description            TEXT,
+      due_date               DATE,
+      screenshot_url         TEXT,
+      screenshot_uploaded_at TIMESTAMPTZ,
+      alarm_scheduled        BOOLEAN DEFAULT FALSE,
+      reminder_sent          BOOLEAN DEFAULT FALSE,
+      created_at             TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_required_deposits_agent ON required_deposits(agent_id)`,
+
+    // BKT Performance Summary
+    `CREATE TABLE IF NOT EXISTS bkt_perf_summary (
+      id                   SERIAL PRIMARY KEY,
+      fos_name             TEXT NOT NULL,
+      agent_id             INTEGER REFERENCES fos_agents(id),
+      bkt                  TEXT NOT NULL,
+      pos_paid             NUMERIC DEFAULT 0,
+      pos_unpaid           NUMERIC DEFAULT 0,
+      pos_grand_total      NUMERIC DEFAULT 0,
+      pos_percentage       NUMERIC DEFAULT 0,
+      count_paid           INTEGER DEFAULT 0,
+      count_unpaid         INTEGER DEFAULT 0,
+      count_total          INTEGER DEFAULT 0,
+      rollback_paid        NUMERIC DEFAULT 0,
+      rollback_unpaid      NUMERIC DEFAULT 0,
+      rollback_grand_total NUMERIC DEFAULT 0,
+      rollback_percentage  NUMERIC DEFAULT 0,
+      uploaded_at          TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(fos_name, bkt)
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_bkt_perf_agent ON bkt_perf_summary(agent_id)`,
+
+    // Column migrations (safe to re-run)
+    `ALTER TABLE bkt_perf_summary ADD COLUMN IF NOT EXISTS pos_paid             NUMERIC DEFAULT 0`,
+    `ALTER TABLE bkt_perf_summary ADD COLUMN IF NOT EXISTS pos_unpaid           NUMERIC DEFAULT 0`,
+    `ALTER TABLE bkt_perf_summary ADD COLUMN IF NOT EXISTS pos_grand_total      NUMERIC DEFAULT 0`,
+    `ALTER TABLE bkt_perf_summary ADD COLUMN IF NOT EXISTS pos_percentage       NUMERIC DEFAULT 0`,
+    `ALTER TABLE bkt_perf_summary ADD COLUMN IF NOT EXISTS count_paid           INTEGER DEFAULT 0`,
+    `ALTER TABLE bkt_perf_summary ADD COLUMN IF NOT EXISTS count_unpaid         INTEGER DEFAULT 0`,
+    `ALTER TABLE bkt_perf_summary ADD COLUMN IF NOT EXISTS count_total          INTEGER DEFAULT 0`,
+    `ALTER TABLE bkt_perf_summary ADD COLUMN IF NOT EXISTS rollback_paid        NUMERIC DEFAULT 0`,
+    `ALTER TABLE bkt_perf_summary ADD COLUMN IF NOT EXISTS rollback_unpaid      NUMERIC DEFAULT 0`,
+    `ALTER TABLE bkt_perf_summary ADD COLUMN IF NOT EXISTS rollback_grand_total NUMERIC DEFAULT 0`,
+    `ALTER TABLE bkt_perf_summary ADD COLUMN IF NOT EXISTS rollback_percentage  NUMERIC DEFAULT 0`,
+    `ALTER TABLE loan_cases ADD COLUMN IF NOT EXISTS telecaller_ptp_date DATE`,
+    `ALTER TABLE bkt_cases  ADD COLUMN IF NOT EXISTS telecaller_ptp_date DATE`,
+
+    // Normalize bkt values
+    `UPDATE bkt_perf_summary SET bkt = 'bkt1'  WHERE LOWER(REPLACE(bkt,' ','')) IN ('1','bkt1')  AND bkt <> 'bkt1'`,
+    `UPDATE bkt_perf_summary SET bkt = 'bkt2'  WHERE LOWER(REPLACE(bkt,' ','')) IN ('2','bkt2')  AND bkt <> 'bkt2'`,
+    `UPDATE bkt_perf_summary SET bkt = 'bkt3'  WHERE LOWER(REPLACE(bkt,' ','')) IN ('3','bkt3')  AND bkt <> 'bkt3'`,
+    `UPDATE bkt_perf_summary SET bkt = 'penal' WHERE LOWER(bkt) = 'penal'                        AND bkt <> 'penal'`,
+
+    // Default admin user
+    `INSERT INTO fos_agents (name, username, password, role)
+     VALUES ('Admin', 'admin', 'admin123', 'admin')
+     ON CONFLICT (username) DO NOTHING`,
+  ];
+
+  for (const sql of migrations) {
+    try {
+      await query(sql);
+    } catch (e: any) {
+      // Log but don't crash — some migrations may already be applied
+      console.warn(`[migration] skipped: ${e.message?.slice(0, 80)}`);
+    }
+  }
+
+  console.log("[migration] Database initialized successfully");
+}
+
+// Keep old function name for compatibility
+export async function initBktPerfSummaryTable() {
+  await initDatabase();
+}
+
 export async function getAgentByUsername(username: string) {
   const result = await query("SELECT * FROM fos_agents WHERE username = $1", [username]);
   return result.rows[0] || null;
@@ -332,7 +570,6 @@ export async function deleteRequiredDeposit(id: number) {
   await query(`DELETE FROM required_deposits WHERE id = $1`, [id]);
 }
 
-// BKT / Penal Cases
 export async function upsertBktCase(data: any) {
   const result = await query(
     `INSERT INTO bkt_cases (
@@ -396,30 +633,19 @@ export async function upsertBktCase(data: any) {
 export async function getAllBktCases(category?: string) {
   if (category === "penal") {
     const result = await query(
-      `SELECT bc.*, fa.name as agent_name
-       FROM bkt_cases bc
-       LEFT JOIN fos_agents fa ON bc.agent_id = fa.id
-       WHERE bc.cbc IS NOT NULL AND bc.cbc::numeric > 0
-       ORDER BY fa.name NULLS LAST, bc.customer_name`
+      `SELECT bc.*, fa.name as agent_name FROM bkt_cases bc LEFT JOIN fos_agents fa ON bc.agent_id = fa.id WHERE bc.cbc IS NOT NULL AND bc.cbc::numeric > 0 ORDER BY fa.name NULLS LAST, bc.customer_name`
     );
     return result.rows;
   }
   if (category) {
     const result = await query(
-      `SELECT bc.*, fa.name as agent_name
-       FROM bkt_cases bc
-       LEFT JOIN fos_agents fa ON bc.agent_id = fa.id
-       WHERE bc.case_category = $1
-       ORDER BY fa.name NULLS LAST, bc.customer_name`,
+      `SELECT bc.*, fa.name as agent_name FROM bkt_cases bc LEFT JOIN fos_agents fa ON bc.agent_id = fa.id WHERE bc.case_category = $1 ORDER BY fa.name NULLS LAST, bc.customer_name`,
       [category]
     );
     return result.rows;
   }
   const result = await query(
-    `SELECT bc.*, fa.name as agent_name
-     FROM bkt_cases bc
-     LEFT JOIN fos_agents fa ON bc.agent_id = fa.id
-     ORDER BY bc.case_category, bc.customer_name`
+    `SELECT bc.*, fa.name as agent_name FROM bkt_cases bc LEFT JOIN fos_agents fa ON bc.agent_id = fa.id ORDER BY bc.case_category, bc.customer_name`
   );
   return result.rows;
 }
@@ -451,54 +677,6 @@ export async function updateBktCaseFeedback(id: number, status: string, feedback
     `UPDATE bkt_cases SET status = $1, latest_feedback = $2, feedback_comments = $3, feedback_date = NOW(), ptp_date = $5, rollback_yn = COALESCE($6, rollback_yn) WHERE id = $4`,
     [status, feedback, comments, id, ptpDate || null, rollbackYn != null ? rollbackYn : null]
   );
-}
-
-// BKT Performance Summary — pre-aggregated Excel upload
-export async function initBktPerfSummaryTable() {
-  await query(`
-    CREATE TABLE IF NOT EXISTS bkt_perf_summary (
-      id SERIAL PRIMARY KEY,
-      fos_name TEXT NOT NULL,
-      agent_id INTEGER,
-      bkt TEXT NOT NULL,
-      pos_paid NUMERIC DEFAULT 0,
-      pos_unpaid NUMERIC DEFAULT 0,
-      pos_grand_total NUMERIC DEFAULT 0,
-      pos_percentage NUMERIC DEFAULT 0,
-      count_paid INTEGER DEFAULT 0,
-      count_unpaid INTEGER DEFAULT 0,
-      count_total INTEGER DEFAULT 0,
-      rollback_paid NUMERIC DEFAULT 0,
-      rollback_unpaid NUMERIC DEFAULT 0,
-      rollback_grand_total NUMERIC DEFAULT 0,
-      rollback_percentage NUMERIC DEFAULT 0,
-      uploaded_at TIMESTAMPTZ DEFAULT NOW(),
-      UNIQUE(fos_name, bkt)
-    )
-  `);
-  // Migrate old columns if they exist
-  const migrations = [
-    `ALTER TABLE bkt_perf_summary ADD COLUMN IF NOT EXISTS pos_paid NUMERIC DEFAULT 0`,
-    `ALTER TABLE bkt_perf_summary ADD COLUMN IF NOT EXISTS pos_unpaid NUMERIC DEFAULT 0`,
-    `ALTER TABLE bkt_perf_summary ADD COLUMN IF NOT EXISTS pos_grand_total NUMERIC DEFAULT 0`,
-    `ALTER TABLE bkt_perf_summary ADD COLUMN IF NOT EXISTS pos_percentage NUMERIC DEFAULT 0`,
-    `ALTER TABLE bkt_perf_summary ADD COLUMN IF NOT EXISTS count_paid INTEGER DEFAULT 0`,
-    `ALTER TABLE bkt_perf_summary ADD COLUMN IF NOT EXISTS count_unpaid INTEGER DEFAULT 0`,
-    `ALTER TABLE bkt_perf_summary ADD COLUMN IF NOT EXISTS count_total INTEGER DEFAULT 0`,
-    `ALTER TABLE bkt_perf_summary ADD COLUMN IF NOT EXISTS rollback_paid NUMERIC DEFAULT 0`,
-    `ALTER TABLE bkt_perf_summary ADD COLUMN IF NOT EXISTS rollback_unpaid NUMERIC DEFAULT 0`,
-    `ALTER TABLE bkt_perf_summary ADD COLUMN IF NOT EXISTS rollback_grand_total NUMERIC DEFAULT 0`,
-    `ALTER TABLE bkt_perf_summary ADD COLUMN IF NOT EXISTS rollback_percentage NUMERIC DEFAULT 0`,
-    `ALTER TABLE loan_cases ADD COLUMN IF NOT EXISTS telecaller_ptp_date DATE`,
-    `ALTER TABLE bkt_cases  ADD COLUMN IF NOT EXISTS telecaller_ptp_date DATE`,
-    `UPDATE bkt_perf_summary SET bkt = 'bkt1' WHERE LOWER(REPLACE(bkt,' ','')) IN ('1','bkt1') AND bkt <> 'bkt1'`,
-    `UPDATE bkt_perf_summary SET bkt = 'bkt2' WHERE LOWER(REPLACE(bkt,' ','')) IN ('2','bkt2') AND bkt <> 'bkt2'`,
-    `UPDATE bkt_perf_summary SET bkt = 'bkt3' WHERE LOWER(REPLACE(bkt,' ','')) IN ('3','bkt3') AND bkt <> 'bkt3'`,
-    `UPDATE bkt_perf_summary SET bkt = 'penal' WHERE LOWER(bkt) = 'penal' AND bkt <> 'penal'`,
-  ];
-  for (const sql of migrations) {
-    try { await query(sql); } catch {}
-  }
 }
 
 export async function upsertBktPerfSummary(data: {
@@ -549,30 +727,22 @@ export async function upsertBktPerfSummary(data: {
 }
 
 export async function applyBktPerfDelta(
-  agentId: number,
-  bkt: string,
-  deltaPosPaid: number,
-  deltaPosUnpaid: number,
-  deltaCountPaid: number,
-  deltaCountUnpaid: number,
-  deltaRbPaid: number,
-  deltaRbUnpaid: number,
+  agentId: number, bkt: string,
+  deltaPosPaid: number, deltaPosUnpaid: number,
+  deltaCountPaid: number, deltaCountUnpaid: number,
+  deltaRbPaid: number, deltaRbUnpaid: number,
 ) {
   if (deltaPosPaid === 0 && deltaCountPaid === 0 && deltaRbPaid === 0) return;
   await query(
     `UPDATE bkt_perf_summary SET
-       pos_paid       = GREATEST(0, pos_paid       + $1),
-       pos_unpaid     = GREATEST(0, pos_unpaid     + $2),
-       pos_percentage = CASE WHEN pos_grand_total > 0
-                          THEN ROUND((GREATEST(0, pos_paid + $1) / pos_grand_total) * 100, 2)
-                          ELSE 0 END,
-       count_paid     = GREATEST(0, count_paid     + $3),
-       count_unpaid   = GREATEST(0, count_unpaid   + $4),
-       rollback_paid  = GREATEST(0, rollback_paid  + $5),
-       rollback_unpaid= GREATEST(0, rollback_unpaid+ $6),
-       rollback_percentage = CASE WHEN rollback_grand_total > 0
-                               THEN ROUND((GREATEST(0, rollback_paid + $5) / rollback_grand_total) * 100, 2)
-                               ELSE 0 END
+       pos_paid        = GREATEST(0, pos_paid       + $1),
+       pos_unpaid      = GREATEST(0, pos_unpaid     + $2),
+       pos_percentage  = CASE WHEN pos_grand_total > 0 THEN ROUND((GREATEST(0, pos_paid + $1) / pos_grand_total) * 100, 2) ELSE 0 END,
+       count_paid      = GREATEST(0, count_paid     + $3),
+       count_unpaid    = GREATEST(0, count_unpaid   + $4),
+       rollback_paid   = GREATEST(0, rollback_paid  + $5),
+       rollback_unpaid = GREATEST(0, rollback_unpaid+ $6),
+       rollback_percentage = CASE WHEN rollback_grand_total > 0 THEN ROUND((GREATEST(0, rollback_paid + $5) / rollback_grand_total) * 100, 2) ELSE 0 END
      WHERE agent_id = $7 AND bkt = $8`,
     [deltaPosPaid, deltaPosUnpaid, deltaCountPaid, deltaCountUnpaid, deltaRbPaid, deltaRbUnpaid, agentId, bkt]
   );
@@ -580,10 +750,7 @@ export async function applyBktPerfDelta(
 
 export async function getAllBktPerfSummary() {
   const result = await query(
-    `SELECT s.*, fa.name as agent_real_name
-     FROM bkt_perf_summary s
-     LEFT JOIN fos_agents fa ON fa.id = s.agent_id
-     ORDER BY s.fos_name, s.bkt`
+    `SELECT s.*, fa.name as agent_real_name FROM bkt_perf_summary s LEFT JOIN fos_agents fa ON fa.id = s.agent_id ORDER BY s.fos_name, s.bkt`
   );
   return result.rows;
 }
