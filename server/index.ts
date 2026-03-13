@@ -7,6 +7,13 @@ import * as path from "path";
 const app = express();
 const log = console.log;
 
+// Prevent crashes from unhandled rejections
+process.on("unhandledRejection", (reason) => {
+  console.error("[unhandledRejection]", reason);
+});
+process.on("uncaughtException", (err) => {
+  console.error("[uncaughtException]", err);
+});
 declare module "http" {
   interface IncomingMessage {
     rawBody: unknown;
