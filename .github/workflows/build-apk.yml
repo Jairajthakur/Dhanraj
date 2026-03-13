@@ -29,6 +29,11 @@ jobs:
           eas-version: latest
           token: ${{ secrets.EXPO_TOKEN }}
 
+      - name: Verify structure
+        run: |
+          ls -la
+          cat package.json | head -5
+
       - name: Build APK
         run: eas build --platform android --profile production --non-interactive
         env:
