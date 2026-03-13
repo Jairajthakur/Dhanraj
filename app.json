@@ -1,12 +1,57 @@
 {
-  "build": {
-    "production": {
-      "android": {
-        "buildType": "apk"
-      },
-      "env": {
-        "EXPO_PUBLIC_API_URL": "https://dhanraj-production-09c4.up.railway.app"
+  "expo": {
+    "name": "Dhanraj Enterprises",
+    "slug": "dhanraj-enterprises",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/images/dhanraj-logo.png",
+    "scheme": "dhanrajenterprises",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/images/dhanraj-logo.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ECEAE4"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.dhanrajenterprises.app"
+    },
+    "android": {
+      "package": "com.dhanrajenterprises.app",
+      "adaptiveIcon": {
+        "backgroundColor": "#ECEAE4",
+        "foregroundImage": "./assets/images/dhanraj-logo.png",
+        "backgroundImage": "./assets/images/android-icon-background.png",
+        "monochromeImage": "./assets/images/android-icon-monochrome.png"
       }
+    },
+    "web": {
+      "favicon": "./assets/images/dhanraj-logo.png"
+    },
+    "plugins": [
+      [
+        "expo-router",
+        {
+          "origin": "https://dhanraj-production-09c4.up.railway.app"
+        }
+      ],
+      "expo-font",
+      "expo-web-browser",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/images/dhanraj-logo.png",
+          "color": "#111111"
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true,
+      "reactCompiler": true
+    },
+    "extra": {
+      "apiUrl": "https://dhanraj-production-09c4.up.railway.app"
     }
   }
 }
