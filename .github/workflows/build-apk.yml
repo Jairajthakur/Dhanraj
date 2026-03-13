@@ -34,3 +34,4 @@ jobs:
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
           EXPO_PUBLIC_API_URL: https://dhanraj-production-09c4.up.railway.app
+          EAS_BUILD_NO_EXPO_GO_WARNING: "true"
