@@ -4,13 +4,19 @@ const path = require("path");
 
 const config = getDefaultConfig(__dirname);
 
-// Fix path alias resolution for @/ imports
+// Configure resolver for path aliases
 config.resolver = {
   ...config.resolver,
+  sourceExts: ["ts", "tsx", "js", "jsx", "json", "mjs"],
   extraNodeModules: {
     "@": path.resolve(__dirname),
   },
 };
+
+// Add watchFolders to ensure Metro watches the constants directory
+config.watchFolders = [
+  path.resolve(__dirname),
+];
 
 config.server = {
   enhanceMiddleware: (metroMiddleware) => {
