@@ -8,6 +8,7 @@ import ExcelJS from "exceljs";
 import * as storage from "./storage";
 import path from "node:path";
 import fs from "node:fs";
+import express from "express";
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
 
@@ -117,7 +118,6 @@ function parseDate(val: any): string | null {
   if (val === null || val === undefined || val === "") return null;
   const s = String(val).trim();
   if (!s) return null;
-  // Handle DD-MM-YYYY (e.g. 11-03-2026 or 11/03/2026) → YYYY-MM-DD
   const ddmmyyyy = s.match(/^(\d{1,2})[-\/](\d{1,2})[-\/](\d{4})$/);
   if (ddmmyyyy) {
     return `${ddmmyyyy[3]}-${ddmmyyyy[2].padStart(2,"0")}-${ddmmyyyy[1].padStart(2,"0")}`;
@@ -137,7 +137,6 @@ function isRepeatHeaderRow(mapped: Record<string, any>): boolean {
   return HEADER_SENTINEL.has(loanNo) || loanNo === "loan no" || loanNo === "s.no" || /^s\.?\s*no\.?$/i.test(loanNo);
 }
 
-// Maps normalized Excel header → DB column key
 const COLUMN_MAP: Record<string, string> = {
   loanno: "loan_no", loannumber: "loan_no",
   appid: "app_id", applicationid: "app_id", appno: "app_id",
@@ -215,6 +214,13 @@ const BKT_PERF_SQL = `
 
 export async function registerRoutes(app: Express): Promise<Server> {
   await storage.initBktPerfSummaryTable();
+
+  // ✅ FIX: Serve uploaded screenshots as static files
+  // This makes https://your-app.railway.app/uploads/screenshots/filename.jpg work
+  app.use(
+    "/uploads/screenshots",
+    express.static(path.join(process.cwd(), "server/uploads/screenshots"))
+  );
 
   const PgStore = connectPgSimple(session);
   app.use(
@@ -666,11 +672,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const depositId = Number(req.params.id);
       if (!req.file) return res.status(400).json({ message: "No file uploaded" });
-      const screenshotUrl = `/uploads/screenshots/${req.file.filename}`;
+
+      // ✅ FIX: Build full public URL so admin can view it directly
+      const baseUrl = process.env.RAILWAY_PUBLIC_DOMAIN
+        ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`
+        : (process.env.APP_URL || "");
+      const screenshotUrl = `${baseUrl}/uploads/screenshots/${req.file.filename}`;
+
       await storage.query(
         "UPDATE required_deposits SET screenshot_url = $1, screenshot_uploaded_at = NOW() WHERE id = $2 AND agent_id = $3",
         [screenshotUrl, depositId, req.session.agentId!]
       );
+
+      // Notify admin via push if admin has a push token
+      const adminRow = await storage.query(
+        "SELECT push_token FROM fos_agents WHERE role = 'admin' AND push_token IS NOT NULL LIMIT 1"
+      );
+      const adminToken = adminRow.rows[0]?.push_token;
+      if (adminToken) {
+        const agentRow = await storage.query("SELECT name FROM fos_agents WHERE id = $1", [req.session.agentId!]);
+        const agentName = agentRow.rows[0]?.name || "A FOS agent";
+        await sendExpoPush(adminToken, "📸 Screenshot Uploaded", `${agentName} has uploaded a payment screenshot. Please verify.`);
+      }
+
       res.json({ success: true, screenshotUrl });
     } catch (e: any) {
       res.status(500).json({ message: e.message });
@@ -681,6 +705,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.put("/api/admin/required-deposits/:id/verify", requireAdmin, async (req, res) => {
     try {
       await storage.query("UPDATE required_deposits SET alarm_scheduled = TRUE WHERE id = $1", [Number(req.params.id)]);
+
+      // ✅ FIX: Notify FOS agent that their deposit has been verified
+      const depositRow = await storage.query(
+        `SELECT rd.agent_id, rd.amount, fa.push_token, fa.name
+         FROM required_deposits rd
+         JOIN fos_agents fa ON fa.id = rd.agent_id
+         WHERE rd.id = $1`,
+        [Number(req.params.id)]
+      );
+      const deposit = depositRow.rows[0];
+      if (deposit?.push_token) {
+        const amtStr = parseFloat(deposit.amount).toLocaleString("en-IN");
+        await sendExpoPush(
+          deposit.push_token,
+          "✅ Deposit Verified",
+          `Your payment screenshot of ₹${amtStr} has been verified by admin.`
+        );
+      }
+
       res.json({ success: true });
     } catch (e: any) {
       res.status(500).json({ message: e.message });
@@ -829,13 +872,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       await ejWorkbook1.xlsx.load(req.file.buffer);
       const worksheet1 = ejWorkbook1.worksheets[0];
 
-      // Read all rows as raw arrays to handle files with title rows above the header
       const rawRows: any[][] = worksheetToRows(worksheet1, true);
       if (rawRows.length === 0) return res.json({ imported: 0, updated: 0, skipped: 0, agentsCreated: 0, errors: [] });
 
-      // Scan first 15 rows to find the actual header row (≥3 recognized column names)
       let headerRowIdx = -1;
-      let colIdxMap: Record<number, string> = {}; // column index → DB field
+      let colIdxMap: Record<number, string> = {};
       for (let r = 0; r < Math.min(rawRows.length, 15); r++) {
         const row = rawRows[r];
         const tempMap: Record<number, string> = {};
@@ -850,14 +891,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Could not find header row. Expected columns like: LOAN NO, CUSTOMER NAME, FOS NAME, POS, BKT" });
       }
 
-      // ── Save FOS-assigned PTP data before clearing ──
       const ptpLoanSave = await storage.query(`SELECT loan_no, ptp_date FROM loan_cases WHERE status = 'PTP'`);
       const ptpLoanMap = new Map<string, string | null>(ptpLoanSave.rows.map((r: any) => [r.loan_no, r.ptp_date]));
 
-      // ── Clear existing allocation data then insert fresh ──
       await storage.deleteAllLoanCases();
 
-      // Load all existing agents
       const existingAgents = await storage.getAllAgentsWithAdmin();
       const agentByName: Record<string, number> = {};
       for (const a of existingAgents) {
@@ -880,7 +918,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (!mapped.customer_name) { skipped++; continue; }
         if (isRepeatHeaderRow(mapped)) { skipped++; continue; }
 
-        // Auto-create FOS agent if fos_name is present and agent doesn't exist
         let agentId: number | null = null;
         if (mapped.fos_name) {
           const fosLower = mapped.fos_name.toLowerCase().trim();
@@ -889,7 +926,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
           } else {
             try {
               const username = fosLower.replace(/\s+/g, ".").replace(/[^a-z0-9.]/g, "");
-              
               const newAgent = await storage.createFosAgent({ name: mapped.fos_name, username, password: randomBytes(16).toString("hex") });
               agentByName[fosLower] = newAgent.id;
               agentId = newAgent.id;
@@ -942,7 +978,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
 
-      // ── Restore FOS-assigned PTP statuses ──
       for (const [loanNo, ptpDate] of ptpLoanMap) {
         await storage.query(
           `UPDATE loan_cases SET status = 'PTP', ptp_date = $1 WHERE loan_no = $2`,
@@ -965,11 +1000,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       await ejWorkbook2.xlsx.load(req.file.buffer);
       const worksheet2 = ejWorkbook2.worksheets.find(ws => ws.name.toUpperCase() === "ALLO") || ejWorkbook2.worksheets[0];
 
-      // Read all rows as raw arrays to handle title rows above the header
       const rawRows: any[][] = worksheetToRows(worksheet2, true);
       if (rawRows.length === 0) return res.json({ imported: 0, updated: 0, skipped: 0, agentsCreated: 0, errors: [] });
 
-      // Scan first 15 rows to find the actual header row (≥3 recognized column names)
       let headerRowIdx = -1;
       let colIdxMap: Record<number, string> = {};
       for (let r = 0; r < Math.min(rawRows.length, 15); r++) {
@@ -986,11 +1019,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Could not find header row. Expected columns like: LOAN NO, CUSTOMER NAME, FOS NAME, POS, BKT" });
       }
 
-      // ── Save FOS-assigned PTP data before clearing ──
       const ptpBktSave = await storage.query(`SELECT loan_no, ptp_date FROM bkt_cases WHERE status = 'PTP'`);
       const ptpBktMap = new Map<string, string | null>(ptpBktSave.rows.map((r: any) => [r.loan_no, r.ptp_date]));
 
-      // ── Clear existing BKT data then insert fresh ──
       await storage.deleteAllBktCases();
 
       const existingAgents = await storage.getAllAgentsWithAdmin();
@@ -1029,7 +1060,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
           } else {
             try {
               const username = fosLower.replace(/\s+/g, ".").replace(/[^a-z0-9.]/g, "");
-              
               const newAgent = await storage.createFosAgent({ name: mapped.fos_name, username, password: randomBytes(16).toString("hex") });
               agentByName[fosLower] = newAgent.id;
               agentId = newAgent.id;
@@ -1085,7 +1115,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
 
-      // ── Restore FOS-assigned PTP statuses ──
       for (const [loanNo, ptpDate] of ptpBktMap) {
         await storage.query(
           `UPDATE bkt_cases SET status = 'PTP', ptp_date = $1 WHERE loan_no = $2`,
@@ -1155,7 +1184,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // BKT Perf Summary — admin (live from bkt_cases + loan_cases; rollback = POS of rollback_yn=true cases)
+  // BKT Perf Summary — admin
   app.get("/api/admin/bkt-perf-summary", requireAdmin, async (req, res) => {
     try {
       const result = await storage.query(`
@@ -1201,15 +1230,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // BKT Perf Summary — FOS own data
-  // Priority: use imported Excel data (bkt_perf_summary) for any BKT already uploaded;
-  // fall back to live case computation for BKT buckets not yet imported.
-  // PENAL always comes from bkt_perf_summary only.
   app.get("/api/bkt-perf-summary", requireAuth, async (req, res) => {
     try {
       const agentId = req.session.agentId!;
       const result = await storage.query(`
         WITH
-        -- Normalize & deduplicate imported rows
         imported_norm AS (
           SELECT *,
             CASE LOWER(REPLACE(bkt, ' ', ''))
@@ -1229,12 +1254,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
           FROM imported_norm
           ORDER BY bkt_norm, uploaded_at DESC
         ),
-        -- Which BKT buckets are already covered by an imported Excel row
         covered_bkts AS (
           SELECT bkt_norm FROM imported_latest
           WHERE bkt_norm IN ('bkt1','bkt2','bkt3')
         ),
-        -- Live computation from cases for BKT buckets NOT yet imported (excludes UC)
         live_cases AS (
           SELECT LOWER(REPLACE(bc.case_category,' ','')) AS bkt,
                  bc.pos::numeric AS pos, bc.status, bc.rollback_yn
@@ -1273,7 +1296,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
           FROM live_cases
           GROUP BY bkt
         ),
-        -- Merge: imported rows first, then live for uncovered buckets
         combined AS (
           SELECT bkt_norm AS bkt,
             COALESCE(pos_paid,0)            AS pos_paid,
@@ -1299,7 +1321,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // BKT Perf Summary — Excel import (pivot table format)
+  // BKT Perf Summary — Excel import
   app.post("/api/admin/import-bkt-perf", requireAdmin, upload.single("file"), async (req, res) => {
     try {
       if (!req.file) return res.status(400).json({ message: "No file uploaded" });
@@ -1308,22 +1330,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
       await ejWorkbook3.xlsx.load(req.file.buffer);
       const worksheet3 = ejWorkbook3.worksheets[0];
 
-      // Use raw array mode to handle pivot tables with merged cells
       const rawRows: any[][] = worksheetToRows(worksheet3, false);
       if (rawRows.length === 0) return res.json({ imported: 0, skipped: 0, errors: [] });
 
-      // Helper: clean numeric value (handles commas, %, ₹)
       const cn = (v: any): number => {
         if (v === "" || v === null || v === undefined) return 0;
         return parseFloat(String(v).replace(/[,%₹\s]/g, "")) || 0;
       };
-      // Helper: parse percentage — Excel stores % cells as fractions (0.0539 = 5.39%), convert to 0-100
       const toPct = (v: any): number => {
         const raw = cn(v);
         return raw > 0 && raw <= 1 ? raw * 100 : raw;
       };
 
-      // Step 1: Find BKT value — manual override takes priority, then auto-detect from slicer cells
       const manualBkt = String(req.body?.bkt || "").trim();
       let bktValue = manualBkt || "";
       if (!bktValue) {
@@ -1338,12 +1356,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
       if (!bktValue) bktValue = "1";
-      // Normalize: "Penal" → "penal", "1"/"2"/"3"/"BKT 1"/"bkt1" → "bkt1"/"bkt2"/"bkt3"
       bktValue = bktValue.toLowerCase().trim().replace(/\s+/g, "");
       if (bktValue === "1" || bktValue === "2" || bktValue === "3") bktValue = `bkt${bktValue}`;
-      // Also handle "bkt1", "bkt2", "bkt3" already correct, "penal" already correct
 
-      // Step 2: Find header row — must contain "Values" AND "PAID"
       let headerIdx = -1;
       let cFos = -1, cVal = -1, cPaid = -1, cUnpaid = -1, cGt = -1, cPct = -1;
       let cRbVal = -1, cRb = -1, cRbGt = -1, cRbPct = -1;
@@ -1384,7 +1399,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Could not find header row. Expected columns: Fos_Name, Values, PAID, UNPAID, Grand Total, Percentage, RollBack" });
       }
 
-      // Step 3: Parse data rows — FOS name may be in merged cells (blank on 2nd row of each pair)
       const fosData: Record<string, {
         posPaid: number; posUnpaid: number; posGrandTotal: number; posPercentage: number;
         countPaid: number; countUnpaid: number; countTotal: number;
@@ -1397,10 +1411,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const fosCell = cFos >= 0 ? String(row[cFos] || "").trim() : "";
         const valCell = cVal >= 0 ? String(row[cVal] || "").trim().toLowerCase() : "";
 
-        // Skip grand total rows
         if (fosCell.toLowerCase().includes("grand total")) continue;
 
-        // Update current FOS name when non-empty
         if (fosCell && fosCell.toLowerCase() !== "grand total") {
           currentFos = fosCell;
         }
@@ -1416,12 +1428,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const d = fosData[currentFos];
 
         if (valCell.includes("sum of pos") || valCell.includes("sum of po")) {
-          // POS amounts row
           d.posPaid        = cPaid   >= 0 ? cn(row[cPaid])   : d.posPaid;
           d.posUnpaid      = cUnpaid >= 0 ? cn(row[cUnpaid]) : d.posUnpaid;
           d.posGrandTotal  = cGt     >= 0 ? cn(row[cGt])     : d.posGrandTotal;
           d.posPercentage  = cPct    >= 0 ? toPct(row[cPct])    : d.posPercentage;
-          // Rollback from right table
           d.rollbackPaid      = cRb    >= 0 ? cn(row[cRb])      : d.rollbackPaid;
           d.rollbackGrandTotal= cRbGt  >= 0 ? cn(row[cRbGt])    : d.rollbackGrandTotal;
           d.rollbackPercentage= cRbPct >= 0 ? toPct(row[cRbPct]): d.rollbackPercentage;
@@ -1430,7 +1440,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
           valCell.includes("cbc lpp") || valCell.includes("sum of cbc") ||
           (valCell.includes("cbc") && valCell.includes("lpp"))
         ) {
-          // CBC+LPP amounts row — used for penal performance
           d.posPaid       = cPaid   >= 0 ? cn(row[cPaid])   : d.posPaid;
           d.posUnpaid     = cUnpaid >= 0 ? cn(row[cUnpaid]) : d.posUnpaid;
           d.posGrandTotal = cGt     >= 0 ? cn(row[cGt])     : d.posGrandTotal;
@@ -1441,14 +1450,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
           (valCell.includes("col") && valCell.includes("cbc")) ||
           valCell === "sum of col cbc" || valCell === "col cbc"
         ) {
-          // Case count row — matches "Sum of Col CBC", "Count", etc.
           d.countPaid   = cPaid   >= 0 ? Math.round(cn(row[cPaid]))   : d.countPaid;
           d.countUnpaid = cUnpaid >= 0 ? Math.round(cn(row[cUnpaid])) : d.countUnpaid;
           d.countTotal  = cGt     >= 0 ? Math.round(cn(row[cGt]))     : d.countTotal;
         }
       }
 
-      // Step 4: Upsert each FOS agent
       const existingAgents = await storage.getAllAgentsWithAdmin();
       const agentByName: Record<string, number> = {};
       for (const a of existingAgents) {
@@ -1462,7 +1469,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       for (let i = 0; i < fosNames.length; i++) {
         const fosName = fosNames[i];
         const d = fosData[fosName];
-        // For penal: always compute Grand Total as Paid + Unpaid (ignore Excel Grand Total column)
         if (bktValue === "penal") {
           d.posGrandTotal = d.posPaid + d.posUnpaid;
         }
@@ -1472,7 +1478,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (!agentId) {
           try {
             const username = fosLower.replace(/\s+/g, ".").replace(/[^a-z0-9.]/g, "");
-            
             const newAgent = await storage.createFosAgent({ name: fosName, username, password: randomBytes(16).toString("hex") });
             agentByName[fosLower] = newAgent.id;
             agentId = newAgent.id;
@@ -1513,7 +1518,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Background job: daily PTP push at 9 AM — runs every 30 min, fires once per day at hour 9
+  // Background job: daily PTP push at 9 AM
   const ptpReminderSentDates = new Set<string>();
   async function runPtpPushJob() {
     try {
@@ -1522,7 +1527,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const todayKey = now.toISOString().slice(0, 10);
       if (hour !== 9 || ptpReminderSentDates.has(todayKey)) return;
 
-      // Get all FOS agents with a push token
       const agents = await storage.query(`
         SELECT id, name, push_token FROM fos_agents
         WHERE role = 'fos' AND push_token IS NOT NULL AND push_token <> ''
@@ -1560,7 +1564,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   runPtpPushJob();
   setInterval(runPtpPushJob, 30 * 60 * 1000);
 
-  // Background job: every 5 minutes check for deposits overdue by 2h without screenshot, send push reminder
+  // Background job: every 5 minutes check for deposits overdue by 2h
   async function runReminderJob() {
     try {
       const result = await storage.query(`
