@@ -41,7 +41,7 @@ Notifications.setNotificationHandler({
   }),
 });
 
-// ✅ Register for push notifications and return the Expo push token
+// ✅ Register for push notifications and return the push token
 async function registerForPushNotificationsAsync(): Promise<string | null> {
   // Push notifications only work on real devices
   if (!Device.isDevice) {
@@ -75,16 +75,24 @@ async function registerForPushNotificationsAsync(): Promise<string | null> {
     return null;
   }
 
-  // Get Expo push token
+  // Get Expo push token with explicit projectId
   try {
     const tokenData = await Notifications.getExpoPushTokenAsync({
-      projectId: undefined, // Uses app.json extra.eas.projectId automatically
+      projectId: "1b09251a-4423-4759-a22b-fc2f0a44fd8e",
     });
-    console.log("[push] Token:", tokenData.data);
+    console.log("[push] Expo Token:", tokenData.data);
     return tokenData.data;
   } catch (e: any) {
-    console.error("[push] Failed to get token:", e.message);
-    return null;
+    console.error("[push] Failed to get Expo token, trying FCM token:", e.message);
+    // Fallback: try native FCM token
+    try {
+      const deviceToken = await Notifications.getDevicePushTokenAsync();
+      console.log("[push] FCM Token:", deviceToken.data);
+      return deviceToken.data as string;
+    } catch (e2: any) {
+      console.error("[push] Failed to get FCM token:", e2.message);
+      return null;
+    }
   }
 }
 
