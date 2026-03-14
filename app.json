@@ -52,12 +52,8 @@
       "reactCompiler": true
     },
     "extra": {
-<<<<<<< HEAD
       "apiUrl": "https://dhanraj-production-09c4.up.railway.app",
-=======
-        "apiUrl": "https://dhanraj-production-09c4.up.railway.app",
->>>>>>> 9592656940e9617467c7a54029f9d0310121cc2c
-       "eas": {
+      "eas": {
         "projectId": "1b09251a-4423-4759-a22b-fc2f0a44fd8e"
       }
     }
