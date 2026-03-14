@@ -18,8 +18,20 @@ jobs:
         with:
           node-version: 20
 
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
       - name: Install dependencies
         run: npm install --legacy-peer-deps
+
+      - name: Install expo-cli explicitly
+        run: npm install @expo/cli --legacy-peer-deps
 
       - name: Setup EAS
         uses: expo/expo-github-action@v8
@@ -27,9 +39,21 @@ jobs:
           eas-version: latest
           token: ${{ secrets.EXPO_TOKEN }}
 
-      - name: Build APK
-        run: eas build --platform android --profile production --non-interactive --no-wait
+      - name: Expo prebuild
+        run: npx expo prebuild --platform android --clean
         env:
-          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
           EXPO_PUBLIC_API_URL: https://dhanraj-production-09c4.up.railway.app
-          EAS_BUILD_NO_EXPO_GO_WARNING: "true"
+
+      - name: Build APK
+        run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleRelease --no-daemon
+        env:
+          EXPO_PUBLIC_API_URL: https://dhanraj-production-09c4.up.railway.app
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: dhanraj-release.apk
+          path: android/app/build/outputs/apk/release/app-release.apk
