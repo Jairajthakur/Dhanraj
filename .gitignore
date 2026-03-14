@@ -1,5 +1,3 @@
-# Learn more https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files
-
 # dependencies
 node_modules/
 
@@ -38,12 +36,11 @@ yarn-error.*
 *.tsbuildinfo
 .vercel
 
+# Secrets - be specific, not *.json
 .env
 google-services.json
 firebase-service-account.json
 
-
+# Replit / local
 attached_assets/
 .config/
-*.json
-.env

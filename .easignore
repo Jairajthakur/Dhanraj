@@ -1,10 +1,23 @@
+# Dependencies
+node_modules/
+
+# Local env and secrets
+.env
+.env.local
+.local
+
+# Replit-specific
+.replit
+attached_assets/
+
+# Server/backend code (not needed for mobile build)
 server/
 server_dist/
+
+# Build artifacts
 android/
 .expo/
-.replit
-.local
-attached_assets/
-node_modules/
+
+# Dev files
 drizzle.config.ts
 *.md
