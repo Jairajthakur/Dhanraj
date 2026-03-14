@@ -98,6 +98,9 @@ export default function AdminDepositionsScreen() {
   const [tab, setTab] = useState<Tab>("required");
   const [addVisible, setAddVisible] = useState(false);
 
+  // FIX 1: State for screenshot modal instead of Alert
+  const [screenshotModalUrl, setScreenshotModalUrl] = useState<string | null>(null);
+
   const { data: reqData, isLoading: reqLoading } = useQuery({
     queryKey: ["/api/admin/required-deposits"],
     queryFn: () => api.admin.getRequiredDeposits(),
@@ -119,6 +122,9 @@ export default function AdminDepositionsScreen() {
 
   const totalRequired = required.reduce((s: number, d: any) => s + parseFloat(d.amount || 0), 0);
   const totalHistory = history.reduce((s: number, d: any) => s + parseFloat(d.amount || 0), 0);
+
+  // FIX 2: Get verified deposits from required list
+  const verifiedDeposits = required.filter((d: any) => d.alarm_scheduled === true);
 
   const handleDelete = (id: number) => {
     Alert.alert("Delete Deposit", "Remove this required deposit?", [
@@ -147,9 +153,10 @@ export default function AdminDepositionsScreen() {
     }
   };
 
+  // FIX 3: Show image modal instead of Alert with URL text
   const showScreenshot = (url: string) => {
     const fullUrl = url.startsWith("http") ? url : `${getApiUrl()}${url}`;
-    Alert.alert("Payment Screenshot", fullUrl, [{ text: "OK" }]);
+    setScreenshotModalUrl(fullUrl);
   };
 
   return (
@@ -186,6 +193,11 @@ export default function AdminDepositionsScreen() {
           <Pressable style={[styles.tabBtn, tab === "history" && styles.tabBtnActive]} onPress={() => setTab("history")}>
             <Ionicons name="receipt" size={16} color={tab === "history" ? "#fff" : Colors.textSecondary} />
             <Text style={[styles.tabText, tab === "history" && styles.tabTextActive]}>History</Text>
+            {verifiedDeposits.length > 0 && (
+              <View style={[styles.badge, tab === "history" && { backgroundColor: "rgba(255,255,255,0.3)" }]}>
+                <Text style={[styles.badgeText, tab === "history" && { color: "#fff" }]}>{verifiedDeposits.length}</Text>
+              </View>
+            )}
           </Pressable>
         </View>
 
@@ -212,30 +224,39 @@ export default function AdminDepositionsScreen() {
                     : null;
                   const isVerified = item.alarm_scheduled === true;
                   return (
-                    <View style={[styles.reqCard, hasScreenshot && { borderLeftColor: isVerified ? Colors.success : Colors.info }]}>
-                      <View style={styles.reqLeft}>
-                        <View style={styles.agentAvatar}>
-                          <Ionicons name="person" size={18} color="#fff" />
-                        </View>
-                        <View style={styles.reqInfo}>
-                          <Text style={styles.reqAgent}>{item.agent_name}</Text>
-                          {item.description ? <Text style={styles.reqDesc}>{item.description}</Text> : null}
-                          <Text style={styles.reqDate}>
-                            Added: {item.created_at ? new Date(item.created_at).toLocaleDateString("en-IN") : ""}
-                          </Text>
-                          {hasScreenshot && item.screenshot_uploaded_at && (
-                            <Text style={[styles.reqDate, { color: Colors.info }]}>
-                              Screenshot: {new Date(item.screenshot_uploaded_at).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
+                    // FIX 4: flexDirection column so screenshotRow renders below, not squished inline
+                    <View style={[
+                      styles.reqCard,
+                      hasScreenshot && { borderLeftColor: isVerified ? Colors.success : Colors.info }
+                    ]}>
+                      {/* Top row: avatar + info + amount + delete */}
+                      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+                        <View style={styles.reqLeft}>
+                          <View style={styles.agentAvatar}>
+                            <Ionicons name="person" size={18} color="#fff" />
+                          </View>
+                          <View style={styles.reqInfo}>
+                            <Text style={styles.reqAgent}>{item.agent_name}</Text>
+                            {item.description ? <Text style={styles.reqDesc}>{item.description}</Text> : null}
+                            <Text style={styles.reqDate}>
+                              Added: {item.created_at ? new Date(item.created_at).toLocaleDateString("en-IN") : ""}
                             </Text>
-                          )}
+                            {hasScreenshot && item.screenshot_uploaded_at && (
+                              <Text style={[styles.reqDate, { color: Colors.info }]}>
+                                Screenshot: {new Date(item.screenshot_uploaded_at).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
+                              </Text>
+                            )}
+                          </View>
+                        </View>
+                        <View style={styles.reqRight}>
+                          <Text style={styles.reqAmount}>₹{parseFloat(item.amount).toLocaleString("en-IN")}</Text>
+                          <Pressable onPress={() => handleDelete(item.id)} style={styles.deleteBtn}>
+                            <Ionicons name="trash-outline" size={18} color={Colors.danger} />
+                          </Pressable>
                         </View>
                       </View>
-                      <View style={styles.reqRight}>
-                        <Text style={styles.reqAmount}>₹{parseFloat(item.amount).toLocaleString("en-IN")}</Text>
-                        <Pressable onPress={() => handleDelete(item.id)} style={styles.deleteBtn}>
-                          <Ionicons name="trash-outline" size={18} color={Colors.danger} />
-                        </Pressable>
-                      </View>
+
+                      {/* Screenshot row below */}
                       {hasScreenshot && screenshotSrc && (
                         <View style={styles.screenshotRow}>
                           <Pressable onPress={() => showScreenshot(item.screenshot_url)} style={styles.thumbWrap}>
@@ -260,6 +281,7 @@ export default function AdminDepositionsScreen() {
                           </View>
                         </View>
                       )}
+
                       {!hasScreenshot && (
                         <View style={styles.noScreenshot}>
                           <Ionicons name="camera-outline" size={13} color={Colors.textMuted} />
@@ -280,45 +302,105 @@ export default function AdminDepositionsScreen() {
             )}
           </>
         ) : (
+          // FIX 5: History tab now shows verified required deposits with agent name + amount + screenshot
           <FlatList
-            data={history}
+            data={verifiedDeposits}
             keyExtractor={(item) => String(item.id)}
             contentContainerStyle={[styles.list, { paddingBottom: insets.bottom + 24 }]}
-            renderItem={({ item }) => (
-              <View style={styles.histCard}>
-                <View style={styles.histHeader}>
-                  <View style={styles.amountBadge}>
-                    <Text style={styles.amountText}>₹{parseFloat(item.amount).toLocaleString("en-IN")}</Text>
+            renderItem={({ item }) => {
+              const screenshotSrc = item.screenshot_url
+                ? (item.screenshot_url.startsWith("http") ? item.screenshot_url : `${getApiUrl()}${item.screenshot_url}`)
+                : null;
+              return (
+                <View style={styles.histCard}>
+                  {/* Amount + Date */}
+                  <View style={styles.histHeader}>
+                    <View style={styles.amountBadge}>
+                      <Text style={styles.amountText}>₹{parseFloat(item.amount).toLocaleString("en-IN")}</Text>
+                    </View>
+                    <Text style={styles.histDate}>
+                      {item.created_at ? new Date(item.created_at).toLocaleDateString("en-IN") : ""}
+                    </Text>
                   </View>
-                  <Text style={styles.histDate}>{item.deposition_date}</Text>
+
+                  {/* Agent name */}
+                  {item.agent_name && (
+                    <View style={styles.agentTag}>
+                      <MaterialIcons name="person" size={13} color={Colors.primary} />
+                      <Text style={styles.agentTagText}>{item.agent_name}</Text>
+                    </View>
+                  )}
+
+                  {/* Description */}
+                  {item.description && (
+                    <Text style={styles.histNotes}>{item.description}</Text>
+                  )}
+
+                  {/* Screenshot thumbnail — tappable */}
+                  {screenshotSrc && (
+                    <Pressable onPress={() => showScreenshot(item.screenshot_url)} style={[styles.thumbWrap, { marginTop: 8 }]}>
+                      <Image source={{ uri: screenshotSrc }} style={styles.thumb} resizeMode="cover" />
+                      <View style={styles.thumbOverlay}>
+                        <Ionicons name="eye-outline" size={16} color="#fff" />
+                      </View>
+                    </Pressable>
+                  )}
+
+                  {/* Verified badge */}
+                  <View style={[styles.verifiedBadge, { marginTop: 8 }]}>
+                    <Ionicons name="checkmark-circle" size={14} color={Colors.success} />
+                    <Text style={styles.verifiedText}>Verified</Text>
+                  </View>
                 </View>
-                {item.customer_name && <Text style={styles.histCustomer} numberOfLines={1}>{item.customer_name}</Text>}
-                {item.loan_no && <Text style={styles.histMeta}>Loan: {item.loan_no} · BKT: {item.bkt}</Text>}
-                {item.agent_name && (
-                  <View style={styles.agentTag}>
-                    <MaterialIcons name="person" size={13} color={Colors.primary} />
-                    <Text style={styles.agentTagText}>{item.agent_name}</Text>
-                  </View>
-                )}
-                {item.notes && <Text style={styles.histNotes}>{item.notes}</Text>}
-              </View>
-            )}
+              );
+            }}
             ListEmptyComponent={
-              histLoading ? (
+              reqLoading ? (
                 <View style={{ padding: 60, alignItems: "center" }}>
                   <ActivityIndicator color={Colors.primary} size="large" />
                 </View>
               ) : (
                 <View style={styles.empty}>
-                  <MaterialIcons name="receipt-long" size={52} color={Colors.textMuted} />
-                  <Text style={styles.emptyTitle}>No History</Text>
-                  <Text style={styles.emptyText}>No deposition records yet</Text>
+                  <Ionicons name="checkmark-circle-outline" size={52} color={Colors.textMuted} />
+                  <Text style={styles.emptyTitle}>No Verified Deposits</Text>
+                  <Text style={styles.emptyText}>Verified required deposits will appear here</Text>
                 </View>
               )
             }
           />
         )}
       </View>
+
+      {/* FIX 6: Full-screen image modal for screenshots */}
+      <Modal
+        visible={!!screenshotModalUrl}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setScreenshotModalUrl(null)}
+      >
+        <Pressable
+          style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.92)", justifyContent: "center", alignItems: "center" }}
+          onPress={() => setScreenshotModalUrl(null)}
+        >
+          <Image
+            source={{ uri: screenshotModalUrl! }}
+            style={{ width: "92%", height: "75%", borderRadius: 12 }}
+            resizeMode="contain"
+          />
+          <Pressable
+            onPress={() => setScreenshotModalUrl(null)}
+            style={{
+              marginTop: 20,
+              backgroundColor: "rgba(255,255,255,0.15)",
+              paddingHorizontal: 28,
+              paddingVertical: 10,
+              borderRadius: 20,
+            }}
+          >
+            <Text style={{ color: "#fff", fontWeight: "700", fontSize: 15 }}>Close</Text>
+          </Pressable>
+        </Pressable>
+      </Modal>
 
       <AddDepositModal visible={addVisible} onClose={() => setAddVisible(false)} agents={agents} />
     </>
@@ -354,9 +436,11 @@ const styles = StyleSheet.create({
   },
   addBtnText: { color: "#fff", fontSize: 15, fontWeight: "700" },
   list: { padding: 16, paddingTop: 8, gap: 10 },
+
+  // FIX: flexDirection is now "column" so screenshotRow sits below agent info
   reqCard: {
     backgroundColor: Colors.surface, borderRadius: 14, padding: 14,
-    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
+    flexDirection: "column",
     shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 6, elevation: 2,
     borderLeftWidth: 4, borderLeftColor: Colors.warning,
   },
