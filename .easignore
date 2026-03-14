@@ -1,16 +1,10 @@
 server/
 server_dist/
-<<<<<<< HEAD
 android/
 .expo/
 .replit
 .local
 attached_assets/
 node_modules/
-=======
 drizzle.config.ts
-.replit
-.local
-attached_assets/
 *.md
->>>>>>> 9592656940e9617467c7a54029f9d0310121cc2c
