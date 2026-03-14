@@ -1,0 +1,8 @@
+server/
+server_dist/
+android/
+.expo/
+.replit
+.local
+attached_assets/
+node_modules/
