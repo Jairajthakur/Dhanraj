@@ -1,9 +1,7 @@
-[build]
 builder = "nixpacks"
 buildCommand = "npm install --legacy-peer-deps && npx esbuild server/index.ts --platform=node --packages=external --bundle --format=cjs --outdir=server_dist"
-
 [deploy]
-startCommand = "npm run db:push && node server_dist/index.js"
+startCommand = "node server_dist/index.js"
 healthcheckPath = "/api/health"
 healthcheckTimeout = 30
 restartPolicyType = "on_failure"
