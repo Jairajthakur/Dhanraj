@@ -44,3 +44,4 @@ firebase-service-account.json
 # Replit / local
 attached_assets/
 .config/
+.local
