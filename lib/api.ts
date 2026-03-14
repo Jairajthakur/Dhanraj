@@ -19,7 +19,7 @@ export async function apiRequest(method: string, route: string, data?: any) {
   return res.json();
 }
 
-async function uploadFile(route: string, fileUri: string, fileName: string, mimeType: string, extraFields?: Record<string, string>) {
+async function uploadFile(route: string, fileUri: string, fileName: string, mimeType: string, extraFields?: Record<string, string>, fieldName: string = "file") {
   const baseUrl = getApiUrl();
   const url = new URL(route, baseUrl);
   const formData = new FormData();
@@ -29,7 +29,7 @@ async function uploadFile(route: string, fileUri: string, fileName: string, mime
     }
   }
   // Use { uri, name, type } object — supported by React Native's XHR FormData
-  formData.append("file", { uri: fileUri, name: fileName, type: mimeType } as any);
+  formData.append(fieldName, { uri: fileUri, name: fileName, type: mimeType } as any);
   return new Promise<any>((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open("POST", url.toString());
@@ -75,7 +75,14 @@ export const api = {
   saveProfilePhoto: (photoUrl: string) => apiRequest("POST", "/api/profile-photo", { photoUrl }),
   getProfile: () => apiRequest("GET", "/api/profile"),
   uploadScreenshot: (depositId: number, fileUri: string) =>
-    uploadFile(`/api/required-deposits/${depositId}/screenshot`, fileUri, "screenshot.jpg", "image/jpeg"),
+    uploadFile(
+      `/api/required-deposits/${depositId}/screenshot`,
+      fileUri,
+      "screenshot.jpg",
+      "image/jpeg",
+      undefined,
+      "screenshot"  // ✅ Fixed: matches server's screenshotUpload.single("screenshot")
+    ),
   changePassword: (data: any) => apiRequest("PUT", "/api/auth/password", data),
   admin: {
     getStats: () => apiRequest("GET", "/api/admin/stats"),
