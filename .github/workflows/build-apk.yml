@@ -4,7 +4,6 @@ on:
     branches:
       - main
   workflow_dispatch:
-
 jobs:
   build:
     name: Build APK
@@ -12,44 +11,35 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
-
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: 17
-
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
-
       - name: Configure Gradle memory
         run: |
           mkdir -p ~/.gradle
           echo "org.gradle.jvmargs=-Xmx6g -XX:MaxMetaspaceSize=1g -XX:+HeapDumpOnOutOfMemoryError" >> ~/.gradle/gradle.properties
           echo "kotlin.daemon.jvm.options=-Xmx4g -XX:MaxMetaspaceSize=1g" >> ~/.gradle/gradle.properties
-
       - name: Install dependencies
         run: npm install --legacy-peer-deps
-
       - name: Install expo-cli explicitly
         run: npm install @expo/cli --legacy-peer-deps
-
       - name: Setup EAS
         uses: expo/expo-github-action@v8
         with:
           eas-version: latest
           token: ${{ secrets.EXPO_TOKEN }}
-
       - name: Expo prebuild
         run: npx expo prebuild --platform android --clean
         env:
-          EXPO_PUBLIC_API_URL: https://dhanraj-production-09c4.up.railway.app
-
+          EXPO_PUBLIC_API_URL: https://dhanraj-production.up.railway.app
       - name: Build APK
         run: |
           cd android
@@ -58,8 +48,7 @@ jobs:
             -Dorg.gradle.jvmargs="-Xmx6g -XX:MaxMetaspaceSize=1g -XX:+HeapDumpOnOutOfMemoryError" \
             -Dkotlin.daemon.jvm.options="-Xmx4g -XX:MaxMetaspaceSize=1g"
         env:
-          EXPO_PUBLIC_API_URL: https://dhanraj-production-09c4.up.railway.app
-
+          EXPO_PUBLIC_API_URL: https://dhanraj-production.up.railway.app
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
