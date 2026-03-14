@@ -27,6 +27,12 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
+      - name: Configure Gradle memory
+        run: |
+          mkdir -p ~/.gradle
+          echo "org.gradle.jvmargs=-Xmx6g -XX:MaxMetaspaceSize=1g -XX:+HeapDumpOnOutOfMemoryError" >> ~/.gradle/gradle.properties
+          echo "kotlin.daemon.jvm.options=-Xmx4g -XX:MaxMetaspaceSize=1g" >> ~/.gradle/gradle.properties
+
       - name: Install dependencies
         run: npm install --legacy-peer-deps
 
@@ -48,7 +54,9 @@ jobs:
         run: |
           cd android
           chmod +x gradlew
-          ./gradlew assembleRelease --no-daemon -Dorg.gradle.jvmargs="-Xmx4g -XX:MaxMetaspaceSize=512m"
+          ./gradlew assembleRelease --no-daemon \
+            -Dorg.gradle.jvmargs="-Xmx6g -XX:MaxMetaspaceSize=1g -XX:+HeapDumpOnOutOfMemoryError" \
+            -Dkotlin.daemon.jvm.options="-Xmx4g -XX:MaxMetaspaceSize=1g"
         env:
           EXPO_PUBLIC_API_URL: https://dhanraj-production-09c4.up.railway.app
 
@@ -56,4 +64,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: dhanraj-release.apk
-          path: android/app/build/outputs/apk/
+          path: android/app/build/outputs/apk/release/app-release.apk
