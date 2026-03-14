@@ -1,0 +1,7 @@
+server/
+server_dist/
+drizzle.config.ts
+.replit
+.local
+attached_assets/
+*.md
