@@ -44,14 +44,10 @@ jobs:
           eas-version: latest
           token: ${{ secrets.EXPO_TOKEN }}
 
-      - name: Create google-services.json
-        run: echo '${{ secrets.GOOGLE_SERVICES_JSON }}' > google-services.json
-
       - name: Expo prebuild
         run: npx expo prebuild --platform android --clean
         env:
           EXPO_PUBLIC_API_URL: https://dhanraj-production.up.railway.app
-          GOOGLE_SERVICES_JSON: ./google-services.json
 
       - name: Build APK
         run: |
