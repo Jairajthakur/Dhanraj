@@ -14,6 +14,7 @@ process.on("unhandledRejection", (reason) => {
 process.on("uncaughtException", (err) => {
   console.error("[uncaughtException]", err);
 });
+
 declare module "http" {
   interface IncomingMessage {
     rawBody: unknown;
@@ -22,14 +23,13 @@ declare module "http" {
 
 function setupCors(app: express.Application) {
   app.use((req, res, next) => {
+    const origin = req.header("origin");
+
     const origins = new Set<string>();
 
-    // Railway domain support
     if (process.env.RAILWAY_PUBLIC_DOMAIN) {
       origins.add(`https://${process.env.RAILWAY_PUBLIC_DOMAIN}`);
     }
-
-    // Legacy Replit support (kept for compatibility)
     if (process.env.REPLIT_DEV_DOMAIN) {
       origins.add(`https://${process.env.REPLIT_DEV_DOMAIN}`);
     }
@@ -38,25 +38,30 @@ function setupCors(app: express.Application) {
         origins.add(`https://${d.trim()}`);
       });
     }
-
-    // Additional allowed origins from env (comma-separated)
     if (process.env.ALLOWED_ORIGINS) {
       process.env.ALLOWED_ORIGINS.split(",").forEach((o) => {
         origins.add(o.trim());
       });
     }
 
-    const origin = req.header("origin");
     const isLocalhost =
       origin?.startsWith("http://localhost:") ||
       origin?.startsWith("http://127.0.0.1:");
 
-    if (origin && (origins.has(origin) || isLocalhost)) {
+    // Mobile APK has no origin header — allow all, still send credentials header
+    if (!origin) {
+      res.header("Access-Control-Allow-Origin", "*");
+    } else if (origins.has(origin) || isLocalhost) {
       res.header("Access-Control-Allow-Origin", origin);
-      res.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
-      res.header("Access-Control-Allow-Headers", "Content-Type");
+      res.header("Access-Control-Allow-Credentials", "true");
+    } else {
+      // Allow all origins for mobile support
+      res.header("Access-Control-Allow-Origin", origin);
       res.header("Access-Control-Allow-Credentials", "true");
     }
+
+    res.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+    res.header("Access-Control-Allow-Headers", "Content-Type, Authorization");
 
     if (req.method === "OPTIONS") {
       return res.sendStatus(200);
@@ -167,7 +172,6 @@ function configureExpoAndLanding(app: express.Application) {
     "landing-page.html"
   );
 
-  // Serve landing page only if template exists
   let landingPageTemplate: string | null = null;
   if (fs.existsSync(templatePath)) {
     landingPageTemplate = fs.readFileSync(templatePath, "utf-8");
@@ -209,12 +213,16 @@ function setupErrorHandler(app: express.Application) {
 }
 
 (async () => {
+  app.set("trust proxy", true);
   setupCors(app);
   setupBodyParsing(app);
   setupRequestLogging(app);
 
-  // ── Health check (Railway uses this) ──
+  // Health check routes
   app.get("/api/health", (_req, res) => {
+    res.json({ status: "ok", timestamp: new Date().toISOString() });
+  });
+  app.get("/health", (_req, res) => {
     res.json({ status: "ok", timestamp: new Date().toISOString() });
   });
 
