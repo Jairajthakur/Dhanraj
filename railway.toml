@@ -1,5 +1,6 @@
 builder = "nixpacks"
 buildCommand = "npm install --legacy-peer-deps && npm run expo:static:build && npm run server:build"
+
 [deploy]
 startCommand = "node server_dist/index.js"
 healthcheckPath = "/api/health"
