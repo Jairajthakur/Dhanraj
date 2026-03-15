@@ -1,12 +1,6 @@
 module.exports = ({ config }) => {
-  const androidConfig = { ...config.android };
-
-  // Always set google-services.json path for FCM to work
-  androidConfig.googleServicesFile = process.env.GOOGLE_SERVICES_JSON || "./google-services.json";
-
   return {
     ...config,
-    android: androidConfig,
     extra: {
       ...config.extra,
       apiUrl: "https://dhanraj-production.up.railway.app",
