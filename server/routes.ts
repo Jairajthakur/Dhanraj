@@ -215,8 +215,6 @@ const BKT_PERF_SQL = `
 export async function registerRoutes(app: Express): Promise<Server> {
   await storage.initBktPerfSummaryTable();
 
-  // ✅ FIX: Serve uploaded screenshots as static files
-  // This makes https://your-app.railway.app/uploads/screenshots/filename.jpg work
   app.use(
     "/uploads/screenshots",
     express.static(path.join(process.cwd(), "server/uploads/screenshots"))
@@ -233,7 +231,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       secret: process.env.SESSION_SECRET || "fos-secret-key-2024",
       resave: false,
       saveUninitialized: false,
-      cookie: { secure: false, maxAge: 7 * 24 * 60 * 60 * 1000 },
+      cookie: {
+        secure: false,
+        httpOnly: false,
+        sameSite: "lax",
+        maxAge: 7 * 24 * 60 * 60 * 1000,
+      },
     })
   );
 
@@ -528,7 +531,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Required Deposits (admin assigns, FOS views and pays)
+  // Required Deposits
   app.get("/api/admin/required-deposits", requireAdmin, async (req, res) => {
     try {
       const deposits = await storage.getAllRequiredDeposits();
@@ -564,7 +567,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // FOS: view own required deposits
   app.get("/api/required-deposits", requireAuth, async (req, res) => {
     try {
       const deposits = await storage.getRequiredDeposits(req.session.agentId!);
@@ -574,7 +576,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // FOS: save push token
   app.post("/api/push-token", requireAuth, async (req, res) => {
     try {
       const { token } = req.body;
@@ -586,7 +587,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Admin: get push token status for all FOS agents
   app.get("/api/admin/push-status", requireAdmin, async (req, res) => {
     try {
       const result = await storage.query(`
@@ -601,7 +601,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Admin: send test push notification to a specific agent
   app.post("/api/admin/test-push/:agentId", requireAdmin, async (req, res) => {
     try {
       const agentRow = await storage.query(
@@ -623,7 +622,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Admin: send test push to ALL FOS agents with tokens
   app.post("/api/admin/test-push-all", requireAdmin, async (req, res) => {
     try {
       const agents = await storage.query(
@@ -646,7 +644,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // FOS: save profile photo URL
   app.post("/api/profile-photo", requireAuth, async (req, res) => {
     try {
       const { photoUrl } = req.body;
@@ -657,7 +654,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // FOS: get own profile (includes photo_url)
   app.get("/api/profile", requireAuth, async (req, res) => {
     try {
       const result = await storage.query("SELECT id, name, username, role, phone, photo_url FROM fos_agents WHERE id = $1", [req.session.agentId!]);
@@ -667,24 +663,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // FOS: upload screenshot for required deposit
   app.post("/api/required-deposits/:id/screenshot", requireAuth, screenshotUpload.single("screenshot"), async (req, res) => {
     try {
       const depositId = Number(req.params.id);
       if (!req.file) return res.status(400).json({ message: "No file uploaded" });
-
-      // ✅ FIX: Build full public URL so admin can view it directly
       const baseUrl = process.env.RAILWAY_PUBLIC_DOMAIN
         ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`
         : (process.env.APP_URL || "");
       const screenshotUrl = `${baseUrl}/uploads/screenshots/${req.file.filename}`;
-
       await storage.query(
         "UPDATE required_deposits SET screenshot_url = $1, screenshot_uploaded_at = NOW() WHERE id = $2 AND agent_id = $3",
         [screenshotUrl, depositId, req.session.agentId!]
       );
-
-      // Notify admin via push if admin has a push token
       const adminRow = await storage.query(
         "SELECT push_token FROM fos_agents WHERE role = 'admin' AND push_token IS NOT NULL LIMIT 1"
       );
@@ -694,19 +684,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const agentName = agentRow.rows[0]?.name || "A FOS agent";
         await sendExpoPush(adminToken, "📸 Screenshot Uploaded", `${agentName} has uploaded a payment screenshot. Please verify.`);
       }
-
       res.json({ success: true, screenshotUrl });
     } catch (e: any) {
       res.status(500).json({ message: e.message });
     }
   });
 
-  // Admin: verify screenshot for required deposit
   app.put("/api/admin/required-deposits/:id/verify", requireAdmin, async (req, res) => {
     try {
       await storage.query("UPDATE required_deposits SET alarm_scheduled = TRUE WHERE id = $1", [Number(req.params.id)]);
-
-      // ✅ FIX: Notify FOS agent that their deposit has been verified
       const depositRow = await storage.query(
         `SELECT rd.agent_id, rd.amount, fa.push_token, fa.name
          FROM required_deposits rd
@@ -723,7 +709,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
           `Your payment screenshot of ₹${amtStr} has been verified by admin.`
         );
       }
-
       res.json({ success: true });
     } catch (e: any) {
       res.status(500).json({ message: e.message });
@@ -757,7 +742,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // BKT Performance per FOS — admin view
   app.get("/api/admin/bkt-performance", requireAdmin, async (req, res) => {
     try {
       const result = await storage.query(BKT_PERF_SQL);
@@ -767,7 +751,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // BKT Performance — FOS own data
   app.get("/api/bkt-performance", requireAuth, async (req, res) => {
     try {
       const agentId = req.session.agentId!;
@@ -775,30 +758,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         `SELECT
            COUNT(bc.id) FILTER (WHERE bc.case_category = 'bkt1')::int AS bkt1_count,
            COUNT(bc.id) FILTER (WHERE bc.case_category = 'bkt1' AND bc.status = 'Paid')::int AS bkt1_paid_count,
-           COALESCE(SUM(bc.pos::numeric) FILTER (WHERE bc.case_category = 'bkt1'), 0)                              AS bkt1_pos_total,
-           COALESCE(SUM(bc.pos::numeric) FILTER (WHERE bc.case_category = 'bkt1' AND bc.status = 'Paid'), 0)      AS bkt1_pos_paid,
-           COALESCE(SUM(bc.pos::numeric) FILTER (WHERE bc.case_category = 'bkt1' AND bc.status <> 'Paid'), 0)     AS bkt1_pos_unpaid,
-           COALESCE(SUM(CASE WHEN bc.rollback::text ~ '^[0-9,]+\.?[0-9]*$' THEN replace(bc.rollback::text,',','')::numeric ELSE NULL END) FILTER (WHERE bc.case_category = 'bkt1'), 0) AS bkt1_rollback,
-           COUNT(bc.id) FILTER (WHERE bc.case_category = 'bkt2')::int AS bkt2_count,
-           COUNT(bc.id) FILTER (WHERE bc.case_category = 'bkt2' AND bc.status = 'Paid')::int AS bkt2_paid_count,
-           COALESCE(SUM(bc.pos::numeric) FILTER (WHERE bc.case_category = 'bkt2'), 0)                              AS bkt2_pos_total,
-           COALESCE(SUM(bc.pos::numeric) FILTER (WHERE bc.case_category = 'bkt2' AND bc.status = 'Paid'), 0)      AS bkt2_pos_paid,
-           COALESCE(SUM(bc.pos::numeric) FILTER (WHERE bc.case_category = 'bkt2' AND bc.status <> 'Paid'), 0)     AS bkt2_pos_unpaid,
-           COALESCE(SUM(CASE WHEN bc.rollback::text ~ '^[0-9,]+\.?[0-9]*$' THEN replace(bc.rollback::text,',','')::numeric ELSE NULL END) FILTER (WHERE bc.case_category = 'bkt2'), 0) AS bkt2_rollback,
-           COUNT(bc.id) FILTER (WHERE bc.case_category = 'bkt3')::int AS bkt3_count,
-           COUNT(bc.id) FILTER (WHERE bc.case_category = 'bkt3' AND bc.status = 'Paid')::int AS bkt3_paid_count,
-           COALESCE(SUM(bc.pos::numeric) FILTER (WHERE bc.case_category = 'bkt3'), 0)                              AS bkt3_pos_total,
-           COALESCE(SUM(bc.pos::numeric) FILTER (WHERE bc.case_category = 'bkt3' AND bc.status = 'Paid'), 0)      AS bkt3_pos_paid,
-           COALESCE(SUM(bc.pos::numeric) FILTER (WHERE bc.case_category = 'bkt3' AND bc.status <> 'Paid'), 0)     AS bkt3_pos_unpaid,
-           COALESCE(SUM(CASE WHEN bc.rollback::text ~ '^[0-9,]+\.?[0-9]*$' THEN replace(bc.rollback::text,',','')::numeric ELSE NULL END) FILTER (WHERE bc.case_category = 'bkt3'), 0) AS bkt3_rollback,
-           COUNT(bc.id) FILTER (WHERE bc.cbc IS NOT NULL AND bc.cbc::numeric > 0)::int AS penal_count,
-           COUNT(bc.id) FILTER (WHERE bc.cbc IS NOT NULL AND bc.cbc::numeric > 0 AND bc.status = 'Paid')::int AS penal_paid_count,
-           COALESCE(SUM(bc.cbc::numeric) FILTER (WHERE bc.cbc IS NOT NULL AND bc.cbc::numeric > 0), 0)                             AS penal_cbc_total,
-           COALESCE(SUM(bc.cbc::numeric) FILTER (WHERE bc.cbc IS NOT NULL AND bc.cbc::numeric > 0 AND bc.status = 'Paid'), 0)      AS penal_cbc_paid,
-           COALESCE(SUM(bc.cbc::numeric) FILTER (WHERE bc.cbc IS NOT NULL AND bc.cbc::numeric > 0 AND bc.status <> 'Paid'), 0)     AS penal_cbc_unpaid,
-           COALESCE(SUM(CASE WHEN bc.rollback::text ~ '^[0-9,]+\.?[0-9]*$' THEN replace(bc.rollback::text,',','')::numeric ELSE NULL END) FILTER (WHERE bc.cbc IS NOT NULL AND bc.cbc::numeric > 0), 0) AS penal_rollback
-         FROM bkt_cases bc
-         WHERE bc.agent_id = $1`,
+           COALESCE(SUM(bc.pos::numeric) FILTER (WHERE bc.case_category = 'bkt1'), 0) AS bkt1_pos_total,
+           COALESCE(SUM(bc.pos::numeric) FILTER (WHERE bc.case_category = 'bkt1' AND bc.status = 'Paid'), 0) AS bkt1_pos_paid,
+           COALESCE(SUM(bc.pos::numeric) FILTER (WHERE bc.case_category = 'bkt1' AND bc.status <> 'Paid'), 0) AS bkt1_pos_unpaid
+         FROM bkt_cases bc WHERE bc.agent_id = $1`,
         [agentId]
       );
       res.json(result.rows[0] || {});
@@ -807,7 +770,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // BKT/Penal Cases — admin view
   app.get("/api/admin/bkt-cases", requireAdmin, async (req, res) => {
     try {
       const category = req.query.category as string | undefined;
@@ -818,7 +780,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // BKT/Penal Cases — FOS view (own cases)
   app.get("/api/bkt-cases", requireAuth, async (req, res) => {
     try {
       const category = req.query.category as string | undefined;
@@ -829,21 +790,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // BKT/Penal feedback update — FOS
   app.put("/api/bkt-cases/:id/feedback", requireAuth, async (req, res) => {
     try {
       const { status, feedback, comments, ptp_date, rollback_yn } = req.body;
       const ynVal = rollback_yn === true || rollback_yn === "true" ? true : rollback_yn === false || rollback_yn === "false" ? false : null;
       const caseId = Number(req.params.id);
-
       const oldRow = await storage.query(
         `SELECT status, rollback_yn, pos::numeric AS pos, agent_id, case_category, pro FROM bkt_cases WHERE id = $1`,
         [caseId]
       );
       const old = oldRow.rows[0];
-
       await storage.updateBktCaseFeedback(caseId, status, feedback, comments, ptp_date, ynVal);
-
       if (old && old.case_category && old.agent_id && (old.pro || "").toUpperCase() !== "UC") {
         const pos    = parseFloat(old.pos) || 0;
         const bktKey = (old.case_category as string).toLowerCase().replace(/\s+/g, "");
@@ -856,25 +813,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const dRb     = !wasRb  && nowRb   ? pos : wasRb  && !nowRb   ? -pos : 0;
         await storage.applyBktPerfDelta(old.agent_id, bktKey, dPos, -dPos, dCount, -dCount, dRb, -dRb);
       }
-
       res.json({ success: true });
     } catch (e: any) {
       res.status(500).json({ message: e.message });
     }
   });
 
-  // Excel Import — full implementation with auto-create FOS users
+  // Excel Import
   app.post("/api/admin/import", requireAdmin, upload.single("file"), async (req, res) => {
     try {
       if (!req.file) return res.status(400).json({ message: "No file uploaded" });
-
       const ejWorkbook1 = new ExcelJS.Workbook();
       await ejWorkbook1.xlsx.load(req.file.buffer);
       const worksheet1 = ejWorkbook1.worksheets[0];
-
       const rawRows: any[][] = worksheetToRows(worksheet1, true);
       if (rawRows.length === 0) return res.json({ imported: 0, updated: 0, skipped: 0, agentsCreated: 0, errors: [] });
-
       let headerRowIdx = -1;
       let colIdxMap: Record<number, string> = {};
       for (let r = 0; r < Math.min(rawRows.length, 15); r++) {
@@ -890,22 +843,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (headerRowIdx === -1) {
         return res.status(400).json({ message: "Could not find header row. Expected columns like: LOAN NO, CUSTOMER NAME, FOS NAME, POS, BKT" });
       }
-
       const ptpLoanSave = await storage.query(`SELECT loan_no, ptp_date FROM loan_cases WHERE status = 'PTP'`);
       const ptpLoanMap = new Map<string, string | null>(ptpLoanSave.rows.map((r: any) => [r.loan_no, r.ptp_date]));
-
       await storage.deleteAllLoanCases();
-
       const existingAgents = await storage.getAllAgentsWithAdmin();
       const agentByName: Record<string, number> = {};
       for (const a of existingAgents) {
         if (a.name) agentByName[a.name.toLowerCase().trim()] = a.id;
       }
-
       let imported = 0, skipped = 0, agentsCreated = 0;
       const errors: string[] = [];
       const dataRows = rawRows.slice(headerRowIdx + 1);
-
       for (let i = 0; i < dataRows.length; i++) {
         const row = dataRows[i];
         const mapped: Record<string, any> = {};
@@ -913,11 +861,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const val = row[Number(colIdx)];
           mapped[dbField] = (val !== undefined && val !== "") ? String(val).trim() : null;
         }
-
         if (!mapped.loan_no) { skipped++; continue; }
         if (!mapped.customer_name) { skipped++; continue; }
         if (isRepeatHeaderRow(mapped)) { skipped++; continue; }
-
         let agentId: number | null = null;
         if (mapped.fos_name) {
           const fosLower = mapped.fos_name.toLowerCase().trim();
@@ -938,38 +884,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
             }
           }
         }
-
         try {
           await storage.upsertLoanCase({
-            agentId,
-            fosName: mapped.fos_name || null,
-            loanNo: mapped.loan_no,
-            customerName: mapped.customer_name,
-            bkt: mapped.bkt ? parseInt(mapped.bkt) || null : null,
-            appId: mapped.app_id || null,
-            address: mapped.address || null,
-            mobileNo: mapped.mobile_no || null,
-            referenceAddress: mapped.reference_address || null,
-            pos: parseNum(mapped.pos),
-            assetMake: mapped.asset_make || null,
-            registrationNo: mapped.registration_no || null,
-            engineNo: mapped.engine_no || null,
-            chassisNo: mapped.chassis_no || null,
-            emiAmount: parseNum(mapped.emi_amount),
-            emiDue: parseNum(mapped.emi_due),
-            cbc: parseNum(mapped.cbc),
-            lpp: parseNum(mapped.lpp),
-            cbcLpp: parseNum(mapped.cbc_lpp),
-            rollback: parseNum(mapped.rollback),
-            clearance: parseNum(mapped.clearance),
-            firstEmiDueDate: parseDate(mapped.first_emi_due_date),
-            loanMaturityDate: parseDate(mapped.loan_maturity_date),
-            tenor: mapped.tenor ? parseInt(mapped.tenor) || null : null,
-            pro: mapped.pro || null,
-            status: normalizeStatus(mapped.status),
-            latestFeedback: mapped.latest_feedback || null,
-            feedbackComments: mapped.feedback_comments || null,
-            telecallerPtpDate: parseDate(mapped.telecaller_ptp_date),
+            agentId, fosName: mapped.fos_name || null, loanNo: mapped.loan_no,
+            customerName: mapped.customer_name, bkt: mapped.bkt ? parseInt(mapped.bkt) || null : null,
+            appId: mapped.app_id || null, address: mapped.address || null, mobileNo: mapped.mobile_no || null,
+            referenceAddress: mapped.reference_address || null, pos: parseNum(mapped.pos),
+            assetMake: mapped.asset_make || null, registrationNo: mapped.registration_no || null,
+            engineNo: mapped.engine_no || null, chassisNo: mapped.chassis_no || null,
+            emiAmount: parseNum(mapped.emi_amount), emiDue: parseNum(mapped.emi_due),
+            cbc: parseNum(mapped.cbc), lpp: parseNum(mapped.lpp), cbcLpp: parseNum(mapped.cbc_lpp),
+            rollback: parseNum(mapped.rollback), clearance: parseNum(mapped.clearance),
+            firstEmiDueDate: parseDate(mapped.first_emi_due_date), loanMaturityDate: parseDate(mapped.loan_maturity_date),
+            tenor: mapped.tenor ? parseInt(mapped.tenor) || null : null, pro: mapped.pro || null,
+            status: normalizeStatus(mapped.status), latestFeedback: mapped.latest_feedback || null,
+            feedbackComments: mapped.feedback_comments || null, telecallerPtpDate: parseDate(mapped.telecaller_ptp_date),
           });
           imported++;
         } catch (e: any) {
@@ -977,14 +906,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
           skipped++;
         }
       }
-
       for (const [loanNo, ptpDate] of ptpLoanMap) {
-        await storage.query(
-          `UPDATE loan_cases SET status = 'PTP', ptp_date = $1 WHERE loan_no = $2`,
-          [ptpDate, loanNo]
-        );
+        await storage.query(`UPDATE loan_cases SET status = 'PTP', ptp_date = $1 WHERE loan_no = $2`, [ptpDate, loanNo]);
       }
-
       res.json({ imported, updated: 0, skipped, agentsCreated, total: dataRows.length, errors: errors.slice(0, 20) });
     } catch (e: any) {
       res.status(500).json({ message: e.message });
@@ -995,14 +919,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/admin/import-bkt", requireAdmin, upload.single("file"), async (req, res) => {
     try {
       if (!req.file) return res.status(400).json({ message: "No file uploaded" });
-
       const ejWorkbook2 = new ExcelJS.Workbook();
       await ejWorkbook2.xlsx.load(req.file.buffer);
       const worksheet2 = ejWorkbook2.worksheets.find(ws => ws.name.toUpperCase() === "ALLO") || ejWorkbook2.worksheets[0];
-
       const rawRows: any[][] = worksheetToRows(worksheet2, true);
       if (rawRows.length === 0) return res.json({ imported: 0, updated: 0, skipped: 0, agentsCreated: 0, errors: [] });
-
       let headerRowIdx = -1;
       let colIdxMap: Record<number, string> = {};
       for (let r = 0; r < Math.min(rawRows.length, 15); r++) {
@@ -1016,24 +937,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (matched >= 3) { headerRowIdx = r; colIdxMap = tempMap; break; }
       }
       if (headerRowIdx === -1) {
-        return res.status(400).json({ message: "Could not find header row. Expected columns like: LOAN NO, CUSTOMER NAME, FOS NAME, POS, BKT" });
+        return res.status(400).json({ message: "Could not find header row." });
       }
-
       const ptpBktSave = await storage.query(`SELECT loan_no, ptp_date FROM bkt_cases WHERE status = 'PTP'`);
       const ptpBktMap = new Map<string, string | null>(ptpBktSave.rows.map((r: any) => [r.loan_no, r.ptp_date]));
-
       await storage.deleteAllBktCases();
-
       const existingAgents = await storage.getAllAgentsWithAdmin();
       const agentByName: Record<string, number> = {};
       for (const a of existingAgents) {
         if (a.name) agentByName[a.name.toLowerCase().trim()] = a.id;
       }
-
       let imported = 0, skipped = 0, agentsCreated = 0;
       const errors: string[] = [];
       const dataRows = rawRows.slice(headerRowIdx + 1);
-
       for (let i = 0; i < dataRows.length; i++) {
         const row = dataRows[i];
         const mapped: Record<string, any> = {};
@@ -1041,17 +957,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const val = row[Number(colIdx)];
           mapped[dbField] = (val !== undefined && val !== "") ? String(val).trim() : null;
         }
-
         if (!mapped.loan_no) { skipped++; continue; }
         if (!mapped.customer_name) { skipped++; continue; }
         if (isRepeatHeaderRow(mapped)) { skipped++; continue; }
-
         const bktVal = mapped.bkt ? parseInt(mapped.bkt) : null;
         let caseCategory = "penal";
         if (bktVal === 1) caseCategory = "bkt1";
         else if (bktVal === 2) caseCategory = "bkt2";
         else if (bktVal === 3) caseCategory = "bkt3";
-
         let agentId: number | null = null;
         if (mapped.fos_name) {
           const fosLower = mapped.fos_name.toLowerCase().trim();
@@ -1072,41 +985,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
             }
           }
         }
-
         try {
           await storage.upsertBktCase({
-            caseCategory, agentId,
-            fosName: mapped.fos_name || null,
-            loanNo: mapped.loan_no,
-            customerName: mapped.customer_name,
-            bkt: bktVal,
-            appId: mapped.app_id || null,
-            address: mapped.address || null,
-            mobileNo: mapped.mobile_no || null,
-            ref1Name: mapped.ref1_name || null,
-            ref1Mobile: mapped.ref1_mobile || null,
-            ref2Name: mapped.ref2_name || null,
-            ref2Mobile: mapped.ref2_mobile || null,
-            referenceAddress: mapped.reference_address || null,
-            pos: parseNum(mapped.pos),
-            assetName: mapped.asset_name || null,
-            assetMake: mapped.asset_make || null,
-            registrationNo: mapped.registration_no || null,
-            engineNo: mapped.engine_no || null,
-            chassisNo: mapped.chassis_no || null,
-            emiAmount: parseNum(mapped.emi_amount),
-            emiDue: parseNum(mapped.emi_due),
-            cbc: parseNum(mapped.cbc),
-            lpp: parseNum(mapped.lpp),
-            cbcLpp: parseNum(mapped.cbc_lpp),
-            rollback: parseNum(mapped.rollback),
-            clearance: parseNum(mapped.clearance),
-            firstEmiDueDate: parseDate(mapped.first_emi_due_date),
+            caseCategory, agentId, fosName: mapped.fos_name || null, loanNo: mapped.loan_no,
+            customerName: mapped.customer_name, bkt: bktVal, appId: mapped.app_id || null,
+            address: mapped.address || null, mobileNo: mapped.mobile_no || null,
+            ref1Name: mapped.ref1_name || null, ref1Mobile: mapped.ref1_mobile || null,
+            ref2Name: mapped.ref2_name || null, ref2Mobile: mapped.ref2_mobile || null,
+            referenceAddress: mapped.reference_address || null, pos: parseNum(mapped.pos),
+            assetName: mapped.asset_name || null, assetMake: mapped.asset_make || null,
+            registrationNo: mapped.registration_no || null, engineNo: mapped.engine_no || null,
+            chassisNo: mapped.chassis_no || null, emiAmount: parseNum(mapped.emi_amount),
+            emiDue: parseNum(mapped.emi_due), cbc: parseNum(mapped.cbc), lpp: parseNum(mapped.lpp),
+            cbcLpp: parseNum(mapped.cbc_lpp), rollback: parseNum(mapped.rollback),
+            clearance: parseNum(mapped.clearance), firstEmiDueDate: parseDate(mapped.first_emi_due_date),
             loanMaturityDate: parseDate(mapped.loan_maturity_date),
-            tenor: mapped.tenor ? parseInt(mapped.tenor) || null : null,
-            pro: mapped.pro || null,
-            status: normalizeStatus(mapped.status),
-            telecallerPtpDate: parseDate(mapped.telecaller_ptp_date),
+            tenor: mapped.tenor ? parseInt(mapped.tenor) || null : null, pro: mapped.pro || null,
+            status: normalizeStatus(mapped.status), telecallerPtpDate: parseDate(mapped.telecaller_ptp_date),
           });
           imported++;
         } catch (e: any) {
@@ -1114,48 +1009,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
           skipped++;
         }
       }
-
       for (const [loanNo, ptpDate] of ptpBktMap) {
-        await storage.query(
-          `UPDATE bkt_cases SET status = 'PTP', ptp_date = $1 WHERE loan_no = $2`,
-          [ptpDate, loanNo]
-        );
+        await storage.query(`UPDATE bkt_cases SET status = 'PTP', ptp_date = $1 WHERE loan_no = $2`, [ptpDate, loanNo]);
       }
-
       res.json({ imported, updated: 0, skipped, agentsCreated, total: dataRows.length, errors: errors.slice(0, 20) });
     } catch (e: any) {
       res.status(500).json({ message: e.message });
     }
   });
 
-  // PTP Export — admin download Excel
+  // PTP Export
   app.get("/api/admin/ptp-export", requireAdmin, async (req, res) => {
     try {
       const result = await storage.query(`
         SELECT fa.name AS fos_name, lc.customer_name, lc.loan_no, lc.mobile_no,
                lc.address, lc.ptp_date, lc.telecaller_ptp_date, lc.pos, lc.bkt::text AS bkt, lc.status
-        FROM loan_cases lc
-        LEFT JOIN fos_agents fa ON lc.agent_id = fa.id
+        FROM loan_cases lc LEFT JOIN fos_agents fa ON lc.agent_id = fa.id
         WHERE lc.status = 'PTP' OR lc.telecaller_ptp_date IS NOT NULL
         UNION ALL
         SELECT fa.name AS fos_name, bc.customer_name, bc.loan_no, bc.mobile_no,
                bc.address, bc.ptp_date, bc.telecaller_ptp_date, bc.pos, bc.case_category AS bkt, bc.status
-        FROM bkt_cases bc
-        LEFT JOIN fos_agents fa ON bc.agent_id = fa.id
+        FROM bkt_cases bc LEFT JOIN fos_agents fa ON bc.agent_id = fa.id
         WHERE bc.status = 'PTP' OR bc.telecaller_ptp_date IS NOT NULL
         ORDER BY fos_name NULLS LAST, telecaller_ptp_date NULLS LAST
       `);
       const rows = result.rows.map((r: any) => ({
-        "FOS Name":             r.fos_name || "",
-        "Customer Name":        r.customer_name || "",
-        "Loan No":              r.loan_no || "",
-        "Mobile No":            r.mobile_no || "",
-        "Address":              r.address || "",
-        "Telecaller PTP Date":  r.telecaller_ptp_date ? String(r.telecaller_ptp_date).slice(0, 10) : "",
-        "FOS PTP Date":         r.ptp_date ? String(r.ptp_date).slice(0, 10) : "",
-        "POS":                  r.pos || "",
-        "BKT":                  r.bkt || "",
-        "Status":               r.status || "",
+        "FOS Name": r.fos_name || "", "Customer Name": r.customer_name || "",
+        "Loan No": r.loan_no || "", "Mobile No": r.mobile_no || "", "Address": r.address || "",
+        "Telecaller PTP Date": r.telecaller_ptp_date ? String(r.telecaller_ptp_date).slice(0, 10) : "",
+        "FOS PTP Date": r.ptp_date ? String(r.ptp_date).slice(0, 10) : "",
+        "POS": r.pos || "", "BKT": r.bkt || "", "Status": r.status || "",
       }));
       const exportWb = new ExcelJS.Workbook();
       const exportWs = exportWb.addWorksheet("PTP Cases");
@@ -1171,57 +1054,40 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Clear all PTP dates (admin action)
   app.post("/api/admin/clear-ptp", requireAdmin, async (req, res) => {
     try {
       await storage.query(`UPDATE loan_cases SET ptp_date = NULL, telecaller_ptp_date = NULL, status = 'Pending' WHERE status = 'PTP'`);
-      await storage.query(`UPDATE bkt_cases  SET ptp_date = NULL, telecaller_ptp_date = NULL, status = 'Pending' WHERE status = 'PTP'`);
+      await storage.query(`UPDATE bkt_cases SET ptp_date = NULL, telecaller_ptp_date = NULL, status = 'Pending' WHERE status = 'PTP'`);
       await storage.query(`UPDATE loan_cases SET ptp_date = NULL, telecaller_ptp_date = NULL WHERE ptp_date IS NOT NULL OR telecaller_ptp_date IS NOT NULL`);
-      await storage.query(`UPDATE bkt_cases  SET ptp_date = NULL, telecaller_ptp_date = NULL WHERE ptp_date IS NOT NULL OR telecaller_ptp_date IS NOT NULL`);
+      await storage.query(`UPDATE bkt_cases SET ptp_date = NULL, telecaller_ptp_date = NULL WHERE ptp_date IS NOT NULL OR telecaller_ptp_date IS NOT NULL`);
       res.json({ success: true });
     } catch (e: any) {
       res.status(500).json({ message: e.message });
     }
   });
 
-  // BKT Perf Summary — admin
   app.get("/api/admin/bkt-perf-summary", requireAdmin, async (req, res) => {
     try {
       const result = await storage.query(`
         WITH norm AS (
-          SELECT *,
-            CASE LOWER(REPLACE(bkt, ' ', ''))
-              WHEN '1'    THEN 'bkt1'
-              WHEN '2'    THEN 'bkt2'
-              WHEN '3'    THEN 'bkt3'
-              WHEN 'bkt1' THEN 'bkt1'
-              WHEN 'bkt2' THEN 'bkt2'
-              WHEN 'bkt3' THEN 'bkt3'
-              ELSE LOWER(REPLACE(bkt, ' ', ''))
-            END AS bkt_norm
+          SELECT *, CASE LOWER(REPLACE(bkt, ' ', ''))
+            WHEN '1' THEN 'bkt1' WHEN '2' THEN 'bkt2' WHEN '3' THEN 'bkt3'
+            WHEN 'bkt1' THEN 'bkt1' WHEN 'bkt2' THEN 'bkt2' WHEN 'bkt3' THEN 'bkt3'
+            ELSE LOWER(REPLACE(bkt, ' ', '')) END AS bkt_norm
           FROM bkt_perf_summary
         ),
         latest AS (
-          SELECT DISTINCT ON (fos_name, bkt_norm) *
-          FROM norm
+          SELECT DISTINCT ON (fos_name, bkt_norm) * FROM norm
           ORDER BY fos_name, bkt_norm, uploaded_at DESC
         )
-        SELECT
-          fos_name,
-          bkt_norm                             AS bkt,
-          COALESCE(pos_paid, 0)               AS pos_paid,
-          COALESCE(pos_unpaid, 0)             AS pos_unpaid,
-          COALESCE(pos_grand_total, 0)        AS pos_grand_total,
-          COALESCE(pos_percentage, 0)         AS pos_percentage,
-          COALESCE(count_paid, 0)             AS count_paid,
-          COALESCE(count_unpaid, 0)           AS count_unpaid,
-          COALESCE(count_total, 0)            AS count_total,
-          COALESCE(rollback_paid, 0)          AS rollback_paid,
-          COALESCE(rollback_unpaid, 0)        AS rollback_unpaid,
-          COALESCE(rollback_grand_total, 0)   AS rollback_grand_total,
-          COALESCE(rollback_percentage, 0)    AS rollback_percentage
-        FROM latest
-        ORDER BY fos_name, bkt_norm
+        SELECT fos_name, bkt_norm AS bkt,
+          COALESCE(pos_paid, 0) AS pos_paid, COALESCE(pos_unpaid, 0) AS pos_unpaid,
+          COALESCE(pos_grand_total, 0) AS pos_grand_total, COALESCE(pos_percentage, 0) AS pos_percentage,
+          COALESCE(count_paid, 0) AS count_paid, COALESCE(count_unpaid, 0) AS count_unpaid,
+          COALESCE(count_total, 0) AS count_total, COALESCE(rollback_paid, 0) AS rollback_paid,
+          COALESCE(rollback_unpaid, 0) AS rollback_unpaid, COALESCE(rollback_grand_total, 0) AS rollback_grand_total,
+          COALESCE(rollback_percentage, 0) AS rollback_percentage
+        FROM latest ORDER BY fos_name, bkt_norm
       `);
       res.json({ rows: result.rows });
     } catch (e: any) {
@@ -1233,25 +1099,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/bkt-perf-summary", requireAuth, async (req, res) => {
     try {
       const agentId = req.session.agentId!;
+      console.log("[bkt-perf-summary] agentId from session:", agentId);
+
+      const checkResult = await storage.query(
+        `SELECT COUNT(*) as cnt FROM bkt_perf_summary WHERE agent_id = $1`,
+        [agentId]
+      );
+      console.log("[bkt-perf-summary] rows in bkt_perf_summary for agent:", checkResult.rows[0]?.cnt);
+
       const result = await storage.query(`
         WITH
         imported_norm AS (
           SELECT *,
             CASE LOWER(REPLACE(bkt, ' ', ''))
-              WHEN '1'    THEN 'bkt1'
-              WHEN '2'    THEN 'bkt2'
-              WHEN '3'    THEN 'bkt3'
-              WHEN 'bkt1' THEN 'bkt1'
-              WHEN 'bkt2' THEN 'bkt2'
-              WHEN 'bkt3' THEN 'bkt3'
+              WHEN '1' THEN 'bkt1' WHEN '2' THEN 'bkt2' WHEN '3' THEN 'bkt3'
+              WHEN 'bkt1' THEN 'bkt1' WHEN 'bkt2' THEN 'bkt2' WHEN 'bkt3' THEN 'bkt3'
               ELSE LOWER(REPLACE(bkt, ' ', ''))
             END AS bkt_norm
           FROM bkt_perf_summary
           WHERE agent_id = $1
         ),
         imported_latest AS (
-          SELECT DISTINCT ON (bkt_norm) *
-          FROM imported_norm
+          SELECT DISTINCT ON (bkt_norm) * FROM imported_norm
           ORDER BY bkt_norm, uploaded_at DESC
         ),
         covered_bkts AS (
@@ -1276,38 +1145,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
             AND UPPER(COALESCE(lc.pro,'')) <> 'UC'
         ),
         live_agg AS (
-          SELECT
-            bkt,
-            COALESCE(SUM(pos) FILTER (WHERE status = 'Paid'), 0)          AS pos_paid,
-            COALESCE(SUM(pos) FILTER (WHERE status <> 'Paid'), 0)         AS pos_unpaid,
-            COALESCE(SUM(pos), 0)                                          AS pos_grand_total,
+          SELECT bkt,
+            COALESCE(SUM(pos) FILTER (WHERE status = 'Paid'), 0) AS pos_paid,
+            COALESCE(SUM(pos) FILTER (WHERE status <> 'Paid'), 0) AS pos_unpaid,
+            COALESCE(SUM(pos), 0) AS pos_grand_total,
             CASE WHEN COALESCE(SUM(pos),0) > 0
               THEN ROUND((COALESCE(SUM(pos) FILTER (WHERE status='Paid'),0)/SUM(pos))*100,2)
-              ELSE 0 END                                                    AS pos_percentage,
-            COUNT(*) FILTER (WHERE status = 'Paid')::int                  AS count_paid,
-            COUNT(*) FILTER (WHERE status <> 'Paid')::int                 AS count_unpaid,
-            COUNT(*)::int                                                   AS count_total,
-            COALESCE(SUM(pos) FILTER (WHERE rollback_yn = true), 0)       AS rollback_paid,
+              ELSE 0 END AS pos_percentage,
+            COUNT(*) FILTER (WHERE status = 'Paid')::int AS count_paid,
+            COUNT(*) FILTER (WHERE status <> 'Paid')::int AS count_unpaid,
+            COUNT(*)::int AS count_total,
+            COALESCE(SUM(pos) FILTER (WHERE rollback_yn = true), 0) AS rollback_paid,
             COALESCE(SUM(pos) FILTER (WHERE rollback_yn IS DISTINCT FROM true), 0) AS rollback_unpaid,
-            COALESCE(SUM(pos), 0)                                          AS rollback_grand_total,
+            COALESCE(SUM(pos), 0) AS rollback_grand_total,
             CASE WHEN COALESCE(SUM(pos),0) > 0
               THEN ROUND((COALESCE(SUM(pos) FILTER (WHERE rollback_yn=true),0)/SUM(pos))*100,2)
-              ELSE 0 END                                                    AS rollback_percentage
-          FROM live_cases
-          GROUP BY bkt
+              ELSE 0 END AS rollback_percentage
+          FROM live_cases GROUP BY bkt
         ),
         combined AS (
           SELECT bkt_norm AS bkt,
-            COALESCE(pos_paid,0)            AS pos_paid,
-            COALESCE(pos_unpaid,0)          AS pos_unpaid,
-            COALESCE(pos_grand_total,0)     AS pos_grand_total,
-            COALESCE(pos_percentage,0)      AS pos_percentage,
-            COALESCE(count_paid,0)          AS count_paid,
-            COALESCE(count_unpaid,0)        AS count_unpaid,
-            COALESCE(count_total,0)         AS count_total,
-            COALESCE(rollback_paid,0)       AS rollback_paid,
-            COALESCE(rollback_unpaid,0)     AS rollback_unpaid,
-            COALESCE(rollback_grand_total,0) AS rollback_grand_total,
+            COALESCE(pos_paid,0) AS pos_paid, COALESCE(pos_unpaid,0) AS pos_unpaid,
+            COALESCE(pos_grand_total,0) AS pos_grand_total, COALESCE(pos_percentage,0) AS pos_percentage,
+            COALESCE(count_paid,0) AS count_paid, COALESCE(count_unpaid,0) AS count_unpaid,
+            COALESCE(count_total,0) AS count_total, COALESCE(rollback_paid,0) AS rollback_paid,
+            COALESCE(rollback_unpaid,0) AS rollback_unpaid, COALESCE(rollback_grand_total,0) AS rollback_grand_total,
             COALESCE(rollback_percentage,0) AS rollback_percentage
           FROM imported_latest
           UNION ALL
@@ -1315,8 +1177,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         )
         SELECT * FROM combined ORDER BY bkt
       `, [agentId]);
+
+      console.log("[bkt-perf-summary] rows returned:", result.rows.length);
       res.json({ rows: result.rows });
     } catch (e: any) {
+      console.error("[bkt-perf-summary] error:", e.message);
       res.status(500).json({ message: e.message });
     }
   });
@@ -1325,14 +1190,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/admin/import-bkt-perf", requireAdmin, upload.single("file"), async (req, res) => {
     try {
       if (!req.file) return res.status(400).json({ message: "No file uploaded" });
-
       const ejWorkbook3 = new ExcelJS.Workbook();
       await ejWorkbook3.xlsx.load(req.file.buffer);
       const worksheet3 = ejWorkbook3.worksheets[0];
-
       const rawRows: any[][] = worksheetToRows(worksheet3, false);
       if (rawRows.length === 0) return res.json({ imported: 0, skipped: 0, errors: [] });
-
       const cn = (v: any): number => {
         if (v === "" || v === null || v === undefined) return 0;
         return parseFloat(String(v).replace(/[,%₹\s]/g, "")) || 0;
@@ -1341,15 +1203,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const raw = cn(v);
         return raw > 0 && raw <= 1 ? raw * 100 : raw;
       };
-
       const manualBkt = String(req.body?.bkt || "").trim();
       let bktValue = manualBkt || "";
       if (!bktValue) {
         for (const row of rawRows.slice(0, 15)) {
           for (let i = 0; i < row.length - 1; i++) {
             if (String(row[i]).toLowerCase().trim() === "bkt" && String(row[i + 1]).trim()) {
-              bktValue = String(row[i + 1]).trim();
-              break;
+              bktValue = String(row[i + 1]).trim(); break;
             }
           }
           if (bktValue) break;
@@ -1358,160 +1218,101 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!bktValue) bktValue = "1";
       bktValue = bktValue.toLowerCase().trim().replace(/\s+/g, "");
       if (bktValue === "1" || bktValue === "2" || bktValue === "3") bktValue = `bkt${bktValue}`;
-
       let headerIdx = -1;
       let cFos = -1, cVal = -1, cPaid = -1, cUnpaid = -1, cGt = -1, cPct = -1;
       let cRbVal = -1, cRb = -1, cRbGt = -1, cRbPct = -1;
-
       for (let r = 0; r < rawRows.length; r++) {
         const row = rawRows[r];
         const norm = (v: any) => String(v || "").toLowerCase().trim().replace(/[\s_]/g, "");
         const cells = row.map(norm);
         if (!cells.some(c => c === "values" || c === "value") || !cells.some(c => c === "paid")) continue;
-
         headerIdx = r;
         let fosCount = 0, valCount = 0, gtCount = 0, pctCount = 0;
         for (let j = 0; j < row.length; j++) {
           const c = cells[j];
-          if (c === "fosname" || c === "fos_name" || c === "fosagent") {
-            if (fosCount === 0) { cFos = j; fosCount++; }
-          } else if (c === "values" || c === "value") {
-            if (valCount === 0) { cVal = j; valCount++; }
-            else if (valCount === 1) { cRbVal = j; valCount++; }
-          } else if (c === "paid" && cPaid === -1) {
-            cPaid = j;
-          } else if (c === "unpaid" && cUnpaid === -1) {
-            cUnpaid = j;
-          } else if ((c === "grandtotal" || c.includes("grand")) && gtCount <= 1) {
-            if (gtCount === 0) { cGt = j; gtCount++; }
-            else { cRbGt = j; gtCount++; }
-          } else if ((c === "percentage" || c.includes("percent")) && pctCount <= 1) {
-            if (pctCount === 0) { cPct = j; pctCount++; }
-            else { cRbPct = j; pctCount++; }
-          } else if (c.includes("rollback") || c === "rb") {
-            cRb = j;
-          }
+          if (c === "fosname" || c === "fos_name" || c === "fosagent") { if (fosCount === 0) { cFos = j; fosCount++; } }
+          else if (c === "values" || c === "value") { if (valCount === 0) { cVal = j; valCount++; } else if (valCount === 1) { cRbVal = j; valCount++; } }
+          else if (c === "paid" && cPaid === -1) { cPaid = j; }
+          else if (c === "unpaid" && cUnpaid === -1) { cUnpaid = j; }
+          else if ((c === "grandtotal" || c.includes("grand")) && gtCount <= 1) { if (gtCount === 0) { cGt = j; gtCount++; } else { cRbGt = j; gtCount++; } }
+          else if ((c === "percentage" || c.includes("percent")) && pctCount <= 1) { if (pctCount === 0) { cPct = j; pctCount++; } else { cRbPct = j; pctCount++; } }
+          else if (c.includes("rollback") || c === "rb") { cRb = j; }
         }
         break;
       }
-
       if (headerIdx === -1) {
         return res.status(400).json({ message: "Could not find header row. Expected columns: Fos_Name, Values, PAID, UNPAID, Grand Total, Percentage, RollBack" });
       }
-
-      const fosData: Record<string, {
-        posPaid: number; posUnpaid: number; posGrandTotal: number; posPercentage: number;
-        countPaid: number; countUnpaid: number; countTotal: number;
-        rollbackPaid: number; rollbackGrandTotal: number; rollbackPercentage: number;
-      }> = {};
-
+      const fosData: Record<string, any> = {};
       let currentFos = "";
       for (let r = headerIdx + 1; r < rawRows.length; r++) {
         const row = rawRows[r];
         const fosCell = cFos >= 0 ? String(row[cFos] || "").trim() : "";
         const valCell = cVal >= 0 ? String(row[cVal] || "").trim().toLowerCase() : "";
-
         if (fosCell.toLowerCase().includes("grand total")) continue;
-
-        if (fosCell && fosCell.toLowerCase() !== "grand total") {
-          currentFos = fosCell;
-        }
+        if (fosCell && fosCell.toLowerCase() !== "grand total") currentFos = fosCell;
         if (!currentFos || !valCell) continue;
-
         if (!fosData[currentFos]) {
-          fosData[currentFos] = {
-            posPaid: 0, posUnpaid: 0, posGrandTotal: 0, posPercentage: 0,
-            countPaid: 0, countUnpaid: 0, countTotal: 0,
-            rollbackPaid: 0, rollbackGrandTotal: 0, rollbackPercentage: 0,
-          };
+          fosData[currentFos] = { posPaid: 0, posUnpaid: 0, posGrandTotal: 0, posPercentage: 0, countPaid: 0, countUnpaid: 0, countTotal: 0, rollbackPaid: 0, rollbackGrandTotal: 0, rollbackPercentage: 0 };
         }
         const d = fosData[currentFos];
-
         if (valCell.includes("sum of pos") || valCell.includes("sum of po")) {
-          d.posPaid        = cPaid   >= 0 ? cn(row[cPaid])   : d.posPaid;
-          d.posUnpaid      = cUnpaid >= 0 ? cn(row[cUnpaid]) : d.posUnpaid;
-          d.posGrandTotal  = cGt     >= 0 ? cn(row[cGt])     : d.posGrandTotal;
-          d.posPercentage  = cPct    >= 0 ? toPct(row[cPct])    : d.posPercentage;
-          d.rollbackPaid      = cRb    >= 0 ? cn(row[cRb])      : d.rollbackPaid;
-          d.rollbackGrandTotal= cRbGt  >= 0 ? cn(row[cRbGt])    : d.rollbackGrandTotal;
-          d.rollbackPercentage= cRbPct >= 0 ? toPct(row[cRbPct]): d.rollbackPercentage;
-        } else if (
-          valCell.includes("cbc+lpp") || valCell.includes("cbclpp") ||
-          valCell.includes("cbc lpp") || valCell.includes("sum of cbc") ||
-          (valCell.includes("cbc") && valCell.includes("lpp"))
-        ) {
-          d.posPaid       = cPaid   >= 0 ? cn(row[cPaid])   : d.posPaid;
-          d.posUnpaid     = cUnpaid >= 0 ? cn(row[cUnpaid]) : d.posUnpaid;
-          d.posGrandTotal = cGt     >= 0 ? cn(row[cGt])     : d.posGrandTotal;
-          d.posPercentage = cPct    >= 0 ? toPct(row[cPct]) : d.posPercentage;
-        } else if (
-          valCell.includes("count") ||
-          valCell.includes("col cbc") || valCell.includes("col_cbc") ||
-          (valCell.includes("col") && valCell.includes("cbc")) ||
-          valCell === "sum of col cbc" || valCell === "col cbc"
-        ) {
-          d.countPaid   = cPaid   >= 0 ? Math.round(cn(row[cPaid]))   : d.countPaid;
+          d.posPaid = cPaid >= 0 ? cn(row[cPaid]) : d.posPaid;
+          d.posUnpaid = cUnpaid >= 0 ? cn(row[cUnpaid]) : d.posUnpaid;
+          d.posGrandTotal = cGt >= 0 ? cn(row[cGt]) : d.posGrandTotal;
+          d.posPercentage = cPct >= 0 ? toPct(row[cPct]) : d.posPercentage;
+          d.rollbackPaid = cRb >= 0 ? cn(row[cRb]) : d.rollbackPaid;
+          d.rollbackGrandTotal = cRbGt >= 0 ? cn(row[cRbGt]) : d.rollbackGrandTotal;
+          d.rollbackPercentage = cRbPct >= 0 ? toPct(row[cRbPct]) : d.rollbackPercentage;
+        } else if (valCell.includes("cbc+lpp") || valCell.includes("cbclpp") || valCell.includes("cbc lpp") || valCell.includes("sum of cbc") || (valCell.includes("cbc") && valCell.includes("lpp"))) {
+          d.posPaid = cPaid >= 0 ? cn(row[cPaid]) : d.posPaid;
+          d.posUnpaid = cUnpaid >= 0 ? cn(row[cUnpaid]) : d.posUnpaid;
+          d.posGrandTotal = cGt >= 0 ? cn(row[cGt]) : d.posGrandTotal;
+          d.posPercentage = cPct >= 0 ? toPct(row[cPct]) : d.posPercentage;
+        } else if (valCell.includes("count") || valCell.includes("col cbc") || valCell.includes("col_cbc") || (valCell.includes("col") && valCell.includes("cbc")) || valCell === "sum of col cbc" || valCell === "col cbc") {
+          d.countPaid = cPaid >= 0 ? Math.round(cn(row[cPaid])) : d.countPaid;
           d.countUnpaid = cUnpaid >= 0 ? Math.round(cn(row[cUnpaid])) : d.countUnpaid;
-          d.countTotal  = cGt     >= 0 ? Math.round(cn(row[cGt]))     : d.countTotal;
+          d.countTotal = cGt >= 0 ? Math.round(cn(row[cGt])) : d.countTotal;
         }
       }
-
       const existingAgents = await storage.getAllAgentsWithAdmin();
       const agentByName: Record<string, number> = {};
       for (const a of existingAgents) {
         if (a.name) agentByName[a.name.toLowerCase().trim()] = a.id;
       }
-
       let imported = 0, skipped = 0;
       const errors: string[] = [];
       const fosNames = Object.keys(fosData);
-
       for (let i = 0; i < fosNames.length; i++) {
         const fosName = fosNames[i];
         const d = fosData[fosName];
-        if (bktValue === "penal") {
-          d.posGrandTotal = d.posPaid + d.posUnpaid;
-        }
+        if (bktValue === "penal") d.posGrandTotal = d.posPaid + d.posUnpaid;
         const fosLower = fosName.toLowerCase();
         let agentId: number | null = agentByName[fosLower] || null;
-
         if (!agentId) {
           try {
             const username = fosLower.replace(/\s+/g, ".").replace(/[^a-z0-9.]/g, "");
             const newAgent = await storage.createFosAgent({ name: fosName, username, password: randomBytes(16).toString("hex") });
-            agentByName[fosLower] = newAgent.id;
-            agentId = newAgent.id;
+            agentByName[fosLower] = newAgent.id; agentId = newAgent.id;
           } catch {
             const uname = fosLower.replace(/\s+/g, ".").replace(/[^a-z0-9.]/g, "");
             const found = await storage.getAgentByUsername(uname);
             if (found) { agentByName[fosLower] = found.id; agentId = found.id; }
           }
         }
-
         try {
           await storage.upsertBktPerfSummary({
-            fosName,
-            agentId,
-            bkt: bktValue,
-            posPaid: d.posPaid,
-            posUnpaid: d.posUnpaid,
-            posGrandTotal: d.posGrandTotal,
-            posPercentage: d.posPercentage,
-            countPaid: d.countPaid,
-            countUnpaid: d.countUnpaid,
-            countTotal: d.countTotal,
-            rollbackPaid: d.rollbackPaid,
-            rollbackUnpaid: Math.max(0, d.rollbackGrandTotal - d.rollbackPaid),
-            rollbackGrandTotal: d.rollbackGrandTotal,
-            rollbackPercentage: d.rollbackPercentage,
+            fosName, agentId, bkt: bktValue,
+            posPaid: d.posPaid, posUnpaid: d.posUnpaid, posGrandTotal: d.posGrandTotal, posPercentage: d.posPercentage,
+            countPaid: d.countPaid, countUnpaid: d.countUnpaid, countTotal: d.countTotal,
+            rollbackPaid: d.rollbackPaid, rollbackUnpaid: Math.max(0, d.rollbackGrandTotal - d.rollbackPaid),
+            rollbackGrandTotal: d.rollbackGrandTotal, rollbackPercentage: d.rollbackPercentage,
           });
           imported++;
         } catch (e: any) {
-          errors.push(`${fosName}: ${e.message}`);
-          skipped++;
+          errors.push(`${fosName}: ${e.message}`); skipped++;
         }
       }
-
       res.json({ imported, skipped, total: fosNames.length, bkt: bktValue, errors: errors.slice(0, 20) });
     } catch (e: any) {
       res.status(500).json({ message: e.message });
@@ -1526,36 +1327,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const hour = now.getHours();
       const todayKey = now.toISOString().slice(0, 10);
       if (hour !== 9 || ptpReminderSentDates.has(todayKey)) return;
-
-      const agents = await storage.query(`
-        SELECT id, name, push_token FROM fos_agents
-        WHERE role = 'fos' AND push_token IS NOT NULL AND push_token <> ''
-      `);
-
+      const agents = await storage.query(`SELECT id, name, push_token FROM fos_agents WHERE role = 'fos' AND push_token IS NOT NULL AND push_token <> ''`);
       for (const agent of agents.rows) {
         const result = await storage.query(`
           SELECT COUNT(*) AS cnt FROM (
-            SELECT id FROM loan_cases
-            WHERE agent_id = $1 AND (
-              (status = 'PTP' AND (ptp_date IS NULL OR ptp_date <= CURRENT_DATE))
-              OR (telecaller_ptp_date IS NOT NULL AND telecaller_ptp_date <= CURRENT_DATE)
-            )
+            SELECT id FROM loan_cases WHERE agent_id = $1 AND ((status = 'PTP' AND (ptp_date IS NULL OR ptp_date <= CURRENT_DATE)) OR (telecaller_ptp_date IS NOT NULL AND telecaller_ptp_date <= CURRENT_DATE))
             UNION ALL
-            SELECT id FROM bkt_cases
-            WHERE agent_id = $1 AND (
-              (status = 'PTP' AND (ptp_date IS NULL OR ptp_date <= CURRENT_DATE))
-              OR (telecaller_ptp_date IS NOT NULL AND telecaller_ptp_date <= CURRENT_DATE)
-            )
+            SELECT id FROM bkt_cases WHERE agent_id = $1 AND ((status = 'PTP' AND (ptp_date IS NULL OR ptp_date <= CURRENT_DATE)) OR (telecaller_ptp_date IS NOT NULL AND telecaller_ptp_date <= CURRENT_DATE))
           ) t
         `, [agent.id]);
         const cnt = parseInt(result.rows[0]?.cnt || "0", 10);
         if (cnt > 0) {
-          await sendExpoPush(
-            agent.push_token,
-            "📅 PTP Due Today",
-            `You have ${cnt} PTP case${cnt !== 1 ? "s" : ""} due today. Open the app to follow up now.`,
-            { screen: "dashboard" }
-          );
+          await sendExpoPush(agent.push_token, "📅 PTP Due Today", `You have ${cnt} PTP case${cnt !== 1 ? "s" : ""} due today. Open the app to follow up now.`, { screen: "dashboard" });
         }
       }
       ptpReminderSentDates.add(todayKey);
@@ -1564,24 +1347,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
   runPtpPushJob();
   setInterval(runPtpPushJob, 30 * 60 * 1000);
 
-  // Background job: every 5 minutes check for deposits overdue by 2h
+  // Background job: deposits overdue by 2h
   async function runReminderJob() {
     try {
       const result = await storage.query(`
         SELECT rd.id, rd.agent_id, rd.amount, fa.push_token
-        FROM required_deposits rd
-        JOIN fos_agents fa ON fa.id = rd.agent_id
-        WHERE rd.screenshot_url IS NULL
-          AND rd.reminder_sent = FALSE
+        FROM required_deposits rd JOIN fos_agents fa ON fa.id = rd.agent_id
+        WHERE rd.screenshot_url IS NULL AND rd.reminder_sent = FALSE
           AND rd.created_at < NOW() - INTERVAL '2 hours'
           AND fa.push_token IS NOT NULL AND fa.push_token <> ''
       `);
       for (const row of result.rows) {
-        await sendExpoPush(
-          row.push_token,
-          "⏰ Deposit Screenshot Overdue",
-          `You have not uploaded your payment screenshot for ₹${parseFloat(row.amount).toLocaleString("en-IN")}. Please upload it now.`
-        );
+        await sendExpoPush(row.push_token, "⏰ Deposit Screenshot Overdue", `You have not uploaded your payment screenshot for ₹${parseFloat(row.amount).toLocaleString("en-IN")}. Please upload it now.`);
         await storage.query(`UPDATE required_deposits SET reminder_sent = TRUE WHERE id = $1`, [row.id]);
       }
     } catch (_) {}
