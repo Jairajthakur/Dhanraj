@@ -12,7 +12,7 @@ import {
   Outfit_700Bold,
 } from "@expo-google-fonts/outfit";
 import * as Notifications from "expo-notifications";
-import * as Device from "expo-device";
+
 
 // Suppress fontfaceobserver timeout unhandled rejections caused by a missing
 // try/catch in @expo/vector-icons componentDidMount.
@@ -50,7 +50,7 @@ async function registerForPushNotificationsAsync(): Promise<string | null> {
   }
 
   // Android: create notification channel
-  if (Platform.OS === "android") {
+ if (Platform.OS === "web") {
     await Notifications.setNotificationChannelAsync("default", {
       name: "default",
       importance: Notifications.AndroidImportance.MAX,
