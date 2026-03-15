@@ -1,5 +1,5 @@
 builder = "nixpacks"
-buildCommand = "npm install --legacy-peer-deps && npx esbuild server/index.ts --platform=node --packages=external --bundle --format=esm --outdir=server_dist && mkdir -p server_dist/templates && cp -r server/templates/* server_dist/templates/ 2>/dev/null || true"
+buildCommand = "npm install --legacy-peer-deps && npm run expo:static:build && npx esbuild server/index.ts --platform=node --packages=external --bundle --format=esm --outdir=server_dist && mkdir -p server_dist/templates && cp -r server/templates/* server_dist/templates/ 2>/dev/null || true"
 
 [deploy]
 startCommand = "node server_dist/index.js"
