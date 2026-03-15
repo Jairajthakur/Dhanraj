@@ -34,7 +34,7 @@
       [
         "expo-router",
         {
-          "origin": "https://dhanraj-production-09c4.up.railway.app"
+          "origin": "https://dhanraj-production.up.railway.app"
         }
       ],
       "expo-font",
