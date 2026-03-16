@@ -231,6 +231,28 @@ export async function initDatabase() {
     `INSERT INTO fos_agents (name, username, password, role)
      VALUES ('Admin', 'admin', 'admin123', 'admin')
      ON CONFLICT (username) DO NOTHING`,
+
+    // New feedback fields
+`ALTER TABLE loan_cases ADD COLUMN IF NOT EXISTS customer_available BOOLEAN`,
+`ALTER TABLE loan_cases ADD COLUMN IF NOT EXISTS vehicle_available BOOLEAN`,
+`ALTER TABLE loan_cases ADD COLUMN IF NOT EXISTS third_party BOOLEAN`,
+`ALTER TABLE loan_cases ADD COLUMN IF NOT EXISTS third_party_name TEXT`,
+`ALTER TABLE loan_cases ADD COLUMN IF NOT EXISTS third_party_number TEXT`,
+`ALTER TABLE loan_cases ADD COLUMN IF NOT EXISTS feedback_code TEXT`,
+`ALTER TABLE loan_cases ADD COLUMN IF NOT EXISTS projection TEXT`,
+`ALTER TABLE loan_cases ADD COLUMN IF NOT EXISTS non_starter BOOLEAN`,
+`ALTER TABLE loan_cases ADD COLUMN IF NOT EXISTS kyc_purchase BOOLEAN`,
+`ALTER TABLE loan_cases ADD COLUMN IF NOT EXISTS workable BOOLEAN`,
+`ALTER TABLE bkt_cases ADD COLUMN IF NOT EXISTS customer_available BOOLEAN`,
+`ALTER TABLE bkt_cases ADD COLUMN IF NOT EXISTS vehicle_available BOOLEAN`,
+`ALTER TABLE bkt_cases ADD COLUMN IF NOT EXISTS third_party BOOLEAN`,
+`ALTER TABLE bkt_cases ADD COLUMN IF NOT EXISTS third_party_name TEXT`,
+`ALTER TABLE bkt_cases ADD COLUMN IF NOT EXISTS third_party_number TEXT`,
+`ALTER TABLE bkt_cases ADD COLUMN IF NOT EXISTS feedback_code TEXT`,
+`ALTER TABLE bkt_cases ADD COLUMN IF NOT EXISTS projection TEXT`,
+`ALTER TABLE bkt_cases ADD COLUMN IF NOT EXISTS non_starter BOOLEAN`,
+`ALTER TABLE bkt_cases ADD COLUMN IF NOT EXISTS kyc_purchase BOOLEAN`,
+`ALTER TABLE bkt_cases ADD COLUMN IF NOT EXISTS workable BOOLEAN`,
   ];
 
   for (const sql of migrations) {
