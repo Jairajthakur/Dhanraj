@@ -25,12 +25,44 @@ const STATUS_COLORS: Record<string, string> = {
   Unpaid: Colors.danger,
 };
 
-const FEEDBACK_OPTIONS = [
-  "Call Not Responding", "Call Busy", "Call Switch Off",
-  "Customer Agreed to Pay", "Partially Paid", "Dispute",
-  "Wrong Number", "Already Paid", "RTP - Refuse to Pay",
-  "Broken Promise", "Field Visit Done",
-];
+const FEEDBACK_CODES = ["PAID", "RTP", "SKIP", "PTP", "CAVNA", "ANF", "EXP", "SFT", "VSL"];
+const PROJECTION_OPTIONS = ["ST", "RF", "RB"];
+
+function YNToggle({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: boolean | null;
+  onChange: (v: boolean | null) => void;
+}) {
+  return (
+    <View style={{ marginBottom: 12 }}>
+      <Text style={fbStyles.label}>{label}</Text>
+      <View style={{ flexDirection: "row", gap: 8 }}>
+        {([true, false] as const).map((val) => (
+          <Pressable
+            key={String(val)}
+            style={[
+              fbStyles.chip,
+              { flex: 1, justifyContent: "center", alignItems: "center" },
+              value === val && {
+                backgroundColor: val ? Colors.success : Colors.danger,
+                borderColor: "transparent",
+              },
+            ]}
+            onPress={() => onChange(value === val ? null : val)}
+          >
+            <Text style={[fbStyles.chipText, value === val && { color: "#fff" }]}>
+              {val ? "Y" : "N"}
+            </Text>
+          </Pressable>
+        ))}
+      </View>
+    </View>
+  );
+}
 
 function FeedbackModal({
   visible, onClose, item, onSaved,
@@ -38,21 +70,40 @@ function FeedbackModal({
   visible: boolean; onClose: () => void; item: any; onSaved: () => void;
 }) {
   const [status, setStatus] = useState(item?.status || "Unpaid");
-  const [feedback, setFeedback] = useState(item?.latest_feedback || "");
-  const [comments, setComments] = useState(item?.feedback_comments || "");
+  const [feedbackCode, setFeedbackCode] = useState(item?.feedback_code || "");
+  const [comments, setComments] = useState(item?.latest_feedback || "");
   const [ptpDate, setPtpDate] = useState(item?.ptp_date ? String(item.ptp_date).slice(0, 10) : "");
-  const [rollbackYn, setRollbackYn] = useState<boolean | null>(item?.rollback_yn != null ? Boolean(item.rollback_yn) : null);
+  const [rollbackYn, setRollbackYn] = useState<boolean | null>(
+    item?.rollback_yn != null ? Boolean(item.rollback_yn) : null
+  );
+  const [customerAvailable, setCustomerAvailable] = useState<boolean | null>(
+    item?.customer_available ?? null
+  );
+  const [vehicleAvailable, setVehicleAvailable] = useState<boolean | null>(
+    item?.vehicle_available ?? null
+  );
+  const [thirdParty, setThirdParty] = useState<boolean | null>(item?.third_party ?? null);
+  const [thirdPartyName, setThirdPartyName] = useState(item?.third_party_name || "");
+  const [thirdPartyNumber, setThirdPartyNumber] = useState(item?.third_party_number || "");
+  const [projection, setProjection] = useState(item?.projection || "");
+  const [nonStarter, setNonStarter] = useState<boolean | null>(item?.non_starter ?? null);
+  const [kycPurchase, setKycPurchase] = useState<boolean | null>(item?.kyc_purchase ?? null);
+  const [workable, setWorkable] = useState<boolean | null>(item?.workable ?? null);
   const [loading, setLoading] = useState(false);
 
-  // Convert DD-MM-YYYY → YYYY-MM-DD for the server
   const toIsoDate = (val: string) => {
     const parts = val.trim().split(/[-\/]/);
-    if (parts.length === 3 && parts[2].length === 4) return `${parts[2]}-${parts[1].padStart(2,"0")}-${parts[0].padStart(2,"0")}`;
+    if (parts.length === 3 && parts[2].length === 4)
+      return `${parts[2]}-${parts[1].padStart(2, "0")}-${parts[0].padStart(2, "0")}`;
     return val;
   };
 
   const save = async () => {
-    if (status === "PTP" && !ptpDate) { Alert.alert("Error", "Please enter a PTP date"); return; }
+    if (!feedbackCode) { Alert.alert("Error", "Please select a Feedback Code"); return; }
+    if ((status === "PTP" || feedbackCode === "PTP") && !ptpDate) {
+      Alert.alert("Error", "Please enter a PTP date");
+      return;
+    }
     setLoading(true);
     try {
       const url = new URL(`/api/bkt-cases/${item.id}/feedback`, getApiUrl()).toString();
@@ -60,7 +111,23 @@ function FeedbackModal({
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ status, feedback, comments, ptp_date: status === "PTP" ? toIsoDate(ptpDate) : null, rollback_yn: rollbackYn }),
+        body: JSON.stringify({
+          status,
+          feedback: comments,
+          comments,
+          ptp_date: status === "PTP" || feedbackCode === "PTP" ? toIsoDate(ptpDate) : null,
+          rollback_yn: rollbackYn,
+          customer_available: customerAvailable,
+          vehicle_available: vehicleAvailable,
+          third_party: thirdParty,
+          third_party_name: thirdParty ? thirdPartyName : null,
+          third_party_number: thirdParty ? thirdPartyNumber : null,
+          feedback_code: feedbackCode,
+          projection,
+          non_starter: nonStarter,
+          kyc_purchase: kycPurchase,
+          workable,
+        }),
       });
       if (!res.ok) throw new Error("Failed to save");
       onSaved();
@@ -78,14 +145,25 @@ function FeedbackModal({
         <ScrollView style={fbStyles.sheet} showsVerticalScrollIndicator={false}>
           <View style={fbStyles.handle} />
           <Text style={fbStyles.title}>Update Feedback</Text>
-          {item && <Text style={fbStyles.subtitle}>{item.customer_name} · {item.loan_no}</Text>}
+          {item && (
+            <Text style={fbStyles.subtitle}>
+              {item.customer_name} · {item.loan_no}
+            </Text>
+          )}
 
+          {/* Status */}
           <Text style={fbStyles.label}>Status</Text>
           <View style={fbStyles.chips}>
             {STATUS_OPTIONS.map((s) => (
               <Pressable
                 key={s}
-                style={[fbStyles.chip, status === s && { backgroundColor: STATUS_COLORS[s] || Colors.primary, borderColor: "transparent" }]}
+                style={[
+                  fbStyles.chip,
+                  status === s && {
+                    backgroundColor: STATUS_COLORS[s] || Colors.primary,
+                    borderColor: "transparent",
+                  },
+                ]}
                 onPress={() => setStatus(s)}
               >
                 <Text style={[fbStyles.chipText, status === s && { color: "#fff" }]}>{s}</Text>
@@ -93,24 +171,73 @@ function FeedbackModal({
             ))}
           </View>
 
-          <Text style={fbStyles.label}>Feedback</Text>
-          <View style={fbStyles.chips}>
-            {FEEDBACK_OPTIONS.map((f) => (
-              <Pressable
-                key={f}
-                style={[fbStyles.chip, feedback === f && { backgroundColor: Colors.primary + "20", borderColor: Colors.primary }]}
-                onPress={() => setFeedback(f)}
-              >
-                <Text style={[fbStyles.chipText, feedback === f && { color: Colors.primary }]}>{f}</Text>
-              </Pressable>
-            ))}
-          </View>
+          {/* Y/N toggles */}
+          <YNToggle label="Customer Available" value={customerAvailable} onChange={setCustomerAvailable} />
+          <YNToggle label="Vehicle Available" value={vehicleAvailable} onChange={setVehicleAvailable} />
+          <YNToggle label="Third Party" value={thirdParty} onChange={setThirdParty} />
 
-          {status === "PTP" && (
+          {thirdParty === true && (
+            <>
+              <Text style={fbStyles.label}>Third Party Name</Text>
+              <TextInput
+                style={[fbStyles.input, { minHeight: 44, marginBottom: 8 }]}
+                placeholder="Enter name"
+                placeholderTextColor={Colors.textMuted}
+                value={thirdPartyName}
+                onChangeText={setThirdPartyName}
+              />
+              <Text style={fbStyles.label}>Third Party Number</Text>
+              <TextInput
+                style={[fbStyles.input, { minHeight: 44, marginBottom: 8 }]}
+                placeholder="Enter number"
+                placeholderTextColor={Colors.textMuted}
+                value={thirdPartyNumber}
+                onChangeText={setThirdPartyNumber}
+                keyboardType="phone-pad"
+              />
+            </>
+          )}
+
+          {/* Feedback Code */}
+          <Text style={fbStyles.label}>Feedback Code</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
+            <View style={{ flexDirection: "row", gap: 8 }}>
+              {FEEDBACK_CODES.map((f) => (
+                <Pressable
+                  key={f}
+                  style={[
+                    fbStyles.chip,
+                    feedbackCode === f && {
+                      backgroundColor: Colors.primary,
+                      borderColor: "transparent",
+                    },
+                  ]}
+                  onPress={() => setFeedbackCode(f)}
+                >
+                  <Text style={[fbStyles.chipText, feedbackCode === f && { color: "#fff" }]}>{f}</Text>
+                </Pressable>
+              ))}
+            </View>
+          </ScrollView>
+
+          {/* Details Feedback */}
+          <Text style={fbStyles.label}>Details Feedback</Text>
+          <TextInput
+            style={fbStyles.input}
+            placeholder="Enter details..."
+            placeholderTextColor={Colors.textMuted}
+            value={comments}
+            onChangeText={setComments}
+            multiline
+            numberOfLines={3}
+          />
+
+          {/* PTP Date */}
+          {(status === "PTP" || feedbackCode === "PTP") && (
             <>
               <Text style={fbStyles.label}>PTP Date</Text>
               <TextInput
-                style={[fbStyles.input, { minHeight: 44 }]}
+                style={[fbStyles.input, { minHeight: 44, marginBottom: 8 }]}
                 placeholder="DD-MM-YYYY"
                 placeholderTextColor={Colors.textMuted}
                 value={ptpDate}
@@ -120,38 +247,56 @@ function FeedbackModal({
             </>
           )}
 
-          <Text style={fbStyles.label}>Rollback</Text>
-          <View style={{ flexDirection: "row", gap: 8, marginBottom: 16 }}>
-            {([true, false] as const).map((val) => (
+          {/* Projection */}
+          <Text style={fbStyles.label}>Projection</Text>
+          <View style={{ flexDirection: "row", gap: 8, marginBottom: 12 }}>
+            {PROJECTION_OPTIONS.map((p) => (
               <Pressable
-                key={String(val)}
+                key={p}
                 style={[
                   fbStyles.chip,
-                  { flex: 1, justifyContent: "center" },
-                  rollbackYn === val && {
-                    backgroundColor: val ? Colors.success : Colors.danger,
-                    borderColor: "transparent",
-                  },
+                  { flex: 1, justifyContent: "center", alignItems: "center" },
+                  projection === p && { backgroundColor: Colors.primary, borderColor: "transparent" },
                 ]}
-                onPress={() => setRollbackYn(rollbackYn === val ? null : val)}
+                onPress={() => setProjection(projection === p ? "" : p)}
               >
-                <Text style={[fbStyles.chipText, rollbackYn === val && { color: "#fff" }]}>
-                  {val ? "Yes" : "No"}
-                </Text>
+                <Text style={[fbStyles.chipText, projection === p && { color: "#fff" }]}>{p}</Text>
               </Pressable>
             ))}
           </View>
 
-          <Text style={fbStyles.label}>Comments (Optional)</Text>
-          <TextInput
-            style={fbStyles.input}
-            placeholder="Add any additional notes..."
-            placeholderTextColor={Colors.textMuted}
-            value={comments}
-            onChangeText={setComments}
-            multiline
-            numberOfLines={3}
-          />
+          {/* Rollback */}
+          <YNToggle label="Rollback" value={rollbackYn} onChange={setRollbackYn} />
+
+          {/* Non Starter */}
+          <YNToggle label="Non Starter" value={nonStarter} onChange={setNonStarter} />
+
+          {/* KYC Purchase */}
+          <YNToggle label="KYC Purchase" value={kycPurchase} onChange={setKycPurchase} />
+
+          {/* Workable */}
+          <Text style={fbStyles.label}>Workable</Text>
+          <View style={{ flexDirection: "row", gap: 8, marginBottom: 16 }}>
+            {(["Workable", "Non Workable"] as const).map((w) => {
+              const val = w === "Workable";
+              return (
+                <Pressable
+                  key={w}
+                  style={[
+                    fbStyles.chip,
+                    { flex: 1, justifyContent: "center", alignItems: "center" },
+                    workable === val && {
+                      backgroundColor: val ? Colors.success : Colors.danger,
+                      borderColor: "transparent",
+                    },
+                  ]}
+                  onPress={() => setWorkable(workable === val ? null : val)}
+                >
+                  <Text style={[fbStyles.chipText, workable === val && { color: "#fff" }]}>{w}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
 
           <View style={fbStyles.btnRow}>
             <Pressable style={fbStyles.cancelBtn} onPress={onClose}>
@@ -165,6 +310,7 @@ function FeedbackModal({
               <Text style={fbStyles.saveText}>{loading ? "Saving..." : "Save"}</Text>
             </Pressable>
           </View>
+          <View style={{ height: 24 }} />
         </ScrollView>
       </View>
     </Modal>
@@ -201,20 +347,29 @@ export default function FosBktCases() {
     );
   }, [cases, search]);
 
-  const tabColor = TABS.find(t => t.key === activeTab)?.color || Colors.primary;
+  const tabColor = TABS.find((t) => t.key === activeTab)?.color || Colors.primary;
 
   return (
     <View style={{ flex: 1, backgroundColor: Colors.background }}>
       {/* Tabs */}
       <View style={[styles.tabBar, { paddingTop: Platform.OS === "web" ? 67 : insets.top }]}>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabScroll}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.tabScroll}
+        >
           {TABS.map((tab) => (
             <Pressable
               key={tab.key}
-              style={[styles.tab, activeTab === tab.key && { backgroundColor: tab.color, borderColor: tab.color }]}
+              style={[
+                styles.tab,
+                activeTab === tab.key && { backgroundColor: tab.color, borderColor: tab.color },
+              ]}
               onPress={() => { setActiveTab(tab.key); setSearch(""); }}
             >
-              <Text style={[styles.tabText, activeTab === tab.key && { color: "#fff" }]}>{tab.label}</Text>
+              <Text style={[styles.tabText, activeTab === tab.key && { color: "#fff" }]}>
+                {tab.label}
+              </Text>
             </Pressable>
           ))}
         </ScrollView>
@@ -247,7 +402,9 @@ export default function FosBktCases() {
           contentContainerStyle={[styles.list, { paddingBottom: insets.bottom + 80 }]}
           scrollEnabled={!!filtered.length}
           ListHeaderComponent={
-            <Text style={styles.count}>{filtered.length} case{filtered.length !== 1 ? "s" : ""}</Text>
+            <Text style={styles.count}>
+              {filtered.length} case{filtered.length !== 1 ? "s" : ""}
+            </Text>
           }
           renderItem={({ item }) => (
             <View style={[styles.card, { borderLeftColor: tabColor }]}>
@@ -278,21 +435,31 @@ export default function FosBktCases() {
                 {item.cbc && Number(item.cbc) > 0 ? (
                   <View style={[styles.chip, { backgroundColor: Colors.primary + "20" }]}>
                     <Text style={styles.chipLabel}>CBC </Text>
-                    <Text style={[styles.chipText, { color: Colors.primary }]}>₹{Number(item.cbc).toLocaleString("en-IN")}</Text>
+                    <Text style={[styles.chipText, { color: Colors.primary }]}>
+                      ₹{Number(item.cbc).toLocaleString("en-IN")}
+                    </Text>
                   </View>
                 ) : null}
                 {item.lpp && Number(item.lpp) > 0 ? (
                   <View style={[styles.chip, { backgroundColor: Colors.warning + "20" }]}>
                     <Text style={styles.chipLabel}>LPP </Text>
-                    <Text style={[styles.chipText, { color: Colors.warning }]}>₹{Number(item.lpp).toLocaleString("en-IN")}</Text>
+                    <Text style={[styles.chipText, { color: Colors.warning }]}>
+                      ₹{Number(item.lpp).toLocaleString("en-IN")}
+                    </Text>
                   </View>
                 ) : null}
               </View>
 
-              {item.registration_no ? <Text style={styles.reg}>Reg: {item.registration_no}</Text> : null}
+              {item.registration_no ? (
+                <Text style={styles.reg}>Reg: {item.registration_no}</Text>
+              ) : null}
               {item.mobile_no ? <Text style={styles.mobile}>{item.mobile_no}</Text> : null}
 
-              {item.latest_feedback ? (
+              {item.feedback_code ? (
+                <Text style={styles.feedback} numberOfLines={1}>
+                  [{item.feedback_code}] {item.latest_feedback || ""}
+                </Text>
+              ) : item.latest_feedback ? (
                 <Text style={styles.feedback} numberOfLines={1}>{item.latest_feedback}</Text>
               ) : null}
 
@@ -312,7 +479,9 @@ export default function FosBktCases() {
             <View style={styles.empty}>
               <Ionicons name="layers-outline" size={48} color={Colors.textMuted} />
               <Text style={styles.emptyText}>
-                {search ? "No cases match your search" : `No ${TABS.find(t => t.key === activeTab)?.label} cases assigned to you`}
+                {search
+                  ? "No cases match your search"
+                  : `No ${TABS.find((t) => t.key === activeTab)?.label} cases assigned to you`}
               </Text>
             </View>
           }
@@ -367,16 +536,16 @@ const styles = StyleSheet.create({
 
 const fbStyles = StyleSheet.create({
   overlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" },
-  sheet: { backgroundColor: Colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, maxHeight: "85%" },
+  sheet: { backgroundColor: Colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, maxHeight: "90%" },
   handle: { width: 40, height: 4, backgroundColor: Colors.border, borderRadius: 2, alignSelf: "center", marginBottom: 12 },
   title: { fontSize: 20, fontWeight: "700", color: Colors.text, marginBottom: 4 },
   subtitle: { fontSize: 13, color: Colors.textSecondary, marginBottom: 16 },
-  label: { fontSize: 13, fontWeight: "700", color: Colors.textSecondary, marginBottom: 8, marginTop: 12 },
-  chips: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  label: { fontSize: 13, fontWeight: "700", color: Colors.textSecondary, marginBottom: 8, marginTop: 4, textTransform: "uppercase", letterSpacing: 0.5 },
+  chips: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 12 },
   chip: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10, borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.surfaceAlt },
   chipText: { fontSize: 13, fontWeight: "600", color: Colors.text },
   input: { borderWidth: 1, borderColor: Colors.border, borderRadius: 12, padding: 12, fontSize: 14, color: Colors.text, backgroundColor: Colors.surfaceAlt, marginBottom: 16, minHeight: 80, textAlignVertical: "top" },
-  btnRow: { flexDirection: "row", gap: 12, paddingBottom: 24 },
+  btnRow: { flexDirection: "row", gap: 12, paddingBottom: 8 },
   cancelBtn: { flex: 1, paddingVertical: 14, borderRadius: 12, alignItems: "center", borderWidth: 1, borderColor: Colors.border },
   cancelText: { fontSize: 15, fontWeight: "600", color: Colors.textSecondary },
   saveBtn: { flex: 2, paddingVertical: 14, borderRadius: 12, alignItems: "center", backgroundColor: Colors.primary },
