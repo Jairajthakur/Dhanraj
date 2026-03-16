@@ -1047,10 +1047,71 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const exportWb = new ExcelJS.Workbook();
       const exportWs = exportWb.addWorksheet("PTP Cases");
       const exportRows = rows.length ? rows : [{ "FOS Name": "No PTP cases found" }];
-      exportWs.columns = Object.keys(exportRows[0]).map(key => ({ header: key, key }));
+      exportWs.columns = Object.keys(exportRows[0]).map(key => ({ header: key, key, width: 20 }));
       exportRows.forEach(row => exportWs.addRow(row));
+      exportWs.getRow(1).font = { bold: true };
       const buf = await exportWb.xlsx.writeBuffer();
       res.setHeader("Content-Disposition", `attachment; filename="PTP_Report_${new Date().toISOString().slice(0,10)}.xlsx"`);
+      res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+      res.send(Buffer.from(buf));
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  // ✅ NEW: Feedback Export
+  app.get("/api/admin/feedback-export", requireAdmin, async (req, res) => {
+    try {
+      const result = await storage.query(`
+        SELECT
+          fa.name AS fos_name,
+          lc.loan_no, lc.customer_name, lc.mobile_no, lc.address,
+          lc.pos, lc.bkt::text AS bkt, lc.status,
+          lc.latest_feedback, lc.feedback_comments,
+          lc.ptp_date, lc.telecaller_ptp_date,
+          lc.updated_at
+        FROM loan_cases lc
+        LEFT JOIN fos_agents fa ON lc.agent_id = fa.id
+        WHERE lc.latest_feedback IS NOT NULL OR lc.status != 'Pending'
+        UNION ALL
+        SELECT
+          fa.name AS fos_name,
+          bc.loan_no, bc.customer_name, bc.mobile_no, bc.address,
+          bc.pos, bc.case_category AS bkt, bc.status,
+          bc.latest_feedback, bc.feedback_comments,
+          bc.ptp_date, bc.telecaller_ptp_date,
+          bc.updated_at
+        FROM bkt_cases bc
+        LEFT JOIN fos_agents fa ON bc.agent_id = fa.id
+        WHERE bc.latest_feedback IS NOT NULL OR bc.status != 'Pending'
+        ORDER BY fos_name NULLS LAST, updated_at DESC NULLS LAST
+      `);
+
+      const rows = result.rows.map((r: any) => ({
+        "FOS Name":            r.fos_name || "",
+        "Loan No":             r.loan_no || "",
+        "Customer Name":       r.customer_name || "",
+        "Mobile No":           r.mobile_no || "",
+        "Address":             r.address || "",
+        "POS":                 r.pos || "",
+        "BKT":                 r.bkt || "",
+        "Status":              r.status || "",
+        "Feedback":            r.latest_feedback || "",
+        "Comments":            r.feedback_comments || "",
+        "Telecaller PTP Date": r.telecaller_ptp_date ? String(r.telecaller_ptp_date).slice(0, 10) : "",
+        "FOS PTP Date":        r.ptp_date ? String(r.ptp_date).slice(0, 10) : "",
+        "Last Updated":        r.updated_at ? String(r.updated_at).slice(0, 19).replace("T", " ") : "",
+      }));
+
+      const wb = new ExcelJS.Workbook();
+      const ws = wb.addWorksheet("Feedback Report");
+      const exportRows = rows.length ? rows : [{ "FOS Name": "No feedback found" }];
+      ws.columns = Object.keys(exportRows[0]).map(key => ({ header: key, key, width: 20 }));
+      exportRows.forEach(row => ws.addRow(row));
+      ws.getRow(1).font = { bold: true };
+
+      const buf = await wb.xlsx.writeBuffer();
+      res.setHeader("Content-Disposition", `attachment; filename="Feedback_Report_${new Date().toISOString().slice(0, 10)}.xlsx"`);
       res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
       res.send(Buffer.from(buf));
     } catch (e: any) {
