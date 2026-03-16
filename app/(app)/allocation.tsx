@@ -17,11 +17,8 @@ const STATUS_COLORS: Record<string, string> = {
   Paid: Colors.statusPaid,
 };
 
-const FEEDBACK_OPTIONS: Record<string, string[]> = {
-  Unpaid: ["SWITCH OFF", "NOT AVAILABLE", "DISCONNECTED", "REFUSED TO PAY", "DISPUTED", "NOT AT HOME"],
-  PTP: ["PTP DATE SET", "WILL PAY TOMORROW", "WILL ARRANGE FUNDS", "CALL LATER"],
-  Paid: ["PAID", "PART PAYMENT", "SETTLED"],
-};
+const FEEDBACK_CODES = ["PAID", "RTP", "SKIP", "PTP", "CAVNA", "ANF", "EXP", "SFT", "VSL"];
+const PROJECTION_OPTIONS = ["ST", "RF", "RB"];
 
 function fmt(v: any, prefix = "") {
   if (v === null || v === undefined || v === "") return "—";
@@ -30,27 +27,104 @@ function fmt(v: any, prefix = "") {
   return String(v);
 }
 
+function YNToggle({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: boolean | null;
+  onChange: (v: boolean | null) => void;
+}) {
+  return (
+    <View style={{ marginBottom: 12 }}>
+      <Text style={fbStyles.sectionLabel}>{label}</Text>
+      <View style={{ flexDirection: "row", gap: 8 }}>
+        {([true, false] as const).map((val) => (
+          <Pressable
+            key={String(val)}
+            style={[
+              fbStyles.feedbackOption,
+              { flex: 1, alignItems: "center" },
+              value === val && {
+                backgroundColor: val ? Colors.success : Colors.danger,
+                borderColor: val ? Colors.success : Colors.danger,
+              },
+            ]}
+            onPress={() => onChange(value === val ? null : val)}
+          >
+            <Text style={[fbStyles.feedbackOptionText, value === val && { color: "#fff" }]}>
+              {val ? "Y" : "N"}
+            </Text>
+          </Pressable>
+        ))}
+      </View>
+    </View>
+  );
+}
+
 function FeedbackModal({ visible, caseItem, onClose, onSave }: any) {
   const [status, setStatus] = useState(caseItem?.status || "Unpaid");
-  const [feedback, setFeedback] = useState(caseItem?.latest_feedback || "");
-  const [comments, setComments] = useState(caseItem?.feedback_comments || "");
-  const [ptpDate, setPtpDate] = useState(caseItem?.ptp_date ? String(caseItem.ptp_date).slice(0, 10) : "");
-  const [rollbackYn, setRollbackYn] = useState<boolean | null>(caseItem?.rollback_yn != null ? Boolean(caseItem.rollback_yn) : null);
+  const [feedbackCode, setFeedbackCode] = useState(caseItem?.feedback_code || "");
+  const [comments, setComments] = useState(caseItem?.latest_feedback || "");
+  const [ptpDate, setPtpDate] = useState(
+    caseItem?.ptp_date ? String(caseItem.ptp_date).slice(0, 10) : ""
+  );
+  const [rollbackYn, setRollbackYn] = useState<boolean | null>(
+    caseItem?.rollback_yn != null ? Boolean(caseItem.rollback_yn) : null
+  );
+  const [customerAvailable, setCustomerAvailable] = useState<boolean | null>(
+    caseItem?.customer_available ?? null
+  );
+  const [vehicleAvailable, setVehicleAvailable] = useState<boolean | null>(
+    caseItem?.vehicle_available ?? null
+  );
+  const [thirdParty, setThirdParty] = useState<boolean | null>(
+    caseItem?.third_party ?? null
+  );
+  const [thirdPartyName, setThirdPartyName] = useState(caseItem?.third_party_name || "");
+  const [thirdPartyNumber, setThirdPartyNumber] = useState(caseItem?.third_party_number || "");
+  const [projection, setProjection] = useState(caseItem?.projection || "");
+  const [nonStarter, setNonStarter] = useState<boolean | null>(caseItem?.non_starter ?? null);
+  const [kycPurchase, setKycPurchase] = useState<boolean | null>(caseItem?.kyc_purchase ?? null);
+  const [workable, setWorkable] = useState<boolean | null>(caseItem?.workable ?? null);
   const [loading, setLoading] = useState(false);
 
-  // Convert DD-MM-YYYY → YYYY-MM-DD for the server
   const toIsoDate = (val: string) => {
     const parts = val.trim().split(/[-\/]/);
-    if (parts.length === 3 && parts[2].length === 4) return `${parts[2]}-${parts[1].padStart(2,"0")}-${parts[0].padStart(2,"0")}`;
-    return val; // already YYYY-MM-DD or blank
+    if (parts.length === 3 && parts[2].length === 4)
+      return `${parts[2]}-${parts[1].padStart(2, "0")}-${parts[0].padStart(2, "0")}`;
+    return val;
   };
 
   const save = async () => {
-    if (!feedback) { Alert.alert("Error", "Please select a feedback"); return; }
-    if (status === "PTP" && !ptpDate) { Alert.alert("Error", "Please enter a PTP date"); return; }
+    if (!feedbackCode) {
+      Alert.alert("Error", "Please select a Feedback Code");
+      return;
+    }
+    if ((status === "PTP" || feedbackCode === "PTP") && !ptpDate) {
+      Alert.alert("Error", "Please enter a PTP date");
+      return;
+    }
     setLoading(true);
     try {
-      await api.updateFeedback(caseItem.id, { status, feedback, comments, ptp_date: status === "PTP" ? toIsoDate(ptpDate) : null, rollback_yn: rollbackYn });
+      await api.updateFeedback(caseItem.id, {
+        status,
+        feedback: comments,
+        comments,
+        ptp_date: status === "PTP" || feedbackCode === "PTP" ? toIsoDate(ptpDate) : null,
+        rollback_yn: rollbackYn,
+        customer_available: customerAvailable,
+        vehicle_available: vehicleAvailable,
+        third_party: thirdParty,
+        third_party_name: thirdParty ? thirdPartyName : null,
+        third_party_number: thirdParty ? thirdPartyNumber : null,
+        feedback_code: feedbackCode,
+        projection,
+        non_starter: nonStarter,
+        kyc_purchase: kycPurchase,
+        workable,
+      });
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       onSave();
       onClose();
@@ -67,8 +141,11 @@ function FeedbackModal({ visible, caseItem, onClose, onSave }: any) {
         <ScrollView style={fbStyles.sheet} showsVerticalScrollIndicator={false}>
           <View style={fbStyles.handle} />
           <Text style={fbStyles.title}>Update Feedback</Text>
-          <Text style={fbStyles.customerName}>{caseItem?.customer_name} · {caseItem?.loan_no}</Text>
+          <Text style={fbStyles.customerName}>
+            {caseItem?.customer_name} · {caseItem?.loan_no}
+          </Text>
 
+          {/* Status */}
           <Text style={fbStyles.sectionLabel}>Status</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
             <View style={{ flexDirection: "row", gap: 8 }}>
@@ -76,7 +153,7 @@ function FeedbackModal({ visible, caseItem, onClose, onSave }: any) {
                 <Pressable
                   key={t}
                   style={[fbStyles.tabChip, status === t && { backgroundColor: STATUS_COLORS[t] }]}
-                  onPress={() => { setStatus(t); setFeedback(""); }}
+                  onPress={() => setStatus(t)}
                 >
                   <Text style={[fbStyles.tabChipText, status === t && { color: "#fff" }]}>{t}</Text>
                 </Pressable>
@@ -84,20 +161,66 @@ function FeedbackModal({ visible, caseItem, onClose, onSave }: any) {
             </View>
           </ScrollView>
 
-          <Text style={fbStyles.sectionLabel}>Detail Feedback</Text>
-          <View style={{ gap: 8, marginBottom: 12 }}>
-            {FEEDBACK_OPTIONS[status]?.map((f) => (
-              <Pressable
-                key={f}
-                style={[fbStyles.feedbackOption, feedback === f && { backgroundColor: STATUS_COLORS[status], borderColor: STATUS_COLORS[status] }]}
-                onPress={() => setFeedback(f)}
-              >
-                <Text style={[fbStyles.feedbackOptionText, feedback === f && { color: "#fff" }]}>{f}</Text>
-              </Pressable>
-            ))}
-          </View>
+          {/* Y/N fields */}
+          <YNToggle label="Customer Available" value={customerAvailable} onChange={setCustomerAvailable} />
+          <YNToggle label="Vehicle Available" value={vehicleAvailable} onChange={setVehicleAvailable} />
+          <YNToggle label="Third Party" value={thirdParty} onChange={setThirdParty} />
 
-          {status === "PTP" && (
+          {thirdParty === true && (
+            <>
+              <Text style={fbStyles.sectionLabel}>Third Party Name</Text>
+              <TextInput
+                style={[fbStyles.commentInput, { minHeight: 44, marginBottom: 8 }]}
+                placeholder="Enter name"
+                placeholderTextColor={Colors.textMuted}
+                value={thirdPartyName}
+                onChangeText={setThirdPartyName}
+              />
+              <Text style={fbStyles.sectionLabel}>Third Party Number</Text>
+              <TextInput
+                style={[fbStyles.commentInput, { minHeight: 44, marginBottom: 8 }]}
+                placeholder="Enter number"
+                placeholderTextColor={Colors.textMuted}
+                value={thirdPartyNumber}
+                onChangeText={setThirdPartyNumber}
+                keyboardType="phone-pad"
+              />
+            </>
+          )}
+
+          {/* Feedback Code */}
+          <Text style={fbStyles.sectionLabel}>Feedback Code</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
+            <View style={{ flexDirection: "row", gap: 8 }}>
+              {FEEDBACK_CODES.map((f) => (
+                <Pressable
+                  key={f}
+                  style={[
+                    fbStyles.tabChip,
+                    feedbackCode === f && { backgroundColor: Colors.accent, borderColor: Colors.accent },
+                  ]}
+                  onPress={() => setFeedbackCode(f)}
+                >
+                  <Text style={[fbStyles.tabChipText, feedbackCode === f && { color: "#fff" }]}>{f}</Text>
+                </Pressable>
+              ))}
+            </View>
+          </ScrollView>
+
+          {/* Details Feedback */}
+          <Text style={fbStyles.sectionLabel}>Details Feedback</Text>
+          <TextInput
+            style={fbStyles.commentInput}
+            placeholder="Enter details..."
+            placeholderTextColor={Colors.textMuted}
+            value={comments}
+            onChangeText={setComments}
+            multiline
+            numberOfLines={3}
+          />
+
+          {/* PTP Date */}
+          {(status === "PTP" || feedbackCode === "PTP") && (
             <>
               <Text style={fbStyles.sectionLabel}>PTP Date</Text>
               <TextInput
@@ -111,42 +234,75 @@ function FeedbackModal({ visible, caseItem, onClose, onSave }: any) {
             </>
           )}
 
-          <Text style={fbStyles.sectionLabel}>Rollback</Text>
+          {/* Projection */}
+          <Text style={fbStyles.sectionLabel}>Projection</Text>
           <View style={{ flexDirection: "row", gap: 8, marginBottom: 12 }}>
-            {([true, false] as const).map((val) => (
+            {PROJECTION_OPTIONS.map((p) => (
               <Pressable
-                key={String(val)}
+                key={p}
                 style={[
                   fbStyles.feedbackOption,
                   { flex: 1, alignItems: "center" },
-                  rollbackYn === val && { backgroundColor: val ? Colors.success : Colors.danger, borderColor: val ? Colors.success : Colors.danger },
+                  projection === p && { backgroundColor: Colors.primary, borderColor: Colors.primary },
                 ]}
-                onPress={() => setRollbackYn(rollbackYn === val ? null : val)}
+                onPress={() => setProjection(projection === p ? "" : p)}
               >
-                <Text style={[fbStyles.feedbackOptionText, rollbackYn === val && { color: "#fff" }]}>
-                  {val ? "Yes" : "No"}
+                <Text style={[fbStyles.feedbackOptionText, projection === p && { color: "#fff" }]}>
+                  {p}
                 </Text>
               </Pressable>
             ))}
           </View>
 
-          <Text style={fbStyles.sectionLabel}>Comments (Optional)</Text>
-          <TextInput
-            style={fbStyles.commentInput}
-            placeholder="Add comments..."
-            placeholderTextColor={Colors.textMuted}
-            value={comments}
-            onChangeText={setComments}
-            multiline
-            numberOfLines={3}
-          />
+          {/* Rollback */}
+          <YNToggle label="Rollback" value={rollbackYn} onChange={setRollbackYn} />
+
+          {/* Non Starter */}
+          <YNToggle label="Non Starter" value={nonStarter} onChange={setNonStarter} />
+
+          {/* KYC Purchase */}
+          <YNToggle label="KYC Purchase" value={kycPurchase} onChange={setKycPurchase} />
+
+          {/* Workable */}
+          <Text style={fbStyles.sectionLabel}>Workable</Text>
+          <View style={{ flexDirection: "row", gap: 8, marginBottom: 12 }}>
+            {(["Workable", "Non Workable"] as const).map((w) => {
+              const val = w === "Workable";
+              return (
+                <Pressable
+                  key={w}
+                  style={[
+                    fbStyles.feedbackOption,
+                    { flex: 1, alignItems: "center" },
+                    workable === val && {
+                      backgroundColor: val ? Colors.success : Colors.danger,
+                      borderColor: val ? Colors.success : Colors.danger,
+                    },
+                  ]}
+                  onPress={() => setWorkable(workable === val ? null : val)}
+                >
+                  <Text style={[fbStyles.feedbackOptionText, workable === val && { color: "#fff" }]}>
+                    {w}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
 
           <View style={fbStyles.btnRow}>
             <Pressable style={fbStyles.cancelBtn} onPress={onClose}>
               <Text style={fbStyles.cancelText}>Cancel</Text>
             </Pressable>
-            <Pressable style={[fbStyles.saveBtn, { backgroundColor: STATUS_COLORS[status] }]} onPress={save} disabled={loading}>
-              {loading ? <ActivityIndicator color="#fff" size="small" /> : <Text style={fbStyles.saveText}>Save</Text>}
+            <Pressable
+              style={[fbStyles.saveBtn, { backgroundColor: STATUS_COLORS[status] }]}
+              onPress={save}
+              disabled={loading}
+            >
+              {loading ? (
+                <ActivityIndicator color="#fff" size="small" />
+              ) : (
+                <Text style={fbStyles.saveText}>Save</Text>
+              )}
             </Pressable>
           </View>
           <View style={{ height: 40 }} />
@@ -169,88 +325,81 @@ function CaseCard({ item, onFeedback }: { item: any; onFeedback: (item: any) => 
 
   return (
     <View style={styles.card}>
-      {/* Header + info rows — tap to navigate to detail screen */}
       <Pressable
         style={styles.cardTapArea}
         onPress={() => router.push({ pathname: "/(app)/customer/[id]", params: { id: item.id } })}
       >
-      <View style={styles.cardHeader}>
-        <View style={styles.cardNameRow}>
-          <Ionicons name="person-circle" size={20} color={Colors.primary} />
-          <Text style={styles.cardName} numberOfLines={1}>{item.customer_name}</Text>
+        <View style={styles.cardHeader}>
+          <View style={styles.cardNameRow}>
+            <Ionicons name="person-circle" size={20} color={Colors.primary} />
+            <Text style={styles.cardName} numberOfLines={1}>{item.customer_name}</Text>
+          </View>
+          <View style={[styles.statusBadge, { backgroundColor: statusColor + "22" }]}>
+            <Text style={[styles.statusText, { color: statusColor }]}>{item.status}</Text>
+          </View>
         </View>
-        <View style={[styles.statusBadge, { backgroundColor: statusColor + "22" }]}>
-          <Text style={[styles.statusText, { color: statusColor }]}>{item.status}</Text>
-        </View>
-      </View>
 
-      {/* Row 1: Loan No + APP ID */}
-      <View style={styles.infoRow}>
-        <View style={styles.infoCell}>
-          <Text style={styles.infoLabel}>LOAN NO</Text>
-          <Text style={styles.infoValue} numberOfLines={1}>{item.loan_no || "—"}</Text>
+        <View style={styles.infoRow}>
+          <View style={styles.infoCell}>
+            <Text style={styles.infoLabel}>LOAN NO</Text>
+            <Text style={styles.infoValue} numberOfLines={1}>{item.loan_no || "—"}</Text>
+          </View>
+          <View style={styles.infoCell}>
+            <Text style={styles.infoLabel}>APP ID</Text>
+            <Text style={styles.infoValue} numberOfLines={1}>{item.app_id || "—"}</Text>
+          </View>
+          <View style={styles.infoCellSmall}>
+            <Text style={styles.infoLabel}>BKT</Text>
+            <Text style={[styles.infoValue, { color: Colors.primary }]}>{item.bkt ?? "—"}</Text>
+          </View>
         </View>
-        <View style={styles.infoCell}>
-          <Text style={styles.infoLabel}>APP ID</Text>
-          <Text style={styles.infoValue} numberOfLines={1}>{item.app_id || "—"}</Text>
-        </View>
-        <View style={styles.infoCellSmall}>
-          <Text style={styles.infoLabel}>BKT</Text>
-          <Text style={[styles.infoValue, { color: Colors.primary }]}>{item.bkt ?? "—"}</Text>
-        </View>
-      </View>
 
-      {/* Row 2: EMI + EMI Due + POS */}
-      <View style={styles.infoRow}>
-        <View style={styles.infoCell}>
-          <Text style={styles.infoLabel}>EMI</Text>
-          <Text style={styles.infoValue}>{fmt(item.emi_amount, "₹")}</Text>
+        <View style={styles.infoRow}>
+          <View style={styles.infoCell}>
+            <Text style={styles.infoLabel}>EMI</Text>
+            <Text style={styles.infoValue}>{fmt(item.emi_amount, "₹")}</Text>
+          </View>
+          <View style={styles.infoCell}>
+            <Text style={styles.infoLabel}>EMI DUE</Text>
+            <Text style={[styles.infoValue, { color: Colors.danger }]}>{fmt(item.emi_due, "₹")}</Text>
+          </View>
+          <View style={styles.infoCell}>
+            <Text style={styles.infoLabel}>POS</Text>
+            <Text style={styles.infoValue}>{fmt(item.pos, "₹")}</Text>
+          </View>
         </View>
-        <View style={styles.infoCell}>
-          <Text style={styles.infoLabel}>EMI DUE</Text>
-          <Text style={[styles.infoValue, { color: Colors.danger }]}>{fmt(item.emi_due, "₹")}</Text>
-        </View>
-        <View style={styles.infoCell}>
-          <Text style={styles.infoLabel}>POS</Text>
-          <Text style={styles.infoValue}>{fmt(item.pos, "₹")}</Text>
-        </View>
-      </View>
 
-      {/* Row 3: CBC + LPP + CBC+LPP */}
-      <View style={styles.infoRow}>
-        <View style={styles.infoCell}>
-          <Text style={styles.infoLabel}>CBC</Text>
-          <Text style={styles.infoValue}>{fmt(item.cbc, "₹")}</Text>
+        <View style={styles.infoRow}>
+          <View style={styles.infoCell}>
+            <Text style={styles.infoLabel}>CBC</Text>
+            <Text style={styles.infoValue}>{fmt(item.cbc, "₹")}</Text>
+          </View>
+          <View style={styles.infoCell}>
+            <Text style={styles.infoLabel}>LPP</Text>
+            <Text style={styles.infoValue}>{fmt(item.lpp, "₹")}</Text>
+          </View>
+          <View style={styles.infoCell}>
+            <Text style={styles.infoLabel}>CBC+LPP</Text>
+            <Text style={[styles.infoValue, { color: Colors.warning }]}>{fmt(item.cbc_lpp, "₹")}</Text>
+          </View>
         </View>
-        <View style={styles.infoCell}>
-          <Text style={styles.infoLabel}>LPP</Text>
-          <Text style={styles.infoValue}>{fmt(item.lpp, "₹")}</Text>
-        </View>
-        <View style={styles.infoCell}>
-          <Text style={styles.infoLabel}>CBC+LPP</Text>
-          <Text style={[styles.infoValue, { color: Colors.warning }]}>{fmt(item.cbc_lpp, "₹")}</Text>
-        </View>
-      </View>
 
-      {/* Row 4: Rollback + Clearance */}
-      <View style={styles.infoRow}>
-        <View style={styles.infoCell}>
-          <Text style={styles.infoLabel}>ROLLBACK</Text>
-          <Text style={styles.infoValue}>{fmt(item.rollback, "₹")}</Text>
+        <View style={styles.infoRow}>
+          <View style={styles.infoCell}>
+            <Text style={styles.infoLabel}>ROLLBACK</Text>
+            <Text style={styles.infoValue}>{fmt(item.rollback, "₹")}</Text>
+          </View>
+          <View style={styles.infoCell}>
+            <Text style={styles.infoLabel}>CLEARANCE</Text>
+            <Text style={[styles.infoValue, { color: Colors.success }]}>{fmt(item.clearance, "₹")}</Text>
+          </View>
+          <View style={styles.infoCellSmall}>
+            <Text style={styles.infoLabel}>TEN</Text>
+            <Text style={styles.infoValue}>{item.tenor ?? "—"}</Text>
+          </View>
         </View>
-        <View style={styles.infoCell}>
-          <Text style={styles.infoLabel}>CLEARANCE</Text>
-          <Text style={[styles.infoValue, { color: Colors.success }]}>{fmt(item.clearance, "₹")}</Text>
-        </View>
-        <View style={styles.infoCellSmall}>
-          <Text style={styles.infoLabel}>TEN</Text>
-          <Text style={styles.infoValue}>{item.tenor ?? "—"}</Text>
-        </View>
-      </View>
-
       </Pressable>
 
-      {/* Mobile — tapping the number calls directly */}
       {item.mobile_no && (
         <Pressable style={styles.phoneRow} onPress={call}>
           <Ionicons name="call" size={14} color={Colors.info} />
@@ -258,21 +407,25 @@ function CaseCard({ item, onFeedback }: { item: any; onFeedback: (item: any) => 
         </Pressable>
       )}
 
-      {/* Detail FB */}
-      {item.latest_feedback && (
+      {item.feedback_code && (
         <View style={styles.feedbackRow}>
-          <Text style={styles.feedbackLabel}>Detail FB: </Text>
-          <Text style={styles.feedbackValue}>{item.latest_feedback}</Text>
+          <Text style={styles.feedbackLabel}>FB Code: </Text>
+          <Text style={styles.feedbackValue}>{item.feedback_code}</Text>
+          {item.latest_feedback ? (
+            <Text style={styles.feedbackValue}> · {item.latest_feedback}</Text>
+          ) : null}
         </View>
       )}
 
-      {/* Actions — standalone, not inside any parent Pressable */}
       <View style={styles.cardActions}>
         <Pressable style={[styles.actionBtn, styles.callBtn]} onPress={call}>
           <Ionicons name="call" size={16} color="#fff" />
           <Text style={styles.actionBtnText}>Call</Text>
         </Pressable>
-        <Pressable style={[styles.actionBtn, styles.detailBtn]} onPress={() => router.push({ pathname: "/(app)/customer/[id]", params: { id: item.id } })}>
+        <Pressable
+          style={[styles.actionBtn, styles.detailBtn]}
+          onPress={() => router.push({ pathname: "/(app)/customer/[id]", params: { id: item.id } })}
+        >
           <Ionicons name="eye" size={16} color={Colors.textSecondary} />
           <Text style={[styles.actionBtnText, { color: Colors.textSecondary }]}>Details</Text>
         </Pressable>
@@ -301,12 +454,13 @@ export default function AllocationScreen() {
     const cases = data?.cases || [];
     return cases
       .filter((c: any) => c.status === activeTab)
-      .filter((c: any) =>
-        !search ||
-        c.customer_name?.toLowerCase().includes(search.toLowerCase()) ||
-        c.loan_no?.toLowerCase().includes(search.toLowerCase()) ||
-        c.app_id?.toLowerCase().includes(search.toLowerCase()) ||
-        c.registration_no?.toLowerCase().includes(search.toLowerCase())
+      .filter(
+        (c: any) =>
+          !search ||
+          c.customer_name?.toLowerCase().includes(search.toLowerCase()) ||
+          c.loan_no?.toLowerCase().includes(search.toLowerCase()) ||
+          c.app_id?.toLowerCase().includes(search.toLowerCase()) ||
+          c.registration_no?.toLowerCase().includes(search.toLowerCase())
       );
   }, [data, activeTab, search]);
 
@@ -325,14 +479,25 @@ export default function AllocationScreen() {
         {TABS.map((tab) => (
           <Pressable
             key={tab}
-            style={[styles.tab, activeTab === tab && [styles.tabActive, { backgroundColor: STATUS_COLORS[tab] }]]}
+            style={[
+              styles.tab,
+              activeTab === tab && [styles.tabActive, { backgroundColor: STATUS_COLORS[tab] }],
+            ]}
             onPress={() => setActiveTab(tab)}
           >
-            <Text style={[styles.tabText, activeTab === tab && styles.tabTextActive]}>
-              {tab}
-            </Text>
-            <View style={[styles.tabCount, activeTab === tab && { backgroundColor: "rgba(255,255,255,0.3)" }]}>
-              <Text style={[styles.tabCountText, activeTab === tab && { color: "#fff" }]}>
+            <Text style={[styles.tabText, activeTab === tab && styles.tabTextActive]}>{tab}</Text>
+            <View
+              style={[
+                styles.tabCount,
+                activeTab === tab && { backgroundColor: "rgba(255,255,255,0.3)" },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.tabCountText,
+                  activeTab === tab && { color: "#fff" },
+                ]}
+              >
                 {counts[tab as keyof typeof counts]}
               </Text>
             </View>
@@ -368,7 +533,7 @@ export default function AllocationScreen() {
           contentContainerStyle={[
             styles.list,
             { paddingBottom: insets.bottom + 24 },
-            filtered.length === 0 && { flex: 1 }
+            filtered.length === 0 && { flex: 1 },
           ]}
           ListEmptyComponent={
             <View style={styles.empty}>
@@ -436,7 +601,7 @@ const styles = StyleSheet.create({
   infoValue: { fontSize: 12, fontWeight: "700", color: Colors.text },
   phoneRow: { flexDirection: "row", alignItems: "center", gap: 6, paddingVertical: 4 },
   phoneText: { fontSize: 13, color: Colors.info, fontWeight: "500" },
-  feedbackRow: { flexDirection: "row", alignItems: "center" },
+  feedbackRow: { flexDirection: "row", alignItems: "center", flexWrap: "wrap" },
   feedbackLabel: { fontSize: 12, color: Colors.textSecondary, fontWeight: "600" },
   feedbackValue: { fontSize: 12, color: Colors.text, fontWeight: "500" },
   cardActions: { flexDirection: "row", gap: 8, marginTop: 4 },
