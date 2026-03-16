@@ -1068,8 +1068,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           lc.loan_no, lc.customer_name, lc.mobile_no, lc.address,
           lc.pos, lc.bkt::text AS bkt, lc.status,
           lc.latest_feedback, lc.feedback_comments,
-          lc.ptp_date, lc.telecaller_ptp_date,
-          lc.updated_at
+          lc.ptp_date, lc.telecaller_ptp_date
         FROM loan_cases lc
         LEFT JOIN fos_agents fa ON lc.agent_id = fa.id
         WHERE lc.latest_feedback IS NOT NULL OR lc.status != 'Pending'
@@ -1079,12 +1078,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
           bc.loan_no, bc.customer_name, bc.mobile_no, bc.address,
           bc.pos, bc.case_category AS bkt, bc.status,
           bc.latest_feedback, bc.feedback_comments,
-          bc.ptp_date, bc.telecaller_ptp_date,
-          bc.updated_at
+          bc.ptp_date, bc.telecaller_ptp_date
         FROM bkt_cases bc
         LEFT JOIN fos_agents fa ON bc.agent_id = fa.id
         WHERE bc.latest_feedback IS NOT NULL OR bc.status != 'Pending'
-        ORDER BY fos_name NULLS LAST, updated_at DESC NULLS LAST
+        ORDER BY fos_name NULLS LAST
       `);
 
       const rows = result.rows.map((r: any) => ({
@@ -1100,7 +1098,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         "Comments":            r.feedback_comments || "",
         "Telecaller PTP Date": r.telecaller_ptp_date ? String(r.telecaller_ptp_date).slice(0, 10) : "",
         "FOS PTP Date":        r.ptp_date ? String(r.ptp_date).slice(0, 10) : "",
-        "Last Updated":        r.updated_at ? String(r.updated_at).slice(0, 19).replace("T", " ") : "",
       }));
 
       const wb = new ExcelJS.Workbook();
