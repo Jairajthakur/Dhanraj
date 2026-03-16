@@ -86,6 +86,14 @@ export function ErrorFallback({ error, resetError }: ErrorFallbackProps) {
           Please reload the app to continue.
         </Text>
 
+        {/* TEMPORARY: Show error in production for debugging — remove after fix */}
+        <Text style={{ color: "red", fontSize: 11, textAlign: "center", marginTop: 4, paddingHorizontal: 16 }}>
+          {error?.message}
+        </Text>
+        <Text style={{ color: "#999", fontSize: 10, textAlign: "center", paddingHorizontal: 16 }}>
+          {error?.stack?.slice(0, 300)}
+        </Text>
+
         <Pressable
           onPress={handleRestart}
           style={({ pressed }) => [
