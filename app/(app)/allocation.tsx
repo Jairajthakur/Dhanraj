@@ -17,6 +17,10 @@ const STATUS_COLORS: Record<string, string> = {
   Paid: Colors.statusPaid,
 };
 
+// ✅ Detail feedback options per status
+const PAID_DETAIL_OPTIONS = ["PAID", "PART PAYMENT", "SETTLED"];
+const PTP_DETAIL_OPTIONS = ["PTP DATE SET", "WILL PAY TOMORROW", "WILL ARRANGE FUNDS", "CALL LATER"];
+
 const FEEDBACK_CODES = ["PAID", "RTP", "SKIP", "PTP", "CAVNA", "ANF", "EXP", "SFT", "VSL"];
 const PROJECTION_OPTIONS = ["ST", "RF", "RB"];
 
@@ -65,8 +69,9 @@ function YNToggle({
 
 function FeedbackModal({ visible, caseItem, onClose, onSave }: any) {
   const [status, setStatus] = useState(caseItem?.status || "Unpaid");
+  const [detailFeedback, setDetailFeedback] = useState(caseItem?.latest_feedback || "");
   const [feedbackCode, setFeedbackCode] = useState(caseItem?.feedback_code || "");
-  const [comments, setComments] = useState(caseItem?.latest_feedback || "");
+  const [comments, setComments] = useState(caseItem?.feedback_comments || "");
   const [ptpDate, setPtpDate] = useState(
     caseItem?.ptp_date ? String(caseItem.ptp_date).slice(0, 10) : ""
   );
@@ -90,6 +95,12 @@ function FeedbackModal({ visible, caseItem, onClose, onSave }: any) {
   const [workable, setWorkable] = useState<boolean | null>(caseItem?.workable ?? null);
   const [loading, setLoading] = useState(false);
 
+  // ✅ When status changes, reset detail feedback selection
+  const handleStatusChange = (newStatus: string) => {
+    setStatus(newStatus);
+    setDetailFeedback("");
+  };
+
   const toIsoDate = (val: string) => {
     const parts = val.trim().split(/[-\/]/);
     if (parts.length === 3 && parts[2].length === 4)
@@ -102,7 +113,7 @@ function FeedbackModal({ visible, caseItem, onClose, onSave }: any) {
       Alert.alert("Error", "Please select a Feedback Code");
       return;
     }
-    if ((status === "PTP" || feedbackCode === "PTP") && !ptpDate) {
+    if (status === "PTP" && !ptpDate) {
       Alert.alert("Error", "Please enter a PTP date");
       return;
     }
@@ -110,9 +121,9 @@ function FeedbackModal({ visible, caseItem, onClose, onSave }: any) {
     try {
       await api.updateFeedback(caseItem.id, {
         status,
-        feedback: comments,
+        feedback: detailFeedback,
         comments,
-        ptp_date: status === "PTP" || feedbackCode === "PTP" ? toIsoDate(ptpDate) : null,
+        ptp_date: status === "PTP" ? toIsoDate(ptpDate) : null,
         rollback_yn: rollbackYn,
         customer_available: customerAvailable,
         vehicle_available: vehicleAvailable,
@@ -135,6 +146,12 @@ function FeedbackModal({ visible, caseItem, onClose, onSave }: any) {
     }
   };
 
+  // ✅ Detail feedback options based on current status
+  const detailOptions =
+    status === "Paid" ? PAID_DETAIL_OPTIONS :
+    status === "PTP" ? PTP_DETAIL_OPTIONS :
+    null; // Unpaid = free text
+
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <View style={fbStyles.overlay}>
@@ -152,8 +169,8 @@ function FeedbackModal({ visible, caseItem, onClose, onSave }: any) {
               {TABS.map((t) => (
                 <Pressable
                   key={t}
-                  style={[fbStyles.tabChip, status === t && { backgroundColor: STATUS_COLORS[t] }]}
-                  onPress={() => setStatus(t)}
+                  style={[fbStyles.tabChip, status === t && { backgroundColor: STATUS_COLORS[t], borderColor: STATUS_COLORS[t] }]}
+                  onPress={() => handleStatusChange(t)}
                 >
                   <Text style={[fbStyles.tabChipText, status === t && { color: "#fff" }]}>{t}</Text>
                 </Pressable>
@@ -207,24 +224,76 @@ function FeedbackModal({ visible, caseItem, onClose, onSave }: any) {
             </View>
           </ScrollView>
 
-          {/* Details Feedback */}
-          <Text style={fbStyles.sectionLabel}>Details Feedback</Text>
-          <TextInput
-            style={fbStyles.commentInput}
-            placeholder="Enter details..."
-            placeholderTextColor={Colors.textMuted}
-            value={comments}
-            onChangeText={setComments}
-            multiline
-            numberOfLines={3}
-          />
+          {/* ✅ Detail Feedback — buttons for Paid/PTP, free text for Unpaid */}
+          <Text style={fbStyles.sectionLabel}>Detail Feedback</Text>
+          {detailOptions ? (
+            <View style={{ gap: 8, marginBottom: 12 }}>
+              {detailOptions.map((opt) => (
+                <Pressable
+                  key={opt}
+                  style={[
+                    fbStyles.detailOptionBtn,
+                    detailFeedback === opt && {
+                      backgroundColor:
+                        status === "Paid" ? Colors.success + "20" :
+                        status === "PTP" ? Colors.statusPTP + "20" : Colors.surfaceAlt,
+                      borderColor:
+                        status === "Paid" ? Colors.success :
+                        status === "PTP" ? Colors.statusPTP : Colors.border,
+                    },
+                  ]}
+                  onPress={() => setDetailFeedback(detailFeedback === opt ? "" : opt)}
+                >
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+                    <View style={[
+                      fbStyles.detailOptionDot,
+                      detailFeedback === opt && {
+                        backgroundColor:
+                          status === "Paid" ? Colors.success :
+                          status === "PTP" ? Colors.statusPTP : Colors.primary,
+                      }
+                    ]} />
+                    <Text style={[
+                      fbStyles.detailOptionText,
+                      detailFeedback === opt && {
+                        color:
+                          status === "Paid" ? Colors.success :
+                          status === "PTP" ? Colors.statusPTP : Colors.primary,
+                        fontWeight: "700",
+                      }
+                    ]}>
+                      {opt}
+                    </Text>
+                  </View>
+                  {detailFeedback === opt && (
+                    <Ionicons
+                      name="checkmark-circle"
+                      size={20}
+                      color={status === "Paid" ? Colors.success : Colors.statusPTP}
+                    />
+                  )}
+                </Pressable>
+              ))}
+            </View>
+          ) : (
+            // Unpaid — free text input
+            <TextInput
+              style={fbStyles.commentInput}
+              placeholder="Enter details feedback..."
+              placeholderTextColor={Colors.textMuted}
+              value={detailFeedback}
+              onChangeText={setDetailFeedback}
+              multiline
+              numberOfLines={3}
+            />
+          )}
 
-          {/* PTP Date */}
-          {(status === "PTP" || feedbackCode === "PTP") && (
+          {/* ✅ PTP Date — shown when PTP status selected */}
+          {status === "PTP" && (
             <>
               <Text style={fbStyles.sectionLabel}>PTP Date</Text>
               <TextInput
-                style={[fbStyles.commentInput, { minHeight: 44, marginBottom: 8 }]}
+                style={[fbStyles.commentInput, { minHeight: 44, marginBottom: 12 }]}
                 placeholder="DD-MM-YYYY"
                 placeholderTextColor={Colors.textMuted}
                 value={ptpDate}
@@ -233,6 +302,18 @@ function FeedbackModal({ visible, caseItem, onClose, onSave }: any) {
               />
             </>
           )}
+
+          {/* Comments (optional for all) */}
+          <Text style={fbStyles.sectionLabel}>Comments (Optional)</Text>
+          <TextInput
+            style={fbStyles.commentInput}
+            placeholder="Add comments..."
+            placeholderTextColor={Colors.textMuted}
+            value={comments}
+            onChangeText={setComments}
+            multiline
+            numberOfLines={3}
+          />
 
           {/* Projection */}
           <Text style={fbStyles.sectionLabel}>Projection</Text>
@@ -407,6 +488,7 @@ function CaseCard({ item, onFeedback }: { item: any; onFeedback: (item: any) => 
         </Pressable>
       )}
 
+      {/* ✅ Show feedback code + detail feedback */}
       {item.feedback_code && (
         <View style={styles.feedbackRow}>
           <Text style={styles.feedbackLabel}>FB Code: </Text>
@@ -414,6 +496,28 @@ function CaseCard({ item, onFeedback }: { item: any; onFeedback: (item: any) => 
           {item.latest_feedback ? (
             <Text style={styles.feedbackValue}> · {item.latest_feedback}</Text>
           ) : null}
+        </View>
+      )}
+
+      {/* ✅ Show PTP date prominently if set */}
+      {item.ptp_date && (
+        <View style={styles.ptpDateRow}>
+          <Ionicons name="calendar" size={13} color={Colors.statusPTP} />
+          <Text style={styles.ptpDateLabel}>PTP Date: </Text>
+          <Text style={styles.ptpDateValue}>
+            {String(item.ptp_date).slice(0, 10)}
+          </Text>
+        </View>
+      )}
+
+      {/* ✅ Show telecaller PTP date if set */}
+      {item.telecaller_ptp_date && (
+        <View style={styles.ptpDateRow}>
+          <Ionicons name="calendar-outline" size={13} color={Colors.info} />
+          <Text style={[styles.ptpDateLabel, { color: Colors.info }]}>Telecaller PTP: </Text>
+          <Text style={[styles.ptpDateValue, { color: Colors.info }]}>
+            {String(item.telecaller_ptp_date).slice(0, 10)}
+          </Text>
         </View>
       )}
 
@@ -604,6 +708,14 @@ const styles = StyleSheet.create({
   feedbackRow: { flexDirection: "row", alignItems: "center", flexWrap: "wrap" },
   feedbackLabel: { fontSize: 12, color: Colors.textSecondary, fontWeight: "600" },
   feedbackValue: { fontSize: 12, color: Colors.text, fontWeight: "500" },
+  // ✅ PTP date row
+  ptpDateRow: {
+    flexDirection: "row", alignItems: "center", gap: 5,
+    backgroundColor: Colors.statusPTP + "12", borderRadius: 8,
+    paddingHorizontal: 10, paddingVertical: 6,
+  },
+  ptpDateLabel: { fontSize: 12, color: Colors.statusPTP, fontWeight: "600" },
+  ptpDateValue: { fontSize: 12, color: Colors.statusPTP, fontWeight: "700" },
   cardActions: { flexDirection: "row", gap: 8, marginTop: 4 },
   actionBtn: {
     flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center",
@@ -637,6 +749,16 @@ const fbStyles = StyleSheet.create({
     borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.surfaceAlt,
   },
   feedbackOptionText: { fontSize: 14, fontWeight: "600", color: Colors.text },
+  // ✅ New detail option button style
+  detailOptionBtn: {
+    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
+    paddingVertical: 14, paddingHorizontal: 16, borderRadius: 12,
+    borderWidth: 1.5, borderColor: Colors.border, backgroundColor: Colors.surfaceAlt,
+  },
+  detailOptionDot: {
+    width: 10, height: 10, borderRadius: 5, backgroundColor: Colors.border,
+  },
+  detailOptionText: { fontSize: 14, fontWeight: "600", color: Colors.text },
   commentInput: {
     borderWidth: 1, borderColor: Colors.border, borderRadius: 12, padding: 12,
     fontSize: 14, color: Colors.text, minHeight: 80, textAlignVertical: "top",
