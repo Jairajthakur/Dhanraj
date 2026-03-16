@@ -1064,40 +1064,47 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const result = await storage.query(`
         SELECT
-          fa.name AS fos_name,
-          lc.loan_no, lc.customer_name, lc.mobile_no, lc.address,
-          lc.pos, lc.bkt::text AS bkt, lc.status,
-          lc.latest_feedback, lc.feedback_comments,
-          lc.ptp_date, lc.telecaller_ptp_date
+          lc.loan_no, lc.app_id, lc.customer_name, lc.bkt::text AS bkt, lc.pro,
+          NULL::text AS branch,
+          lc.customer_available, lc.vehicle_available, lc.third_party,
+          lc.feedback_code, lc.latest_feedback, lc.ptp_date,
+          lc.projection, lc.non_starter, lc.kyc_purchase, lc.workable,
+          lc.status, fa.name AS fos_name
         FROM loan_cases lc
         LEFT JOIN fos_agents fa ON lc.agent_id = fa.id
-        WHERE lc.latest_feedback IS NOT NULL OR lc.status != 'Pending'
+        WHERE lc.latest_feedback IS NOT NULL OR lc.feedback_code IS NOT NULL OR lc.status != 'Pending'
         UNION ALL
         SELECT
-          fa.name AS fos_name,
-          bc.loan_no, bc.customer_name, bc.mobile_no, bc.address,
-          bc.pos, bc.case_category AS bkt, bc.status,
-          bc.latest_feedback, bc.feedback_comments,
-          bc.ptp_date, bc.telecaller_ptp_date
+          bc.loan_no, bc.app_id, bc.customer_name, bc.case_category AS bkt, bc.pro,
+          NULL::text AS branch,
+          bc.customer_available, bc.vehicle_available, bc.third_party,
+          bc.feedback_code, bc.latest_feedback, bc.ptp_date,
+          bc.projection, bc.non_starter, bc.kyc_purchase, bc.workable,
+          bc.status, fa.name AS fos_name
         FROM bkt_cases bc
         LEFT JOIN fos_agents fa ON bc.agent_id = fa.id
-        WHERE bc.latest_feedback IS NOT NULL OR bc.status != 'Pending'
-        ORDER BY fos_name NULLS LAST
+        WHERE bc.latest_feedback IS NOT NULL OR bc.feedback_code IS NOT NULL OR bc.status != 'Pending'
+        ORDER BY fos_name NULLS LAST, loan_no
       `);
 
+      // ✅ Exact columns from FEEDBACK_FORMAT.xlsx
       const rows = result.rows.map((r: any) => ({
-        "FOS Name":            r.fos_name || "",
-        "Loan No":             r.loan_no || "",
-        "Customer Name":       r.customer_name || "",
-        "Mobile No":           r.mobile_no || "",
-        "Address":             r.address || "",
-        "POS":                 r.pos || "",
-        "BKT":                 r.bkt || "",
-        "Status":              r.status || "",
-        "Feedback":            r.latest_feedback || "",
-        "Comments":            r.feedback_comments || "",
-        "Telecaller PTP Date": r.telecaller_ptp_date ? String(r.telecaller_ptp_date).slice(0, 10) : "",
-        "FOS PTP Date":        r.ptp_date ? String(r.ptp_date).slice(0, 10) : "",
+        "LOAN NO":               r.loan_no || "",
+        "APP ID":                r.app_id || "",
+        "CUSTOMERNAME":          r.customer_name || "",
+        "Bkt":                   r.bkt || "",
+        "Pro":                   r.pro || "",
+        "Branch":                r.branch || "",
+        "Customer Available Y/N": r.customer_available === true ? "Y" : r.customer_available === false ? "N" : "",
+        "Vehicle Available Y/N":  r.vehicle_available === true ? "Y" : r.vehicle_available === false ? "N" : "",
+        "Third_party Y/N":        r.third_party === true ? "Y" : r.third_party === false ? "N" : "",
+        "FEEDBACK CODE":         r.feedback_code || "",
+        "Details FEEDBACK":      r.latest_feedback || "",
+        "PTP DATE":              r.ptp_date ? String(r.ptp_date).slice(0, 10) : "",
+        "Projection":            r.projection || "",
+        "NON_STARTER (Y/N)":     r.non_starter === true ? "Y" : r.non_starter === false ? "N" : "",
+        "KYC PURCHASE (Y/N)":    r.kyc_purchase === true ? "Y" : r.kyc_purchase === false ? "N" : "",
+        "Workable/Non":          r.workable === true ? "Workable" : r.workable === false ? "Non Workable" : "",
       }));
 
       const wb = new ExcelJS.Workbook();
