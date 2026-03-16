@@ -269,7 +269,6 @@ export async function initDatabase() {
   console.log("[migration] Database initialized successfully");
 }
 
-// Keep old function name for compatibility
 export async function initBktPerfSummaryTable() {
   await initDatabase();
 }
@@ -353,6 +352,8 @@ export interface FeedbackExtra {
   workable?: boolean | null;
 }
 
+// ✅ FIXED: Use COALESCE so existing values are NEVER overwritten with NULL
+// Only updates a field if the new value is not null
 export async function updateLoanCaseFeedback(
   id: number,
   status: string,
@@ -370,16 +371,16 @@ export async function updateLoanCaseFeedback(
        feedback_date      = NOW(),
        ptp_date           = $5,
        rollback_yn        = COALESCE($6, rollback_yn),
-       customer_available = $7,
-       vehicle_available  = $8,
-       third_party        = $9,
-       third_party_name   = $10,
-       third_party_number = $11,
-       feedback_code      = $12,
-       projection         = $13,
-       non_starter        = $14,
-       kyc_purchase       = $15,
-       workable           = $16
+       customer_available = COALESCE($7, customer_available),
+       vehicle_available  = COALESCE($8, vehicle_available),
+       third_party        = COALESCE($9, third_party),
+       third_party_name   = COALESCE($10, third_party_name),
+       third_party_number = COALESCE($11, third_party_number),
+       feedback_code      = COALESCE(NULLIF($12, ''), feedback_code),
+       projection         = COALESCE(NULLIF($13, ''), projection),
+       non_starter        = COALESCE($14, non_starter),
+       kyc_purchase       = COALESCE($15, kyc_purchase),
+       workable           = COALESCE($16, workable)
      WHERE id = $4`,
     [
       status, feedback, comments, id,
@@ -748,6 +749,7 @@ export async function getBktCasesByAgent(agentId: number, category?: string) {
   return result.rows;
 }
 
+// ✅ FIXED: Use COALESCE so existing values are NEVER overwritten with NULL
 export async function updateBktCaseFeedback(
   id: number,
   status: string,
@@ -765,16 +767,16 @@ export async function updateBktCaseFeedback(
        feedback_date      = NOW(),
        ptp_date           = $5,
        rollback_yn        = COALESCE($6, rollback_yn),
-       customer_available = $7,
-       vehicle_available  = $8,
-       third_party        = $9,
-       third_party_name   = $10,
-       third_party_number = $11,
-       feedback_code      = $12,
-       projection         = $13,
-       non_starter        = $14,
-       kyc_purchase       = $15,
-       workable           = $16
+       customer_available = COALESCE($7, customer_available),
+       vehicle_available  = COALESCE($8, vehicle_available),
+       third_party        = COALESCE($9, third_party),
+       third_party_name   = COALESCE($10, third_party_name),
+       third_party_number = COALESCE($11, third_party_number),
+       feedback_code      = COALESCE(NULLIF($12, ''), feedback_code),
+       projection         = COALESCE(NULLIF($13, ''), projection),
+       non_starter        = COALESCE($14, non_starter),
+       kyc_purchase       = COALESCE($15, kyc_purchase),
+       workable           = COALESCE($16, workable)
      WHERE id = $4`,
     [
       status, feedback, comments, id,
