@@ -109,8 +109,6 @@ function ImportModal({
     try {
       const formData = new FormData();
       if (Platform.OS !== "web" && nativeFile.uri) {
-        // On Android/iOS: read the local file:// URI as a Blob using global fetch
-        // (expo/fetch / undici requires a real Blob, not React Native's {uri,name,type} shorthand)
         const fileRes = await (globalThis as any).fetch(nativeFile.uri);
         const blob = await fileRes.blob();
         formData.append("file", blob, nativeFile.name);
@@ -157,7 +155,6 @@ function ImportModal({
             <Text style={importStyles.infoText}>{infoText}</Text>
           </View>
 
-          {/* Web file input */}
           {Platform.OS === "web" && (
             // @ts-ignore
             <input
@@ -333,7 +330,6 @@ function BktPerfImportModal({
             <Text style={importStyles.infoText}>Pivot table Excel with POS + Rollback data. Select BKT if auto-detection fails.</Text>
           </View>
 
-          {/* BKT Selector */}
           <View style={bktSelStyles.container}>
             <Text style={bktSelStyles.label}>BKT / Sheet:</Text>
             <View style={bktSelStyles.row}>
@@ -412,6 +408,7 @@ export default function AdminDashboard() {
   const [importVisible, setImportVisible] = useState(false);
   const [bktPerfImportVisible, setBktPerfImportVisible] = useState(false);
   const [ptpDownloading, setPtpDownloading] = useState(false);
+  const [feedbackDownloading, setFeedbackDownloading] = useState(false);
   const [ptpClearing, setPtpClearing] = useState(false);
   const [pushTesting, setPushTesting] = useState(false);
   const [pushExpanded, setPushExpanded] = useState(false);
@@ -472,9 +469,14 @@ export default function AdminDashboard() {
     }
   };
 
-  const handleDownloadPTP = async () => {
-    const url = new URL("/api/admin/ptp-export", getApiUrl()).toString();
-    setPtpDownloading(true);
+  // Generic Excel download helper
+  const downloadExcel = async (
+    apiPath: string,
+    fileName: string,
+    setLoading: (v: boolean) => void
+  ) => {
+    const url = new URL(apiPath, getApiUrl()).toString();
+    setLoading(true);
     try {
       if (Platform.OS === "web") {
         const res = await fetch(url, { credentials: "include" });
@@ -483,7 +485,7 @@ export default function AdminDashboard() {
         const blobUrl = URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = blobUrl;
-        a.download = `PTP_Report_${new Date().toISOString().slice(0, 10)}.xlsx`;
+        a.download = fileName;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
@@ -499,26 +501,39 @@ export default function AdminDashboard() {
           binary += String.fromCharCode(...(uint8.subarray(i, i + CHUNK) as any));
         }
         const base64 = btoa(binary);
-        const fileName = `PTP_Report_${new Date().toISOString().slice(0, 10)}.xlsx`;
         const fileUri = (FileSystem.cacheDirectory ?? FileSystem.documentDirectory ?? "") + fileName;
         await FileSystem.writeAsStringAsync(fileUri, base64, { encoding: "base64" });
         const canShare = await Sharing.isAvailableAsync();
         if (canShare) {
           await Sharing.shareAsync(fileUri, {
             mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            dialogTitle: "Save PTP Report",
+            dialogTitle: "Save Report",
             UTI: "com.microsoft.excel.xlsx",
           });
         } else {
-          Alert.alert("Saved", `PTP Report saved.\n\nFile: ${fileName}`);
+          Alert.alert("Saved", `Report saved.\n\nFile: ${fileName}`);
         }
       }
     } catch (e: any) {
       Alert.alert("Download Failed", e.message || "Could not download report");
     } finally {
-      setPtpDownloading(false);
+      setLoading(false);
     }
   };
+
+  const handleDownloadPTP = () =>
+    downloadExcel(
+      "/api/admin/ptp-export",
+      `PTP_Report_${new Date().toISOString().slice(0, 10)}.xlsx`,
+      setPtpDownloading
+    );
+
+  const handleDownloadFeedback = () =>
+    downloadExcel(
+      "/api/admin/feedback-export",
+      `Feedback_Report_${new Date().toISOString().slice(0, 10)}.xlsx`,
+      setFeedbackDownloading
+    );
 
   const handleClearPTP = () => {
     Alert.alert(
@@ -571,7 +586,7 @@ export default function AdminDashboard() {
         style={{ flex: 1, backgroundColor: Colors.background }}
         contentContainerStyle={[styles.container, { paddingBottom: insets.bottom + 24, paddingTop: Platform.OS === "web" ? 67 : 0 }]}
       >
-        {/* Import Excel Banner — Allocation */}
+        {/* Import Allocation */}
         <Pressable style={styles.importBanner} onPress={() => setImportVisible(true)}>
           <View style={styles.importBannerLeft}>
             <Ionicons name="cloud-upload" size={28} color="#fff" />
@@ -583,7 +598,7 @@ export default function AdminDashboard() {
           <Ionicons name="chevron-forward" size={22} color="rgba(255,255,255,0.7)" />
         </Pressable>
 
-        {/* Import Excel Banner — BKT Performance Summary */}
+        {/* Import BKT Performance Summary */}
         <Pressable style={[styles.importBanner, { backgroundColor: Colors.primary }]} onPress={() => setBktPerfImportVisible(true)}>
           <View style={styles.importBannerLeft}>
             <Ionicons name="bar-chart-outline" size={28} color="#fff" />
@@ -611,6 +626,24 @@ export default function AdminDashboard() {
             </View>
           </View>
           {!ptpDownloading && <Ionicons name="chevron-forward" size={22} color="rgba(255,255,255,0.7)" />}
+        </Pressable>
+
+        {/* Download Feedback Report */}
+        <Pressable
+          style={[styles.importBanner, { backgroundColor: Colors.info }, feedbackDownloading && { opacity: 0.7 }]}
+          onPress={handleDownloadFeedback}
+          disabled={feedbackDownloading}
+        >
+          <View style={styles.importBannerLeft}>
+            {feedbackDownloading
+              ? <ActivityIndicator color="#fff" size="small" style={{ marginRight: 4 }} />
+              : <Ionicons name="chatbox-outline" size={28} color="#fff" />}
+            <View>
+              <Text style={styles.importBannerTitle}>Download Feedback Report</Text>
+              <Text style={styles.importBannerSub}>{feedbackDownloading ? "Preparing file…" : "Export all FOS feedback with full details as Excel"}</Text>
+            </View>
+          </View>
+          {!feedbackDownloading && <Ionicons name="chevron-forward" size={22} color="rgba(255,255,255,0.7)" />}
         </Pressable>
 
         {/* Clear PTP Dates */}
