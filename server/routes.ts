@@ -213,8 +213,12 @@ const BKT_PERF_SQL = `
 `;
 
 export async function registerRoutes(app: Express): Promise<Server> {
-  await storage.initBktPerfSummaryTable();
+  app.get("/api/health", (_req, res) => {
+    res.json({ status: "ok" });
+  });
 
+  await storage.initBktPerfSummaryTable();
+  // ... rest of code
   app.use(
     "/uploads/screenshots",
     express.static(path.join(process.cwd(), "server/uploads/screenshots"))
