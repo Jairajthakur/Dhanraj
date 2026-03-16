@@ -99,8 +99,8 @@ function RootLayoutNav() {
   const { agent, isLoading } = useAuth();
   const segments = useSegments();
   const navigationState = useRootNavigationState();
-  const notificationListener = useRef<any>();
-  const responseListener = useRef<any>();
+  const notificationListener = useRef<any>(null);
+  const responseListener = useRef<any>(null);
   const tokenSavedRef = useRef(false);
 
   useEffect(() => {
@@ -110,8 +110,6 @@ function RootLayoutNav() {
     }
     if (tokenSavedRef.current) return;
 
-    // ✅ FIX: Push registration is fully isolated — any failure here
-    // will NEVER crash the app or trigger the ErrorBoundary
     const registerAndSave = async () => {
       try {
         const token = await registerForPushNotificationsAsync();
@@ -121,12 +119,10 @@ function RootLayoutNav() {
             tokenSavedRef.current = true;
             console.log("[push] Token saved to server successfully");
           } catch (e: any) {
-            // Non-critical: token save failed, app continues normally
             console.error("[push] Failed to save token to server:", e.message);
           }
         }
       } catch (e: any) {
-        // Non-critical: push registration failed, app continues normally
         console.error("[push] Failed to register for push notifications:", e.message);
       }
     };
@@ -135,46 +131,73 @@ function RootLayoutNav() {
   }, [agent]);
 
   useEffect(() => {
-    notificationListener.current = Notifications.addNotificationReceivedListener(
-      (notification) => {
-        console.log("[push] Notification received:", notification.request.content.title);
-      }
-    );
-
-    responseListener.current = Notifications.addNotificationResponseReceivedListener(
-      (response) => {
-        try {
-          const data = response.notification.request.content.data as any;
-          console.log("[push] Notification tapped, data:", data);
-          if (!agent) return;
-
-          if (data?.screen === "dashboard") {
-            if (agent.role === "fos") {
-              router.push("/(app)/dashboard" as any);
-            }
-          } else if (data?.type === "deposit_required" || data?.type === "screenshot_uploaded") {
-            if (agent.role === "admin") {
-              router.push("/(admin)/depositions" as any);
-            } else if (agent.role === "fos") {
-              router.push("/(app)/depositions" as any);
-            }
-          }
-        } catch (e: any) {
-          // ✅ FIX: Notification tap handler won't crash the app
-          console.error("[push] Error handling notification response:", e.message);
+    // Set up notification listeners
+    try {
+      notificationListener.current = Notifications.addNotificationReceivedListener(
+        (notification) => {
+          console.log("[push] Notification received:", notification.request.content.title);
         }
-      }
-    );
+      );
+    } catch (e: any) {
+      console.error("[push] Failed to add notification listener:", e.message);
+    }
 
+    try {
+      responseListener.current = Notifications.addNotificationResponseReceivedListener(
+        (response) => {
+          try {
+            const data = response.notification.request.content.data as any;
+            console.log("[push] Notification tapped, data:", data);
+            if (!agent) return;
+
+            if (data?.screen === "dashboard") {
+              if (agent.role === "fos") {
+                router.push("/(app)/dashboard" as any);
+              }
+            } else if (data?.type === "deposit_required" || data?.type === "screenshot_uploaded") {
+              if (agent.role === "admin") {
+                router.push("/(admin)/depositions" as any);
+              } else if (agent.role === "fos") {
+                router.push("/(app)/depositions" as any);
+              }
+            }
+          } catch (e: any) {
+            console.error("[push] Error handling notification response:", e.message);
+          }
+        }
+      );
+    } catch (e: any) {
+      console.error("[push] Failed to add response listener:", e.message);
+    }
+
+    // ✅ FIX: Safe cleanup that won't crash if removeNotificationSubscription is undefined
     return () => {
-      if (notificationListener.current) {
-        Notifications.removeNotificationSubscription(notificationListener.current);
+      try {
+        if (
+          notificationListener.current &&
+          typeof Notifications.removeNotificationSubscription === "function"
+        ) {
+          Notifications.removeNotificationSubscription(notificationListener.current);
+        }
+      } catch (e: any) {
+        console.error("[push] Failed to remove notification listener:", e.message);
       }
-      if (responseListener.current) {
-        Notifications.removeNotificationSubscription(responseListener.current);
+      try {
+        if (
+          responseListener.current &&
+          typeof Notifications.removeNotificationSubscription === "function"
+        ) {
+          Notifications.removeNotificationSubscription(responseListener.current);
+        }
+      } catch (e: any) {
+        console.error("[push] Failed to remove response listener:", e.message);
       }
+      notificationListener.current = null;
+      responseListener.current = null;
     };
-  }, [agent]);
+  // ✅ FIX: Empty deps array — this effect runs once on mount and cleans up on unmount only
+  // Previously had [agent] which caused re-runs and unsafe cleanups on every login/logout
+  }, []);
 
   useEffect(() => {
     const subscription = AppState.addEventListener("change", async (nextState) => {
