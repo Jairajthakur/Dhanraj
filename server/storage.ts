@@ -242,6 +242,9 @@ export async function initDatabase() {
     `ALTER TABLE bkt_cases  ADD COLUMN IF NOT EXISTS non_starter        BOOLEAN`,
     `ALTER TABLE bkt_cases  ADD COLUMN IF NOT EXISTS kyc_purchase       BOOLEAN`,
     `ALTER TABLE bkt_cases  ADD COLUMN IF NOT EXISTS workable           BOOLEAN`,
+    `ALTER TABLE fos_agents ADD COLUMN IF NOT EXISTS phone      TEXT`,
+    `ALTER TABLE fos_agents ADD COLUMN IF NOT EXISTS photo_url  TEXT`,
+    `ALTER TABLE fos_agents ADD COLUMN IF NOT EXISTS push_token TEXT`,
 
     // Normalize bkt values
     `UPDATE bkt_perf_summary SET bkt = 'bkt1'  WHERE LOWER(REPLACE(bkt,' ','')) IN ('1','bkt1')  AND bkt <> 'bkt1'`,
