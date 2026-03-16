@@ -12,7 +12,7 @@ import {
   Outfit_700Bold,
 } from "@expo-google-fonts/outfit";
 import * as Notifications from "expo-notifications";
-
+import * as Device from "expo-device"; // ✅ FIXED: Added missing import
 
 // Suppress fontfaceobserver timeout unhandled rejections caused by a missing
 // try/catch in @expo/vector-icons componentDidMount.
@@ -32,7 +32,7 @@ import { api } from "@/lib/api";
 
 SplashScreen.preventAutoHideAsync();
 
-// ✅ Configure how notifications appear when app is in foreground
+// Configure how notifications appear when app is in foreground
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
     shouldShowAlert: true,
@@ -41,7 +41,7 @@ Notifications.setNotificationHandler({
   }),
 });
 
-// ✅ Register for push notifications and return the push token
+// Register for push notifications and return the push token
 async function registerForPushNotificationsAsync(): Promise<string | null> {
   // Push notifications only work on real devices
   if (!Device.isDevice) {
@@ -50,7 +50,7 @@ async function registerForPushNotificationsAsync(): Promise<string | null> {
   }
 
   // Android: create notification channel
- if (Platform.OS === "web") {
+  if (Platform.OS === "android") { // ✅ FIXED: was "web", should be "android"
     await Notifications.setNotificationChannelAsync("default", {
       name: "default",
       importance: Notifications.AndroidImportance.MAX,
@@ -104,7 +104,7 @@ function RootLayoutNav() {
   const responseListener = useRef<any>();
   const tokenSavedRef = useRef(false);
 
-  // ✅ Register push token whenever agent logs in
+  // Register push token whenever agent logs in
   useEffect(() => {
     if (!agent) {
       tokenSavedRef.current = false;
@@ -129,7 +129,7 @@ function RootLayoutNav() {
     registerAndSave();
   }, [agent]);
 
-  // ✅ Listen for incoming notifications while app is open (foreground)
+  // Listen for incoming notifications while app is open (foreground)
   useEffect(() => {
     notificationListener.current = Notifications.addNotificationReceivedListener(
       (notification) => {
@@ -137,7 +137,7 @@ function RootLayoutNav() {
       }
     );
 
-    // ✅ Handle notification tap — navigate to relevant screen
+    // Handle notification tap — navigate to relevant screen
     responseListener.current = Notifications.addNotificationResponseReceivedListener(
       (response) => {
         const data = response.notification.request.content.data as any;
@@ -169,7 +169,7 @@ function RootLayoutNav() {
     };
   }, [agent]);
 
-  // ✅ Re-register token when app comes back to foreground (token may have changed)
+  // Re-register token when app comes back to foreground (token may have changed)
   useEffect(() => {
     const subscription = AppState.addEventListener("change", async (nextState) => {
       if (nextState === "active" && agent && !tokenSavedRef.current) {
