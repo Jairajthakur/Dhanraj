@@ -325,8 +325,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.put("/api/cases/:id/feedback", requireAuth, async (req, res) => {
     try {
-      const { status, feedback, comments, ptp_date, rollback_yn } = req.body;
+      const {
+        status, feedback, comments, ptp_date, rollback_yn,
+        customer_available, vehicle_available, third_party,
+        third_party_name, third_party_number, feedback_code,
+        projection, non_starter, kyc_purchase, workable,
+      } = req.body;
       const ynVal = rollback_yn === true || rollback_yn === "true" ? true : rollback_yn === false || rollback_yn === "false" ? false : null;
+      const toBool = (v: any) => v === true || v === "true" ? true : v === false || v === "false" ? false : null;
       const caseId = Number(req.params.id);
 
       const oldRow = await storage.query(
@@ -335,7 +341,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
       );
       const old = oldRow.rows[0];
 
-      await storage.updateLoanCaseFeedback(caseId, status, feedback, comments, ptp_date, ynVal);
+      await storage.updateLoanCaseFeedback(caseId, status, feedback, comments, ptp_date, ynVal, {
+        customerAvailable: toBool(customer_available),
+        vehicleAvailable:  toBool(vehicle_available),
+        thirdParty:        toBool(third_party),
+        thirdPartyName:    third_party_name || null,
+        thirdPartyNumber:  third_party_number || null,
+        feedbackCode:      feedback_code || null,
+        projection:        projection || null,
+        nonStarter:        toBool(non_starter),
+        kycPurchase:       toBool(kyc_purchase),
+        workable:          toBool(workable),
+      });
 
       if (old && old.bkt && old.agent_id && (old.pro || "").toUpperCase() !== "UC") {
         const pos = parseFloat(old.pos) || 0;
@@ -796,15 +813,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.put("/api/bkt-cases/:id/feedback", requireAuth, async (req, res) => {
     try {
-      const { status, feedback, comments, ptp_date, rollback_yn } = req.body;
+      const {
+        status, feedback, comments, ptp_date, rollback_yn,
+        customer_available, vehicle_available, third_party,
+        third_party_name, third_party_number, feedback_code,
+        projection, non_starter, kyc_purchase, workable,
+      } = req.body;
       const ynVal = rollback_yn === true || rollback_yn === "true" ? true : rollback_yn === false || rollback_yn === "false" ? false : null;
+      const toBool = (v: any) => v === true || v === "true" ? true : v === false || v === "false" ? false : null;
       const caseId = Number(req.params.id);
       const oldRow = await storage.query(
         `SELECT status, rollback_yn, pos::numeric AS pos, agent_id, case_category, pro FROM bkt_cases WHERE id = $1`,
         [caseId]
       );
       const old = oldRow.rows[0];
-      await storage.updateBktCaseFeedback(caseId, status, feedback, comments, ptp_date, ynVal);
+      await storage.updateBktCaseFeedback(caseId, status, feedback, comments, ptp_date, ynVal, {
+        customerAvailable: toBool(customer_available),
+        vehicleAvailable:  toBool(vehicle_available),
+        thirdParty:        toBool(third_party),
+        thirdPartyName:    third_party_name || null,
+        thirdPartyNumber:  third_party_number || null,
+        feedbackCode:      feedback_code || null,
+        projection:        projection || null,
+        nonStarter:        toBool(non_starter),
+        kycPurchase:       toBool(kyc_purchase),
+        workable:          toBool(workable),
+      });
       if (old && old.case_category && old.agent_id && (old.pro || "").toUpperCase() !== "UC") {
         const pos    = parseFloat(old.pos) || 0;
         const bktKey = (old.case_category as string).toLowerCase().replace(/\s+/g, "");
@@ -1062,73 +1096,38 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // ✅ NEW: Feedback Export
   app.get("/api/admin/feedback-export", requireAdmin, async (req, res) => {
     try {
-      // Query loan_cases columns safely
-      const lcCols = await storage.query(`
-        SELECT column_name FROM information_schema.columns
-        WHERE table_name = 'loan_cases'
-      `);
-      const bcCols = await storage.query(`
-        SELECT column_name FROM information_schema.columns
-        WHERE table_name = 'bkt_cases'
-      `);
-      const lcColSet = new Set(lcCols.rows.map((r: any) => r.column_name));
-      const bcColSet = new Set(bcCols.rows.map((r: any) => r.column_name));
-
-      const safeCol = (colSet: Set<string>, col: string, alias?: string) => {
-        const a = alias || col;
-        return colSet.has(col) ? `${col} AS ${a}` : `NULL AS ${a}`;
-      };
-
       const result = await storage.query(`
         SELECT
           TO_CHAR(COALESCE(lc.created_at, NOW()), 'DD-Mon') AS allu_date,
-          lc.loan_no,
-          ${lcColSet.has('app_id') ? 'lc.app_id' : 'NULL::text AS app_id'},
-          lc.customer_name,
-          lc.bkt::text AS bkt,
-          ${lcColSet.has('pro') ? 'lc.pro' : 'NULL::text AS pro'},
+          lc.loan_no, lc.app_id, lc.customer_name,
+          lc.bkt::text AS bkt, lc.pro,
           'NANDED'::text AS branch,
-          ${lcColSet.has('customer_available') ? 'lc.customer_available' : 'NULL::boolean AS customer_available'},
-          ${lcColSet.has('vehicle_available') ? 'lc.vehicle_available' : 'NULL::boolean AS vehicle_available'},
-          ${lcColSet.has('third_party') ? 'lc.third_party' : 'NULL::boolean AS third_party'},
-          ${lcColSet.has('feedback_code') ? 'lc.feedback_code' : 'NULL::text AS feedback_code'},
-          lc.latest_feedback,
-          lc.ptp_date,
-          ${lcColSet.has('projection') ? 'lc.projection' : 'NULL::text AS projection'},
-          ${lcColSet.has('non_starter') ? 'lc.non_starter' : 'NULL::boolean AS non_starter'},
-          ${lcColSet.has('kyc_purchase') ? 'lc.kyc_purchase' : 'NULL::boolean AS kyc_purchase'},
-          ${lcColSet.has('workable') ? 'lc.workable' : 'NULL::boolean AS workable'},
-          lc.status,
-          ${lcColSet.has('feedback_comments') ? 'lc.feedback_comments' : 'NULL::text AS feedback_comments'},
-          fa.name AS fos_name
+          lc.customer_available, lc.vehicle_available, lc.third_party,
+          lc.third_party_name, lc.third_party_number,
+          lc.feedback_code, lc.latest_feedback, lc.ptp_date,
+          lc.projection, lc.non_starter, lc.kyc_purchase, lc.workable,
+          lc.status, lc.feedback_comments, fa.name AS fos_name
         FROM loan_cases lc
         LEFT JOIN fos_agents fa ON lc.agent_id = fa.id
-        WHERE lc.latest_feedback IS NOT NULL OR lc.status IN ('Paid', 'PTP')
+        WHERE lc.latest_feedback IS NOT NULL
+           OR lc.feedback_code IS NOT NULL
+           OR lc.status IN ('Paid', 'PTP')
         UNION ALL
         SELECT
           TO_CHAR(COALESCE(bc.created_at, NOW()), 'DD-Mon') AS allu_date,
-          bc.loan_no,
-          ${bcColSet.has('app_id') ? 'bc.app_id' : 'NULL::text AS app_id'},
-          bc.customer_name,
-          bc.case_category AS bkt,
-          ${bcColSet.has('pro') ? 'bc.pro' : 'NULL::text AS pro'},
+          bc.loan_no, bc.app_id, bc.customer_name,
+          bc.case_category AS bkt, bc.pro,
           'NANDED'::text AS branch,
-          ${bcColSet.has('customer_available') ? 'bc.customer_available' : 'NULL::boolean AS customer_available'},
-          ${bcColSet.has('vehicle_available') ? 'bc.vehicle_available' : 'NULL::boolean AS vehicle_available'},
-          ${bcColSet.has('third_party') ? 'bc.third_party' : 'NULL::boolean AS third_party'},
-          ${bcColSet.has('feedback_code') ? 'bc.feedback_code' : 'NULL::text AS feedback_code'},
-          bc.latest_feedback,
-          bc.ptp_date,
-          ${bcColSet.has('projection') ? 'bc.projection' : 'NULL::text AS projection'},
-          ${bcColSet.has('non_starter') ? 'bc.non_starter' : 'NULL::boolean AS non_starter'},
-          ${bcColSet.has('kyc_purchase') ? 'bc.kyc_purchase' : 'NULL::boolean AS kyc_purchase'},
-          ${bcColSet.has('workable') ? 'bc.workable' : 'NULL::boolean AS workable'},
-          bc.status,
-          ${bcColSet.has('feedback_comments') ? 'bc.feedback_comments' : 'NULL::text AS feedback_comments'},
-          fa.name AS fos_name
+          bc.customer_available, bc.vehicle_available, bc.third_party,
+          bc.third_party_name, bc.third_party_number,
+          bc.feedback_code, bc.latest_feedback, bc.ptp_date,
+          bc.projection, bc.non_starter, bc.kyc_purchase, bc.workable,
+          bc.status, bc.feedback_comments, fa.name AS fos_name
         FROM bkt_cases bc
         LEFT JOIN fos_agents fa ON bc.agent_id = fa.id
-        WHERE bc.latest_feedback IS NOT NULL OR bc.status IN ('Paid', 'PTP')
+        WHERE bc.latest_feedback IS NOT NULL
+           OR bc.feedback_code IS NOT NULL
+           OR bc.status IN ('Paid', 'PTP')
         ORDER BY fos_name NULLS LAST, loan_no
       `);
 
@@ -1145,6 +1144,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         "Customer Y/N":        yn(r.customer_available),
         "Vehicle Y/N":         yn(r.vehicle_available),
         "Third_party Y/N":     yn(r.third_party),
+        "Third Party Name":    r.third_party === true ? (r.third_party_name || "") : "",
+        "Third Party Number":  r.third_party === true ? (r.third_party_number || "") : "",
         "FEEDBACK CODE":       r.feedback_code || "",
         "Details FEEDBACK":    r.latest_feedback || "",
         "PTP DATE":            r.ptp_date ? String(r.ptp_date).slice(0, 10) : "",
@@ -1461,6 +1462,64 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
       res.json({ imported, skipped, total: fosNames.length, bkt: bktValue, errors: errors.slice(0, 20) });
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  // ✅ Admin: Reset all feedback for a specific FOS agent
+  app.post("/api/admin/reset-feedback/agent/:agentId", requireAdmin, async (req, res) => {
+    try {
+      const agentId = Number(req.params.agentId);
+      const agentRow = await storage.query("SELECT name FROM fos_agents WHERE id = $1", [agentId]);
+      if (!agentRow.rows[0]) return res.status(404).json({ message: "Agent not found" });
+
+      await storage.query(`
+        UPDATE loan_cases SET
+          latest_feedback = NULL, feedback_comments = NULL, feedback_code = NULL,
+          customer_available = NULL, vehicle_available = NULL, third_party = NULL,
+          third_party_name = NULL, third_party_number = NULL,
+          projection = NULL, non_starter = NULL, kyc_purchase = NULL, workable = NULL,
+          feedback_date = NULL
+        WHERE agent_id = $1
+      `, [agentId]);
+
+      await storage.query(`
+        UPDATE bkt_cases SET
+          latest_feedback = NULL, feedback_comments = NULL, feedback_code = NULL,
+          customer_available = NULL, vehicle_available = NULL, third_party = NULL,
+          third_party_name = NULL, third_party_number = NULL,
+          projection = NULL, non_starter = NULL, kyc_purchase = NULL, workable = NULL,
+          feedback_date = NULL
+        WHERE agent_id = $1
+      `, [agentId]);
+
+      const agentName = agentRow.rows[0].name;
+      console.log(`[admin] Reset all feedback for agent: ${agentName} (id: ${agentId})`);
+      res.json({ success: true, message: `All feedback reset for ${agentName}` });
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  // ✅ Admin: Reset feedback for a single case
+  app.post("/api/admin/reset-feedback/case/:caseId", requireAdmin, async (req, res) => {
+    try {
+      const caseId = Number(req.params.caseId);
+      const { table } = req.body; // "loan" or "bkt"
+      const tbl = table === "bkt" ? "bkt_cases" : "loan_cases";
+
+      await storage.query(`
+        UPDATE ${tbl} SET
+          latest_feedback = NULL, feedback_comments = NULL, feedback_code = NULL,
+          customer_available = NULL, vehicle_available = NULL, third_party = NULL,
+          third_party_name = NULL, third_party_number = NULL,
+          projection = NULL, non_starter = NULL, kyc_purchase = NULL, workable = NULL,
+          feedback_date = NULL, status = 'Unpaid'
+        WHERE id = $1
+      `, [caseId]);
+
+      res.json({ success: true });
     } catch (e: any) {
       res.status(500).json({ message: e.message });
     }
