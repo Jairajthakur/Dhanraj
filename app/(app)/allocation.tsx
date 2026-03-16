@@ -78,15 +78,9 @@ function FeedbackModal({ visible, caseItem, onClose, onSave, isLocked = false }:
   const [rollbackYn, setRollbackYn] = useState<boolean | null>(
     caseItem?.rollback_yn != null ? Boolean(caseItem.rollback_yn) : null
   );
-  const [customerAvailable, setCustomerAvailable] = useState<boolean | null>(
-    caseItem?.customer_available ?? null
-  );
-  const [vehicleAvailable, setVehicleAvailable] = useState<boolean | null>(
-    caseItem?.vehicle_available ?? null
-  );
-  const [thirdParty, setThirdParty] = useState<boolean | null>(
-    caseItem?.third_party ?? null
-  );
+  const [customerAvailable, setCustomerAvailable] = useState<boolean | null>(caseItem?.customer_available ?? null);
+  const [vehicleAvailable, setVehicleAvailable] = useState<boolean | null>(caseItem?.vehicle_available ?? null);
+  const [thirdParty, setThirdParty] = useState<boolean | null>(caseItem?.third_party ?? null);
   const [thirdPartyName, setThirdPartyName] = useState(caseItem?.third_party_name || "");
   const [thirdPartyNumber, setThirdPartyNumber] = useState(caseItem?.third_party_number || "");
   const [projection, setProjection] = useState(caseItem?.projection || "");
@@ -95,7 +89,6 @@ function FeedbackModal({ visible, caseItem, onClose, onSave, isLocked = false }:
   const [workable, setWorkable] = useState<boolean | null>(caseItem?.workable ?? null);
   const [loading, setLoading] = useState(false);
 
-  // ✅ When status changes, reset detail feedback selection
   const handleStatusChange = (newStatus: string) => {
     setStatus(newStatus);
     setDetailFeedback("");
@@ -109,7 +102,6 @@ function FeedbackModal({ visible, caseItem, onClose, onSave, isLocked = false }:
   };
 
   const save = async () => {
-    // When locked (status change only), skip feedbackCode validation
     if (!isLocked && !feedbackCode) {
       Alert.alert("Error", "Please select a Feedback Code");
       return;
@@ -147,11 +139,39 @@ function FeedbackModal({ visible, caseItem, onClose, onSave, isLocked = false }:
     }
   };
 
-  // ✅ Detail feedback options based on current status
+  // Detail feedback options per status
   const detailOptions =
     status === "Paid" ? PAID_DETAIL_OPTIONS :
-    status === "PTP" ? PTP_DETAIL_OPTIONS :
-    null; // Unpaid = free text
+    status === "PTP"  ? PTP_DETAIL_OPTIONS  : null;
+
+  // ✅ Show PTP options if feedback code is PTP (regardless of status)
+  const showPtpOptions = feedbackCode === "PTP" || status === "PTP";
+
+  const renderDetailOptions = (options: string[], activeColor: string) => (
+    <View style={{ gap: 8, marginBottom: 12 }}>
+      {options.map((opt) => (
+        <Pressable
+          key={opt}
+          style={[
+            fbStyles.detailOptionBtn,
+            detailFeedback === opt && {
+              backgroundColor: activeColor + "20",
+              borderColor: activeColor,
+            },
+          ]}
+          onPress={() => setDetailFeedback(detailFeedback === opt ? "" : opt)}
+        >
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+            <View style={[fbStyles.detailOptionDot, detailFeedback === opt && { backgroundColor: activeColor }]} />
+            <Text style={[fbStyles.detailOptionText, detailFeedback === opt && { color: activeColor, fontWeight: "700" }]}>
+              {opt}
+            </Text>
+          </View>
+          {detailFeedback === opt && <Ionicons name="checkmark-circle" size={20} color={activeColor} />}
+        </Pressable>
+      ))}
+    </View>
+  );
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
@@ -163,7 +183,7 @@ function FeedbackModal({ visible, caseItem, onClose, onSave, isLocked = false }:
             {caseItem?.customer_name} · {caseItem?.loan_no}
           </Text>
 
-          {/* ✅ Locked notice for Unpaid cases with existing feedback */}
+          {/* ✅ Locked banner */}
           {isLocked && (
             <View style={fbStyles.lockedBanner}>
               <Ionicons name="lock-closed" size={14} color={Colors.warning} />
@@ -171,12 +191,11 @@ function FeedbackModal({ visible, caseItem, onClose, onSave, isLocked = false }:
             </View>
           )}
 
-          {/* Status */}
+          {/* STATUS */}
           <Text style={fbStyles.sectionLabel}>Status</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
             <View style={{ flexDirection: "row", gap: 8 }}>
               {TABS.map((t) => {
-                // When locked, only allow changing to Paid or PTP
                 const disabled = isLocked && t === "Unpaid";
                 return (
                   <Pressable
@@ -195,125 +214,36 @@ function FeedbackModal({ visible, caseItem, onClose, onSave, isLocked = false }:
             </View>
           </ScrollView>
 
-          {/* Hide detail fields when locked - only status change allowed */}
-          {!isLocked && (
-          <View>
-          {/* Y/N fields */}
-          <YNToggle label="Customer Available" value={customerAvailable} onChange={setCustomerAvailable} />
-          <YNToggle label="Vehicle Available" value={vehicleAvailable} onChange={setVehicleAvailable} />
-          <YNToggle label="Third Party" value={thirdParty} onChange={setThirdParty} />
-
-          {thirdParty === true && (
+          {/* ====== PAID LAYOUT ====== */}
+          {status === "Paid" && (
             <>
-              <Text style={fbStyles.sectionLabel}>Third Party Name</Text>
+              <Text style={fbStyles.sectionLabel}>Detail Feedback</Text>
+              {renderDetailOptions(PAID_DETAIL_OPTIONS, Colors.success)}
+
+              {/* Rollback */}
+              <YNToggle label="Rollback" value={rollbackYn} onChange={setRollbackYn} />
+
+              {/* Comments */}
+              <Text style={fbStyles.sectionLabel}>Comments (Optional)</Text>
               <TextInput
-                style={[fbStyles.commentInput, { minHeight: 44, marginBottom: 8 }]}
-                placeholder="Enter name"
+                style={fbStyles.commentInput}
+                placeholder="Add comments..."
                 placeholderTextColor={Colors.textMuted}
-                value={thirdPartyName}
-                onChangeText={setThirdPartyName}
-              />
-              <Text style={fbStyles.sectionLabel}>Third Party Number</Text>
-              <TextInput
-                style={[fbStyles.commentInput, { minHeight: 44, marginBottom: 8 }]}
-                placeholder="Enter number"
-                placeholderTextColor={Colors.textMuted}
-                value={thirdPartyNumber}
-                onChangeText={setThirdPartyNumber}
-                keyboardType="phone-pad"
+                value={comments}
+                onChangeText={setComments}
+                multiline
+                numberOfLines={3}
               />
             </>
           )}
 
-          {/* Feedback Code */}
-          <Text style={fbStyles.sectionLabel}>Feedback Code</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
-            <View style={{ flexDirection: "row", gap: 8 }}>
-              {FEEDBACK_CODES.map((f) => (
-                <Pressable
-                  key={f}
-                  style={[
-                    fbStyles.tabChip,
-                    feedbackCode === f && { backgroundColor: Colors.accent, borderColor: Colors.accent },
-                  ]}
-                  onPress={() => setFeedbackCode(f)}
-                >
-                  <Text style={[fbStyles.tabChipText, feedbackCode === f && { color: "#fff" }]}>{f}</Text>
-                </Pressable>
-              ))}
-            </View>
-          </ScrollView>
-
-          {/* ✅ Detail Feedback — buttons for Paid/PTP, free text for Unpaid */}
-          <Text style={fbStyles.sectionLabel}>Detail Feedback</Text>
-          {detailOptions ? (
-            <View style={{ gap: 8, marginBottom: 12 }}>
-              {detailOptions.map((opt) => (
-                <Pressable
-                  key={opt}
-                  style={[
-                    fbStyles.detailOptionBtn,
-                    detailFeedback === opt && {
-                      backgroundColor:
-                        status === "Paid" ? Colors.success + "20" :
-                        status === "PTP" ? Colors.statusPTP + "20" : Colors.surfaceAlt,
-                      borderColor:
-                        status === "Paid" ? Colors.success :
-                        status === "PTP" ? Colors.statusPTP : Colors.border,
-                    },
-                  ]}
-                  onPress={() => setDetailFeedback(detailFeedback === opt ? "" : opt)}
-                >
-                  <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-                    <View style={[
-                      fbStyles.detailOptionDot,
-                      detailFeedback === opt && {
-                        backgroundColor:
-                          status === "Paid" ? Colors.success :
-                          status === "PTP" ? Colors.statusPTP : Colors.primary,
-                      }
-                    ]} />
-                    <Text style={[
-                      fbStyles.detailOptionText,
-                      detailFeedback === opt && {
-                        color:
-                          status === "Paid" ? Colors.success :
-                          status === "PTP" ? Colors.statusPTP : Colors.primary,
-                        fontWeight: "700",
-                      }
-                    ]}>
-                      {opt}
-                    </Text>
-                  </View>
-                  {detailFeedback === opt && (
-                    <Ionicons
-                      name="checkmark-circle"
-                      size={20}
-                      color={status === "Paid" ? Colors.success : Colors.statusPTP}
-                    />
-                  )}
-                </Pressable>
-              ))}
-            </View>
-          ) : (
-            // Unpaid — free text input
-            <TextInput
-              style={fbStyles.commentInput}
-              placeholder="Enter details feedback..."
-              placeholderTextColor={Colors.textMuted}
-              value={detailFeedback}
-              onChangeText={setDetailFeedback}
-              multiline
-              numberOfLines={3}
-            />
-          )}
-
-          </View>
-          )}
-
-          {/* ✅ PTP Date — shown when PTP or Paid selected (always visible) */}
+          {/* ====== PTP LAYOUT ====== */}
           {status === "PTP" && (
             <>
+              <Text style={fbStyles.sectionLabel}>Detail Feedback</Text>
+              {renderDetailOptions(PTP_DETAIL_OPTIONS, Colors.statusPTP)}
+
+              {/* PTP Date */}
               <Text style={fbStyles.sectionLabel}>PTP Date</Text>
               <TextInput
                 style={[fbStyles.commentInput, { minHeight: 44, marginBottom: 12 }]}
@@ -323,77 +253,186 @@ function FeedbackModal({ visible, caseItem, onClose, onSave, isLocked = false }:
                 onChangeText={setPtpDate}
                 keyboardType="numeric"
               />
+
+              {/* Rollback */}
+              <YNToggle label="Rollback" value={rollbackYn} onChange={setRollbackYn} />
+
+              {/* Comments */}
+              <Text style={fbStyles.sectionLabel}>Comments (Optional)</Text>
+              <TextInput
+                style={fbStyles.commentInput}
+                placeholder="Add comments..."
+                placeholderTextColor={Colors.textMuted}
+                value={comments}
+                onChangeText={setComments}
+                multiline
+                numberOfLines={3}
+              />
             </>
           )}
 
-          {/* Comments (optional for all) */}
-          <Text style={fbStyles.sectionLabel}>Comments (Optional)</Text>
-          <TextInput
-            style={fbStyles.commentInput}
-            placeholder="Add comments..."
-            placeholderTextColor={Colors.textMuted}
-            value={comments}
-            onChangeText={setComments}
-            multiline
-            numberOfLines={3}
-          />
+          {/* ====== UNPAID LAYOUT ====== */}
+          {status === "Unpaid" && (
+            <>
+              {isLocked ? (
+                /* ✅ Locked — show all fields as read-only display */
+                <View style={fbStyles.lockedFieldsContainer}>
+                  {[
+                    { label: "Feedback Code", value: caseItem?.feedback_code },
+                    { label: "Detail Feedback", value: caseItem?.latest_feedback },
+                    { label: "Customer Available", value: caseItem?.customer_available === true ? "Y" : caseItem?.customer_available === false ? "N" : "" },
+                    { label: "Vehicle Available", value: caseItem?.vehicle_available === true ? "Y" : caseItem?.vehicle_available === false ? "N" : "" },
+                    { label: "Third Party", value: caseItem?.third_party === true ? "Y" : caseItem?.third_party === false ? "N" : "" },
+                    { label: "Projection", value: caseItem?.projection },
+                    { label: "Non Starter", value: caseItem?.non_starter === true ? "Y" : caseItem?.non_starter === false ? "N" : "" },
+                    { label: "KYC Purchase", value: caseItem?.kyc_purchase === true ? "Y" : caseItem?.kyc_purchase === false ? "N" : "" },
+                    { label: "Workable", value: caseItem?.workable === true ? "Workable" : caseItem?.workable === false ? "Non Workable" : "" },
+                    { label: "Comments", value: caseItem?.feedback_comments },
+                  ].filter(f => f.value).map(f => (
+                    <View key={f.label} style={fbStyles.lockedField}>
+                      <Text style={fbStyles.lockedFieldLabel}>{f.label}</Text>
+                      <Text style={fbStyles.lockedFieldValue}>{f.value}</Text>
+                    </View>
+                  ))}
+                </View>
+              ) : (
+                /* ✅ Unlocked — full Unpaid form */
+                <>
+                  <YNToggle label="Customer Available" value={customerAvailable} onChange={setCustomerAvailable} />
+                  <YNToggle label="Vehicle Available" value={vehicleAvailable} onChange={setVehicleAvailable} />
+                  <YNToggle label="Third Party" value={thirdParty} onChange={setThirdParty} />
 
-          {/* Projection */}
-          <Text style={fbStyles.sectionLabel}>Projection</Text>
-          <View style={{ flexDirection: "row", gap: 8, marginBottom: 12 }}>
-            {PROJECTION_OPTIONS.map((p) => (
-              <Pressable
-                key={p}
-                style={[
-                  fbStyles.feedbackOption,
-                  { flex: 1, alignItems: "center" },
-                  projection === p && { backgroundColor: Colors.primary, borderColor: Colors.primary },
-                ]}
-                onPress={() => setProjection(projection === p ? "" : p)}
-              >
-                <Text style={[fbStyles.feedbackOptionText, projection === p && { color: "#fff" }]}>
-                  {p}
-                </Text>
-              </Pressable>
-            ))}
-          </View>
+                  {thirdParty === true && (
+                    <>
+                      <Text style={fbStyles.sectionLabel}>Third Party Name</Text>
+                      <TextInput
+                        style={[fbStyles.commentInput, { minHeight: 44, marginBottom: 8 }]}
+                        placeholder="Enter name"
+                        placeholderTextColor={Colors.textMuted}
+                        value={thirdPartyName}
+                        onChangeText={setThirdPartyName}
+                      />
+                      <Text style={fbStyles.sectionLabel}>Third Party Number</Text>
+                      <TextInput
+                        style={[fbStyles.commentInput, { minHeight: 44, marginBottom: 8 }]}
+                        placeholder="Enter number"
+                        placeholderTextColor={Colors.textMuted}
+                        value={thirdPartyNumber}
+                        onChangeText={setThirdPartyNumber}
+                        keyboardType="phone-pad"
+                      />
+                    </>
+                  )}
 
-          {/* Rollback - not for Unpaid */}
-          {status !== "Unpaid" && (
-            <YNToggle label="Rollback" value={rollbackYn} onChange={setRollbackYn} />
+                  {/* Feedback Code */}
+                  <Text style={fbStyles.sectionLabel}>Feedback Code</Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
+                    <View style={{ flexDirection: "row", gap: 8 }}>
+                      {FEEDBACK_CODES.map((f) => (
+                        <Pressable
+                          key={f}
+                          style={[
+                            fbStyles.tabChip,
+                            feedbackCode === f && { backgroundColor: Colors.accent, borderColor: Colors.accent },
+                          ]}
+                          onPress={() => setFeedbackCode(f)}
+                        >
+                          <Text style={[fbStyles.tabChipText, feedbackCode === f && { color: "#fff" }]}>{f}</Text>
+                        </Pressable>
+                      ))}
+                    </View>
+                  </ScrollView>
+
+                  {/* Detail Feedback — PTP options if feedback code is PTP, else free text */}
+                  <Text style={fbStyles.sectionLabel}>Detail Feedback</Text>
+                  {feedbackCode === "PTP" ? (
+                    <>
+                      {renderDetailOptions(PTP_DETAIL_OPTIONS, Colors.statusPTP)}
+                      <Text style={fbStyles.sectionLabel}>PTP Date</Text>
+                      <TextInput
+                        style={[fbStyles.commentInput, { minHeight: 44, marginBottom: 12 }]}
+                        placeholder="DD-MM-YYYY"
+                        placeholderTextColor={Colors.textMuted}
+                        value={ptpDate}
+                        onChangeText={setPtpDate}
+                        keyboardType="numeric"
+                      />
+                    </>
+                  ) : (
+                    <TextInput
+                      style={fbStyles.commentInput}
+                      placeholder="Enter details feedback..."
+                      placeholderTextColor={Colors.textMuted}
+                      value={detailFeedback}
+                      onChangeText={setDetailFeedback}
+                      multiline
+                      numberOfLines={3}
+                    />
+                  )}
+
+                  {/* Projection */}
+                  <Text style={fbStyles.sectionLabel}>Projection</Text>
+                  <View style={{ flexDirection: "row", gap: 8, marginBottom: 12 }}>
+                    {PROJECTION_OPTIONS.map((p) => (
+                      <Pressable
+                        key={p}
+                        style={[
+                          fbStyles.feedbackOption,
+                          { flex: 1, alignItems: "center" },
+                          projection === p && { backgroundColor: Colors.primary, borderColor: Colors.primary },
+                        ]}
+                        onPress={() => setProjection(projection === p ? "" : p)}
+                      >
+                        <Text style={[fbStyles.feedbackOptionText, projection === p && { color: "#fff" }]}>{p}</Text>
+                      </Pressable>
+                    ))}
+                  </View>
+
+                  {/* Non Starter */}
+                  <YNToggle label="Non Starter" value={nonStarter} onChange={setNonStarter} />
+
+                  {/* KYC Purchase */}
+                  <YNToggle label="KYC Purchase" value={kycPurchase} onChange={setKycPurchase} />
+
+                  {/* Workable */}
+                  <Text style={fbStyles.sectionLabel}>Workable</Text>
+                  <View style={{ flexDirection: "row", gap: 8, marginBottom: 12 }}>
+                    {(["Workable", "Non Workable"] as const).map((w) => {
+                      const val = w === "Workable";
+                      return (
+                        <Pressable
+                          key={w}
+                          style={[
+                            fbStyles.feedbackOption,
+                            { flex: 1, alignItems: "center" },
+                            workable === val && {
+                              backgroundColor: val ? Colors.success : Colors.danger,
+                              borderColor: val ? Colors.success : Colors.danger,
+                            },
+                          ]}
+                          onPress={() => setWorkable(workable === val ? null : val)}
+                        >
+                          <Text style={[fbStyles.feedbackOptionText, workable === val && { color: "#fff" }]}>{w}</Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+
+                  {/* Comments */}
+                  <Text style={fbStyles.sectionLabel}>Comments (Optional)</Text>
+                  <TextInput
+                    style={fbStyles.commentInput}
+                    placeholder="Add comments..."
+                    placeholderTextColor={Colors.textMuted}
+                    value={comments}
+                    onChangeText={setComments}
+                    multiline
+                    numberOfLines={3}
+                  />
+                </>
+              )}
+            </>
           )}
-
-          {/* Non Starter */}
-          <YNToggle label="Non Starter" value={nonStarter} onChange={setNonStarter} />
-
-          {/* KYC Purchase */}
-          <YNToggle label="KYC Purchase" value={kycPurchase} onChange={setKycPurchase} />
-
-          {/* Workable */}
-          <Text style={fbStyles.sectionLabel}>Workable</Text>
-          <View style={{ flexDirection: "row", gap: 8, marginBottom: 12 }}>
-            {(["Workable", "Non Workable"] as const).map((w) => {
-              const val = w === "Workable";
-              return (
-                <Pressable
-                  key={w}
-                  style={[
-                    fbStyles.feedbackOption,
-                    { flex: 1, alignItems: "center" },
-                    workable === val && {
-                      backgroundColor: val ? Colors.success : Colors.danger,
-                      borderColor: val ? Colors.success : Colors.danger,
-                    },
-                  ]}
-                  onPress={() => setWorkable(workable === val ? null : val)}
-                >
-                  <Text style={[fbStyles.feedbackOptionText, workable === val && { color: "#fff" }]}>
-                    {w}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
 
           <View style={fbStyles.btnRow}>
             <Pressable style={fbStyles.cancelBtn} onPress={onClose}>
@@ -404,11 +443,7 @@ function FeedbackModal({ visible, caseItem, onClose, onSave, isLocked = false }:
               onPress={save}
               disabled={loading}
             >
-              {loading ? (
-                <ActivityIndicator color="#fff" size="small" />
-              ) : (
-                <Text style={fbStyles.saveText}>Save</Text>
-              )}
+              {loading ? <ActivityIndicator color="#fff" size="small" /> : <Text style={fbStyles.saveText}>Save</Text>}
             </Pressable>
           </View>
           <View style={{ height: 40 }} />
@@ -417,6 +452,7 @@ function FeedbackModal({ visible, caseItem, onClose, onSave, isLocked = false }:
     </Modal>
   );
 }
+
 
 function CaseCard({ item, onFeedback }: { item: any; onFeedback: (item: any) => void }) {
   const call = () => {
