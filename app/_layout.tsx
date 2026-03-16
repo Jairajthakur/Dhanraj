@@ -12,10 +12,8 @@ import {
   Outfit_700Bold,
 } from "@expo-google-fonts/outfit";
 import * as Notifications from "expo-notifications";
-import * as Device from "expo-device"; // ✅ FIXED: Added missing import
+// ✅ REMOVED expo-device import
 
-// Suppress fontfaceobserver timeout unhandled rejections caused by a missing
-// try/catch in @expo/vector-icons componentDidMount.
 if (Platform.OS === "web" && typeof window !== "undefined") {
   window.addEventListener("unhandledrejection", (event) => {
     if (event.reason?.message?.includes("ms timeout exceeded")) {
@@ -32,7 +30,6 @@ import { api } from "@/lib/api";
 
 SplashScreen.preventAutoHideAsync();
 
-// Configure how notifications appear when app is in foreground
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
     shouldShowAlert: true,
@@ -41,16 +38,15 @@ Notifications.setNotificationHandler({
   }),
 });
 
-// Register for push notifications and return the push token
 async function registerForPushNotificationsAsync(): Promise<string | null> {
-  // Push notifications only work on real devices
-  if (!Device.isDevice) {
-    console.log("[push] Skipping: not a real device");
+  // ✅ FIXED: Replaced Device.isDevice with __DEV__ check
+  if (__DEV__) {
+    console.log("[push] Skipping: dev mode");
     return null;
   }
 
-  // Android: create notification channel
-  if (Platform.OS === "android") { // ✅ FIXED: was "web", should be "android"
+  // ✅ FIXED: was "web", now correctly "android"
+  if (Platform.OS === "android") {
     await Notifications.setNotificationChannelAsync("default", {
       name: "default",
       importance: Notifications.AndroidImportance.MAX,
@@ -60,11 +56,9 @@ async function registerForPushNotificationsAsync(): Promise<string | null> {
     });
   }
 
-  // Check existing permission
   const { status: existingStatus } = await Notifications.getPermissionsAsync();
   let finalStatus = existingStatus;
 
-  // Request permission if not already granted
   if (existingStatus !== "granted") {
     const { status } = await Notifications.requestPermissionsAsync();
     finalStatus = status;
@@ -75,7 +69,6 @@ async function registerForPushNotificationsAsync(): Promise<string | null> {
     return null;
   }
 
-  // Get Expo push token with explicit projectId
   try {
     const tokenData = await Notifications.getExpoPushTokenAsync({
       projectId: "1b09251a-4423-4759-a22b-fc2f0a44fd8e",
@@ -84,7 +77,6 @@ async function registerForPushNotificationsAsync(): Promise<string | null> {
     return tokenData.data;
   } catch (e: any) {
     console.error("[push] Failed to get Expo token, trying FCM token:", e.message);
-    // Fallback: try native FCM token
     try {
       const deviceToken = await Notifications.getDevicePushTokenAsync();
       console.log("[push] FCM Token:", deviceToken.data);
@@ -104,13 +96,11 @@ function RootLayoutNav() {
   const responseListener = useRef<any>();
   const tokenSavedRef = useRef(false);
 
-  // Register push token whenever agent logs in
   useEffect(() => {
     if (!agent) {
       tokenSavedRef.current = false;
       return;
     }
-    // Only register once per session
     if (tokenSavedRef.current) return;
 
     const registerAndSave = async () => {
@@ -129,7 +119,6 @@ function RootLayoutNav() {
     registerAndSave();
   }, [agent]);
 
-  // Listen for incoming notifications while app is open (foreground)
   useEffect(() => {
     notificationListener.current = Notifications.addNotificationReceivedListener(
       (notification) => {
@@ -137,14 +126,12 @@ function RootLayoutNav() {
       }
     );
 
-    // Handle notification tap — navigate to relevant screen
     responseListener.current = Notifications.addNotificationResponseReceivedListener(
       (response) => {
         const data = response.notification.request.content.data as any;
         console.log("[push] Notification tapped, data:", data);
         if (!agent) return;
 
-        // Navigate based on notification type
         if (data?.screen === "dashboard") {
           if (agent.role === "fos") {
             router.push("/(app)/dashboard" as any);
@@ -169,7 +156,6 @@ function RootLayoutNav() {
     };
   }, [agent]);
 
-  // Re-register token when app comes back to foreground (token may have changed)
   useEffect(() => {
     const subscription = AppState.addEventListener("change", async (nextState) => {
       if (nextState === "active" && agent && !tokenSavedRef.current) {
@@ -186,9 +172,7 @@ function RootLayoutNav() {
   }, [agent]);
 
   useEffect(() => {
-    // Wait for navigation container to be ready
     if (!navigationState?.key) return;
-    // Wait for auth check to complete
     if (isLoading) return;
 
     SplashScreen.hideAsync();
