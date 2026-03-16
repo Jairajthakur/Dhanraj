@@ -1064,55 +1064,92 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const result = await storage.query(`
         SELECT
+          TO_CHAR(COALESCE(lc.created_at, NOW()), 'DD-Mon') AS allu_date,
           lc.loan_no, lc.app_id, lc.customer_name, lc.bkt::text AS bkt, lc.pro,
-          NULL::text AS branch,
+          'NANDED'::text AS branch,
           lc.customer_available, lc.vehicle_available, lc.third_party,
           lc.feedback_code, lc.latest_feedback, lc.ptp_date,
           lc.projection, lc.non_starter, lc.kyc_purchase, lc.workable,
-          lc.status, fa.name AS fos_name
+          lc.status, lc.feedback_comments,
+          fa.name AS fos_name
         FROM loan_cases lc
         LEFT JOIN fos_agents fa ON lc.agent_id = fa.id
-        WHERE lc.latest_feedback IS NOT NULL OR lc.feedback_code IS NOT NULL OR lc.status != 'Pending'
+        WHERE lc.feedback_code IS NOT NULL
         UNION ALL
         SELECT
+          TO_CHAR(COALESCE(bc.created_at, NOW()), 'DD-Mon') AS allu_date,
           bc.loan_no, bc.app_id, bc.customer_name, bc.case_category AS bkt, bc.pro,
-          NULL::text AS branch,
+          'NANDED'::text AS branch,
           bc.customer_available, bc.vehicle_available, bc.third_party,
           bc.feedback_code, bc.latest_feedback, bc.ptp_date,
           bc.projection, bc.non_starter, bc.kyc_purchase, bc.workable,
-          bc.status, fa.name AS fos_name
+          bc.status, bc.feedback_comments,
+          fa.name AS fos_name
         FROM bkt_cases bc
         LEFT JOIN fos_agents fa ON bc.agent_id = fa.id
-        WHERE bc.latest_feedback IS NOT NULL OR bc.feedback_code IS NOT NULL OR bc.status != 'Pending'
+        WHERE bc.feedback_code IS NOT NULL
         ORDER BY fos_name NULLS LAST, loan_no
       `);
 
-      // ✅ Exact columns from FEEDBACK_FORMAT.xlsx
+      // ✅ Exact columns matching your Excel format
+      const yn = (v: any) => v === true ? "Y" : v === false ? "N" : "";
       const rows = result.rows.map((r: any) => ({
-        "LOAN NO":               r.loan_no || "",
-        "APP ID":                r.app_id || "",
-        "CUSTOMERNAME":          r.customer_name || "",
-        "Bkt":                   r.bkt || "",
-        "Pro":                   r.pro || "",
-        "Branch":                r.branch || "",
-        "Customer Available Y/N": r.customer_available === true ? "Y" : r.customer_available === false ? "N" : "",
-        "Vehicle Available Y/N":  r.vehicle_available === true ? "Y" : r.vehicle_available === false ? "N" : "",
-        "Third_party Y/N":        r.third_party === true ? "Y" : r.third_party === false ? "N" : "",
-        "FEEDBACK CODE":         r.feedback_code || "",
-        "Details FEEDBACK":      r.latest_feedback || "",
-        "PTP DATE":              r.ptp_date ? String(r.ptp_date).slice(0, 10) : "",
-        "Projection":            r.projection || "",
-        "NON_STARTER (Y/N)":     r.non_starter === true ? "Y" : r.non_starter === false ? "N" : "",
-        "KYC PURCHASE (Y/N)":    r.kyc_purchase === true ? "Y" : r.kyc_purchase === false ? "N" : "",
-        "Workable/Non":          r.workable === true ? "Workable" : r.workable === false ? "Non Workable" : "",
+        "Allu Date":           r.allu_date || "",
+        "LOAN NO":             r.loan_no || "",
+        "APP ID":              r.app_id || "",
+        "CUSTOMERNAME":        r.customer_name || "",
+        "Bkt":                 r.bkt || "",
+        "Pro":                 r.pro || "",
+        "Branch":              r.branch || "",
+        "Customer Y/N":        yn(r.customer_available),
+        "Vehicle Y/N":         yn(r.vehicle_available),
+        "Third_party Y/N":     yn(r.third_party),
+        "FEEDBACK CODE":       r.feedback_code || "",
+        "Details FEEDBACK":    r.latest_feedback || "",
+        "PTP DATE":            r.ptp_date ? String(r.ptp_date).slice(0, 10) : "",
+        "Projection":          r.projection || "",
+        "NON_STARTER (Y/N)":   yn(r.non_starter),
+        "KYC PURCHASE (Y/N)":  yn(r.kyc_purchase),
+        "Workable/Non":        r.workable === true ? "WORKABLE" : r.workable === false ? "NONWORKABLE" : "",
+        "Comments":            r.feedback_comments || "",
+        "Status":              r.status || "",
+        "FOS Name":            r.fos_name || "",
       }));
 
       const wb = new ExcelJS.Workbook();
       const ws = wb.addWorksheet("Feedback Report");
-      const exportRows = rows.length ? rows : [{ "FOS Name": "No feedback found" }];
-      ws.columns = Object.keys(exportRows[0]).map(key => ({ header: key, key, width: 20 }));
+      const exportRows = rows.length ? rows : [{
+        "Allu Date": "", "LOAN NO": "No feedback found", "APP ID": "",
+        "CUSTOMERNAME": "", "Bkt": "", "Pro": "", "Branch": "",
+        "Customer Y/N": "", "Vehicle Y/N": "", "Third_party Y/N": "",
+        "FEEDBACK CODE": "", "Details FEEDBACK": "", "PTP DATE": "",
+        "Projection": "", "NON_STARTER (Y/N)": "", "KYC PURCHASE (Y/N)": "",
+        "Workable/Non": "", "Comments": "", "Status": "", "FOS Name": "",
+      }];
+
+      ws.columns = Object.keys(exportRows[0]).map(key => ({
+        header: key, key,
+        width: ["CUSTOMERNAME", "Details FEEDBACK", "Comments"].includes(key) ? 30 : 16,
+      }));
+
       exportRows.forEach(row => ws.addRow(row));
-      ws.getRow(1).font = { bold: true };
+
+      // ✅ Yellow header row like your Excel
+      ws.getRow(1).eachCell(cell => {
+        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFFF00" } };
+        cell.font = { bold: true, color: { argb: "FF000000" } };
+        cell.border = {
+          top: { style: "thin" }, bottom: { style: "thin" },
+          left: { style: "thin" }, right: { style: "thin" },
+        };
+        cell.alignment = { vertical: "middle", horizontal: "center", wrapText: true };
+      });
+
+      // ✅ Auto filter on header row
+      ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: exportRows[0] ? Object.keys(exportRows[0]).length : 20 } };
+
+      // ✅ Freeze header row
+      ws.views = [{ state: "frozen", ySplit: 1 }];
 
       const buf = await wb.xlsx.writeBuffer();
       res.setHeader("Content-Disposition", `attachment; filename="Feedback_Report_${new Date().toISOString().slice(0, 10)}.xlsx"`);
