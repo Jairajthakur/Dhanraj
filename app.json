@@ -9,34 +9,34 @@
     "scheme": "dhanrajenterprises",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
+
     "splash": {
       "image": "./assets/images/dhanraj-logo.png",
       "resizeMode": "contain",
       "backgroundColor": "#ECEAE4"
     },
+
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.dhanrajenterprises.app"
     },
+
     "android": {
       "package": "com.dhanrajenterprises.app",
       "adaptiveIcon": {
-        "backgroundColor": "#ECEAE4",
         "foregroundImage": "./assets/images/dhanraj-logo.png",
+        "backgroundColor": "#ECEAE4",
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       }
     },
+
     "web": {
       "favicon": "./assets/images/dhanraj-logo.png"
     },
+
     "plugins": [
-      [
-        "expo-router",
-        {
-          "origin": "https://dhanraj-production.up.railway.app"
-        }
-      ],
+      "expo-router",
       "expo-font",
       "expo-web-browser",
       [
@@ -47,10 +47,12 @@
         }
       ]
     ],
+
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
     },
+
     "extra": {
       "apiUrl": "https://dhanraj-production.up.railway.app",
       "eas": {
