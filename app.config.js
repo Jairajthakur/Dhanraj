@@ -1,6 +1,11 @@
 module.exports = ({ config }) => {
   return {
     ...config,
+    web: {
+      bundler: "metro",
+      output: "static",
+      baseUrl: "/Dhanraj",
+    },
     extra: {
       ...config.extra,
       apiUrl: "https://dhanraj-production.up.railway.app",
