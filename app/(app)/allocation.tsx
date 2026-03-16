@@ -67,7 +67,7 @@ function YNToggle({
   );
 }
 
-function FeedbackModal({ visible, caseItem, onClose, onSave }: any) {
+function FeedbackModal({ visible, caseItem, onClose, onSave, isLocked = false }: any) {
   const [status, setStatus] = useState(caseItem?.status || "Unpaid");
   const [detailFeedback, setDetailFeedback] = useState(caseItem?.latest_feedback || "");
   const [feedbackCode, setFeedbackCode] = useState(caseItem?.feedback_code || "");
@@ -109,7 +109,8 @@ function FeedbackModal({ visible, caseItem, onClose, onSave }: any) {
   };
 
   const save = async () => {
-    if (!feedbackCode) {
+    // When locked (status change only), skip feedbackCode validation
+    if (!isLocked && !feedbackCode) {
       Alert.alert("Error", "Please select a Feedback Code");
       return;
     }
@@ -162,22 +163,41 @@ function FeedbackModal({ visible, caseItem, onClose, onSave }: any) {
             {caseItem?.customer_name} · {caseItem?.loan_no}
           </Text>
 
+          {/* ✅ Locked notice for Unpaid cases with existing feedback */}
+          {isLocked && (
+            <View style={fbStyles.lockedBanner}>
+              <Ionicons name="lock-closed" size={14} color={Colors.warning} />
+              <Text style={fbStyles.lockedText}>Feedback locked. You can only change status to Paid or PTP.</Text>
+            </View>
+          )}
+
           {/* Status */}
           <Text style={fbStyles.sectionLabel}>Status</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
             <View style={{ flexDirection: "row", gap: 8 }}>
-              {TABS.map((t) => (
-                <Pressable
-                  key={t}
-                  style={[fbStyles.tabChip, status === t && { backgroundColor: STATUS_COLORS[t], borderColor: STATUS_COLORS[t] }]}
-                  onPress={() => handleStatusChange(t)}
-                >
-                  <Text style={[fbStyles.tabChipText, status === t && { color: "#fff" }]}>{t}</Text>
-                </Pressable>
-              ))}
+              {TABS.map((t) => {
+                // When locked, only allow changing to Paid or PTP
+                const disabled = isLocked && t === "Unpaid";
+                return (
+                  <Pressable
+                    key={t}
+                    style={[
+                      fbStyles.tabChip,
+                      status === t && { backgroundColor: STATUS_COLORS[t], borderColor: STATUS_COLORS[t] },
+                      disabled && { opacity: 0.3 },
+                    ]}
+                    onPress={() => !disabled && handleStatusChange(t)}
+                  >
+                    <Text style={[fbStyles.tabChipText, status === t && { color: "#fff" }]}>{t}</Text>
+                  </Pressable>
+                );
+              })}
             </View>
           </ScrollView>
 
+          {/* Hide detail fields when locked - only status change allowed */}
+          {!isLocked && (
+          <View>
           {/* Y/N fields */}
           <YNToggle label="Customer Available" value={customerAvailable} onChange={setCustomerAvailable} />
           <YNToggle label="Vehicle Available" value={vehicleAvailable} onChange={setVehicleAvailable} />
@@ -288,7 +308,10 @@ function FeedbackModal({ visible, caseItem, onClose, onSave }: any) {
             />
           )}
 
-          {/* ✅ PTP Date — shown when PTP status selected */}
+          </View>
+          )}
+
+          {/* ✅ PTP Date — shown when PTP or Paid selected (always visible) */}
           {status === "PTP" && (
             <>
               <Text style={fbStyles.sectionLabel}>PTP Date</Text>
@@ -335,8 +358,10 @@ function FeedbackModal({ visible, caseItem, onClose, onSave }: any) {
             ))}
           </View>
 
-          {/* Rollback */}
-          <YNToggle label="Rollback" value={rollbackYn} onChange={setRollbackYn} />
+          {/* Rollback - not for Unpaid */}
+          {status !== "Unpaid" && (
+            <YNToggle label="Rollback" value={rollbackYn} onChange={setRollbackYn} />
+          )}
 
           {/* Non Starter */}
           <YNToggle label="Non Starter" value={nonStarter} onChange={setNonStarter} />
@@ -533,10 +558,17 @@ function CaseCard({ item, onFeedback }: { item: any; onFeedback: (item: any) => 
           <Ionicons name="eye" size={16} color={Colors.textSecondary} />
           <Text style={[styles.actionBtnText, { color: Colors.textSecondary }]}>Details</Text>
         </Pressable>
-        <Pressable style={[styles.actionBtn, styles.feedbackBtn]} onPress={() => onFeedback(item)}>
-          <Ionicons name="chatbox" size={16} color="#fff" />
-          <Text style={styles.actionBtnText}>Feedback</Text>
-        </Pressable>
+        {item.status === "Unpaid" && item.latest_feedback ? (
+          <Pressable style={[styles.actionBtn, styles.statusChangeBtn]} onPress={() => onFeedback(item)}>
+            <Ionicons name="swap-horizontal" size={16} color="#fff" />
+            <Text style={styles.actionBtnText}>Mark Paid/PTP</Text>
+          </Pressable>
+        ) : (
+          <Pressable style={[styles.actionBtn, styles.feedbackBtn]} onPress={() => onFeedback(item)}>
+            <Ionicons name="chatbox" size={16} color="#fff" />
+            <Text style={styles.actionBtnText}>Feedback</Text>
+          </Pressable>
+        )}
       </View>
     </View>
   );
@@ -653,6 +685,7 @@ export default function AllocationScreen() {
         <FeedbackModal
           visible={!!feedbackItem}
           caseItem={feedbackItem}
+          isLocked={feedbackItem?.status === "Unpaid" && !!feedbackItem?.latest_feedback}
           onClose={() => setFeedbackItem(null)}
           onSave={() => {
             qc.invalidateQueries({ queryKey: ["/api/cases"] });
@@ -724,6 +757,7 @@ const styles = StyleSheet.create({
   callBtn: { backgroundColor: Colors.primary },
   detailBtn: { backgroundColor: Colors.surfaceElevated, borderWidth: 1, borderColor: Colors.borderLight },
   feedbackBtn: { backgroundColor: Colors.accent },
+  statusChangeBtn: { backgroundColor: Colors.statusPTP },
   actionBtnText: { color: "#fff", fontSize: 13, fontWeight: "700" },
   empty: { flex: 1, justifyContent: "center", alignItems: "center", gap: 12, paddingVertical: 60 },
   emptyText: { fontSize: 16, color: Colors.textMuted },
