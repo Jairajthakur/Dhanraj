@@ -221,6 +221,28 @@ export async function initDatabase() {
     `ALTER TABLE loan_cases ADD COLUMN IF NOT EXISTS telecaller_ptp_date DATE`,
     `ALTER TABLE bkt_cases  ADD COLUMN IF NOT EXISTS telecaller_ptp_date DATE`,
 
+    // New feedback fields
+    `ALTER TABLE loan_cases ADD COLUMN IF NOT EXISTS customer_available BOOLEAN`,
+    `ALTER TABLE loan_cases ADD COLUMN IF NOT EXISTS vehicle_available  BOOLEAN`,
+    `ALTER TABLE loan_cases ADD COLUMN IF NOT EXISTS third_party        BOOLEAN`,
+    `ALTER TABLE loan_cases ADD COLUMN IF NOT EXISTS third_party_name   TEXT`,
+    `ALTER TABLE loan_cases ADD COLUMN IF NOT EXISTS third_party_number TEXT`,
+    `ALTER TABLE loan_cases ADD COLUMN IF NOT EXISTS feedback_code      TEXT`,
+    `ALTER TABLE loan_cases ADD COLUMN IF NOT EXISTS projection         TEXT`,
+    `ALTER TABLE loan_cases ADD COLUMN IF NOT EXISTS non_starter        BOOLEAN`,
+    `ALTER TABLE loan_cases ADD COLUMN IF NOT EXISTS kyc_purchase       BOOLEAN`,
+    `ALTER TABLE loan_cases ADD COLUMN IF NOT EXISTS workable           BOOLEAN`,
+    `ALTER TABLE bkt_cases  ADD COLUMN IF NOT EXISTS customer_available BOOLEAN`,
+    `ALTER TABLE bkt_cases  ADD COLUMN IF NOT EXISTS vehicle_available  BOOLEAN`,
+    `ALTER TABLE bkt_cases  ADD COLUMN IF NOT EXISTS third_party        BOOLEAN`,
+    `ALTER TABLE bkt_cases  ADD COLUMN IF NOT EXISTS third_party_name   TEXT`,
+    `ALTER TABLE bkt_cases  ADD COLUMN IF NOT EXISTS third_party_number TEXT`,
+    `ALTER TABLE bkt_cases  ADD COLUMN IF NOT EXISTS feedback_code      TEXT`,
+    `ALTER TABLE bkt_cases  ADD COLUMN IF NOT EXISTS projection         TEXT`,
+    `ALTER TABLE bkt_cases  ADD COLUMN IF NOT EXISTS non_starter        BOOLEAN`,
+    `ALTER TABLE bkt_cases  ADD COLUMN IF NOT EXISTS kyc_purchase       BOOLEAN`,
+    `ALTER TABLE bkt_cases  ADD COLUMN IF NOT EXISTS workable           BOOLEAN`,
+
     // Normalize bkt values
     `UPDATE bkt_perf_summary SET bkt = 'bkt1'  WHERE LOWER(REPLACE(bkt,' ','')) IN ('1','bkt1')  AND bkt <> 'bkt1'`,
     `UPDATE bkt_perf_summary SET bkt = 'bkt2'  WHERE LOWER(REPLACE(bkt,' ','')) IN ('2','bkt2')  AND bkt <> 'bkt2'`,
@@ -231,35 +253,12 @@ export async function initDatabase() {
     `INSERT INTO fos_agents (name, username, password, role)
      VALUES ('Admin', 'admin', 'admin123', 'admin')
      ON CONFLICT (username) DO NOTHING`,
-
-    // New feedback fields
-`ALTER TABLE loan_cases ADD COLUMN IF NOT EXISTS customer_available BOOLEAN`,
-`ALTER TABLE loan_cases ADD COLUMN IF NOT EXISTS vehicle_available BOOLEAN`,
-`ALTER TABLE loan_cases ADD COLUMN IF NOT EXISTS third_party BOOLEAN`,
-`ALTER TABLE loan_cases ADD COLUMN IF NOT EXISTS third_party_name TEXT`,
-`ALTER TABLE loan_cases ADD COLUMN IF NOT EXISTS third_party_number TEXT`,
-`ALTER TABLE loan_cases ADD COLUMN IF NOT EXISTS feedback_code TEXT`,
-`ALTER TABLE loan_cases ADD COLUMN IF NOT EXISTS projection TEXT`,
-`ALTER TABLE loan_cases ADD COLUMN IF NOT EXISTS non_starter BOOLEAN`,
-`ALTER TABLE loan_cases ADD COLUMN IF NOT EXISTS kyc_purchase BOOLEAN`,
-`ALTER TABLE loan_cases ADD COLUMN IF NOT EXISTS workable BOOLEAN`,
-`ALTER TABLE bkt_cases ADD COLUMN IF NOT EXISTS customer_available BOOLEAN`,
-`ALTER TABLE bkt_cases ADD COLUMN IF NOT EXISTS vehicle_available BOOLEAN`,
-`ALTER TABLE bkt_cases ADD COLUMN IF NOT EXISTS third_party BOOLEAN`,
-`ALTER TABLE bkt_cases ADD COLUMN IF NOT EXISTS third_party_name TEXT`,
-`ALTER TABLE bkt_cases ADD COLUMN IF NOT EXISTS third_party_number TEXT`,
-`ALTER TABLE bkt_cases ADD COLUMN IF NOT EXISTS feedback_code TEXT`,
-`ALTER TABLE bkt_cases ADD COLUMN IF NOT EXISTS projection TEXT`,
-`ALTER TABLE bkt_cases ADD COLUMN IF NOT EXISTS non_starter BOOLEAN`,
-`ALTER TABLE bkt_cases ADD COLUMN IF NOT EXISTS kyc_purchase BOOLEAN`,
-`ALTER TABLE bkt_cases ADD COLUMN IF NOT EXISTS workable BOOLEAN`,
   ];
 
   for (const sql of migrations) {
     try {
       await query(sql);
     } catch (e: any) {
-      // Log but don't crash — some migrations may already be applied
       console.warn(`[migration] skipped: ${e.message?.slice(0, 80)}`);
     }
   }
@@ -338,10 +337,62 @@ export async function getLoanCaseById(id: number) {
   return result.rows[0] || null;
 }
 
-export async function updateLoanCaseFeedback(id: number, status: string, feedback: string, comments: string, ptpDate?: string | null, rollbackYn?: boolean | null) {
+export interface FeedbackExtra {
+  customerAvailable?: boolean | null;
+  vehicleAvailable?: boolean | null;
+  thirdParty?: boolean | null;
+  thirdPartyName?: string | null;
+  thirdPartyNumber?: string | null;
+  feedbackCode?: string | null;
+  projection?: string | null;
+  nonStarter?: boolean | null;
+  kycPurchase?: boolean | null;
+  workable?: boolean | null;
+}
+
+export async function updateLoanCaseFeedback(
+  id: number,
+  status: string,
+  feedback: string,
+  comments: string,
+  ptpDate?: string | null,
+  rollbackYn?: boolean | null,
+  extra?: FeedbackExtra
+) {
   await query(
-    `UPDATE loan_cases SET status = $1, latest_feedback = $2, feedback_comments = $3, feedback_date = NOW(), ptp_date = $5, rollback_yn = COALESCE($6, rollback_yn) WHERE id = $4`,
-    [status, feedback, comments, id, ptpDate || null, rollbackYn != null ? rollbackYn : null]
+    `UPDATE loan_cases SET
+       status             = $1,
+       latest_feedback    = $2,
+       feedback_comments  = $3,
+       feedback_date      = NOW(),
+       ptp_date           = $5,
+       rollback_yn        = COALESCE($6, rollback_yn),
+       customer_available = $7,
+       vehicle_available  = $8,
+       third_party        = $9,
+       third_party_name   = $10,
+       third_party_number = $11,
+       feedback_code      = $12,
+       projection         = $13,
+       non_starter        = $14,
+       kyc_purchase       = $15,
+       workable           = $16
+     WHERE id = $4`,
+    [
+      status, feedback, comments, id,
+      ptpDate || null,
+      rollbackYn != null ? rollbackYn : null,
+      extra?.customerAvailable ?? null,
+      extra?.vehicleAvailable ?? null,
+      extra?.thirdParty ?? null,
+      extra?.thirdPartyName ?? null,
+      extra?.thirdPartyNumber ?? null,
+      extra?.feedbackCode ?? null,
+      extra?.projection ?? null,
+      extra?.nonStarter ?? null,
+      extra?.kycPurchase ?? null,
+      extra?.workable ?? null,
+    ]
   );
 }
 
@@ -694,10 +745,49 @@ export async function getBktCasesByAgent(agentId: number, category?: string) {
   return result.rows;
 }
 
-export async function updateBktCaseFeedback(id: number, status: string, feedback: string, comments: string, ptpDate?: string | null, rollbackYn?: boolean | null) {
+export async function updateBktCaseFeedback(
+  id: number,
+  status: string,
+  feedback: string,
+  comments: string,
+  ptpDate?: string | null,
+  rollbackYn?: boolean | null,
+  extra?: FeedbackExtra
+) {
   await query(
-    `UPDATE bkt_cases SET status = $1, latest_feedback = $2, feedback_comments = $3, feedback_date = NOW(), ptp_date = $5, rollback_yn = COALESCE($6, rollback_yn) WHERE id = $4`,
-    [status, feedback, comments, id, ptpDate || null, rollbackYn != null ? rollbackYn : null]
+    `UPDATE bkt_cases SET
+       status             = $1,
+       latest_feedback    = $2,
+       feedback_comments  = $3,
+       feedback_date      = NOW(),
+       ptp_date           = $5,
+       rollback_yn        = COALESCE($6, rollback_yn),
+       customer_available = $7,
+       vehicle_available  = $8,
+       third_party        = $9,
+       third_party_name   = $10,
+       third_party_number = $11,
+       feedback_code      = $12,
+       projection         = $13,
+       non_starter        = $14,
+       kyc_purchase       = $15,
+       workable           = $16
+     WHERE id = $4`,
+    [
+      status, feedback, comments, id,
+      ptpDate || null,
+      rollbackYn != null ? rollbackYn : null,
+      extra?.customerAvailable ?? null,
+      extra?.vehicleAvailable ?? null,
+      extra?.thirdParty ?? null,
+      extra?.thirdPartyName ?? null,
+      extra?.thirdPartyNumber ?? null,
+      extra?.feedbackCode ?? null,
+      extra?.projection ?? null,
+      extra?.nonStarter ?? null,
+      extra?.kycPurchase ?? null,
+      extra?.workable ?? null,
+    ]
   );
 }
 
@@ -726,19 +816,19 @@ export async function upsertBktPerfSummary(data: {
         uploaded_at)
      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,NOW())
      ON CONFLICT (fos_name, bkt) DO UPDATE SET
-       agent_id           = COALESCE(EXCLUDED.agent_id, bkt_perf_summary.agent_id),
-       pos_paid           = EXCLUDED.pos_paid,
-       pos_unpaid         = EXCLUDED.pos_unpaid,
-       pos_grand_total    = EXCLUDED.pos_grand_total,
-       pos_percentage     = EXCLUDED.pos_percentage,
-       count_paid         = EXCLUDED.count_paid,
-       count_unpaid       = EXCLUDED.count_unpaid,
-       count_total        = EXCLUDED.count_total,
-       rollback_paid      = EXCLUDED.rollback_paid,
-       rollback_unpaid    = EXCLUDED.rollback_unpaid,
+       agent_id             = COALESCE(EXCLUDED.agent_id, bkt_perf_summary.agent_id),
+       pos_paid             = EXCLUDED.pos_paid,
+       pos_unpaid           = EXCLUDED.pos_unpaid,
+       pos_grand_total      = EXCLUDED.pos_grand_total,
+       pos_percentage       = EXCLUDED.pos_percentage,
+       count_paid           = EXCLUDED.count_paid,
+       count_unpaid         = EXCLUDED.count_unpaid,
+       count_total          = EXCLUDED.count_total,
+       rollback_paid        = EXCLUDED.rollback_paid,
+       rollback_unpaid      = EXCLUDED.rollback_unpaid,
        rollback_grand_total = EXCLUDED.rollback_grand_total,
        rollback_percentage  = EXCLUDED.rollback_percentage,
-       uploaded_at        = NOW()`,
+       uploaded_at          = NOW()`,
     [
       data.fosName, data.agentId, data.bkt,
       data.posPaid, data.posUnpaid, data.posGrandTotal, data.posPercentage,
