@@ -469,7 +469,7 @@ export default function AdminDashboard() {
     }
   };
 
-  // Generic Excel download helper
+  // ✅ FIXED: Generic Excel download helper — safe error parsing
   const downloadExcel = async (
     apiPath: string,
     fileName: string,
@@ -480,7 +480,12 @@ export default function AdminDashboard() {
     try {
       if (Platform.OS === "web") {
         const res = await fetch(url, { credentials: "include" });
-        if (!res.ok) throw new Error((await res.json()).message || "Export failed");
+        if (!res.ok) {
+          const text = await res.text();
+          let msg = text;
+          try { msg = JSON.parse(text).message; } catch {}
+          throw new Error(msg || "Export failed");
+        }
         const blob = await res.blob();
         const blobUrl = URL.createObjectURL(blob);
         const a = document.createElement("a");
@@ -492,7 +497,12 @@ export default function AdminDashboard() {
         URL.revokeObjectURL(blobUrl);
       } else {
         const res = await expoFetch(url, { credentials: "include" });
-        if (!res.ok) throw new Error((await res.json()).message || "Export failed");
+        if (!res.ok) {
+          const text = await res.text();
+          let msg = text;
+          try { msg = JSON.parse(text).message; } catch {}
+          throw new Error(msg || "Export failed");
+        }
         const ab = await res.arrayBuffer();
         const uint8 = new Uint8Array(ab);
         const CHUNK = 0x8000;
@@ -548,7 +558,12 @@ export default function AdminDashboard() {
             try {
               const url = new URL("/api/admin/clear-ptp", getApiUrl()).toString();
               const res = await expoFetch(url, { method: "POST", credentials: "include" });
-              if (!res.ok) throw new Error((await res.json()).message || "Clear failed");
+              if (!res.ok) {
+                const text = await res.text();
+                let msg = text;
+                try { msg = JSON.parse(text).message; } catch {}
+                throw new Error(msg || "Clear failed");
+              }
               qc.invalidateQueries({ queryKey: ["/api/admin/stats"] });
               Alert.alert("Done", "All PTP dates have been cleared.");
             } catch (e: any) {
