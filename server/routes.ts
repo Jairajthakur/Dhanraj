@@ -1062,32 +1062,73 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // ✅ NEW: Feedback Export
   app.get("/api/admin/feedback-export", requireAdmin, async (req, res) => {
     try {
+      // Query loan_cases columns safely
+      const lcCols = await storage.query(`
+        SELECT column_name FROM information_schema.columns
+        WHERE table_name = 'loan_cases'
+      `);
+      const bcCols = await storage.query(`
+        SELECT column_name FROM information_schema.columns
+        WHERE table_name = 'bkt_cases'
+      `);
+      const lcColSet = new Set(lcCols.rows.map((r: any) => r.column_name));
+      const bcColSet = new Set(bcCols.rows.map((r: any) => r.column_name));
+
+      const safeCol = (colSet: Set<string>, col: string, alias?: string) => {
+        const a = alias || col;
+        return colSet.has(col) ? `${col} AS ${a}` : `NULL AS ${a}`;
+      };
+
       const result = await storage.query(`
         SELECT
           TO_CHAR(COALESCE(lc.created_at, NOW()), 'DD-Mon') AS allu_date,
-          lc.loan_no, lc.app_id, lc.customer_name, lc.bkt::text AS bkt, lc.pro,
+          lc.loan_no,
+          ${lcColSet.has('app_id') ? 'lc.app_id' : 'NULL::text AS app_id'},
+          lc.customer_name,
+          lc.bkt::text AS bkt,
+          ${lcColSet.has('pro') ? 'lc.pro' : 'NULL::text AS pro'},
           'NANDED'::text AS branch,
-          lc.customer_available, lc.vehicle_available, lc.third_party,
-          lc.feedback_code, lc.latest_feedback, lc.ptp_date,
-          lc.projection, lc.non_starter, lc.kyc_purchase, lc.workable,
-          lc.status, lc.feedback_comments,
+          ${lcColSet.has('customer_available') ? 'lc.customer_available' : 'NULL::boolean AS customer_available'},
+          ${lcColSet.has('vehicle_available') ? 'lc.vehicle_available' : 'NULL::boolean AS vehicle_available'},
+          ${lcColSet.has('third_party') ? 'lc.third_party' : 'NULL::boolean AS third_party'},
+          ${lcColSet.has('feedback_code') ? 'lc.feedback_code' : 'NULL::text AS feedback_code'},
+          lc.latest_feedback,
+          lc.ptp_date,
+          ${lcColSet.has('projection') ? 'lc.projection' : 'NULL::text AS projection'},
+          ${lcColSet.has('non_starter') ? 'lc.non_starter' : 'NULL::boolean AS non_starter'},
+          ${lcColSet.has('kyc_purchase') ? 'lc.kyc_purchase' : 'NULL::boolean AS kyc_purchase'},
+          ${lcColSet.has('workable') ? 'lc.workable' : 'NULL::boolean AS workable'},
+          lc.status,
+          ${lcColSet.has('feedback_comments') ? 'lc.feedback_comments' : 'NULL::text AS feedback_comments'},
           fa.name AS fos_name
         FROM loan_cases lc
         LEFT JOIN fos_agents fa ON lc.agent_id = fa.id
-        WHERE lc.feedback_code IS NOT NULL
+        WHERE lc.latest_feedback IS NOT NULL OR lc.status IN ('Paid', 'PTP')
         UNION ALL
         SELECT
           TO_CHAR(COALESCE(bc.created_at, NOW()), 'DD-Mon') AS allu_date,
-          bc.loan_no, bc.app_id, bc.customer_name, bc.case_category AS bkt, bc.pro,
+          bc.loan_no,
+          ${bcColSet.has('app_id') ? 'bc.app_id' : 'NULL::text AS app_id'},
+          bc.customer_name,
+          bc.case_category AS bkt,
+          ${bcColSet.has('pro') ? 'bc.pro' : 'NULL::text AS pro'},
           'NANDED'::text AS branch,
-          bc.customer_available, bc.vehicle_available, bc.third_party,
-          bc.feedback_code, bc.latest_feedback, bc.ptp_date,
-          bc.projection, bc.non_starter, bc.kyc_purchase, bc.workable,
-          bc.status, bc.feedback_comments,
+          ${bcColSet.has('customer_available') ? 'bc.customer_available' : 'NULL::boolean AS customer_available'},
+          ${bcColSet.has('vehicle_available') ? 'bc.vehicle_available' : 'NULL::boolean AS vehicle_available'},
+          ${bcColSet.has('third_party') ? 'bc.third_party' : 'NULL::boolean AS third_party'},
+          ${bcColSet.has('feedback_code') ? 'bc.feedback_code' : 'NULL::text AS feedback_code'},
+          bc.latest_feedback,
+          bc.ptp_date,
+          ${bcColSet.has('projection') ? 'bc.projection' : 'NULL::text AS projection'},
+          ${bcColSet.has('non_starter') ? 'bc.non_starter' : 'NULL::boolean AS non_starter'},
+          ${bcColSet.has('kyc_purchase') ? 'bc.kyc_purchase' : 'NULL::boolean AS kyc_purchase'},
+          ${bcColSet.has('workable') ? 'bc.workable' : 'NULL::boolean AS workable'},
+          bc.status,
+          ${bcColSet.has('feedback_comments') ? 'bc.feedback_comments' : 'NULL::text AS feedback_comments'},
           fa.name AS fos_name
         FROM bkt_cases bc
         LEFT JOIN fos_agents fa ON bc.agent_id = fa.id
-        WHERE bc.feedback_code IS NOT NULL
+        WHERE bc.latest_feedback IS NOT NULL OR bc.status IN ('Paid', 'PTP')
         ORDER BY fos_name NULLS LAST, loan_no
       `);
 
