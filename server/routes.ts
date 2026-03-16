@@ -341,18 +341,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
       );
       const old = oldRow.rows[0];
 
-      await storage.updateLoanCaseFeedback(caseId, status, feedback, comments, ptp_date, ynVal, {
-        customerAvailable: toBool(customer_available),
-        vehicleAvailable:  toBool(vehicle_available),
-        thirdParty:        toBool(third_party),
-        thirdPartyName:    third_party_name || null,
-        thirdPartyNumber:  third_party_number || null,
-        feedbackCode:      feedback_code || null,
-        projection:        projection || null,
-        nonStarter:        toBool(non_starter),
-        kycPurchase:       toBool(kyc_purchase),
-        workable:          toBool(workable),
-      });
+      // Only update extra fields if they were explicitly sent
+      const extraFields = {
+        ...(customer_available  !== undefined && { customerAvailable: toBool(customer_available) }),
+        ...(vehicle_available   !== undefined && { vehicleAvailable:  toBool(vehicle_available) }),
+        ...(third_party         !== undefined && { thirdParty:        toBool(third_party) }),
+        ...(third_party_name    !== undefined && { thirdPartyName:    third_party_name || null }),
+        ...(third_party_number  !== undefined && { thirdPartyNumber:  third_party_number || null }),
+        ...(feedback_code       !== undefined && { feedbackCode:      feedback_code || null }),
+        ...(projection          !== undefined && { projection:        projection || null }),
+        ...(non_starter         !== undefined && { nonStarter:        toBool(non_starter) }),
+        ...(kyc_purchase        !== undefined && { kycPurchase:       toBool(kyc_purchase) }),
+        ...(workable            !== undefined && { workable:          toBool(workable) }),
+      };
+      await storage.updateLoanCaseFeedback(caseId, status, feedback, comments, ptp_date, ynVal, extraFields);
 
       if (old && old.bkt && old.agent_id && (old.pro || "").toUpperCase() !== "UC") {
         const pos = parseFloat(old.pos) || 0;
@@ -827,18 +829,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
         [caseId]
       );
       const old = oldRow.rows[0];
-      await storage.updateBktCaseFeedback(caseId, status, feedback, comments, ptp_date, ynVal, {
-        customerAvailable: toBool(customer_available),
-        vehicleAvailable:  toBool(vehicle_available),
-        thirdParty:        toBool(third_party),
-        thirdPartyName:    third_party_name || null,
-        thirdPartyNumber:  third_party_number || null,
-        feedbackCode:      feedback_code || null,
-        projection:        projection || null,
-        nonStarter:        toBool(non_starter),
-        kycPurchase:       toBool(kyc_purchase),
-        workable:          toBool(workable),
-      });
+      const bktExtraFields = {
+        ...(customer_available  !== undefined && { customerAvailable: toBool(customer_available) }),
+        ...(vehicle_available   !== undefined && { vehicleAvailable:  toBool(vehicle_available) }),
+        ...(third_party         !== undefined && { thirdParty:        toBool(third_party) }),
+        ...(third_party_name    !== undefined && { thirdPartyName:    third_party_name || null }),
+        ...(third_party_number  !== undefined && { thirdPartyNumber:  third_party_number || null }),
+        ...(feedback_code       !== undefined && { feedbackCode:      feedback_code || null }),
+        ...(projection          !== undefined && { projection:        projection || null }),
+        ...(non_starter         !== undefined && { nonStarter:        toBool(non_starter) }),
+        ...(kyc_purchase        !== undefined && { kycPurchase:       toBool(kyc_purchase) }),
+        ...(workable            !== undefined && { workable:          toBool(workable) }),
+      };
+      await storage.updateBktCaseFeedback(caseId, status, feedback, comments, ptp_date, ynVal, bktExtraFields);
       if (old && old.case_category && old.agent_id && (old.pro || "").toUpperCase() !== "UC") {
         const pos    = parseFloat(old.pos) || 0;
         const bktKey = (old.case_category as string).toLowerCase().replace(/\s+/g, "");
@@ -1132,7 +1135,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       `);
 
       // ✅ Exact columns matching your Excel format
-      const yn = (v: any) => v === true ? "Y" : v === false ? "N" : "";
+      const yn = (v: any) => (v === true || v === "true" || v === "t" || v === 1) ? "Y" : (v === false || v === "false" || v === "f" || v === 0) ? "N" : "";
       const rows = result.rows.map((r: any) => ({
         "Allu Date":           r.allu_date || "",
         "LOAN NO":             r.loan_no || "",
@@ -1144,15 +1147,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         "Customer Y/N":        yn(r.customer_available),
         "Vehicle Y/N":         yn(r.vehicle_available),
         "Third_party Y/N":     yn(r.third_party),
-        "Third Party Name":    r.third_party === true ? (r.third_party_name || "") : "",
-        "Third Party Number":  r.third_party === true ? (r.third_party_number || "") : "",
-        "FEEDBACK CODE":       r.feedback_code || "",
-        "Details FEEDBACK":    r.latest_feedback || "",
-        "PTP DATE":            r.ptp_date ? String(r.ptp_date).slice(0, 10) : "",
-        "Projection":          r.projection || "",
+        "Third Party Name":    (r.third_party === true || r.third_party === "true" || r.third_party === "t") ? (r.third_party_name || "") : "",
+        "Third Party Number":  (r.third_party === true || r.third_party === "true" || r.third_party === "t") ? (r.third_party_number || "") : "",
+        "FEEDBACK CODE":       r.feedback_code != null ? String(r.feedback_code) : "",
+        "Details FEEDBACK":    r.latest_feedback != null ? String(r.latest_feedback) : "",
+        "PTP DATE":            r.ptp_date ? (r.ptp_date instanceof Date ? r.ptp_date.toISOString().slice(0, 10) : String(r.ptp_date).slice(0, 10)) : "",
+        "Projection":          r.projection != null ? String(r.projection) : "",
         "NON_STARTER (Y/N)":   yn(r.non_starter),
         "KYC PURCHASE (Y/N)":  yn(r.kyc_purchase),
-        "Workable/Non":        r.workable === true ? "WORKABLE" : r.workable === false ? "NONWORKABLE" : "",
+        "Workable/Non":        (r.workable === true || r.workable === "true" || r.workable === "t") ? "WORKABLE" : (r.workable === false || r.workable === "false" || r.workable === "f") ? "NONWORKABLE" : "",
         "Comments":            r.feedback_comments || "",
         "Status":              r.status || "",
         "FOS Name":            r.fos_name || "",
