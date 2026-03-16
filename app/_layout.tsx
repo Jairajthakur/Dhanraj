@@ -84,6 +84,7 @@ function RootLayoutNav() {
   const responseListener = useRef<any>(null);
   const tokenSavedRef = useRef(false);
 
+  // ✅ Save push token when agent logs in
   useEffect(() => {
     if (!agent || tokenSavedRef.current) return;
 
@@ -103,6 +104,7 @@ function RootLayoutNav() {
     saveToken();
   }, [agent]);
 
+  // ✅ Notification listeners — mount once, never re-subscribe
   useEffect(() => {
     notificationListener.current =
       Notifications.addNotificationReceivedListener((notification) => {
@@ -139,9 +141,15 @@ function RootLayoutNav() {
     };
   }, []);
 
+  // ✅ AppState listener — use agentRef to avoid re-subscribing on agent change
+  const agentRef = useRef(agent);
+  useEffect(() => {
+    agentRef.current = agent;
+  }, [agent]);
+
   useEffect(() => {
     const subscription = AppState.addEventListener("change", async (state) => {
-      if (state === "active" && agent && !tokenSavedRef.current) {
+      if (state === "active" && agentRef.current && !tokenSavedRef.current) {
         try {
           const token = await registerForPushNotificationsAsync();
           if (token) {
@@ -152,11 +160,10 @@ function RootLayoutNav() {
       }
     });
 
-    return () => {
-      if (subscription?.remove) subscription.remove();
-    };
-  }, [agent]);
+    return () => subscription.remove(); // ✅ Direct call, no optional chaining
+  }, []); // ✅ Empty deps — subscribes once only
 
+  // ✅ Navigation/auth redirect
   useEffect(() => {
     if (!navigationState?.key || isLoading) return;
 
