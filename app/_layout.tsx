@@ -1,4 +1,3 @@
-```tsx
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Stack, router, useSegments, useRootNavigationState } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
@@ -222,4 +221,3 @@ export default function RootLayout() {
     </ErrorBoundary>
   );
 }
-```
