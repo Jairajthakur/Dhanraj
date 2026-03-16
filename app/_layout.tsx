@@ -12,7 +12,6 @@ import {
   Outfit_700Bold,
 } from "@expo-google-fonts/outfit";
 import * as Notifications from "expo-notifications";
-// ✅ REMOVED expo-device import
 
 if (Platform.OS === "web" && typeof window !== "undefined") {
   window.addEventListener("unhandledrejection", (event) => {
@@ -39,33 +38,41 @@ Notifications.setNotificationHandler({
 });
 
 async function registerForPushNotificationsAsync(): Promise<string | null> {
-  // ✅ FIXED: Replaced Device.isDevice with __DEV__ check
+  // Skip in dev mode
   if (__DEV__) {
     console.log("[push] Skipping: dev mode");
     return null;
   }
 
-  // ✅ FIXED: was "web", now correctly "android"
   if (Platform.OS === "android") {
-    await Notifications.setNotificationChannelAsync("default", {
-      name: "default",
-      importance: Notifications.AndroidImportance.MAX,
-      vibrationPattern: [0, 250, 250, 250],
-      lightColor: "#FF231F7C",
-      sound: "default",
-    });
+    try {
+      await Notifications.setNotificationChannelAsync("default", {
+        name: "default",
+        importance: Notifications.AndroidImportance.MAX,
+        vibrationPattern: [0, 250, 250, 250],
+        lightColor: "#FF231F7C",
+        sound: "default",
+      });
+    } catch (e: any) {
+      console.error("[push] Failed to set notification channel:", e.message);
+    }
   }
 
-  const { status: existingStatus } = await Notifications.getPermissionsAsync();
-  let finalStatus = existingStatus;
+  try {
+    const { status: existingStatus } = await Notifications.getPermissionsAsync();
+    let finalStatus = existingStatus;
 
-  if (existingStatus !== "granted") {
-    const { status } = await Notifications.requestPermissionsAsync();
-    finalStatus = status;
-  }
+    if (existingStatus !== "granted") {
+      const { status } = await Notifications.requestPermissionsAsync();
+      finalStatus = status;
+    }
 
-  if (finalStatus !== "granted") {
-    console.log("[push] Permission denied");
+    if (finalStatus !== "granted") {
+      console.log("[push] Permission denied");
+      return null;
+    }
+  } catch (e: any) {
+    console.error("[push] Failed to get/request permissions:", e.message);
     return null;
   }
 
@@ -103,16 +110,24 @@ function RootLayoutNav() {
     }
     if (tokenSavedRef.current) return;
 
+    // ✅ FIX: Push registration is fully isolated — any failure here
+    // will NEVER crash the app or trigger the ErrorBoundary
     const registerAndSave = async () => {
       try {
         const token = await registerForPushNotificationsAsync();
         if (token) {
-          await api.savePushToken(token);
-          tokenSavedRef.current = true;
-          console.log("[push] Token saved to server successfully");
+          try {
+            await api.savePushToken(token);
+            tokenSavedRef.current = true;
+            console.log("[push] Token saved to server successfully");
+          } catch (e: any) {
+            // Non-critical: token save failed, app continues normally
+            console.error("[push] Failed to save token to server:", e.message);
+          }
         }
       } catch (e: any) {
-        console.error("[push] Failed to save token:", e.message);
+        // Non-critical: push registration failed, app continues normally
+        console.error("[push] Failed to register for push notifications:", e.message);
       }
     };
 
@@ -128,20 +143,25 @@ function RootLayoutNav() {
 
     responseListener.current = Notifications.addNotificationResponseReceivedListener(
       (response) => {
-        const data = response.notification.request.content.data as any;
-        console.log("[push] Notification tapped, data:", data);
-        if (!agent) return;
+        try {
+          const data = response.notification.request.content.data as any;
+          console.log("[push] Notification tapped, data:", data);
+          if (!agent) return;
 
-        if (data?.screen === "dashboard") {
-          if (agent.role === "fos") {
-            router.push("/(app)/dashboard" as any);
+          if (data?.screen === "dashboard") {
+            if (agent.role === "fos") {
+              router.push("/(app)/dashboard" as any);
+            }
+          } else if (data?.type === "deposit_required" || data?.type === "screenshot_uploaded") {
+            if (agent.role === "admin") {
+              router.push("/(admin)/depositions" as any);
+            } else if (agent.role === "fos") {
+              router.push("/(app)/depositions" as any);
+            }
           }
-        } else if (data?.type === "deposit_required" || data?.type === "screenshot_uploaded") {
-          if (agent.role === "admin") {
-            router.push("/(admin)/depositions" as any);
-          } else if (agent.role === "fos") {
-            router.push("/(app)/depositions" as any);
-          }
+        } catch (e: any) {
+          // ✅ FIX: Notification tap handler won't crash the app
+          console.error("[push] Error handling notification response:", e.message);
         }
       }
     );
@@ -162,10 +182,16 @@ function RootLayoutNav() {
         try {
           const token = await registerForPushNotificationsAsync();
           if (token) {
-            await api.savePushToken(token);
-            tokenSavedRef.current = true;
+            try {
+              await api.savePushToken(token);
+              tokenSavedRef.current = true;
+            } catch (_) {
+              // Non-critical: silently ignore
+            }
           }
-        } catch (_) {}
+        } catch (_) {
+          // Non-critical: silently ignore
+        }
       }
     });
     return () => subscription.remove();
