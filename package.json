@@ -14,7 +14,7 @@
     "db:push": "drizzle-kit push",
     "start": "npx expo start",
     "lint": "npx expo lint",
-    "lint:fix": "npx expo lint --fix"
+    "lint:fix": "npx expo lint --fix",
     "homepage": "https://jairajthakur.github.io/Dhanraj"
   },
   "dependencies": {
