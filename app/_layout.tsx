@@ -30,47 +30,27 @@ Notifications.setNotificationHandler({
 });
 
 async function registerForPushNotificationsAsync(): Promise<string | null> {
-  if (__DEV__) {
-    console.log("[push] Skipping push registration in dev mode");
-    return null;
-  }
+  if (__DEV__) return null;
 
   if (Platform.OS === "android") {
     try {
       await Notifications.setNotificationChannelAsync("default", {
         name: "default",
         importance: Notifications.AndroidImportance.MAX,
-        vibrationPattern: [0, 250, 250, 250],
-        lightColor: "#FF231F7C",
-        sound: "default",
       });
-    } catch (e: any) {
-      console.log("[push] Channel setup failed:", e.message);
-    }
+    } catch {}
   }
 
   try {
-    const { status: existingStatus } = await Notifications.getPermissionsAsync();
-    let finalStatus = existingStatus;
-
-    if (existingStatus !== "granted") {
-      const { status } = await Notifications.requestPermissionsAsync();
-      finalStatus = status;
-    }
-
-    if (finalStatus !== "granted") {
-      console.log("[push] Permission denied");
-      return null;
-    }
+    const { status } = await Notifications.requestPermissionsAsync();
+    if (status !== "granted") return null;
 
     const tokenData = await Notifications.getExpoPushTokenAsync({
       projectId: "1b09251a-4423-4759-a22b-fc2f0a44fd8e",
     });
 
-    console.log("[push] Token:", tokenData.data);
     return tokenData.data;
-  } catch (e: any) {
-    console.log("[push] Token error:", e.message);
+  } catch {
     return null;
   }
 }
@@ -84,7 +64,7 @@ function RootLayoutNav() {
   const responseListener = useRef<any>(null);
   const tokenSavedRef = useRef(false);
 
-  // ✅ Save push token when agent logs in
+  // Save push token after login
   useEffect(() => {
     if (!agent || tokenSavedRef.current) return;
 
@@ -94,22 +74,17 @@ function RootLayoutNav() {
         if (token) {
           await api.savePushToken(token);
           tokenSavedRef.current = true;
-          console.log("[push] token saved");
         }
-      } catch (e) {
-        console.log("[push] save token failed");
-      }
+      } catch {}
     };
 
     saveToken();
   }, [agent]);
 
-  // ✅ Notification listeners — mount once, never re-subscribe
+  // Notification listeners
   useEffect(() => {
     notificationListener.current =
-      Notifications.addNotificationReceivedListener((notification) => {
-        console.log("[push] received:", notification.request.content.title);
-      });
+      Notifications.addNotificationReceivedListener(() => {});
 
     responseListener.current =
       Notifications.addNotificationResponseReceivedListener((response) => {
@@ -120,35 +95,22 @@ function RootLayoutNav() {
         if (data?.screen === "dashboard") {
           router.push("/(app)/dashboard");
         }
-
-        if (data?.type === "deposit_required") {
-          if (agent.role === "admin") router.push("/(admin)/depositions");
-          if (agent.role === "fos") router.push("/(app)/depositions");
-        }
       });
 
     return () => {
-      try {
-        notificationListener.current?.remove?.();
-      } catch {}
-
-      try {
-        responseListener.current?.remove?.();
-      } catch {}
-
-      notificationListener.current = null;
-      responseListener.current = null;
+      notificationListener.current?.remove?.();
+      responseListener.current?.remove?.();
     };
   }, []);
 
-  // ✅ AppState listener — use agentRef to avoid re-subscribing on agent change
+  // AppState listener
   const agentRef = useRef(agent);
   useEffect(() => {
     agentRef.current = agent;
   }, [agent]);
 
   useEffect(() => {
-    const subscription = AppState.addEventListener("change", async (state) => {
+    const sub = AppState.addEventListener("change", async (state) => {
       if (state === "active" && agentRef.current && !tokenSavedRef.current) {
         try {
           const token = await registerForPushNotificationsAsync();
@@ -160,38 +122,53 @@ function RootLayoutNav() {
       }
     });
 
-    return () => subscription.remove(); // ✅ Direct call, no optional chaining
-  }, []); // ✅ Empty deps — subscribes once only
+    return () => sub.remove();
+  }, []);
 
-  // ✅ Navigation/auth redirect
+  // Navigation logic
   useEffect(() => {
-    if (!navigationState?.key || isLoading) return;
+    if (!navigationState?.key) return;
 
-    SplashScreen.hideAsync();
+    if (!isLoading) {
+      SplashScreen.hideAsync();
 
-    const inLogin = segments[0] === "login";
-    const inApp = segments[0] === "(app)";
-    const inAdmin = segments[0] === "(admin)";
-    const inRepo = segments[0] === "(repo)";
+      const inLogin = segments[0] === "login";
+      const inApp = segments[0] === "(app)";
+      const inAdmin = segments[0] === "(admin)";
+      const inRepo = segments[0] === "(repo)";
 
-    if (!agent) {
-      if (!inLogin) router.replace("/login");
-    } else if (agent.role === "admin" && !inAdmin) {
-      router.replace("/(admin)");
-    } else if (agent.role === "fos" && !inApp) {
-      router.replace("/(app)/dashboard");
-    } else if (agent.role === "repo" && !inRepo) {
-      router.replace("/(repo)");
+      if (!agent && !inLogin) {
+        router.replace("/login");
+      } else if (agent?.role === "admin" && !inAdmin) {
+        router.replace("/(admin)");
+      } else if (agent?.role === "fos" && !inApp) {
+        router.replace("/(app)/dashboard");
+      } else if (agent?.role === "repo" && !inRepo) {
+        router.replace("/(repo)");
+      }
     }
   }, [agent, isLoading, navigationState?.key]);
 
+  // ✅ FIXED: Always render something
+  if (isLoading) {
+    return (
+      <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
+        <Text>Loading...</Text>
+      </View>
+    );
+  }
+
   return (
     <Stack screenOptions={{ headerShown: false }}>
-      <Stack.Screen name="login" />
-      <Stack.Screen name="(app)" />
-      <Stack.Screen name="(admin)" />
-      <Stack.Screen name="(repo)" />
-      <Stack.Screen name="index" />
+      {!agent ? (
+        <Stack.Screen name="login" />
+      ) : agent.role === "admin" ? (
+        <Stack.Screen name="(admin)" />
+      ) : agent.role === "fos" ? (
+        <Stack.Screen name="(app)" />
+      ) : (
+        <Stack.Screen name="(repo)" />
+      )}
     </Stack>
   );
 }
@@ -204,14 +181,14 @@ export default function RootLayout() {
     Outfit_700Bold,
   });
 
-  useEffect(() => {
-    if (fontsLoaded || fontError) {
-      if ((Text as any).defaultProps == null) (Text as any).defaultProps = {};
-      (Text as any).defaultProps.style = { fontFamily: "Outfit_400Regular" };
-    }
-  }, [fontsLoaded, fontError]);
-
-  if (!fontsLoaded && !fontError) return null;
+  // ✅ FIXED: No more blank screen
+  if (!fontsLoaded && !fontError) {
+    return (
+      <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
+        <Text>Loading...</Text>
+      </View>
+    );
+  }
 
   return (
     <ErrorBoundary>
