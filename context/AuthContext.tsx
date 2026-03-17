@@ -4,110 +4,53 @@ import React, {
   useState,
   useEffect,
   ReactNode,
-  useCallback,
-  useMemo,
 } from "react";
 import { api } from "../lib/api";
 
-interface Agent {
-  id: number;
-  name: string;
-  username: string;
-  role: string;
-  phone?: string;
-}
-
-interface AuthContextValue {
-  agent: Agent | null;
-  isLoading: boolean;
-  login: (username: string, password: string) => Promise<void>;
-  logout: () => Promise<void>;
-}
-
-const AuthContext = createContext<AuthContextValue | null>(null);
+const AuthContext = createContext<any>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [agent, setAgent] = useState<Agent | null>(null);
+  const [agent, setAgent] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    const initAuth = async () => {
-      try {
-        const token =
-          typeof window !== "undefined"
-            ? localStorage.getItem("token")
-            : null;
+    const token = localStorage.getItem("token");
 
-        if (!token) {
-          setAgent(null);
-          return;
-        }
-
-        const data = await api.me();
-        setAgent(data.agent);
-      } catch {
-        if (typeof window !== "undefined") {
-          localStorage.removeItem("token");
-        }
-        setAgent(null);
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    initAuth();
-  }, []);
-
-  const login = useCallback(async (username: string, password: string) => {
-    setIsLoading(true);
-    try {
-      const data = await api.login(username, password);
-
-      if (data?.agent) {
-        setAgent(data.agent);
-      } else {
-        throw new Error("Invalid login response");
-      }
-    } catch (err) {
-      setAgent(null);
-      throw err;
-    } finally {
+    if (!token) {
       setIsLoading(false);
+      return;
     }
-  }, []);
 
-  const logout = useCallback(async () => {
-    setIsLoading(true);
-    try {
-      await api.logout();
-    } catch {
-      // ignore error
-    } finally {
-      if (typeof window !== "undefined") {
+    api
+      .me()
+      .then((res) => setAgent(res.agent))
+      .catch(() => {
         localStorage.removeItem("token");
-      }
-      setAgent(null);
-      setIsLoading(false);
-    }
+        setAgent(null);
+      })
+      .finally(() => setIsLoading(false));
   }, []);
 
-  const value = useMemo(
-    () => ({
-      agent,
-      isLoading,
-      login,
-      logout,
-    }),
-    [agent, isLoading, login, logout]
-  );
+  const login = async (username: string, password: string) => {
+    setIsLoading(true);
+    const res = await api.login(username, password);
+    setAgent(res.agent);
+    setIsLoading(false);
+  };
 
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+  const logout = async () => {
+    await api.logout();
+    localStorage.removeItem("token");
+    setAgent(null);
+  };
+
+  return (
+    <AuthContext.Provider value={{ agent, isLoading, login, logout }}>
+      {children}
+    </AuthContext.Provider>
+  );
 }
 
 export function useAuth() {
-  const ctx = useContext(AuthContext);
-  if (!ctx) {
-    throw new Error("useAuth must be used within AuthProvider");
-  }
-  return ctx;
+  return useContext(AuthContext);
 }
