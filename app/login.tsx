@@ -1,11 +1,20 @@
 import React, { useState } from "react";
 import {
-  View, Text, TextInput, Pressable, StyleSheet, Alert,
-  KeyboardAvoidingView, Platform, ScrollView, ActivityIndicator, Image
+  View,
+  Text,
+  TextInput,
+  Pressable,
+  StyleSheet,
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  ActivityIndicator,
+  Image,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import { useAuth } from "@/context/AuthContext";
+import { useAuth } from "@/contexts/auth-context"; // ✅ FIXED PATH
 import Colors from "@/constants/colors";
 
 const logo = require("@/assets/images/dhanraj-logo.png");
@@ -13,6 +22,7 @@ const logo = require("@/assets/images/dhanraj-logo.png");
 export default function LoginScreen() {
   const insets = useSafeAreaInsets();
   const { login } = useAuth();
+
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [showPass, setShowPass] = useState(false);
@@ -23,7 +33,9 @@ export default function LoginScreen() {
       Alert.alert("Error", "Please enter username and password");
       return;
     }
+
     setLoading(true);
+
     try {
       await login(username.trim(), password.trim());
     } catch (e: any) {
@@ -39,7 +51,13 @@ export default function LoginScreen() {
       behavior={Platform.OS === "ios" ? "padding" : "height"}
     >
       <ScrollView
-        contentContainerStyle={[styles.container, { paddingTop: insets.top + 52, paddingBottom: insets.bottom + 40 }]}
+        contentContainerStyle={[
+          styles.container,
+          {
+            paddingTop: insets.top + 52,
+            paddingBottom: insets.bottom + 40,
+          },
+        ]}
         keyboardShouldPersistTaps="handled"
       >
         <View style={styles.logoSection}>
@@ -73,7 +91,11 @@ export default function LoginScreen() {
 
             <View style={styles.inputWrapper}>
               <View style={styles.inputIconWrap}>
-                <Ionicons name="lock-closed" size={18} color={Colors.primary} />
+                <Ionicons
+                  name="lock-closed"
+                  size={18}
+                  color={Colors.primary}
+                />
               </View>
               <TextInput
                 style={[styles.input, { flex: 1 }]}
@@ -84,14 +106,24 @@ export default function LoginScreen() {
                 secureTextEntry={!showPass}
                 autoCapitalize="none"
               />
-              <Pressable onPress={() => setShowPass(!showPass)} style={styles.eyeBtn}>
-                <Ionicons name={showPass ? "eye-off" : "eye"} size={18} color={Colors.textSecondary} />
+              <Pressable
+                onPress={() => setShowPass(!showPass)}
+                style={styles.eyeBtn}
+              >
+                <Ionicons
+                  name={showPass ? "eye-off" : "eye"}
+                  size={18}
+                  color={Colors.textSecondary}
+                />
               </Pressable>
             </View>
           </View>
 
           <Pressable
-            style={({ pressed }) => [styles.loginBtn, pressed && { opacity: 0.8 }]}
+            style={({ pressed }) => [
+              styles.loginBtn,
+              pressed && { opacity: 0.8 },
+            ]}
             onPress={handleLogin}
             disabled={loading}
           >
@@ -106,7 +138,9 @@ export default function LoginScreen() {
           </Pressable>
         </View>
 
-        <Text style={styles.footer}>Hero FinCorp · FOS Collection System</Text>
+        <Text style={styles.footer}>
+          Hero FinCorp · FOS Collection System
+        </Text>
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -181,7 +215,6 @@ const styles = StyleSheet.create({
     fontSize: 22,
     fontWeight: "800",
     color: Colors.text,
-    letterSpacing: -0.3,
   },
   cardSubtitle: {
     fontSize: 14,
@@ -227,22 +260,15 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     gap: 8,
     marginTop: 4,
-    shadowColor: Colors.primary,
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.5,
-    shadowRadius: 12,
-    elevation: 8,
   },
   loginBtnText: {
     color: "#fff",
     fontSize: 17,
     fontWeight: "800",
-    letterSpacing: 0.3,
   },
   footer: {
     fontSize: 12,
     color: Colors.textMuted,
     textAlign: "center",
-    letterSpacing: 0.5,
   },
 });
