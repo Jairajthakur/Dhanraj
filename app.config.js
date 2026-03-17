@@ -3,6 +3,7 @@ module.exports = ({ config }) => ({
   web: {
     bundler: "webpack",
     output: "static",
+    baseUrl: "/Dhanraj",
   },
   extra: {
     ...config.extra,
