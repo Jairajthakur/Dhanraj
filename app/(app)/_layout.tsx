@@ -6,37 +6,42 @@ import {
 import { Stack, router } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import * as Notifications from "expo-notifications";
-import Constants from "expo-constants";
 import Colors from "@/constants/colors";
 import { useAuth } from "@/context/AuthContext";
 import { api } from "@/lib/api";
 import * as Haptics from "expo-haptics";
 
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: true,
-    shouldSetBadge: true,
-  }),
-});
+// ✅ Only import and configure notifications on native platforms
+if (Platform.OS !== "web") {
+  const Notifications = require("expo-notifications");
+  const Constants = require("expo-constants").default;
 
-// Android: create high-priority notification channel so pushes show as heads-up even when app is closed
-if (Platform.OS === "android") {
-  Notifications.setNotificationChannelAsync("default", {
-    name: "FOS Alerts",
-    importance: Notifications.AndroidImportance.MAX,
-    vibrationPattern: [0, 250, 250, 250],
-    lightColor: "#111111",
-    sound: "default",
-    enableVibrate: true,
-    showBadge: true,
+  Notifications.setNotificationHandler({
+    handleNotification: async () => ({
+      shouldShowAlert: true,
+      shouldPlaySound: true,
+      shouldSetBadge: true,
+    }),
   });
+
+  if (Platform.OS === "android") {
+    Notifications.setNotificationChannelAsync("default", {
+      name: "FOS Alerts",
+      importance: Notifications.AndroidImportance.MAX,
+      vibrationPattern: [0, 250, 250, 250],
+      lightColor: "#111111",
+      sound: "default",
+      enableVibrate: true,
+      showBadge: true,
+    });
+  }
 }
 
 async function registerPushToken() {
+  if (Platform.OS === "web") return; // ✅ already guarded, but be explicit
   try {
-    if (Platform.OS === "web") return;
+    const Notifications = require("expo-notifications");
+    const Constants = require("expo-constants").default;
     const { status: existing } = await Notifications.getPermissionsAsync();
     let finalStatus = existing;
     if (existing !== "granted") {
@@ -131,7 +136,9 @@ function Drawer({ visible, onClose, agentName }: DrawerProps) {
   const [attVisible, setAttVisible] = useState(false);
 
   const handleNav = (item: typeof MENU_ITEMS[0]) => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    if (Platform.OS !== "web") {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    }
     onClose();
     if (item.key === "attendance") {
       setTimeout(() => setAttVisible(true), 300);
@@ -214,7 +221,7 @@ export default function AppLayout() {
   const { agent } = useAuth();
 
   useEffect(() => {
-    registerPushToken();
+    registerPushToken(); // ✅ already guarded inside the function
   }, []);
 
   return (
@@ -280,14 +287,8 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     backgroundColor: Colors.primary + "18",
   },
-  drawerOverlay: {
-    flex: 1,
-    flexDirection: "row",
-  },
-  drawerBackdrop: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.65)",
-  },
+  drawerOverlay: { flex: 1, flexDirection: "row" },
+  drawerBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.65)" },
   drawerContainer: {
     width: "82%",
     maxWidth: 310,
@@ -319,21 +320,9 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: Colors.border,
   },
-  drawerAvatarText: {
-    color: Colors.text,
-    fontSize: 20,
-    fontWeight: "800",
-  },
-  drawerHeaderInfo: {
-    flex: 1,
-    gap: 6,
-  },
-  drawerName: {
-    color: Colors.text,
-    fontSize: 16,
-    fontWeight: "800",
-    letterSpacing: -0.2,
-  },
+  drawerAvatarText: { color: Colors.text, fontSize: 20, fontWeight: "800" },
+  drawerHeaderInfo: { flex: 1, gap: 6 },
+  drawerName: { color: Colors.text, fontSize: 16, fontWeight: "800", letterSpacing: -0.2 },
   drawerRoleBadge: {
     backgroundColor: Colors.border,
     borderRadius: 6,
@@ -341,16 +330,8 @@ const styles = StyleSheet.create({
     paddingVertical: 3,
     alignSelf: "flex-start",
   },
-  drawerRoleText: {
-    color: Colors.textSecondary,
-    fontSize: 11,
-    fontWeight: "700",
-    letterSpacing: 0.5,
-  },
-  drawerMenu: {
-    flex: 1,
-    paddingTop: 8,
-  },
+  drawerRoleText: { color: Colors.textSecondary, fontSize: 11, fontWeight: "700", letterSpacing: 0.5 },
+  drawerMenu: { flex: 1, paddingTop: 8 },
   menuSection: {
     marginHorizontal: 12,
     backgroundColor: Colors.surfaceAlt,
@@ -368,9 +349,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: Colors.border,
   },
-  drawerItemPressed: {
-    backgroundColor: Colors.border,
-  },
+  drawerItemPressed: { backgroundColor: Colors.border },
   drawerIconWrap: {
     width: 32,
     height: 32,
@@ -379,12 +358,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  drawerItemText: {
-    flex: 1,
-    fontSize: 14,
-    color: Colors.text,
-    fontWeight: "600",
-  },
+  drawerItemText: { flex: 1, fontSize: 14, color: Colors.text, fontWeight: "600" },
   modalOverlay: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.65)",
@@ -406,11 +380,7 @@ const styles = StyleSheet.create({
     padding: 20,
     paddingBottom: 18,
   },
-  attTitle: {
-    fontSize: 17,
-    fontWeight: "700",
-    color: Colors.text,
-  },
+  attTitle: { fontSize: 17, fontWeight: "700", color: Colors.text },
   attBtn: {
     flexDirection: "row",
     alignItems: "center",
@@ -418,9 +388,5 @@ const styles = StyleSheet.create({
     gap: 10,
     paddingVertical: 18,
   },
-  attBtnText: {
-    fontSize: 14,
-    fontWeight: "800",
-    letterSpacing: 1,
-  },
+  attBtnText: { fontSize: 14, fontWeight: "800", letterSpacing: 1 },
 });
