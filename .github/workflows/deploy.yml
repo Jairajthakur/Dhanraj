@@ -26,6 +26,7 @@ jobs:
       - name: Install dependencies
         run: |
           npm config set legacy-peer-deps true
+          npm install --package-lock-only
           npm install
 
       - name: Build Expo Web
@@ -44,9 +45,6 @@ jobs:
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
-    permissions:
-      pages: write
-      id-token: write
     steps:
       - name: Deploy to GitHub Pages
         id: deployment
