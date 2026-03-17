@@ -9,6 +9,16 @@ module.exports = ({ config }) => {
     experiments: {
       baseUrl: "/Dhanraj",
     },
+    plugins: [
+      [
+        "expo-font",
+        {
+          fonts: [
+            "./node_modules/@expo-google-fonts/outfit/Outfit_400Regular.ttf"
+          ]
+        }
+      ]
+    ],
     extra: {
       ...config.extra,
       apiUrl: "https://dhanraj-production.up.railway.app",
