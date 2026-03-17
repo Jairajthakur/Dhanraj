@@ -12,7 +12,7 @@ import { StatusBar } from "expo-status-bar";
 import { useFonts, Outfit_400Regular } from "@expo-google-fonts/outfit";
 
 import { queryClient } from "../lib/query-client"; // ✅ FIXED
-import { AuthProvider, useAuth } from "../contexts/Authcontext"; // ✅ FIXED
+import { AuthProvider, useAuth } from "../context/AuthContext"; // ✅ FIXED
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
 SplashScreen.preventAutoHideAsync();
