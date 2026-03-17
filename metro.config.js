@@ -4,20 +4,28 @@ const path = require("path");
 
 const config = getDefaultConfig(__dirname);
 
-// Configure resolver for path aliases
+// ✅ Configure resolver (keep your existing + add nanoid fix)
 config.resolver = {
   ...config.resolver,
   sourceExts: ["ts", "tsx", "js", "jsx", "json", "mjs"],
+
   extraNodeModules: {
     "@": path.resolve(__dirname),
   },
+
+  // 🔥 FIX: nanoid issue for Expo web build
+  alias: {
+    ...(config.resolver.alias || {}),
+    "nanoid/non-secure": "nanoid",
+  },
 };
 
-// Add watchFolders to ensure Metro watches the constants directory
+// ✅ Ensure Metro watches project files
 config.watchFolders = [
   path.resolve(__dirname),
 ];
 
+// ✅ API proxy (your existing setup)
 config.server = {
   enhanceMiddleware: (metroMiddleware) => {
     const apiProxy = createProxyMiddleware({
