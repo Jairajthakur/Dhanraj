@@ -23,16 +23,12 @@ jobs:
         with:
           node-version: 18
 
-      - name: Install patch-package
-        run: npm install patch-package --save-dev --legacy-peer-deps
-
       - name: Install dependencies
         run: npm install --legacy-peer-deps
 
       - name: Build web
         env:
           EXPO_PUBLIC_API_URL: ${{ secrets.EXPO_PUBLIC_API_URL }}
-          PUBLIC_URL: /Dhanraj
         run: npx expo export --platform web
 
       - name: Add .nojekyll
