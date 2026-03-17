@@ -9,38 +9,30 @@ on:
 permissions:
   pages: write
   id-token: write
-  contents: write
+  contents: read
 
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      # ✅ Node setup (NO cache → fixes lock file error)
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
 
-      # ✅ Install dependencies (fix everything)
       - name: Install dependencies
         run: |
           npm config set legacy-peer-deps true
-          npm install patch-package
-          npm install --package-lock-only
           npm install
-          npm install nanoid@3.3.7
 
-      # ✅ Build Expo web
       - name: Build Expo Web
         env:
           EXPO_PUBLIC_API_URL: ${{ secrets.EXPO_PUBLIC_API_URL }}
         run: npx expo export --platform web
 
-      # ✅ Upload build to GitHub Pages
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
@@ -49,8 +41,13 @@ jobs:
   deploy:
     needs: build
     runs-on: ubuntu-latest
-
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    permissions:
+      pages: write
+      id-token: write
     steps:
-      # ✅ Deploy to GitHub Pages
       - name: Deploy to GitHub Pages
+        id: deployment
         uses: actions/deploy-pages@v4
