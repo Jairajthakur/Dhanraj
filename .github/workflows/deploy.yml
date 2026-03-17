@@ -18,23 +18,27 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
+      # ✅ Node 20 (fixes toReversed error)
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm   # ⚡ faster builds
 
+      # ✅ Install dependencies (fix lock + peer deps + nanoid)
       - name: Install dependencies
         run: |
           npm config set legacy-peer-deps true
+          npm install --package-lock-only
           npm install
           npm install nanoid@3.3.7
 
+      # ✅ Build Expo Web
       - name: Build Expo Web
         env:
           EXPO_PUBLIC_API_URL: ${{ secrets.EXPO_PUBLIC_API_URL }}
         run: npx expo export --platform web
 
+      # ✅ Upload build for GitHub Pages
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
@@ -45,5 +49,6 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # ✅ Deploy to GitHub Pages
       - name: Deploy to GitHub Pages
         uses: actions/deploy-pages@v4
