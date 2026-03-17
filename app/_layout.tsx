@@ -43,10 +43,17 @@ function RootLayoutNav() {
     }
   }, [agent, isLoading, navigationState?.key]);
 
-  if (isLoading || !navigationState?.key) {
+  if (isLoading) {
     return (
-      <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
-        <Text>Loading...</Text>
+      <View
+        style={{
+          flex: 1,
+          justifyContent: "center",
+          alignItems: "center",
+          backgroundColor: "#ECEAE4",
+        }}
+      >
+        <Text style={{ color: "#0D0D0D" }}>Loading...</Text>
       </View>
     );
   }
