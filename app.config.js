@@ -14,10 +14,12 @@ module.exports = ({ config }) => {
         "expo-font",
         {
           fonts: [
-            "./node_modules/@expo-google-fonts/outfit/Outfit_400Regular.ttf"
-          ]
-        }
-      ]
+            "./node_modules/@expo-google-fonts/outfit/Outfit_400Regular.ttf",
+            "./node_modules/@expo/vector-icons/build/vendor/react-native-vector-icons/Fonts/Ionicons.ttf",
+            "./node_modules/@expo/vector-icons/build/vendor/react-native-vector-icons/Fonts/MaterialIcons.ttf",
+          ],
+        },
+      ],
     ],
     extra: {
       ...config.extra,
