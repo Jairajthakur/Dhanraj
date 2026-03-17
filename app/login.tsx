@@ -14,7 +14,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import { useAuth } from "@/contexts/auth-context"; // ✅ FIXED PATH
+import { useAuth } from "@/context/AuthContext"; // ✅ FIXED PATH
 import Colors from "@/constants/colors";
 
 const logo = require("@/assets/images/dhanraj-logo.png");
