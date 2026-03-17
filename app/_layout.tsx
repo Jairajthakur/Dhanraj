@@ -21,6 +21,7 @@ import { api } from "@/lib/api";
 
 SplashScreen.preventAutoHideAsync();
 
+// Notification handler
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
     shouldShowAlert: true,
@@ -29,8 +30,9 @@ Notifications.setNotificationHandler({
   }),
 });
 
+// Push token function (safe for web)
 async function registerForPushNotificationsAsync(): Promise<string | null> {
-  if (__DEV__) return null;
+  if (__DEV__ || Platform.OS === "web") return null;
 
   if (Platform.OS === "android") {
     try {
@@ -60,8 +62,6 @@ function RootLayoutNav() {
   const segments = useSegments();
   const navigationState = useRootNavigationState();
 
-  const notificationListener = useRef<any>(null);
-  const responseListener = useRef<any>(null);
   const tokenSavedRef = useRef(false);
 
   // Save push token after login
@@ -80,28 +80,6 @@ function RootLayoutNav() {
 
     saveToken();
   }, [agent]);
-
-  // Notification listeners
-  useEffect(() => {
-    notificationListener.current =
-      Notifications.addNotificationReceivedListener(() => {});
-
-    responseListener.current =
-      Notifications.addNotificationResponseReceivedListener((response) => {
-        const data = response.notification.request.content.data as any;
-
-        if (!agent) return;
-
-        if (data?.screen === "dashboard") {
-          router.push("/(app)/dashboard");
-        }
-      });
-
-    return () => {
-      notificationListener.current?.remove?.();
-      responseListener.current?.remove?.();
-    };
-  }, []);
 
   // AppState listener
   const agentRef = useRef(agent);
@@ -125,31 +103,36 @@ function RootLayoutNav() {
     return () => sub.remove();
   }, []);
 
-  // Navigation logic
+  // Navigation logic (FIXED)
   useEffect(() => {
-    if (!navigationState?.key) return;
+    if (!navigationState?.key || isLoading) return;
 
-    if (!isLoading) {
-      SplashScreen.hideAsync();
+    SplashScreen.hideAsync();
 
-      const inLogin = segments[0] === "login";
-      const inApp = segments[0] === "(app)";
-      const inAdmin = segments[0] === "(admin)";
-      const inRepo = segments[0] === "(repo)";
+    const inLogin = segments[0] === "login";
 
-      if (!agent && !inLogin) {
-        router.replace("/login");
-      } else if (agent?.role === "admin" && !inAdmin) {
-        router.replace("/(admin)");
-      } else if (agent?.role === "fos" && !inApp) {
-        router.replace("/(app)/dashboard");
-      } else if (agent?.role === "repo" && !inRepo) {
-        router.replace("/(repo)");
-      }
+    if (!agent && !inLogin) {
+      router.replace("/login");
+      return;
+    }
+
+    if (agent?.role === "admin") {
+      router.replace("/(admin)");
+      return;
+    }
+
+    if (agent?.role === "fos") {
+      router.replace("/(app)/dashboard");
+      return;
+    }
+
+    if (agent?.role === "repo") {
+      router.replace("/(repo)");
+      return;
     }
   }, [agent, isLoading, navigationState?.key]);
 
-  // ✅ FIXED: Always render something
+  // ✅ CRITICAL FIX: Never return empty
   if (isLoading) {
     return (
       <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
@@ -160,15 +143,11 @@ function RootLayoutNav() {
 
   return (
     <Stack screenOptions={{ headerShown: false }}>
-      {!agent ? (
-        <Stack.Screen name="login" />
-      ) : agent.role === "admin" ? (
-        <Stack.Screen name="(admin)" />
-      ) : agent.role === "fos" ? (
-        <Stack.Screen name="(app)" />
-      ) : (
-        <Stack.Screen name="(repo)" />
-      )}
+      <Stack.Screen name="login" />
+      <Stack.Screen name="(app)" />
+      <Stack.Screen name="(admin)" />
+      <Stack.Screen name="(repo)" />
+      <Stack.Screen name="index" />
     </Stack>
   );
 }
@@ -181,7 +160,7 @@ export default function RootLayout() {
     Outfit_700Bold,
   });
 
-  // ✅ FIXED: No more blank screen
+  // ✅ Prevent blank screen during font load
   if (!fontsLoaded && !fontError) {
     return (
       <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
