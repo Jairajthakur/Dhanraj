@@ -31,9 +31,12 @@
       }
     },
 
-    "web": {
-      "favicon": "./assets/images/dhanraj-logo.png"
-    },
+  "web": {
+  "favicon": "./assets/images/dhanraj-logo.png",
+  "bundler": "metro",
+  "output": "static",
+  "baseUrl": "/Dhanraj/"
+}
 
     "plugins": [
       "expo-router",
