@@ -10,9 +10,8 @@ import React, { useEffect } from "react";
 import { Text, View } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import { useFonts, Outfit_400Regular } from "@expo-google-fonts/outfit";
-
-import { queryClient } from "../lib/query-client"; // ✅ FIXED
-import { AuthProvider, useAuth } from "../context/AuthContext"; // ✅ FIXED
+import { queryClient } from "../lib/query-client";
+import { AuthProvider, useAuth } from "../context/AuthContext";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
 SplashScreen.preventAutoHideAsync();
@@ -25,25 +24,19 @@ function RootLayoutNav() {
   useEffect(() => {
     if (!navigationState?.key || isLoading) return;
 
-    SplashScreen.hideAsync();
-
     const inLogin = segments[0] === "login";
-
     if (!agent && !inLogin) {
       router.replace("/login");
       return;
     }
-
     if (agent?.role === "admin") {
       router.replace("/(admin)");
       return;
     }
-
     if (agent?.role === "fos") {
       router.replace("/(app)/dashboard");
       return;
     }
-
     if (agent?.role === "repo") {
       router.replace("/(repo)");
       return;
@@ -52,13 +45,7 @@ function RootLayoutNav() {
 
   if (isLoading) {
     return (
-      <View
-        style={{
-          flex: 1,
-          justifyContent: "center",
-          alignItems: "center",
-        }}
-      >
+      <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
         <Text>Loading...</Text>
       </View>
     );
@@ -76,22 +63,20 @@ function RootLayoutNav() {
 }
 
 export default function RootLayout() {
-  const [fontsLoaded] = useFonts({
+  const [fontsLoaded, fontError] = useFonts({
     Outfit_400Regular,
   });
 
-  if (!fontsLoaded) {
-    return (
-      <View
-        style={{
-          flex: 1,
-          justifyContent: "center",
-          alignItems: "center",
-        }}
-      >
-        <Text>Loading Fonts...</Text>
-      </View>
-    );
+  const appReady = fontsLoaded || !!fontError;
+
+  useEffect(() => {
+    if (appReady) {
+      SplashScreen.hideAsync();
+    }
+  }, [appReady]);
+
+  if (!appReady) {
+    return null;
   }
 
   return (
