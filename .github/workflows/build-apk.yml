@@ -1,64 +1,74 @@
 name: Build Android APK
+
 on:
-  push:
-    branches:
-      - main
-  workflow_dispatch:
+  workflow_dispatch:   # ✅ manual trigger (recommended)
+  # push:
+  #   branches: [main]   # ❌ avoid auto build (heavy)
+
 jobs:
   build:
     name: Build APK
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # ✅ Node setup with caching
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
+          cache: npm
 
+      # ✅ Java setup
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: 17
 
+      # ✅ Android SDK
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
+      # ✅ Gradle memory optimization
       - name: Configure Gradle memory
         run: |
           mkdir -p ~/.gradle
           echo "org.gradle.jvmargs=-Xmx6g -XX:MaxMetaspaceSize=1g -XX:+HeapDumpOnOutOfMemoryError" >> ~/.gradle/gradle.properties
           echo "kotlin.daemon.jvm.options=-Xmx4g -XX:MaxMetaspaceSize=1g" >> ~/.gradle/gradle.properties
 
+      # ✅ Install dependencies (with nanoid fix)
       - name: Install dependencies
-        run: npm install --legacy-peer-deps
+        run: |
+          npm config set legacy-peer-deps true
+          npm install
+          npm install nanoid@3.3.7
 
-      - name: Install expo-cli explicitly
-        run: npm install @expo/cli --legacy-peer-deps
-
+      # ✅ Setup EAS
       - name: Setup EAS
         uses: expo/expo-github-action@v8
         with:
           eas-version: latest
           token: ${{ secrets.EXPO_TOKEN }}
 
+      # ✅ Expo prebuild
       - name: Expo prebuild
         run: npx expo prebuild --platform android --clean
         env:
           EXPO_PUBLIC_API_URL: https://dhanraj-production.up.railway.app
 
+      # ✅ Build APK (improved logging)
       - name: Build APK
         run: |
           cd android
           chmod +x gradlew
-          ./gradlew assembleRelease --no-daemon \
-            -Dorg.gradle.jvmargs="-Xmx6g -XX:MaxMetaspaceSize=1g -XX:+HeapDumpOnOutOfMemoryError" \
-            -Dkotlin.daemon.jvm.options="-Xmx4g -XX:MaxMetaspaceSize=1g"
+          ./gradlew assembleRelease --stacktrace --no-daemon
         env:
           EXPO_PUBLIC_API_URL: https://dhanraj-production.up.railway.app
 
+      # ✅ Upload APK
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
