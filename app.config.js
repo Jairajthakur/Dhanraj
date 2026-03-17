@@ -5,6 +5,8 @@ module.exports = ({ config }) => {
     web: {
       bundler: "metro",
       output: "static",
+    },
+    experiments: {
       baseUrl: "/Dhanraj",
     },
     extra: {
