@@ -9,18 +9,25 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+
     permissions:
       contents: write
       pages: write
       id-token: write
+
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
 
+      # ✅ FIX: Use Node 20 (VERY IMPORTANT)
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 18
+          node-version: 20
+
+      # Optional but recommended for Expo stability
+      - name: Install Expo CLI
+        run: npm install -g expo-cli
 
       - name: Install dependencies
         run: npm install
