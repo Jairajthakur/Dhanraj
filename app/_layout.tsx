@@ -1,13 +1,18 @@
 import { QueryClientProvider } from "@tanstack/react-query";
-import { Stack, router, useSegments, useRootNavigationState } from "expo-router";
+import {
+  Stack,
+  router,
+  useSegments,
+  useRootNavigationState,
+} from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import React, { useEffect } from "react";
 import { Text, View } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import { useFonts, Outfit_400Regular } from "@expo-google-fonts/outfit";
 
-import { queryClient } from "@/lib/query-client";
-import { AuthProvider, useAuth } from "@/contexts/auth-context";
+import { queryClient } from "../lib/query-client"; // ✅ FIXED
+import { AuthProvider, useAuth } from "../contexts/auth-context"; // ✅ FIXED
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
 SplashScreen.preventAutoHideAsync();
@@ -26,24 +31,34 @@ function RootLayoutNav() {
 
     if (!agent && !inLogin) {
       router.replace("/login");
+      return;
     }
 
     if (agent?.role === "admin") {
       router.replace("/(admin)");
+      return;
     }
 
     if (agent?.role === "fos") {
       router.replace("/(app)/dashboard");
+      return;
     }
 
     if (agent?.role === "repo") {
       router.replace("/(repo)");
+      return;
     }
   }, [agent, isLoading, navigationState?.key]);
 
   if (isLoading) {
     return (
-      <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
+      <View
+        style={{
+          flex: 1,
+          justifyContent: "center",
+          alignItems: "center",
+        }}
+      >
         <Text>Loading...</Text>
       </View>
     );
@@ -67,8 +82,14 @@ export default function RootLayout() {
 
   if (!fontsLoaded) {
     return (
-      <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
-        <Text>Loading...</Text>
+      <View
+        style={{
+          flex: 1,
+          justifyContent: "center",
+          alignItems: "center",
+        }}
+      >
+        <Text>Loading Fonts...</Text>
       </View>
     );
   }
