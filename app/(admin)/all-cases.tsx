@@ -170,6 +170,8 @@ export default function AllCasesScreen() {
   const [statusFilter, setStatusFilter] = useState("All");
   const [selectedCase, setSelectedCase] = useState<any>(null);
   const [resettingAgent, setResettingAgent] = useState<number | null>(null);
+  const [agentCasesModal, setAgentCasesModal] = useState<{ agentId: number; agentName: string; cases: any[] } | null>(null);
+  const [resettingCaseId, setResettingCaseId] = useState<number | null>(null);
 
   const { data, isLoading } = useQuery({
     queryKey: ["/api/admin/cases"],
@@ -326,28 +328,32 @@ export default function AllCasesScreen() {
                   </View>
                   <Text style={styles.resetPanelSub}>Tap an agent to reset all their feedback so they can re-submit</Text>
                   {agentGroups.map((ag) => (
-                    <View key={ag.agentId} style={styles.agentResetRow}>
+                    <Pressable
+                      key={ag.agentId}
+                      style={styles.agentResetRow}
+                      onPress={() => {
+                        const agentCases = (data?.cases || []).filter((c: any) => c.agent_id === ag.agentId);
+                        setAgentCasesModal({ agentId: ag.agentId, agentName: ag.agentName, cases: agentCases });
+                      }}
+                    >
                       <View style={styles.agentResetInfo}>
                         <Text style={styles.agentResetName}>{ag.agentName}</Text>
                         <Text style={styles.agentResetCount}>
-                          {ag.feedbackCount}/{ag.count} feedback given
+                          {ag.feedbackCount}/{ag.count} feedback given · tap to view cases
                         </Text>
                       </View>
                       {ag.feedbackCount > 0 ? (
                         <Pressable
-                          style={[
-                            styles.resetBtn,
-                            resettingAgent === ag.agentId && { opacity: 0.5 },
-                          ]}
-                          onPress={() => handleResetAgentFeedback(ag.agentId, ag.agentName)}
+                          style={[styles.resetBtn, resettingAgent === ag.agentId && { opacity: 0.5 }]}
+                          onPress={(e) => {
+                            e.stopPropagation?.();
+                            handleResetAgentFeedback(ag.agentId, ag.agentName);
+                          }}
                           disabled={resettingAgent === ag.agentId}
                         >
                           {resettingAgent === ag.agentId
                             ? <ActivityIndicator size="small" color="#fff" />
-                            : <>
-                                <Ionicons name="refresh" size={13} color="#fff" />
-                                <Text style={styles.resetBtnText}>Reset All</Text>
-                              </>
+                            : <><Ionicons name="refresh" size={13} color="#fff" /><Text style={styles.resetBtnText}>Reset All</Text></>
                           }
                         </Pressable>
                       ) : (
@@ -355,7 +361,8 @@ export default function AllCasesScreen() {
                           <Text style={styles.noFeedbackBadgeText}>No feedback</Text>
                         </View>
                       )}
-                    </View>
+                      <Ionicons name="chevron-forward" size={14} color={Colors.textMuted} style={{ marginLeft: 4 }} />
+                    </Pressable>
                   ))}
                 </View>
               )}
@@ -450,6 +457,120 @@ export default function AllCasesScreen() {
         onClose={() => setSelectedCase(null)}
         onResetCase={handleResetCase}
       />
+
+      {/* ✅ Agent Case-wise Reset Modal */}
+      {agentCasesModal && (
+        <Modal visible={true} transparent={false} animationType="slide" onRequestClose={() => setAgentCasesModal(null)}>
+          <View style={{ flex: 1, backgroundColor: Colors.background }}>
+            {/* Header */}
+            <View style={agentModalStyles.header}>
+              <Pressable onPress={() => setAgentCasesModal(null)} style={{ padding: 8 }}>
+                <Ionicons name="arrow-back" size={22} color={Colors.text} />
+              </Pressable>
+              <View style={{ flex: 1 }}>
+                <Text style={agentModalStyles.headerTitle}>{agentCasesModal.agentName}</Text>
+                <Text style={agentModalStyles.headerSub}>{agentCasesModal.cases.length} cases · tap case to reset feedback</Text>
+              </View>
+              <Pressable
+                style={[agentModalStyles.resetAllBtn, resettingAgent === agentCasesModal.agentId && { opacity: 0.5 }]}
+                onPress={() => handleResetAgentFeedback(agentCasesModal.agentId, agentCasesModal.agentName)}
+                disabled={resettingAgent === agentCasesModal.agentId}
+              >
+                {resettingAgent === agentCasesModal.agentId
+                  ? <ActivityIndicator size="small" color="#fff" />
+                  : <Text style={agentModalStyles.resetAllBtnText}>Reset All</Text>}
+              </Pressable>
+            </View>
+
+            <FlatList
+              data={agentCasesModal.cases}
+              keyExtractor={(item) => String(item.id)}
+              contentContainerStyle={{ padding: 12, gap: 10 }}
+              renderItem={({ item }) => {
+                const hasFeedback = !!(item.latest_feedback || item.feedback_code);
+                const statusColor = STATUS_COLORS[item.status] || Colors.textMuted;
+                return (
+                  <View style={agentModalStyles.caseRow}>
+                    <View style={agentModalStyles.caseInfo}>
+                      <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                        <Text style={agentModalStyles.caseName} numberOfLines={1}>{item.customer_name}</Text>
+                        <View style={[agentModalStyles.statusBadge, { backgroundColor: statusColor + "22" }]}>
+                          <Text style={[agentModalStyles.statusText, { color: statusColor }]}>{item.status}</Text>
+                        </View>
+                      </View>
+                      <Text style={agentModalStyles.caseLoan}>{item.loan_no}</Text>
+                      {hasFeedback && (
+                        <Text style={agentModalStyles.caseFeedback} numberOfLines={1}>
+                          {item.feedback_code ? item.feedback_code + " · " : ""}{item.latest_feedback || ""}
+                        </Text>
+                      )}
+                    </View>
+                    {hasFeedback ? (
+                      <Pressable
+                        style={[agentModalStyles.resetCaseBtn, resettingCaseId === item.id && { opacity: 0.5 }]}
+                        disabled={resettingCaseId === item.id}
+                        onPress={() => {
+                          Alert.alert(
+                            "Reset Feedback",
+                            `Reset feedback for ${item.customer_name}? Status will be set to Unpaid.`,
+                            [
+                              { text: "Cancel", style: "cancel" },
+                              {
+                                text: "Reset", style: "destructive",
+                                onPress: async () => {
+                                  setResettingCaseId(item.id);
+                                  try {
+                                    const url = new URL(`/api/admin/reset-feedback/case/${item.id}`, getApiUrl()).toString();
+                                    const res = await expoFetch(url, {
+                                      method: "POST", credentials: "include",
+                                      headers: { "Content-Type": "application/json" },
+                                      body: JSON.stringify({ table: "loan" }),
+                                    });
+                                    const json: any = await res.json();
+                                    if (!res.ok) throw new Error(json.message || "Reset failed");
+                                    qc.invalidateQueries({ queryKey: ["/api/admin/cases"] });
+                                    // Update modal cases list
+                                    setAgentCasesModal(prev => prev ? {
+                                      ...prev,
+                                      cases: prev.cases.map(c => c.id === item.id
+                                        ? { ...c, latest_feedback: null, feedback_code: null, status: "Unpaid" }
+                                        : c
+                                      )
+                                    } : null);
+                                    Alert.alert("Done", "Feedback reset successfully.");
+                                  } catch (e: any) {
+                                    Alert.alert("Error", e.message);
+                                  } finally {
+                                    setResettingCaseId(null);
+                                  }
+                                },
+                              },
+                            ]
+                          );
+                        }}
+                      >
+                        {resettingCaseId === item.id
+                          ? <ActivityIndicator size="small" color="#fff" />
+                          : <><Ionicons name="refresh" size={13} color="#fff" /><Text style={agentModalStyles.resetCaseBtnText}>Reset</Text></>
+                        }
+                      </Pressable>
+                    ) : (
+                      <View style={agentModalStyles.noFeedbackTag}>
+                        <Text style={agentModalStyles.noFeedbackTagText}>No feedback</Text>
+                      </View>
+                    )}
+                  </View>
+                );
+              }}
+              ListEmptyComponent={
+                <View style={{ flex: 1, alignItems: "center", paddingTop: 60 }}>
+                  <Text style={{ color: Colors.textMuted }}>No cases found</Text>
+                </View>
+              }
+            />
+          </View>
+        </Modal>
+      )}
     </View>
   );
 }
@@ -531,6 +652,44 @@ const styles = StyleSheet.create({
   viewDetailText: { fontSize: 11, color: Colors.primary, fontWeight: "600" },
   empty: { flex: 1, justifyContent: "center", alignItems: "center", gap: 12, paddingVertical: 60 },
   emptyText: { fontSize: 15, color: Colors.textMuted, textAlign: "center" },
+});
+
+const agentModalStyles = StyleSheet.create({
+  header: {
+    flexDirection: "row", alignItems: "center", gap: 12,
+    padding: 16, backgroundColor: Colors.surface,
+    borderBottomWidth: 1, borderBottomColor: Colors.border,
+    paddingTop: 52,
+  },
+  headerTitle: { fontSize: 16, fontWeight: "700", color: Colors.text },
+  headerSub: { fontSize: 11, color: Colors.textSecondary, marginTop: 2 },
+  resetAllBtn: {
+    backgroundColor: Colors.danger, borderRadius: 8,
+    paddingHorizontal: 12, paddingVertical: 8,
+  },
+  resetAllBtnText: { fontSize: 12, fontWeight: "700", color: "#fff" },
+  caseRow: {
+    flexDirection: "row", alignItems: "center", gap: 12,
+    backgroundColor: Colors.surface, borderRadius: 12, padding: 14,
+    borderWidth: 1, borderColor: Colors.border,
+  },
+  caseInfo: { flex: 1 },
+  caseName: { fontSize: 13, fontWeight: "700", color: Colors.text, textTransform: "uppercase", flex: 1 },
+  caseLoan: { fontSize: 11, color: Colors.textSecondary, marginBottom: 2 },
+  caseFeedback: { fontSize: 11, color: Colors.accent, fontStyle: "italic" },
+  statusBadge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10 },
+  statusText: { fontSize: 10, fontWeight: "700" },
+  resetCaseBtn: {
+    flexDirection: "row", alignItems: "center", gap: 5,
+    backgroundColor: Colors.danger, borderRadius: 8,
+    paddingHorizontal: 10, paddingVertical: 8, minWidth: 70, justifyContent: "center",
+  },
+  resetCaseBtnText: { fontSize: 12, fontWeight: "700", color: "#fff" },
+  noFeedbackTag: {
+    backgroundColor: Colors.surfaceAlt, borderRadius: 8,
+    paddingHorizontal: 10, paddingVertical: 8,
+  },
+  noFeedbackTagText: { fontSize: 11, color: Colors.textMuted, fontWeight: "600" },
 });
 
 const detailStyles = StyleSheet.create({
