@@ -7,7 +7,7 @@ import {
 } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import React, { useEffect } from "react";
-import { Text, View } from "react-native";
+import { Text, View, Platform } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import { useFonts, Outfit_400Regular } from "@expo-google-fonts/outfit";
 import { queryClient } from "../lib/query-client";
@@ -43,7 +43,7 @@ function RootLayoutNav() {
     }
   }, [agent, isLoading, navigationState?.key]);
 
-  if (isLoading) {
+  if (isLoading || !navigationState?.key) {
     return (
       <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
         <Text>Loading...</Text>
@@ -58,16 +58,19 @@ function RootLayoutNav() {
       <Stack.Screen name="(app)" />
       <Stack.Screen name="(admin)" />
       <Stack.Screen name="(repo)" />
+      <Stack.Screen name="(tabs)" />
     </Stack>
   );
 }
 
 export default function RootLayout() {
-  const [fontsLoaded, fontError] = useFonts({
-    Outfit_400Regular,
-  });
+  const [fontsLoaded, fontError] = useFonts(
+    Platform.OS === "web"
+      ? {}
+      : { Outfit_400Regular }
+  );
 
-  const appReady = fontsLoaded || !!fontError;
+  const appReady = Platform.OS === "web" ? true : (fontsLoaded || !!fontError);
 
   useEffect(() => {
     if (appReady) {
