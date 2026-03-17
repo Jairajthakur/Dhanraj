@@ -3,7 +3,6 @@
   "main": "expo-router/entry",
   "version": "1.0.0",
   "private": true,
-
   "scripts": {
     "postinstall": "patch-package",
     "expo:dev": "EXPO_PACKAGER_PROXY_URL=https://$REPLIT_DEV_DOMAIN REACT_NATIVE_PACKAGER_HOSTNAME=$REPLIT_DEV_DOMAIN EXPO_PUBLIC_DOMAIN=$REPLIT_DEV_DOMAIN:5000 npx expo start --localhost",
@@ -17,7 +16,6 @@
     "lint": "npx expo lint",
     "lint:fix": "npx expo lint --fix"
   },
-
   "dependencies": {
     "@expo-google-fonts/outfit": "^0.4.3",
     "@expo/vector-icons": "^15.0.3",
@@ -76,7 +74,6 @@
     "zod": "^3.24.2",
     "zod-validation-error": "^3.4.0"
   },
-
   "devDependencies": {
     "@babel/core": "^7.25.2",
     "@expo/ngrok": "^4.1.0",
@@ -89,8 +86,7 @@
     "patch-package": "^8.0.0",
     "typescript": "~5.9.2"
   },
-
   "overrides": {
-    "nanoid": "3.3.7"
+    "nanoid": "^3.3.7"
   }
 }
