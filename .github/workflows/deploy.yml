@@ -22,11 +22,11 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "18"
+          cache: ""
 
       - name: Install dependencies
-        run: |
-          npm install --ignore-scripts --no-package-lock
-          
+        run: npm install --ignore-scripts --no-package-lock
+
       - name: Build web
         env:
           EXPO_PUBLIC_API_URL: ${{ secrets.EXPO_PUBLIC_API_URL }}
