@@ -19,6 +19,20 @@ const STATUS_COLORS: Record<string, string> = {
 
 // ✅ Detail feedback options per status
 const PAID_DETAIL_OPTIONS = ["PAID", "PART PAYMENT", "SETTLED"];
+const UNPAID_DETAIL_OPTIONS = [
+  "CUSTOMER ALREADY PAID",
+  "CUSTOMER & VEHICLE SKIP",
+  "PROMISS TO PAY",
+  "CUSTOMER SHIFTED TO PUNE & CALL RECIVED SAY PTP",
+  "CUSTOMER WORKING FROM SUGARCANE HARVESTING/SKIP",
+  "CUSTOMER & VEHICLE SKIP BUT PHONE CALL RECIVED AND PTP",
+  "CUSTOMER WORKING FROM HYD & VEHICLE SKIP",
+  "CUSTOMER WORKING FROM PUNE",
+  "CUSTOMER SAY VEHICLE ISSUE & NOT READY TO PAY EMI",
+  "CUSTOMER INTENATIONALLY DEFULTER",
+  "CUSTOMER VEHICLE SOMEONE MORTGAGE & CUSTOMER SKIP",
+  "CUSTOMER SHIFTED TO TELANGANA & VEHICLE SKIP",
+];
 const PTP_DETAIL_OPTIONS = ["PTP DATE SET", "WILL PAY TOMORROW", "WILL ARRANGE FUNDS", "CALL LATER"];
 
 const FEEDBACK_CODES = ["PAID", "RTP", "SKIP", "PTP", "CAVNA", "ANF", "EXP", "SFT", "VSL"];
@@ -343,7 +357,7 @@ function FeedbackModal({ visible, caseItem, onClose, onSave, isLocked = false }:
                     </View>
                   </ScrollView>
 
-                  {/* Detail Feedback — PTP options if feedback code is PTP, else free text */}
+                  {/* Detail Feedback — PTP options if feedback code is PTP, else unpaid options */}
                   <Text style={fbStyles.sectionLabel}>Detail Feedback</Text>
                   {feedbackCode === "PTP" ? (
                     <>
@@ -359,15 +373,18 @@ function FeedbackModal({ visible, caseItem, onClose, onSave, isLocked = false }:
                       />
                     </>
                   ) : (
-                    <TextInput
-                      style={fbStyles.commentInput}
-                      placeholder="Enter details feedback..."
-                      placeholderTextColor={Colors.textMuted}
-                      value={detailFeedback}
-                      onChangeText={setDetailFeedback}
-                      multiline
-                      numberOfLines={3}
-                    />
+                    <>
+                      {renderDetailOptions(UNPAID_DETAIL_OPTIONS, Colors.statusUnpaid)}
+                      <TextInput
+                        style={[fbStyles.commentInput, { minHeight: 44 }]}
+                        placeholder="Or type custom feedback..."
+                        placeholderTextColor={Colors.textMuted}
+                        value={detailFeedback && !UNPAID_DETAIL_OPTIONS.includes(detailFeedback) ? detailFeedback : ""}
+                        onChangeText={(t) => setDetailFeedback(t)}
+                        multiline
+                        numberOfLines={2}
+                      />
+                    </>
                   )}
 
                   {/* Projection */}
