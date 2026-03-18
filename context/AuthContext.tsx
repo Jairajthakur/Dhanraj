@@ -35,35 +35,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [agent, setAgent] = useState<Agent | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  // ─── Initial Auth Check ───────────────────────────────────────────────────
+  // ─── Initial Auth Check ─────────────────────────────────────────────────
   useEffect(() => {
     let cancelled = false;
 
     const bootstrap = async () => {
       try {
-        // Step 1: Show cached agent immediately (fast path — no flash)
+        // Step 1: Load cached agent immediately (instant UI — no flash)
         const cached = await agentCache.get();
         if (cached && !cancelled) {
           setAgent(cached);
         }
 
-        // Step 2: Verify with server in background
+        // Step 2: Verify session with server in background
         const res = await api.me();
         if (!cancelled && res?.agent) {
           setAgent(res.agent);
           await agentCache.set(res.agent);
         }
-      } catch (e: any) {
-        // Server says not authenticated
+      } catch {
         if (!cancelled) {
           const cached = await agentCache.get();
-          // On native: keep cached agent if server unreachable (offline support)
-          // On web: always trust server response
           if (Platform.OS === "web" || !cached) {
+            // Web: always trust server; Native with no cache: clear
             await agentCache.clear();
             setAgent(null);
           }
-          // If native + cached exists: keep agent (already set above)
+          // Native + cached: keep agent (offline tolerance)
         }
       } finally {
         if (!cancelled) setIsLoading(false);
@@ -73,7 +71,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // Safety net — never stay stuck on loading screen
     const timeout = setTimeout(() => {
       if (!cancelled) {
-        console.warn("[Auth] Bootstrap timed out — forcing isLoading=false");
+        console.warn("[Auth] Bootstrap timed out — forcing ready");
         setIsLoading(false);
       }
     }, 6000);
@@ -86,29 +84,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  // ─── Re-validate on App Foreground ───────────────────────────────────────
+  // ─── Re-validate when app comes to foreground ───────────────────────────
   useEffect(() => {
     if (Platform.OS === "web") return;
 
     const handleAppStateChange = async (nextState: AppStateStatus) => {
       if (nextState !== "active") return;
-
       try {
         const cached = await agentCache.get();
-        if (!cached) return; // not logged in, skip
-
+        if (!cached) return;
         const res = await api.me();
         if (res?.agent) {
           setAgent(res.agent);
           await agentCache.set(res.agent);
         }
       } catch {
-        // Session expired while app was in background
-        const cached = await agentCache.get();
-        if (!cached) {
-          setAgent(null);
-        }
-        // If still cached, keep user logged in (offline tolerance)
+        // Keep existing agent on network error (offline tolerance)
       }
     };
 
@@ -116,7 +107,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => subscription.remove();
   }, []);
 
-  // ─── Login ────────────────────────────────────────────────────────────────
+  // ─── Login ──────────────────────────────────────────────────────────────
   const login = async (username: string, password: string) => {
     setIsLoading(true);
     try {
@@ -129,13 +120,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  // ─── Logout ───────────────────────────────────────────────────────────────
+  // ─── Logout ─────────────────────────────────────────────────────────────
   const logout = async () => {
     try {
       await api.logout();
-    } catch (_) {
-      // Even if server call fails, clear local state
-    } finally {
+    } catch (_) {}
+    finally {
       await agentCache.clear();
       setAgent(null);
     }
