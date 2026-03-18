@@ -17,8 +17,6 @@ import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "@/context/AuthContext";
 import Colors from "@/constants/colors";
 
-const logo = require("@/assets/images/dhanraj-logo.png");
-
 export default function LoginScreen() {
   const insets = useSafeAreaInsets();
   const { login } = useAuth();
@@ -27,6 +25,11 @@ export default function LoginScreen() {
   const [password, setPassword] = useState("");
   const [showPass, setShowPass] = useState(false);
   const [loading, setLoading] = useState(false);
+
+  // ← moved inside component, safe for SSR
+  const logo = Platform.OS === "web"
+    ? { uri: "/Dhanraj/assets/dhanraj-logo.png" }
+    : require("@/assets/images/dhanraj-logo.png");
 
   const handleLogin = async () => {
     if (!username.trim() || !password.trim()) {
@@ -78,8 +81,6 @@ export default function LoginScreen() {
                 <Ionicons name="person" size={18} color={Colors.primary} />
               </View>
               <TextInput
-                id="username"
-                nativeID="username"
                 style={styles.input}
                 placeholder="Username"
                 placeholderTextColor={Colors.textMuted}
@@ -92,15 +93,9 @@ export default function LoginScreen() {
 
             <View style={styles.inputWrapper}>
               <View style={styles.inputIconWrap}>
-                <Ionicons
-                  name="lock-closed"
-                  size={18}
-                  color={Colors.primary}
-                />
+                <Ionicons name="lock-closed" size={18} color={Colors.primary} />
               </View>
               <TextInput
-                id="password"
-                nativeID="password"
                 style={[styles.input, { flex: 1 }]}
                 placeholder="Password"
                 placeholderTextColor={Colors.textMuted}
@@ -141,9 +136,7 @@ export default function LoginScreen() {
           </Pressable>
         </View>
 
-        <Text style={styles.footer}>
-          Hero FinCorp · FOS Collection System
-        </Text>
+        <Text style={styles.footer}>Hero FinCorp · FOS Collection System</Text>
       </ScrollView>
     </KeyboardAvoidingView>
   );
