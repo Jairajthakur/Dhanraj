@@ -900,7 +900,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Excel Import
+  // ✅ Excel Import — preserves manually set Paid/Unpaid/Rollback statuses
   app.post("/api/admin/import", requireAdmin, upload.single("file"), async (req, res) => {
     try {
       if (!req.file) return res.status(400).json({ message: "No file uploaded" });
@@ -927,12 +927,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
           message: "Could not find header row. Expected columns like: LOAN NO, CUSTOMER NAME, FOS NAME, POS, BKT",
         });
       }
+
+      // ✅ Save PTP dates AND manually set statuses + rollback before wiping
       const ptpLoanSave = await storage.query(
-        `SELECT loan_no, ptp_date FROM loan_cases WHERE status = 'PTP'`
+        `SELECT loan_no, ptp_date, telecaller_ptp_date FROM loan_cases WHERE status = 'PTP'`
       );
-      const ptpLoanMap = new Map<string, string | null>(
-        ptpLoanSave.rows.map((r: any) => [r.loan_no, r.ptp_date])
+      const ptpLoanMap = new Map<string, { ptpDate: string | null; telecallerPtpDate: string | null }>(
+        ptpLoanSave.rows.map((r: any) => [r.loan_no, { ptpDate: r.ptp_date, telecallerPtpDate: r.telecaller_ptp_date }])
       );
+
+      // ✅ Save ALL manually set Paid statuses and rollback_yn
+      const manualStatusSave = await storage.query(
+        `SELECT loan_no, status, rollback_yn FROM loan_cases WHERE status = 'Paid' OR rollback_yn = true`
+      );
+      const manualStatusMap = new Map<string, { status: string; rollback_yn: boolean }>(
+        manualStatusSave.rows.map((r: any) => [r.loan_no, { status: r.status, rollback_yn: r.rollback_yn }])
+      );
+
       await storage.deleteAllLoanCases();
       const existingAgents = await storage.getAllAgentsWithAdmin();
       const agentByName: Record<string, number> = {};
@@ -1003,12 +1014,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
           skipped++;
         }
       }
-      for (const [loanNo, ptpDate] of ptpLoanMap) {
+
+      // ✅ Restore PTP statuses
+      for (const [loanNo, ptpData] of ptpLoanMap) {
         await storage.query(
-          `UPDATE loan_cases SET status = 'PTP', ptp_date = $1 WHERE loan_no = $2`,
-          [ptpDate, loanNo]
+          `UPDATE loan_cases SET status = 'PTP', ptp_date = $1, telecaller_ptp_date = $2 WHERE loan_no = $3`,
+          [ptpData.ptpDate, ptpData.telecallerPtpDate, loanNo]
         );
       }
+
+      // ✅ Restore manually set Paid statuses and rollback_yn
+      // Only restore if the loan still exists after import (it may be a new allocation)
+      for (const [loanNo, savedData] of manualStatusMap) {
+        // Don't overwrite PTP cases
+        if (ptpLoanMap.has(loanNo)) continue;
+        await storage.query(
+          `UPDATE loan_cases SET status = $1, rollback_yn = $2 WHERE loan_no = $3`,
+          [savedData.status, savedData.rollback_yn, loanNo]
+        );
+      }
+
       res.json({
         imported, updated: 0, skipped, agentsCreated,
         total: dataRows.length, errors: errors.slice(0, 20),
@@ -1018,7 +1043,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // BKT Import
+  // ✅ BKT Import — preserves manually set Paid/Unpaid/Rollback statuses
   app.post("/api/admin/import-bkt", requireAdmin, upload.single("file"), async (req, res) => {
     try {
       if (!req.file) return res.status(400).json({ message: "No file uploaded" });
@@ -1045,12 +1070,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (headerRowIdx === -1) {
         return res.status(400).json({ message: "Could not find header row." });
       }
+
+      // ✅ Save PTP dates before wiping
       const ptpBktSave = await storage.query(
-        `SELECT loan_no, ptp_date FROM bkt_cases WHERE status = 'PTP'`
+        `SELECT loan_no, ptp_date, telecaller_ptp_date FROM bkt_cases WHERE status = 'PTP'`
       );
-      const ptpBktMap = new Map<string, string | null>(
-        ptpBktSave.rows.map((r: any) => [r.loan_no, r.ptp_date])
+      const ptpBktMap = new Map<string, { ptpDate: string | null; telecallerPtpDate: string | null }>(
+        ptpBktSave.rows.map((r: any) => [r.loan_no, { ptpDate: r.ptp_date, telecallerPtpDate: r.telecaller_ptp_date }])
       );
+
+      // ✅ Save manually set Paid statuses and rollback_yn for BKT cases
+      const manualBktStatusSave = await storage.query(
+        `SELECT loan_no, status, rollback_yn FROM bkt_cases WHERE status = 'Paid' OR rollback_yn = true`
+      );
+      const manualBktStatusMap = new Map<string, { status: string; rollback_yn: boolean }>(
+        manualBktStatusSave.rows.map((r: any) => [r.loan_no, { status: r.status, rollback_yn: r.rollback_yn }])
+      );
+
       await storage.deleteAllBktCases();
       const existingAgents = await storage.getAllAgentsWithAdmin();
       const agentByName: Record<string, number> = {};
@@ -1129,12 +1165,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
           skipped++;
         }
       }
-      for (const [loanNo, ptpDate] of ptpBktMap) {
+
+      // ✅ Restore PTP statuses
+      for (const [loanNo, ptpData] of ptpBktMap) {
         await storage.query(
-          `UPDATE bkt_cases SET status = 'PTP', ptp_date = $1 WHERE loan_no = $2`,
-          [ptpDate, loanNo]
+          `UPDATE bkt_cases SET status = 'PTP', ptp_date = $1, telecaller_ptp_date = $2 WHERE loan_no = $3`,
+          [ptpData.ptpDate, ptpData.telecallerPtpDate, loanNo]
         );
       }
+
+      // ✅ Restore manually set Paid statuses and rollback_yn for BKT
+      for (const [loanNo, savedData] of manualBktStatusMap) {
+        if (ptpBktMap.has(loanNo)) continue;
+        await storage.query(
+          `UPDATE bkt_cases SET status = $1, rollback_yn = $2 WHERE loan_no = $3`,
+          [savedData.status, savedData.rollback_yn, loanNo]
+        );
+      }
+
       res.json({
         imported, updated: 0, skipped, agentsCreated,
         total: dataRows.length, errors: errors.slice(0, 20),
@@ -1177,23 +1225,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }));
       const exportWb = new ExcelJS.Workbook();
       const exportWs = exportWb.addWorksheet("PTP Cases");
-      const exportRows = rows.length
-        ? rows
-        : [{ "FOS Name": "No PTP cases found" }];
+      const exportRows = rows.length ? rows : [{ "FOS Name": "No PTP cases found" }];
       exportWs.columns = Object.keys(exportRows[0]).map((key) => ({
         header: key, key, width: 20,
       }));
       exportRows.forEach((row) => exportWs.addRow(row));
       exportWs.getRow(1).font = { bold: true };
       const buf = await exportWb.xlsx.writeBuffer();
-      res.setHeader(
-        "Content-Disposition",
-        `attachment; filename="PTP_Report_${new Date().toISOString().slice(0, 10)}.xlsx"`
-      );
-      res.setHeader(
-        "Content-Type",
-        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-      );
+      res.setHeader("Content-Disposition", `attachment; filename="PTP_Report_${new Date().toISOString().slice(0, 10)}.xlsx"`);
+      res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
       res.send(Buffer.from(buf));
     } catch (e: any) {
       res.status(500).json({ message: e.message });
@@ -1236,11 +1276,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ORDER BY fos_name NULLS LAST, loan_no
       `);
       const yn = (v: any) =>
-        v === true || v === "true" || v === "t" || v === 1
-          ? "Y"
-          : v === false || v === "false" || v === "f" || v === 0
-          ? "N"
-          : "";
+        v === true || v === "true" || v === "t" || v === 1 ? "Y"
+        : v === false || v === "false" || v === "f" || v === 0 ? "N" : "";
       const rows = result.rows.map((r: any) => ({
         "Allu Date": r.allu_date || "",
         "LOAN NO": r.loan_no || "",
@@ -1252,81 +1289,45 @@ export async function registerRoutes(app: Express): Promise<Server> {
         "Customer Y/N": yn(r.customer_available),
         "Vehicle Y/N": yn(r.vehicle_available),
         "Third_party Y/N": yn(r.third_party),
-        "Third Party Name":
-          r.third_party === true || r.third_party === "true" || r.third_party === "t"
-            ? r.third_party_name || ""
-            : "",
-        "Third Party Number":
-          r.third_party === true || r.third_party === "true" || r.third_party === "t"
-            ? r.third_party_number || ""
-            : "",
-        "FEEDBACK CODE":
-          r.feedback_code != null ? String(r.feedback_code) : "",
-        "Details FEEDBACK":
-          r.latest_feedback != null ? String(r.latest_feedback) : "",
-        "PTP DATE": r.ptp_date
-          ? r.ptp_date instanceof Date
-            ? r.ptp_date.toISOString().slice(0, 10)
-            : String(r.ptp_date).slice(0, 10)
-          : "",
-        "Projection":
-          r.projection != null ? String(r.projection) : "",
+        "Third Party Name": r.third_party === true || r.third_party === "true" || r.third_party === "t" ? r.third_party_name || "" : "",
+        "Third Party Number": r.third_party === true || r.third_party === "true" || r.third_party === "t" ? r.third_party_number || "" : "",
+        "FEEDBACK CODE": r.feedback_code != null ? String(r.feedback_code) : "",
+        "Details FEEDBACK": r.latest_feedback != null ? String(r.latest_feedback) : "",
+        "PTP DATE": r.ptp_date ? (r.ptp_date instanceof Date ? r.ptp_date.toISOString().slice(0, 10) : String(r.ptp_date).slice(0, 10)) : "",
+        "Projection": r.projection != null ? String(r.projection) : "",
         "NON_STARTER (Y/N)": yn(r.non_starter),
         "KYC PURCHASE (Y/N)": yn(r.kyc_purchase),
-        "Workable/Non":
-          r.workable === true || r.workable === "true" || r.workable === "t"
-            ? "WORKABLE"
-            : r.workable === false || r.workable === "false" || r.workable === "f"
-            ? "NONWORKABLE"
-            : "",
+        "Workable/Non": r.workable === true || r.workable === "true" || r.workable === "t" ? "WORKABLE" : r.workable === false || r.workable === "false" || r.workable === "f" ? "NONWORKABLE" : "",
         "Comments": r.feedback_comments || "",
         "Status": r.status || "",
         "FOS Name": r.fos_name || "",
       }));
       const wb = new ExcelJS.Workbook();
       const ws = wb.addWorksheet("Feedback Report");
-      const exportRows = rows.length
-        ? rows
-        : [{
-            "Allu Date": "", "LOAN NO": "No feedback found", "APP ID": "",
-            "CUSTOMERNAME": "", "Bkt": "", "Pro": "", "Branch": "",
-            "Customer Y/N": "", "Vehicle Y/N": "", "Third_party Y/N": "",
-            "Third Party Name": "", "Third Party Number": "",
-            "FEEDBACK CODE": "", "Details FEEDBACK": "", "PTP DATE": "",
-            "Projection": "", "NON_STARTER (Y/N)": "", "KYC PURCHASE (Y/N)": "",
-            "Workable/Non": "", "Comments": "", "Status": "", "FOS Name": "",
-          }];
+      const exportRows = rows.length ? rows : [{
+        "Allu Date": "", "LOAN NO": "No feedback found", "APP ID": "", "CUSTOMERNAME": "",
+        "Bkt": "", "Pro": "", "Branch": "", "Customer Y/N": "", "Vehicle Y/N": "",
+        "Third_party Y/N": "", "Third Party Name": "", "Third Party Number": "",
+        "FEEDBACK CODE": "", "Details FEEDBACK": "", "PTP DATE": "", "Projection": "",
+        "NON_STARTER (Y/N)": "", "KYC PURCHASE (Y/N)": "", "Workable/Non": "",
+        "Comments": "", "Status": "", "FOS Name": "",
+      }];
       ws.columns = Object.keys(exportRows[0]).map((key) => ({
-        header: key,
-        key,
+        header: key, key,
         width: ["CUSTOMERNAME", "Details FEEDBACK", "Comments"].includes(key) ? 30 : 16,
       }));
       exportRows.forEach((row) => ws.addRow(row));
       ws.getRow(1).eachCell((cell) => {
-        cell.fill = {
-          type: "pattern", pattern: "solid", fgColor: { argb: "FFFFFF00" },
-        };
+        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFFF00" } };
         cell.font = { bold: true, color: { argb: "FF000000" } };
-        cell.border = {
-          top: { style: "thin" }, bottom: { style: "thin" },
-          left: { style: "thin" }, right: { style: "thin" },
-        };
+        cell.border = { top: { style: "thin" }, bottom: { style: "thin" }, left: { style: "thin" }, right: { style: "thin" } };
         cell.alignment = { vertical: "middle", horizontal: "center", wrapText: true };
       });
-      ws.autoFilter = {
-        from: { row: 1, column: 1 },
-        to: { row: 1, column: exportRows[0] ? Object.keys(exportRows[0]).length : 20 },
-      };
+      ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: exportRows[0] ? Object.keys(exportRows[0]).length : 20 } };
       ws.views = [{ state: "frozen", ySplit: 1 }];
       const buf = await wb.xlsx.writeBuffer();
-      res.setHeader(
-        "Content-Disposition",
-        `attachment; filename="Feedback_Report_${new Date().toISOString().slice(0, 10)}.xlsx"`
-      );
-      res.setHeader(
-        "Content-Type",
-        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-      );
+      res.setHeader("Content-Disposition", `attachment; filename="Feedback_Report_${new Date().toISOString().slice(0, 10)}.xlsx"`);
+      res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
       res.send(Buffer.from(buf));
     } catch (e: any) {
       res.status(500).json({ message: e.message });
@@ -1335,18 +1336,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/admin/clear-ptp", requireAdmin, async (req, res) => {
     try {
-      await storage.query(
-        `UPDATE loan_cases SET ptp_date = NULL, telecaller_ptp_date = NULL, status = 'Pending' WHERE status = 'PTP'`
-      );
-      await storage.query(
-        `UPDATE bkt_cases SET ptp_date = NULL, telecaller_ptp_date = NULL, status = 'Pending' WHERE status = 'PTP'`
-      );
-      await storage.query(
-        `UPDATE loan_cases SET ptp_date = NULL, telecaller_ptp_date = NULL WHERE ptp_date IS NOT NULL OR telecaller_ptp_date IS NOT NULL`
-      );
-      await storage.query(
-        `UPDATE bkt_cases SET ptp_date = NULL, telecaller_ptp_date = NULL WHERE ptp_date IS NOT NULL OR telecaller_ptp_date IS NOT NULL`
-      );
+      await storage.query(`UPDATE loan_cases SET ptp_date = NULL, telecaller_ptp_date = NULL, status = 'Pending' WHERE status = 'PTP'`);
+      await storage.query(`UPDATE bkt_cases SET ptp_date = NULL, telecaller_ptp_date = NULL, status = 'Pending' WHERE status = 'PTP'`);
+      await storage.query(`UPDATE loan_cases SET ptp_date = NULL, telecaller_ptp_date = NULL WHERE ptp_date IS NOT NULL OR telecaller_ptp_date IS NOT NULL`);
+      await storage.query(`UPDATE bkt_cases SET ptp_date = NULL, telecaller_ptp_date = NULL WHERE ptp_date IS NOT NULL OR telecaller_ptp_date IS NOT NULL`);
       res.json({ success: true });
     } catch (e: any) {
       res.status(500).json({ message: e.message });
@@ -1368,16 +1361,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
           ORDER BY fos_name, bkt_norm, uploaded_at DESC
         )
         SELECT fos_name, bkt_norm AS bkt,
-          COALESCE(pos_paid, 0) AS pos_paid,
-          COALESCE(pos_unpaid, 0) AS pos_unpaid,
-          COALESCE(pos_grand_total, 0) AS pos_grand_total,
-          COALESCE(pos_percentage, 0) AS pos_percentage,
-          COALESCE(count_paid, 0) AS count_paid,
-          COALESCE(count_unpaid, 0) AS count_unpaid,
-          COALESCE(count_total, 0) AS count_total,
-          COALESCE(rollback_paid, 0) AS rollback_paid,
-          COALESCE(rollback_unpaid, 0) AS rollback_unpaid,
-          COALESCE(rollback_grand_total, 0) AS rollback_grand_total,
+          COALESCE(pos_paid, 0) AS pos_paid, COALESCE(pos_unpaid, 0) AS pos_unpaid,
+          COALESCE(pos_grand_total, 0) AS pos_grand_total, COALESCE(pos_percentage, 0) AS pos_percentage,
+          COALESCE(count_paid, 0) AS count_paid, COALESCE(count_unpaid, 0) AS count_unpaid,
+          COALESCE(count_total, 0) AS count_total, COALESCE(rollback_paid, 0) AS rollback_paid,
+          COALESCE(rollback_unpaid, 0) AS rollback_unpaid, COALESCE(rollback_grand_total, 0) AS rollback_grand_total,
           COALESCE(rollback_percentage, 0) AS rollback_percentage
         FROM latest ORDER BY fos_name, bkt_norm
       `);
@@ -1399,28 +1387,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
               WHEN 'bkt1' THEN 'bkt1' WHEN 'bkt2' THEN 'bkt2' WHEN 'bkt3' THEN 'bkt3'
               ELSE LOWER(REPLACE(bkt, ' ', ''))
             END AS bkt_norm
-          FROM bkt_perf_summary
-          WHERE agent_id = $1
+          FROM bkt_perf_summary WHERE agent_id = $1
         ),
         imported_latest AS (
-          SELECT DISTINCT ON (bkt_norm) * FROM imported_norm
-          ORDER BY bkt_norm, uploaded_at DESC
+          SELECT DISTINCT ON (bkt_norm) * FROM imported_norm ORDER BY bkt_norm, uploaded_at DESC
         ),
         covered_bkts AS (
-          SELECT bkt_norm FROM imported_latest
-          WHERE bkt_norm IN ('bkt1','bkt2','bkt3')
+          SELECT bkt_norm FROM imported_latest WHERE bkt_norm IN ('bkt1','bkt2','bkt3')
         ),
         live_cases AS (
-          SELECT LOWER(REPLACE(bc.case_category,' ','')) AS bkt,
-                 bc.pos::numeric AS pos, bc.status, bc.rollback_yn
+          SELECT LOWER(REPLACE(bc.case_category,' ','')) AS bkt, bc.pos::numeric AS pos, bc.status, bc.rollback_yn
           FROM bkt_cases bc
           WHERE bc.agent_id = $1
             AND LOWER(REPLACE(bc.case_category,' ','')) IN ('bkt1','bkt2','bkt3')
             AND LOWER(REPLACE(bc.case_category,' ','')) NOT IN (SELECT bkt_norm FROM covered_bkts)
             AND UPPER(COALESCE(bc.pro,'')) <> 'UC'
           UNION ALL
-          SELECT 'bkt' || lc.bkt::text AS bkt,
-                 lc.pos::numeric AS pos, lc.status, lc.rollback_yn
+          SELECT 'bkt' || lc.bkt::text AS bkt, lc.pos::numeric AS pos, lc.status, lc.rollback_yn
           FROM loan_cases lc
           WHERE lc.agent_id = $1
             AND lc.bkt IS NOT NULL
@@ -1432,36 +1415,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
             COALESCE(SUM(pos) FILTER (WHERE status = 'Paid'), 0) AS pos_paid,
             COALESCE(SUM(pos) FILTER (WHERE status <> 'Paid'), 0) AS pos_unpaid,
             COALESCE(SUM(pos), 0) AS pos_grand_total,
-            CASE WHEN COALESCE(SUM(pos),0) > 0
-              THEN ROUND((COALESCE(SUM(pos) FILTER (WHERE status='Paid'),0)/SUM(pos))*100,2)
-              ELSE 0 END AS pos_percentage,
+            CASE WHEN COALESCE(SUM(pos),0) > 0 THEN ROUND((COALESCE(SUM(pos) FILTER (WHERE status='Paid'),0)/SUM(pos))*100,2) ELSE 0 END AS pos_percentage,
             COUNT(*) FILTER (WHERE status = 'Paid')::int AS count_paid,
             COUNT(*) FILTER (WHERE status <> 'Paid')::int AS count_unpaid,
             COUNT(*)::int AS count_total,
             COALESCE(SUM(pos) FILTER (WHERE rollback_yn = true), 0) AS rollback_paid,
             COALESCE(SUM(pos) FILTER (WHERE rollback_yn IS DISTINCT FROM true), 0) AS rollback_unpaid,
             COALESCE(SUM(pos), 0) AS rollback_grand_total,
-            CASE WHEN COALESCE(SUM(pos),0) > 0
-              THEN ROUND((COALESCE(SUM(pos) FILTER (WHERE rollback_yn=true),0)/SUM(pos))*100,2)
-              ELSE 0 END AS rollback_percentage
+            CASE WHEN COALESCE(SUM(pos),0) > 0 THEN ROUND((COALESCE(SUM(pos) FILTER (WHERE rollback_yn=true),0)/SUM(pos))*100,2) ELSE 0 END AS rollback_percentage
           FROM live_cases GROUP BY bkt
         ),
         combined AS (
           SELECT bkt_norm AS bkt,
-            COALESCE(pos_paid,0) AS pos_paid,
-            COALESCE(pos_unpaid,0) AS pos_unpaid,
-            COALESCE(pos_grand_total,0) AS pos_grand_total,
-            COALESCE(pos_percentage,0) AS pos_percentage,
-            COALESCE(count_paid,0) AS count_paid,
-            COALESCE(count_unpaid,0) AS count_unpaid,
-            COALESCE(count_total,0) AS count_total,
-            COALESCE(rollback_paid,0) AS rollback_paid,
-            COALESCE(rollback_unpaid,0) AS rollback_unpaid,
-            COALESCE(rollback_grand_total,0) AS rollback_grand_total,
+            COALESCE(pos_paid,0) AS pos_paid, COALESCE(pos_unpaid,0) AS pos_unpaid,
+            COALESCE(pos_grand_total,0) AS pos_grand_total, COALESCE(pos_percentage,0) AS pos_percentage,
+            COALESCE(count_paid,0) AS count_paid, COALESCE(count_unpaid,0) AS count_unpaid,
+            COALESCE(count_total,0) AS count_total, COALESCE(rollback_paid,0) AS rollback_paid,
+            COALESCE(rollback_unpaid,0) AS rollback_unpaid, COALESCE(rollback_grand_total,0) AS rollback_grand_total,
             COALESCE(rollback_percentage,0) AS rollback_percentage
           FROM imported_latest
-          UNION ALL
-          SELECT * FROM live_agg
+          UNION ALL SELECT * FROM live_agg
         )
         SELECT * FROM combined ORDER BY bkt
       `, [agentId]);
@@ -1479,8 +1452,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       await ejWorkbook3.xlsx.load(req.file.buffer);
       const worksheet3 = ejWorkbook3.worksheets[0];
       const rawRows: any[][] = worksheetToRows(worksheet3, false);
-      if (rawRows.length === 0)
-        return res.json({ imported: 0, skipped: 0, errors: [] });
+      if (rawRows.length === 0) return res.json({ imported: 0, skipped: 0, errors: [] });
       const cn = (v: any): number => {
         if (v === "" || v === null || v === undefined) return 0;
         return parseFloat(String(v).replace(/[,%₹\s]/g, "")) || 0;
@@ -1494,12 +1466,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!bktValue) {
         for (const row of rawRows.slice(0, 15)) {
           for (let i = 0; i < row.length - 1; i++) {
-            if (
-              String(row[i]).toLowerCase().trim() === "bkt" &&
-              String(row[i + 1]).trim()
-            ) {
-              bktValue = String(row[i + 1]).trim();
-              break;
+            if (String(row[i]).toLowerCase().trim() === "bkt" && String(row[i + 1]).trim()) {
+              bktValue = String(row[i + 1]).trim(); break;
             }
           }
           if (bktValue) break;
@@ -1507,77 +1475,46 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       if (!bktValue) bktValue = "1";
       bktValue = bktValue.toLowerCase().trim().replace(/\s+/g, "");
-      if (bktValue === "1" || bktValue === "2" || bktValue === "3")
-        bktValue = `bkt${bktValue}`;
+      if (bktValue === "1" || bktValue === "2" || bktValue === "3") bktValue = `bkt${bktValue}`;
       let headerIdx = -1;
       let cFos = -1, cVal = -1, cPaid = -1, cUnpaid = -1, cGt = -1, cPct = -1;
       let cRbVal = -1, cRb = -1, cRbGt = -1, cRbPct = -1;
       for (let r = 0; r < rawRows.length; r++) {
         const row = rawRows[r];
-        const norm = (v: any) =>
-          String(v || "").toLowerCase().trim().replace(/[\s_]/g, "");
+        const norm = (v: any) => String(v || "").toLowerCase().trim().replace(/[\s_]/g, "");
         const cells = row.map(norm);
-        if (
-          !cells.some((c) => c === "values" || c === "value") ||
-          !cells.some((c) => c === "paid")
-        )
-          continue;
+        if (!cells.some((c) => c === "values" || c === "value") || !cells.some((c) => c === "paid")) continue;
         headerIdx = r;
         let fosCount = 0, valCount = 0, gtCount = 0, pctCount = 0;
         for (let j = 0; j < row.length; j++) {
           const c = cells[j];
-          if (c === "fosname" || c === "fos_name" || c === "fosagent") {
-            if (fosCount === 0) { cFos = j; fosCount++; }
-          } else if (c === "values" || c === "value") {
-            if (valCount === 0) { cVal = j; valCount++; }
-            else if (valCount === 1) { cRbVal = j; valCount++; }
-          } else if (c === "paid" && cPaid === -1) {
-            cPaid = j;
-          } else if (c === "unpaid" && cUnpaid === -1) {
-            cUnpaid = j;
-          } else if ((c === "grandtotal" || c.includes("grand")) && gtCount <= 1) {
-            if (gtCount === 0) { cGt = j; gtCount++; }
-            else { cRbGt = j; gtCount++; }
-          } else if ((c === "percentage" || c.includes("percent")) && pctCount <= 1) {
-            if (pctCount === 0) { cPct = j; pctCount++; }
-            else { cRbPct = j; pctCount++; }
-          } else if (c.includes("rollback") || c === "rb") {
-            cRb = j;
-          }
+          if (c === "fosname" || c === "fos_name" || c === "fosagent") { if (fosCount === 0) { cFos = j; fosCount++; } }
+          else if (c === "values" || c === "value") { if (valCount === 0) { cVal = j; valCount++; } else if (valCount === 1) { cRbVal = j; valCount++; } }
+          else if (c === "paid" && cPaid === -1) { cPaid = j; }
+          else if (c === "unpaid" && cUnpaid === -1) { cUnpaid = j; }
+          else if ((c === "grandtotal" || c.includes("grand")) && gtCount <= 1) { if (gtCount === 0) { cGt = j; gtCount++; } else { cRbGt = j; gtCount++; } }
+          else if ((c === "percentage" || c.includes("percent")) && pctCount <= 1) { if (pctCount === 0) { cPct = j; pctCount++; } else { cRbPct = j; pctCount++; } }
+          else if (c.includes("rollback") || c === "rb") { cRb = j; }
         }
         break;
       }
       if (headerIdx === -1) {
-        return res.status(400).json({
-          message: "Could not find header row. Expected columns: Fos_Name, Values, PAID, UNPAID, Grand Total, Percentage, RollBack",
-        });
+        return res.status(400).json({ message: "Could not find header row. Expected columns: Fos_Name, Values, PAID, UNPAID, Grand Total, Percentage, RollBack" });
       }
       const fosData: Record<string, any> = {};
       let currentFos = "";
       for (let r = headerIdx + 1; r < rawRows.length; r++) {
         const row = rawRows[r];
-        const fosCell =
-          cFos >= 0 ? String(row[cFos] || "").trim() : "";
-        const valCell =
-          cVal >= 0
-            ? String(row[cVal] || "").trim().toLowerCase()
-            : "";
+        const fosCell = cFos >= 0 ? String(row[cFos] || "").trim() : "";
+        const valCell = cVal >= 0 ? String(row[cVal] || "").trim().toLowerCase() : "";
         if (fosCell.toLowerCase().includes("grand total")) continue;
-        if (fosCell && fosCell.toLowerCase() !== "grand total")
-          currentFos = fosCell;
+        if (fosCell && fosCell.toLowerCase() !== "grand total") currentFos = fosCell;
         if (!currentFos || !valCell) continue;
         if (!fosData[currentFos]) {
-          fosData[currentFos] = {
-            posPaid: 0, posUnpaid: 0, posGrandTotal: 0, posPercentage: 0,
-            countPaid: 0, countUnpaid: 0, countTotal: 0,
-            rollbackPaid: 0, rollbackGrandTotal: 0, rollbackPercentage: 0,
-          };
+          fosData[currentFos] = { posPaid: 0, posUnpaid: 0, posGrandTotal: 0, posPercentage: 0, countPaid: 0, countUnpaid: 0, countTotal: 0, rollbackPaid: 0, rollbackGrandTotal: 0, rollbackPercentage: 0 };
         }
         const d = fosData[currentFos];
-        if (
-          valCell.includes("sum of pos") ||
-          valCell.includes("sum of po")
-        ) {
+        if (valCell.includes("sum of pos") || valCell.includes("sum of po")) {
           d.posPaid = cPaid >= 0 ? cn(row[cPaid]) : d.posPaid;
           d.posUnpaid = cUnpaid >= 0 ? cn(row[cUnpaid]) : d.posUnpaid;
           d.posGrandTotal = cGt >= 0 ? cn(row[cGt]) : d.posGrandTotal;
@@ -1585,25 +1522,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
           d.rollbackPaid = cRb >= 0 ? cn(row[cRb]) : d.rollbackPaid;
           d.rollbackGrandTotal = cRbGt >= 0 ? cn(row[cRbGt]) : d.rollbackGrandTotal;
           d.rollbackPercentage = cRbPct >= 0 ? toPct(row[cRbPct]) : d.rollbackPercentage;
-        } else if (
-          valCell.includes("cbc+lpp") ||
-          valCell.includes("cbclpp") ||
-          valCell.includes("cbc lpp") ||
-          valCell.includes("sum of cbc") ||
-          (valCell.includes("cbc") && valCell.includes("lpp"))
-        ) {
+        } else if (valCell.includes("cbc+lpp") || valCell.includes("cbclpp") || valCell.includes("cbc lpp") || valCell.includes("sum of cbc") || (valCell.includes("cbc") && valCell.includes("lpp"))) {
           d.posPaid = cPaid >= 0 ? cn(row[cPaid]) : d.posPaid;
           d.posUnpaid = cUnpaid >= 0 ? cn(row[cUnpaid]) : d.posUnpaid;
           d.posGrandTotal = cGt >= 0 ? cn(row[cGt]) : d.posGrandTotal;
           d.posPercentage = cPct >= 0 ? toPct(row[cPct]) : d.posPercentage;
-        } else if (
-          valCell.includes("count") ||
-          valCell.includes("col cbc") ||
-          valCell.includes("col_cbc") ||
-          (valCell.includes("col") && valCell.includes("cbc")) ||
-          valCell === "sum of col cbc" ||
-          valCell === "col cbc"
-        ) {
+        } else if (valCell.includes("count") || valCell.includes("col cbc") || valCell.includes("col_cbc") || (valCell.includes("col") && valCell.includes("cbc")) || valCell === "sum of col cbc" || valCell === "col cbc") {
           d.countPaid = cPaid >= 0 ? Math.round(cn(row[cPaid])) : d.countPaid;
           d.countUnpaid = cUnpaid >= 0 ? Math.round(cn(row[cUnpaid])) : d.countUnpaid;
           d.countTotal = cGt >= 0 ? Math.round(cn(row[cGt])) : d.countTotal;
@@ -1620,24 +1544,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
       for (let i = 0; i < fosNames.length; i++) {
         const fosName = fosNames[i];
         const d = fosData[fosName];
-        if (bktValue === "penal")
-          d.posGrandTotal = d.posPaid + d.posUnpaid;
+        if (bktValue === "penal") d.posGrandTotal = d.posPaid + d.posUnpaid;
         const fosLower = fosName.toLowerCase();
         let agentId: number | null = agentByName[fosLower] || null;
         if (!agentId) {
           try {
-            const username = fosLower
-              .replace(/\s+/g, ".")
-              .replace(/[^a-z0-9.]/g, "");
-            const newAgent = await storage.createFosAgent({
-              name: fosName, username, password: randomBytes(16).toString("hex"),
-            });
-            agentByName[fosLower] = newAgent.id;
-            agentId = newAgent.id;
+            const username = fosLower.replace(/\s+/g, ".").replace(/[^a-z0-9.]/g, "");
+            const newAgent = await storage.createFosAgent({ name: fosName, username, password: randomBytes(16).toString("hex") });
+            agentByName[fosLower] = newAgent.id; agentId = newAgent.id;
           } catch {
-            const uname = fosLower
-              .replace(/\s+/g, ".")
-              .replace(/[^a-z0-9.]/g, "");
+            const uname = fosLower.replace(/\s+/g, ".").replace(/[^a-z0-9.]/g, "");
             const found = await storage.getAgentByUsername(uname);
             if (found) { agentByName[fosLower] = found.id; agentId = found.id; }
           }
@@ -1645,24 +1561,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
         try {
           await storage.upsertBktPerfSummary({
             fosName, agentId, bkt: bktValue,
-            posPaid: d.posPaid, posUnpaid: d.posUnpaid,
-            posGrandTotal: d.posGrandTotal, posPercentage: d.posPercentage,
-            countPaid: d.countPaid, countUnpaid: d.countUnpaid,
-            countTotal: d.countTotal, rollbackPaid: d.rollbackPaid,
-            rollbackUnpaid: Math.max(0, d.rollbackGrandTotal - d.rollbackPaid),
-            rollbackGrandTotal: d.rollbackGrandTotal,
-            rollbackPercentage: d.rollbackPercentage,
+            posPaid: d.posPaid, posUnpaid: d.posUnpaid, posGrandTotal: d.posGrandTotal, posPercentage: d.posPercentage,
+            countPaid: d.countPaid, countUnpaid: d.countUnpaid, countTotal: d.countTotal,
+            rollbackPaid: d.rollbackPaid, rollbackUnpaid: Math.max(0, d.rollbackGrandTotal - d.rollbackPaid),
+            rollbackGrandTotal: d.rollbackGrandTotal, rollbackPercentage: d.rollbackPercentage,
           });
           imported++;
         } catch (e: any) {
-          errors.push(`${fosName}: ${e.message}`);
-          skipped++;
+          errors.push(`${fosName}: ${e.message}`); skipped++;
         }
       }
-      res.json({
-        imported, skipped, total: fosNames.length,
-        bkt: bktValue, errors: errors.slice(0, 20),
-      });
+      res.json({ imported, skipped, total: fosNames.length, bkt: bktValue, errors: errors.slice(0, 20) });
     } catch (e: any) {
       res.status(500).json({ message: e.message });
     }
@@ -1672,36 +1581,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/admin/reset-feedback/agent/:agentId", requireAdmin, async (req, res) => {
     try {
       const agentId = Number(req.params.agentId);
-      const agentRow = await storage.query(
-        "SELECT name FROM fos_agents WHERE id = $1",
-        [agentId]
-      );
-      if (!agentRow.rows[0])
-        return res.status(404).json({ message: "Agent not found" });
-      await storage.query(
-        `UPDATE loan_cases SET
-          latest_feedback = NULL, feedback_comments = NULL, feedback_code = NULL,
-          customer_available = NULL, vehicle_available = NULL, third_party = NULL,
-          third_party_name = NULL, third_party_number = NULL,
-          projection = NULL, non_starter = NULL, kyc_purchase = NULL,
-          workable = NULL, feedback_date = NULL
-        WHERE agent_id = $1`,
-        [agentId]
-      );
-      await storage.query(
-        `UPDATE bkt_cases SET
-          latest_feedback = NULL, feedback_comments = NULL, feedback_code = NULL,
-          customer_available = NULL, vehicle_available = NULL, third_party = NULL,
-          third_party_name = NULL, third_party_number = NULL,
-          projection = NULL, non_starter = NULL, kyc_purchase = NULL,
-          workable = NULL, feedback_date = NULL
-        WHERE agent_id = $1`,
-        [agentId]
-      );
-      res.json({
-        success: true,
-        message: `All feedback reset for ${agentRow.rows[0].name}`,
-      });
+      const agentRow = await storage.query("SELECT name FROM fos_agents WHERE id = $1", [agentId]);
+      if (!agentRow.rows[0]) return res.status(404).json({ message: "Agent not found" });
+      await storage.query(`UPDATE loan_cases SET latest_feedback = NULL, feedback_comments = NULL, feedback_code = NULL, customer_available = NULL, vehicle_available = NULL, third_party = NULL, third_party_name = NULL, third_party_number = NULL, projection = NULL, non_starter = NULL, kyc_purchase = NULL, workable = NULL, feedback_date = NULL WHERE agent_id = $1`, [agentId]);
+      await storage.query(`UPDATE bkt_cases SET latest_feedback = NULL, feedback_comments = NULL, feedback_code = NULL, customer_available = NULL, vehicle_available = NULL, third_party = NULL, third_party_name = NULL, third_party_number = NULL, projection = NULL, non_starter = NULL, kyc_purchase = NULL, workable = NULL, feedback_date = NULL WHERE agent_id = $1`, [agentId]);
+      res.json({ success: true, message: `All feedback reset for ${agentRow.rows[0].name}` });
     } catch (e: any) {
       res.status(500).json({ message: e.message });
     }
@@ -1713,60 +1597,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const caseId = Number(req.params.caseId);
       const { table } = req.body;
       const tbl = table === "bkt" ? "bkt_cases" : "loan_cases";
-      await storage.query(
-        `UPDATE ${tbl} SET
-          latest_feedback = NULL, feedback_comments = NULL, feedback_code = NULL,
-          customer_available = NULL, vehicle_available = NULL, third_party = NULL,
-          third_party_name = NULL, third_party_number = NULL,
-          projection = NULL, non_starter = NULL, kyc_purchase = NULL,
-          workable = NULL, feedback_date = NULL, status = 'Unpaid'
-        WHERE id = $1`,
-        [caseId]
-      );
+      await storage.query(`UPDATE ${tbl} SET latest_feedback = NULL, feedback_comments = NULL, feedback_code = NULL, customer_available = NULL, vehicle_available = NULL, third_party = NULL, third_party_name = NULL, third_party_number = NULL, projection = NULL, non_starter = NULL, kyc_purchase = NULL, workable = NULL, feedback_date = NULL, status = 'Unpaid' WHERE id = $1`, [caseId]);
       res.json({ success: true });
     } catch (e: any) {
       res.status(500).json({ message: e.message });
     }
   });
 
-  // ✅ NEW: Admin update case status (Paid / Unpaid / Rollback)
+  // Admin update case status (Paid / Unpaid / Rollback)
   app.put("/api/admin/cases/:id/status", requireAdmin, async (req, res) => {
     try {
       const caseId = Number(req.params.id);
       const { status, rollback_yn, table } = req.body;
       const tbl = table === "bkt" ? "bkt_cases" : "loan_cases";
-
       const oldRow = await storage.query(
-        `SELECT status, rollback_yn, pos::numeric AS pos, agent_id,
-         ${table === "bkt" ? "case_category AS bkt_key" : "bkt::text AS bkt_key"}, pro
-         FROM ${tbl} WHERE id = $1`,
+        `SELECT status, rollback_yn, pos::numeric AS pos, agent_id, ${table === "bkt" ? "case_category AS bkt_key" : "bkt::text AS bkt_key"}, pro FROM ${tbl} WHERE id = $1`,
         [caseId]
       );
       const old = oldRow.rows[0];
       if (!old) return res.status(404).json({ message: "Case not found" });
-
-      const ynVal =
-        rollback_yn === true || rollback_yn === "true"
-          ? true
-          : rollback_yn === false || rollback_yn === "false"
-          ? false
-          : null;
-
-      await storage.query(
-        `UPDATE ${tbl} SET status = $1, rollback_yn = $2, updated_at = NOW() WHERE id = $3`,
-        [status, ynVal, caseId]
-      );
-
-      if (
-        old.bkt_key &&
-        old.agent_id &&
-        (old.pro || "").toUpperCase() !== "UC"
-      ) {
+      const ynVal = rollback_yn === true || rollback_yn === "true" ? true : rollback_yn === false || rollback_yn === "false" ? false : null;
+      await storage.query(`UPDATE ${tbl} SET status = $1, rollback_yn = $2, updated_at = NOW() WHERE id = $3`, [status, ynVal, caseId]);
+      if (old.bkt_key && old.agent_id && (old.pro || "").toUpperCase() !== "UC") {
         const pos = parseFloat(old.pos) || 0;
-        const bktKey =
-          table === "bkt"
-            ? old.bkt_key.toLowerCase().replace(/\s+/g, "")
-            : `bkt${old.bkt_key}`;
+        const bktKey = table === "bkt" ? old.bkt_key.toLowerCase().replace(/\s+/g, "") : `bkt${old.bkt_key}`;
         const wasPaid = old.status === "Paid";
         const nowPaid = status === "Paid";
         const wasRb = old.rollback_yn === true;
@@ -1774,39 +1628,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const dPos = !wasPaid && nowPaid ? pos : wasPaid && !nowPaid ? -pos : 0;
         const dCount = !wasPaid && nowPaid ? 1 : wasPaid && !nowPaid ? -1 : 0;
         const dRb = !wasRb && nowRb ? pos : wasRb && !nowRb ? -pos : 0;
-        await storage.applyBktPerfDelta(
-          old.agent_id, bktKey, dPos, -dPos, dCount, -dCount, dRb, -dRb
-        );
+        await storage.applyBktPerfDelta(old.agent_id, bktKey, dPos, -dPos, dCount, -dCount, dRb, -dRb);
       }
-
-      // Push notification to FOS agent
       if (old.agent_id) {
-        const agentRow = await storage.query(
-          "SELECT push_token FROM fos_agents WHERE id = $1",
-          [old.agent_id]
-        );
+        const agentRow = await storage.query("SELECT push_token FROM fos_agents WHERE id = $1", [old.agent_id]);
         const pushToken = agentRow.rows[0]?.push_token;
         if (pushToken) {
-          const caseRow = await storage.query(
-            `SELECT customer_name, loan_no FROM ${tbl} WHERE id = $1`,
-            [caseId]
-          );
+          const caseRow = await storage.query(`SELECT customer_name, loan_no FROM ${tbl} WHERE id = $1`, [caseId]);
           const c = caseRow.rows[0];
           if (c) {
             await sendExpoPush(
               pushToken,
-              status === "Paid"
-                ? "✅ Case Marked Paid"
-                : status === "Unpaid"
-                ? "❌ Case Marked Unpaid"
-                : "🔄 Case Status Updated",
+              status === "Paid" ? "✅ Case Marked Paid" : status === "Unpaid" ? "❌ Case Marked Unpaid" : "🔄 Case Status Updated",
               `${c.customer_name} (${c.loan_no}) marked ${status} by admin.`,
               { type: "status_update", caseId, status }
             );
           }
         }
       }
-
       res.json({ success: true });
     } catch (e: any) {
       res.status(500).json({ message: e.message });
@@ -1821,30 +1660,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const hour = now.getHours();
       const todayKey = now.toISOString().slice(0, 10);
       if (hour !== 9 || ptpReminderSentDates.has(todayKey)) return;
-      const agents = await storage.query(
-        `SELECT id, name, push_token FROM fos_agents WHERE role = 'fos' AND push_token IS NOT NULL AND push_token <> ''`
-      );
+      const agents = await storage.query(`SELECT id, name, push_token FROM fos_agents WHERE role = 'fos' AND push_token IS NOT NULL AND push_token <> ''`);
       for (const agent of agents.rows) {
-        const result = await storage.query(
-          `SELECT COUNT(*) AS cnt FROM (
-            SELECT id FROM loan_cases WHERE agent_id = $1
-              AND ((status = 'PTP' AND (ptp_date IS NULL OR ptp_date <= CURRENT_DATE))
-              OR (telecaller_ptp_date IS NOT NULL AND telecaller_ptp_date <= CURRENT_DATE))
-            UNION ALL
-            SELECT id FROM bkt_cases WHERE agent_id = $1
-              AND ((status = 'PTP' AND (ptp_date IS NULL OR ptp_date <= CURRENT_DATE))
-              OR (telecaller_ptp_date IS NOT NULL AND telecaller_ptp_date <= CURRENT_DATE))
-          ) t`,
-          [agent.id]
-        );
+        const result = await storage.query(`SELECT COUNT(*) AS cnt FROM (SELECT id FROM loan_cases WHERE agent_id = $1 AND ((status = 'PTP' AND (ptp_date IS NULL OR ptp_date <= CURRENT_DATE)) OR (telecaller_ptp_date IS NOT NULL AND telecaller_ptp_date <= CURRENT_DATE)) UNION ALL SELECT id FROM bkt_cases WHERE agent_id = $1 AND ((status = 'PTP' AND (ptp_date IS NULL OR ptp_date <= CURRENT_DATE)) OR (telecaller_ptp_date IS NOT NULL AND telecaller_ptp_date <= CURRENT_DATE))) t`, [agent.id]);
         const cnt = parseInt(result.rows[0]?.cnt || "0", 10);
         if (cnt > 0) {
-          await sendExpoPush(
-            agent.push_token,
-            "📅 PTP Due Today",
-            `You have ${cnt} PTP case${cnt !== 1 ? "s" : ""} due today. Open the app to follow up now.`,
-            { screen: "dashboard" }
-          );
+          await sendExpoPush(agent.push_token, "📅 PTP Due Today", `You have ${cnt} PTP case${cnt !== 1 ? "s" : ""} due today. Open the app to follow up now.`, { screen: "dashboard" });
         }
       }
       ptpReminderSentDates.add(todayKey);
@@ -1856,23 +1677,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Background job: deposits overdue by 2h
   async function runReminderJob() {
     try {
-      const result = await storage.query(`
-        SELECT rd.id, rd.agent_id, rd.amount, fa.push_token
-        FROM required_deposits rd JOIN fos_agents fa ON fa.id = rd.agent_id
-        WHERE rd.screenshot_url IS NULL AND rd.reminder_sent = FALSE
-          AND rd.created_at < NOW() - INTERVAL '2 hours'
-          AND fa.push_token IS NOT NULL AND fa.push_token <> ''
-      `);
+      const result = await storage.query(`SELECT rd.id, rd.agent_id, rd.amount, fa.push_token FROM required_deposits rd JOIN fos_agents fa ON fa.id = rd.agent_id WHERE rd.screenshot_url IS NULL AND rd.reminder_sent = FALSE AND rd.created_at < NOW() - INTERVAL '2 hours' AND fa.push_token IS NOT NULL AND fa.push_token <> ''`);
       for (const row of result.rows) {
-        await sendExpoPush(
-          row.push_token,
-          "⏰ Deposit Screenshot Overdue",
-          `You have not uploaded your payment screenshot for ₹${parseFloat(row.amount).toLocaleString("en-IN")}. Please upload it now.`
-        );
-        await storage.query(
-          `UPDATE required_deposits SET reminder_sent = TRUE WHERE id = $1`,
-          [row.id]
-        );
+        await sendExpoPush(row.push_token, "⏰ Deposit Screenshot Overdue", `You have not uploaded your payment screenshot for ₹${parseFloat(row.amount).toLocaleString("en-IN")}. Please upload it now.`);
+        await storage.query(`UPDATE required_deposits SET reminder_sent = TRUE WHERE id = $1`, [row.id]);
       }
     } catch (_) {}
   }
