@@ -5,7 +5,7 @@ import React, {
   useEffect,
   ReactNode,
 } from "react";
-import AsyncStorage from "@react-native-async-storage/async-storage";
+import { AppState, AppStateStatus, Platform } from "react-native";
 import { api } from "../lib/api";
 
 const AuthContext = createContext<any>(null);
@@ -15,38 +15,49 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    const loadUser = async () => {
-      try {
-        const token = await AsyncStorage.getItem("token");
+    const token = localStorage.getItem("token");
+    if (!token) {
+      setIsLoading(false);
+      return;
+    }
+    api
+      .me()
+      .then((res) => setAgent(res.agent))
+      .catch(() => {
+        // Only clear if token is gone (401 clears it in apiRequest)
+        const stillHasToken = localStorage.getItem("token");
+        if (!stillHasToken) setAgent(null);
+      })
+      .finally(() => setIsLoading(false));
+  }, []);
 
-        if (!token) {
-          setIsLoading(false);
-          return;
-        }
+  // Re-validate when app comes to foreground — do NOT logout on background
+  useEffect(() => {
+    if (Platform.OS === "web") return;
 
-        const res = await api.me();
-        setAgent(res.agent);
-      } catch (e) {
-        await AsyncStorage.removeItem("token");
-        setAgent(null);
-      } finally {
-        setIsLoading(false);
+    const handleAppStateChange = (nextState: AppStateStatus) => {
+      if (nextState === "active") {
+        const token = localStorage.getItem("token");
+        if (!token) return;
+        api
+          .me()
+          .then((res) => setAgent(res.agent))
+          .catch(() => {
+            const stillHasToken = localStorage.getItem("token");
+            if (!stillHasToken) setAgent(null);
+          });
       }
+      // Do nothing on background/inactive — keep session alive
     };
 
-    loadUser();
+    const subscription = AppState.addEventListener("change", handleAppStateChange);
+    return () => subscription.remove();
   }, []);
 
   const login = async (username: string, password: string) => {
     setIsLoading(true);
     try {
       const res = await api.login(username, password);
-
-      // ✅ store token
-      if (res.token) {
-        await AsyncStorage.setItem("token", res.token);
-      }
-
       setAgent(res.agent);
     } finally {
       setIsLoading(false);
@@ -54,8 +65,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const logout = async () => {
-    await api.logout();
-    await AsyncStorage.removeItem("token");
+    try {
+      await api.logout();
+    } catch (_) {}
+    localStorage.removeItem("token");
     setAgent(null);
   };
 
