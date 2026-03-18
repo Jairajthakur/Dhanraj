@@ -5,6 +5,7 @@ import React, {
   useEffect,
   ReactNode,
 } from "react";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { api } from "../lib/api";
 
 const AuthContext = createContext<any>(null);
@@ -14,33 +15,47 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    const token = localStorage.getItem("token");
+    const loadUser = async () => {
+      try {
+        const token = await AsyncStorage.getItem("token");
 
-    if (!token) {
-      setIsLoading(false);
-      return;
-    }
+        if (!token) {
+          setIsLoading(false);
+          return;
+        }
 
-    api
-      .me()
-      .then((res) => setAgent(res.agent))
-      .catch(() => {
-        localStorage.removeItem("token");
+        const res = await api.me();
+        setAgent(res.agent);
+      } catch (e) {
+        await AsyncStorage.removeItem("token");
         setAgent(null);
-      })
-      .finally(() => setIsLoading(false));
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    loadUser();
   }, []);
 
   const login = async (username: string, password: string) => {
     setIsLoading(true);
-    const res = await api.login(username, password);
-    setAgent(res.agent);
-    setIsLoading(false);
+    try {
+      const res = await api.login(username, password);
+
+      // ✅ store token
+      if (res.token) {
+        await AsyncStorage.setItem("token", res.token);
+      }
+
+      setAgent(res.agent);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const logout = async () => {
     await api.logout();
-    localStorage.removeItem("token");
+    await AsyncStorage.removeItem("token");
     setAgent(null);
   };
 
