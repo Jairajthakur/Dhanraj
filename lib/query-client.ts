@@ -1,32 +1,32 @@
 import { Platform } from "react-native";
 import Constants from "expo-constants";
 import { QueryClient, QueryFunction } from "@tanstack/react-query";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
+// ─── Get API URL — never throws ─────────────────────────────────────────────
 export function getApiUrl(): string {
-  // 1. EAS build-time env var — set in eas.json for APK/production builds
+  // 1. EAS build-time env var
   const easApiUrl = process.env.EXPO_PUBLIC_API_URL;
   if (easApiUrl) {
     return easApiUrl.startsWith("http") ? easApiUrl : `https://${easApiUrl}`;
   }
 
-  // 2. Env var baked in by Metro
+  // 2. Metro env var
   const envDomain = process.env.EXPO_PUBLIC_DOMAIN;
   if (envDomain) {
     return envDomain.startsWith("http") ? envDomain : `https://${envDomain}`;
   }
 
-  // 3. app.json extra.apiUrl — always baked in, most reliable on native
+  // 3. app.json extra.apiUrl — most reliable on native APK builds
   const extraUrl = Constants.expoConfig?.extra?.apiUrl as string | undefined;
-  if (extraUrl) {
-    return extraUrl;
-  }
+  if (extraUrl) return extraUrl;
 
-  // 4. Web — always use production Railway URL directly
+  // 4. Web fallback
   if (Platform.OS === "web") {
     return "https://dhanraj-production.up.railway.app";
   }
 
-  // 5. Native/Expo Go last resort
+  // 5. Expo Go dev fallback
   const candidates: (string | undefined)[] = [
     (Constants.expoConfig as any)?.hostUri,
     (Constants as any).expoGoConfig?.debuggerHost,
@@ -34,7 +34,6 @@ export function getApiUrl(): string {
     (Constants as any).manifest2?.extra?.expoClient?.debuggerHost,
     Constants.linkingUri,
   ];
-
   for (const raw of candidates) {
     if (!raw) continue;
     const stripped = raw
@@ -47,11 +46,22 @@ export function getApiUrl(): string {
     }
   }
 
-  throw new Error(
-    "Cannot reach backend. Check your network connection and try again."
-  );
+  // ✅ FIXED: Never throw — always return hardcoded fallback
+  console.warn("[API] Could not detect API URL — using hardcoded fallback");
+  return "https://dhanraj-production.up.railway.app";
 }
 
+// ─── Safe token getter — works on web AND native ─────────────────────────────
+async function getToken(): Promise<string | null> {
+  try {
+    if (Platform.OS === "web") return localStorage.getItem("token");
+    return await AsyncStorage.getItem("token");
+  } catch {
+    return null;
+  }
+}
+
+// ─── Safe fetch wrapper ──────────────────────────────────────────────────────
 async function throwIfResNotOk(res: Response) {
   if (!res.ok) {
     const text = (await res.text()) || res.statusText;
@@ -62,14 +72,20 @@ async function throwIfResNotOk(res: Response) {
 export async function apiRequest(
   method: string,
   route: string,
-  data?: unknown | undefined,
+  data?: unknown,
 ): Promise<Response> {
   const baseUrl = getApiUrl();
-  const url = new URL(route, baseUrl);
+  let url: string;
+  try {
+    url = new URL(route, baseUrl).toString();
+  } catch {
+    url = `${baseUrl}${route}`;
+  }
 
-  const token = localStorage.getItem("token");
+  // ✅ FIXED: async token — no localStorage on native
+  const token = await getToken();
 
-  const res = await fetch(url.toString(), {
+  const res = await fetch(url, {
     method,
     headers: {
       ...(data ? { "Content-Type": "application/json" } : {}),
@@ -83,18 +99,26 @@ export async function apiRequest(
   return res;
 }
 
+// ─── Query function ──────────────────────────────────────────────────────────
 type UnauthorizedBehavior = "returnNull" | "throw";
+
 export const getQueryFn: <T>(options: {
   on401: UnauthorizedBehavior;
 }) => QueryFunction<T> =
   ({ on401: unauthorizedBehavior }) =>
   async ({ queryKey }) => {
     const baseUrl = getApiUrl();
-    const url = new URL(queryKey.join("/") as string, baseUrl);
+    let url: string;
+    try {
+      url = new URL(queryKey.join("/") as string, baseUrl).toString();
+    } catch {
+      url = `${baseUrl}${queryKey.join("/")}`;
+    }
 
-    const token = localStorage.getItem("token");
+    // ✅ FIXED: async token — no localStorage on native
+    const token = await getToken();
 
-    const res = await fetch(url.toString(), {
+    const res = await fetch(url, {
       credentials: "include",
       headers: token ? { Authorization: `Bearer ${token}` } : {},
     });
@@ -107,6 +131,7 @@ export const getQueryFn: <T>(options: {
     return await res.json();
   };
 
+// ─── Query client ────────────────────────────────────────────────────────────
 export const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
