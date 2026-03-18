@@ -4,9 +4,9 @@ import { getApiUrl } from "./query-client";
 
 const SESSION_KEY = "session_agent";
 
-// Persisted agent cache — bridges cookie session gap on native
+// ─── Agent cache — works on both web and native ─────────────────────────────
 export const agentCache = {
-  get: async () => {
+  get: async (): Promise<any | null> => {
     try {
       if (Platform.OS === "web") {
         const v = localStorage.getItem(SESSION_KEY);
@@ -16,17 +16,22 @@ export const agentCache = {
       return v ? JSON.parse(v) : null;
     } catch { return null; }
   },
-  set: async (agent: any) => {
-    const v = JSON.stringify(agent);
-    if (Platform.OS === "web") { localStorage.setItem(SESSION_KEY, v); return; }
-    await AsyncStorage.setItem(SESSION_KEY, v);
+  set: async (agent: any): Promise<void> => {
+    try {
+      const v = JSON.stringify(agent);
+      if (Platform.OS === "web") { localStorage.setItem(SESSION_KEY, v); return; }
+      await AsyncStorage.setItem(SESSION_KEY, v);
+    } catch {}
   },
-  clear: async () => {
-    if (Platform.OS === "web") { localStorage.removeItem(SESSION_KEY); return; }
-    await AsyncStorage.removeItem(SESSION_KEY);
+  clear: async (): Promise<void> => {
+    try {
+      if (Platform.OS === "web") { localStorage.removeItem(SESSION_KEY); return; }
+      await AsyncStorage.removeItem(SESSION_KEY);
+    } catch {}
   },
 };
 
+// ─── Core request function ───────────────────────────────────────────────────
 async function apiRequest(method: string, route: string, data?: any) {
   const baseUrl = getApiUrl();
   const url = new URL(route, baseUrl);
@@ -34,7 +39,7 @@ async function apiRequest(method: string, route: string, data?: any) {
   const res = await fetch(url.toString(), {
     method,
     headers: { "Content-Type": "application/json" },
-    credentials: "include", // sends session cookie automatically
+    credentials: "include", // session cookie auth — matches your Express backend
     body: data ? JSON.stringify(data) : undefined,
   });
 
@@ -51,27 +56,26 @@ async function apiRequest(method: string, route: string, data?: any) {
   return res.json();
 }
 
+// ─── API ─────────────────────────────────────────────────────────────────────
 export const api = {
   login: async (username: string, password: string) => {
     const res = await apiRequest("POST", "/api/auth/login", { username, password });
-    // Save agent locally so native app survives restarts
     if (res?.agent) await agentCache.set(res.agent);
     return res;
   },
 
   logout: async () => {
     await agentCache.clear();
-    return apiRequest("POST", "/api/auth/logout");
+    try { await apiRequest("POST", "/api/auth/logout"); } catch {}
   },
 
-  // Tries server first, falls back to cached agent on native
   me: async () => {
     try {
       const res = await apiRequest("GET", "/api/auth/me");
-      if (res?.agent) await agentCache.set(res.agent); // keep cache fresh
+      if (res?.agent) await agentCache.set(res.agent);
       return res;
     } catch (e: any) {
-      // On native, cookie may be lost but agent cache still valid
+      // On native: fall back to cache if server unreachable
       if (Platform.OS !== "web") {
         const cached = await agentCache.get();
         if (cached) return { agent: cached };
@@ -94,13 +98,21 @@ export const api = {
   getSalary: () => apiRequest("GET", "/api/salary"),
   checkIn: () => apiRequest("POST", "/api/attendance/checkin"),
   checkOut: () => apiRequest("POST", "/api/attendance/checkout"),
-  savePushToken: (token: string) =>
-    apiRequest("POST", "/api/push-token", { token }),
   getBktPerformance: () => apiRequest("GET", "/api/bkt-performance"),
   getBktPerfSummary: () => apiRequest("GET", "/api/bkt-perf-summary"),
   getRequiredDeposits: () => apiRequest("GET", "/api/required-deposits"),
   changePassword: (data: any) => apiRequest("PUT", "/api/auth/password", data),
   getProfile: () => apiRequest("GET", "/api/profile"),
+
+  // ✅ Push token — only called after agent is confirmed logged in
+  savePushToken: async (token: string) => {
+    try {
+      await apiRequest("POST", "/api/push-token", { token });
+      console.log("[Push] Token saved to server ✅");
+    } catch (e: any) {
+      console.error("[Push] Failed to save token:", e.message);
+    }
+  },
 
   admin: {
     getCases: () => apiRequest("GET", "/api/admin/cases"),
