@@ -14,7 +14,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import { useAuth } from "@/context/AuthContext"; // ✅ FIXED PATH
+import { useAuth } from "@/context/AuthContext";
 import Colors from "@/constants/colors";
 
 const logo = require("@/assets/images/dhanraj-logo.png");
@@ -33,9 +33,7 @@ export default function LoginScreen() {
       Alert.alert("Error", "Please enter username and password");
       return;
     }
-
     setLoading(true);
-
     try {
       await login(username.trim(), password.trim());
     } catch (e: any) {
@@ -48,14 +46,15 @@ export default function LoginScreen() {
   return (
     <KeyboardAvoidingView
       style={{ flex: 1, backgroundColor: Colors.background }}
-      behavior={Platform.OS === "ios" ? "padding" : "height"}
+      behavior={Platform.OS === "ios" ? "padding" : undefined}
+      enabled={Platform.OS !== "web"}
     >
       <ScrollView
         contentContainerStyle={[
           styles.container,
           {
-            paddingTop: insets.top + 52,
-            paddingBottom: insets.bottom + 40,
+            paddingTop: Platform.OS === "web" ? 40 : insets.top + 52,
+            paddingBottom: Platform.OS === "web" ? 40 : insets.bottom + 40,
           },
         ]}
         keyboardShouldPersistTaps="handled"
@@ -79,6 +78,8 @@ export default function LoginScreen() {
                 <Ionicons name="person" size={18} color={Colors.primary} />
               </View>
               <TextInput
+                id="username"
+                nativeID="username"
                 style={styles.input}
                 placeholder="Username"
                 placeholderTextColor={Colors.textMuted}
@@ -98,6 +99,8 @@ export default function LoginScreen() {
                 />
               </View>
               <TextInput
+                id="password"
+                nativeID="password"
                 style={[styles.input, { flex: 1 }]}
                 placeholder="Password"
                 placeholderTextColor={Colors.textMuted}
