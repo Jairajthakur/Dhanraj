@@ -1,26 +1,45 @@
-import { getApiUrl } from "./query-client";
+import { Platform } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { getApiUrl } from "./query-client";
+
+const SESSION_KEY = "session_agent";
+
+// Persisted agent cache — bridges cookie session gap on native
+export const agentCache = {
+  get: async () => {
+    try {
+      if (Platform.OS === "web") {
+        const v = localStorage.getItem(SESSION_KEY);
+        return v ? JSON.parse(v) : null;
+      }
+      const v = await AsyncStorage.getItem(SESSION_KEY);
+      return v ? JSON.parse(v) : null;
+    } catch { return null; }
+  },
+  set: async (agent: any) => {
+    const v = JSON.stringify(agent);
+    if (Platform.OS === "web") { localStorage.setItem(SESSION_KEY, v); return; }
+    await AsyncStorage.setItem(SESSION_KEY, v);
+  },
+  clear: async () => {
+    if (Platform.OS === "web") { localStorage.removeItem(SESSION_KEY); return; }
+    await AsyncStorage.removeItem(SESSION_KEY);
+  },
+};
 
 async function apiRequest(method: string, route: string, data?: any) {
   const baseUrl = getApiUrl();
   const url = new URL(route, baseUrl);
 
-  // ✅ FIX: use AsyncStorage instead of localStorage
-  const token = await AsyncStorage.getItem("token");
-
   const res = await fetch(url.toString(), {
     method,
-    headers: {
-      "Content-Type": "application/json",
-      ...(token && { Authorization: `Bearer ${token}` }),
-    },
-    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    credentials: "include", // sends session cookie automatically
     body: data ? JSON.stringify(data) : undefined,
   });
 
-  // ✅ FIX: remove token from AsyncStorage
   if (res.status === 401) {
-    await AsyncStorage.removeItem("token");
+    await agentCache.clear();
     throw new Error("Unauthorized");
   }
 
@@ -34,68 +53,113 @@ async function apiRequest(method: string, route: string, data?: any) {
 
 export const api = {
   login: async (username: string, password: string) => {
-    const res = await apiRequest("POST", "/api/auth/login", {
-      username,
-      password,
-    });
-
-    // ✅ SAVE TOKEN AFTER LOGIN
-    if (res?.token) {
-      await AsyncStorage.setItem("token", res.token);
-    }
-
+    const res = await apiRequest("POST", "/api/auth/login", { username, password });
+    // Save agent locally so native app survives restarts
+    if (res?.agent) await agentCache.set(res.agent);
     return res;
   },
 
   logout: async () => {
-    await AsyncStorage.removeItem("token");
+    await agentCache.clear();
     return apiRequest("POST", "/api/auth/logout");
   },
 
-  me: () => apiRequest("GET", "/api/auth/me"),
-  getCases: () => apiRequest("GET", "/api/cases"),
-  getStats: () => apiRequest("GET", "/api/stats"),
+  // Tries server first, falls back to cached agent on native
+  me: async () => {
+    try {
+      const res = await apiRequest("GET", "/api/auth/me");
+      if (res?.agent) await agentCache.set(res.agent); // keep cache fresh
+      return res;
+    } catch (e: any) {
+      // On native, cookie may be lost but agent cache still valid
+      if (Platform.OS !== "web") {
+        const cached = await agentCache.get();
+        if (cached) return { agent: cached };
+      }
+      throw e;
+    }
+  },
 
+  getCases: () => apiRequest("GET", "/api/cases"),
+  getBktCases: (category?: string) =>
+    apiRequest("GET", `/api/bkt-cases${category ? `?category=${category}` : ""}`),
+  getStats: () => apiRequest("GET", "/api/stats"),
+  getTodayPtp: () => apiRequest("GET", "/api/today-ptp"),
   updateFeedback: (id: number, data: any) =>
     apiRequest("PUT", `/api/cases/${id}/feedback`, data),
-
   updateBktFeedback: (id: number, data: any) =>
     apiRequest("PUT", `/api/bkt-cases/${id}/feedback`, data),
-
   getDepositions: () => apiRequest("GET", "/api/depositions"),
-  createDeposition: (data: any) =>
-    apiRequest("POST", "/api/depositions", data),
-
+  createDeposition: (data: any) => apiRequest("POST", "/api/depositions", data),
   getSalary: () => apiRequest("GET", "/api/salary"),
   checkIn: () => apiRequest("POST", "/api/attendance/checkin"),
   checkOut: () => apiRequest("POST", "/api/attendance/checkout"),
-
   savePushToken: (token: string) =>
     apiRequest("POST", "/api/push-token", { token }),
+  getBktPerformance: () => apiRequest("GET", "/api/bkt-performance"),
+  getBktPerfSummary: () => apiRequest("GET", "/api/bkt-perf-summary"),
+  getRequiredDeposits: () => apiRequest("GET", "/api/required-deposits"),
+  changePassword: (data: any) => apiRequest("PUT", "/api/auth/password", data),
+  getProfile: () => apiRequest("GET", "/api/profile"),
 
   admin: {
     getCases: () => apiRequest("GET", "/api/admin/cases"),
-
+    getCasesByAgent: (agentId: number) =>
+      apiRequest("GET", `/api/admin/cases/agent/${agentId}`),
     getBktCases: (category?: string) =>
-      apiRequest(
-        "GET",
-        `/api/admin/bkt-cases${category ? `?category=${category}` : ""}`
-      ),
-
+      apiRequest("GET", `/api/admin/bkt-cases${category ? `?category=${category}` : ""}`),
     getAgents: () => apiRequest("GET", "/api/admin/agents"),
     getStats: () => apiRequest("GET", "/api/admin/stats"),
+    getAgentStats: (agentId: number) =>
+      apiRequest("GET", `/api/admin/agent/${agentId}/stats`),
     getSalary: () => apiRequest("GET", "/api/admin/salary"),
+    createSalary: (data: any) => apiRequest("POST", "/api/admin/salary", data),
     getDepositions: () => apiRequest("GET", "/api/admin/depositions"),
+    getRequiredDeposits: () => apiRequest("GET", "/api/admin/required-deposits"),
+    createRequiredDeposit: (data: any) =>
+      apiRequest("POST", "/api/admin/required-deposits", data),
+    deleteRequiredDeposit: (id: number) =>
+      apiRequest("DELETE", `/api/admin/required-deposits/${id}`),
+    verifyDeposit: (id: number) =>
+      apiRequest("PUT", `/api/admin/required-deposits/${id}/verify`),
     getAttendance: () => apiRequest("GET", "/api/admin/attendance"),
     getBktPerformance: () => apiRequest("GET", "/api/admin/bkt-performance"),
-
-    updateCaseStatus: (
-      id: number,
-      data: {
-        status: "Paid" | "Unpaid" | "PTP";
-        rollback_yn?: boolean | null;
-        table: "loan" | "bkt";
-      }
-    ) => apiRequest("PUT", `/api/admin/cases/${id}/status`, data),
+    getBktPerfSummary: () => apiRequest("GET", "/api/admin/bkt-perf-summary"),
+    updateCaseStatus: (id: number, data: {
+      status: "Paid" | "Unpaid" | "PTP";
+      rollback_yn?: boolean | null;
+      table: "loan" | "bkt";
+    }) => apiRequest("PUT", `/api/admin/cases/${id}/status`, data),
+    resetFeedbackAgent: (agentId: number) =>
+      apiRequest("POST", `/api/admin/reset-feedback/agent/${agentId}`),
+    resetFeedbackCase: (caseId: number, table: "loan" | "bkt") =>
+      apiRequest("POST", `/api/admin/reset-feedback/case/${caseId}`, { table }),
+    importCases: (file: File) => {
+      const form = new FormData();
+      form.append("file", file);
+      return fetch(`${getApiUrl()}/api/admin/import`, {
+        method: "POST", credentials: "include", body: form,
+      }).then(r => r.json());
+    },
+    importBkt: (file: File) => {
+      const form = new FormData();
+      form.append("file", file);
+      return fetch(`${getApiUrl()}/api/admin/import-bkt`, {
+        method: "POST", credentials: "include", body: form,
+      }).then(r => r.json());
+    },
+    importBktPerf: (file: File, bkt?: string) => {
+      const form = new FormData();
+      form.append("file", file);
+      if (bkt) form.append("bkt", bkt);
+      return fetch(`${getApiUrl()}/api/admin/import-bkt-perf`, {
+        method: "POST", credentials: "include", body: form,
+      }).then(r => r.json());
+    },
+    getPushStatus: () => apiRequest("GET", "/api/admin/push-status"),
+    testPush: (agentId: number) =>
+      apiRequest("POST", `/api/admin/test-push/${agentId}`),
+    testPushAll: () => apiRequest("POST", "/api/admin/test-push-all"),
+    clearPtp: () => apiRequest("POST", "/api/admin/clear-ptp"),
   },
 };
