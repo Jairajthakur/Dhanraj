@@ -28,21 +28,18 @@ function RootLayoutNav() {
     if (!navigationState?.key || isLoading) return;
 
     const inLogin = segments[0] === "login";
-    if (!agent && !inLogin) {
-      router.replace("/login");
+
+    if (!agent) {
+      if (!inLogin) router.replace("/login");
       return;
     }
-    if (agent?.role === "admin") {
+
+    if (agent.role === "admin") {
       router.replace("/(admin)");
-      return;
-    }
-    if (agent?.role === "fos") {
+    } else if (agent.role === "fos") {
       router.replace("/(app)/dashboard");
-      return;
-    }
-    if (agent?.role === "repo") {
+    } else if (agent.role === "repo") {
       router.replace("/(repo)");
-      return;
     }
   }, [agent, isLoading, navigationState?.key]);
 
@@ -86,8 +83,20 @@ export default function RootLayout() {
     }
   }, [appReady]);
 
+  // ✅ FIXED: No more blank screen
   if (!appReady) {
-    return null;
+    return (
+      <View
+        style={{
+          flex: 1,
+          justifyContent: "center",
+          alignItems: "center",
+          backgroundColor: "#ECEAE4",
+        }}
+      >
+        <Text>Loading App...</Text>
+      </View>
+    );
   }
 
   return (
