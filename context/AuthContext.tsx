@@ -41,13 +41,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const bootstrap = async () => {
       try {
-        // Step 1: Load cached agent immediately (instant UI — no flash)
+        // Step 1: Load cached agent immediately (no flash)
         const cached = await agentCache.get();
         if (cached && !cancelled) {
           setAgent(cached);
         }
 
-        // Step 2: Verify session with server in background
+        // Step 2: Verify with server
         const res = await api.me();
         if (!cancelled && res?.agent) {
           setAgent(res.agent);
@@ -57,21 +57,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (!cancelled) {
           const cached = await agentCache.get();
           if (Platform.OS === "web" || !cached) {
-            // Web: always trust server; Native with no cache: clear
             await agentCache.clear();
             setAgent(null);
           }
-          // Native + cached: keep agent (offline tolerance)
         }
       } finally {
         if (!cancelled) setIsLoading(false);
       }
     };
 
-    // Safety net — never stay stuck on loading screen
+    // Safety net — never stay stuck
     const timeout = setTimeout(() => {
       if (!cancelled) {
-        console.warn("[Auth] Bootstrap timed out — forcing ready");
+        console.warn("[Auth] Bootstrap timed out");
         setIsLoading(false);
       }
     }, 6000);
@@ -84,7 +82,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  // ─── Re-validate when app comes to foreground ───────────────────────────
+  // ─── Re-validate on foreground ──────────────────────────────────────────
   useEffect(() => {
     if (Platform.OS === "web") return;
 
@@ -99,7 +97,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           await agentCache.set(res.agent);
         }
       } catch {
-        // Keep existing agent on network error (offline tolerance)
+        // Keep existing agent on network error
       }
     };
 
@@ -121,14 +119,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   // ─── Logout ─────────────────────────────────────────────────────────────
+  // ✅ FIXED: finally detached from try/catch was causing startup crash
   const logout = async () => {
     try {
       await api.logout();
-    } catch (_) {}
-    finally {
-      await agentCache.clear();
-      setAgent(null);
+    } catch (_) {
+      // ignore server errors on logout
     }
+    await agentCache.clear();
+    setAgent(null);
   };
 
   return (
@@ -139,7 +138,4 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 }
 
 export function useAuth() {
-  const ctx = useContext(AuthContext);
-  if (!ctx) throw new Error("useAuth must be used within AuthProvider");
-  return ctx;
-}
+  const c
