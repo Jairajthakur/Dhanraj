@@ -12,13 +12,11 @@ import {
   ActivityIndicator,
   Image,
 } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "@/context/AuthContext";
 import Colors from "@/constants/colors";
 
 export default function LoginScreen() {
-  const insets = useSafeAreaInsets();
   const { login } = useAuth();
   const logo = require("@/assets/images/dhanraj-logo.png");
 
@@ -49,13 +47,7 @@ export default function LoginScreen() {
       enabled={Platform.OS !== "web"}
     >
       <ScrollView
-        contentContainerStyle={[
-          styles.container,
-          {
-            paddingTop: Platform.OS === "web" ? 40 : insets.top + 52,
-            paddingBottom: Platform.OS === "web" ? 40 : insets.bottom + 40,
-          },
-        ]}
+        contentContainerStyle={styles.container}
         keyboardShouldPersistTaps="handled"
       >
         <View style={styles.logoSection}>
@@ -148,7 +140,9 @@ const styles = StyleSheet.create({
   container: {
     flexGrow: 1,
     alignItems: "center",
+    justifyContent: "center",
     paddingHorizontal: 24,
+    paddingVertical: 40,
     gap: 32,
   },
   logoSection: {
