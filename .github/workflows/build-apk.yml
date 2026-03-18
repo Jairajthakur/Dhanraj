@@ -3,6 +3,9 @@ name: Build Android APK
 on:
   workflow_dispatch:
 
+env:
+  EXPO_PUBLIC_API_URL: https://dhanraj-production.up.railway.app
+
 jobs:
   build:
     name: Build APK
@@ -12,51 +15,57 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # ✅ FIXED: Node 22 (LTS, supported, not deprecated)
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
 
+      # ✅ FIXED: Java 17
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: 17
 
+      # ✅ FIXED: Android SDK
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      # ✅ Cache node_modules using package.json hash
+      # ✅ Cache node_modules — gracefully skipped if cache service is down
       - name: Cache node_modules
         uses: actions/cache@v4
+        continue-on-error: true   # ← won't fail build if cache is unavailable
         with:
           path: node_modules
           key: ${{ runner.os }}-node-${{ hashFiles('package.json') }}
           restore-keys: |
             ${{ runner.os }}-node-
 
-      # ✅ Cache Gradle — biggest time saver
+      # ✅ Cache Gradle — gracefully skipped if cache service is down
       - name: Cache Gradle
         uses: actions/cache@v4
+        continue-on-error: true   # ← won't fail build if cache is unavailable
         with:
           path: |
             ~/.gradle/caches
             ~/.gradle/wrapper
-            android/.gradle
-          key: ${{ runner.os }}-gradle-${{ hashFiles('android/**/*.gradle*', 'android/gradle/wrapper/gradle-wrapper.properties') }}
+          key: ${{ runner.os }}-gradle-${{ hashFiles('android/**/*.gradle*') }}
           restore-keys: |
             ${{ runner.os }}-gradle-
 
-      # ✅ Cache .expo folder
+      # ✅ Cache Expo
       - name: Cache Expo
         uses: actions/cache@v4
+        continue-on-error: true   # ← won't fail build if cache is unavailable
         with:
           path: .expo
           key: ${{ runner.os }}-expo-${{ hashFiles('app.json') }}
           restore-keys: |
             ${{ runner.os }}-expo-
 
+      # ✅ Gradle memory optimization
       - name: Configure Gradle memory
         run: |
           mkdir -p ~/.gradle
@@ -69,24 +78,25 @@ jobs:
           kotlin.incremental=true
           EOF
 
-      # ✅ FIXED: npm install instead of npm ci
+      # ✅ Install dependencies
       - name: Install dependencies
         run: |
           npm config set legacy-peer-deps true
           npm install --legacy-peer-deps
           npm install nanoid@3.3.7 --legacy-peer-deps
 
+      # ✅ Setup EAS
       - name: Setup EAS
         uses: expo/expo-github-action@v8
         with:
           eas-version: latest
           token: ${{ secrets.EXPO_TOKEN }}
 
+      # ✅ Expo prebuild
       - name: Expo prebuild
         run: npx expo prebuild --platform android --clean
-        env:
-          EXPO_PUBLIC_API_URL: https://dhanraj-production.up.railway.app
 
+      # ✅ Build APK
       - name: Build APK
         run: |
           cd android
@@ -97,9 +107,9 @@ jobs:
             --build-cache \
             --stacktrace
         env:
-          EXPO_PUBLIC_API_URL: https://dhanraj-production.up.railway.app
           GRADLE_OPTS: "-Xmx6g -XX:MaxMetaspaceSize=1g"
 
+      # ✅ Upload APK
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
