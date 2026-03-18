@@ -107,7 +107,6 @@ function normalizeStatus(val: any): string {
   if (s === "TRUE" || s === "PAID" || s === "YES" || s === "1") return "Paid";
   if (s === "FALSE" || s === "UNPAID" || s === "NO" || s === "0") return "Unpaid";
   if (s === "PTP") return "PTP";
-  if (s === "PAID") return "Paid";
   const raw = String(val || "").trim();
   if (raw === "Paid" || raw === "Unpaid" || raw === "PTP") return raw;
   if (raw === "Follow Up" || raw === "FOLLOW UP" || raw === "FOLLOWUP") return "Unpaid";
@@ -556,7 +555,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const pushToken = agentRow.rows[0]?.push_token;
       if (pushToken) {
         const amtStr = Number(amount).toLocaleString("en-IN");
-        await sendExpoPush(pushToken, "Deposit Required", `Admin has assigned you a deposit of ₹${amtStr}. Please deposit within 2 hours.`);
+        await sendExpoPush(pushToken, "💰 Deposit Assigned", `Admin has assigned you a deposit of ₹${amtStr}. Please upload screenshot within 2 hours.`);
       }
       res.json({ deposit });
     } catch (e: any) {
@@ -812,6 +811,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // ✅ Excel Import — Excel is source of truth, only PTP dates preserved
+  // ✅ FOS agents NOT in Excel are automatically removed
   app.post("/api/admin/import", requireAdmin, upload.single("file"), async (req, res) => {
     try {
       if (!req.file) return res.status(400).json({ message: "No file uploaded" });
@@ -820,7 +820,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const worksheet1 = ejWorkbook1.worksheets[0];
       const rawRows: any[][] = worksheetToRows(worksheet1, true);
       if (rawRows.length === 0)
-        return res.json({ imported: 0, updated: 0, skipped: 0, agentsCreated: 0, errors: [] });
+        return res.json({ imported: 0, updated: 0, skipped: 0, agentsCreated: 0, agentsRemoved: 0, errors: [] });
+
       let headerRowIdx = -1;
       let colIdxMap: Record<number, string> = {};
       for (let r = 0; r < Math.min(rawRows.length, 15); r++) {
@@ -837,6 +838,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Could not find header row. Expected columns like: LOAN NO, CUSTOMER NAME, FOS NAME, POS, BKT" });
       }
 
+      // ✅ Collect all FOS names present in this Excel file
+      const fosNamesInExcel = new Set<string>();
+      const dataRows = rawRows.slice(headerRowIdx + 1);
+      for (const row of dataRows) {
+        const mapped: Record<string, any> = {};
+        for (const [colIdx, dbField] of Object.entries(colIdxMap)) {
+          const val = row[Number(colIdx)];
+          mapped[dbField] = val !== undefined && val !== "" ? String(val).trim() : null;
+        }
+        if (mapped.fos_name && mapped.loan_no && mapped.customer_name && !isRepeatHeaderRow(mapped)) {
+          fosNamesInExcel.add(mapped.fos_name.toLowerCase().trim());
+        }
+      }
+
       // Save only PTP dates — Excel status overwrites everything else
       const ptpLoanSave = await storage.query(`SELECT loan_no, ptp_date, telecaller_ptp_date FROM loan_cases WHERE status = 'PTP'`);
       const ptpLoanMap = new Map<string, { ptpDate: string | null; telecallerPtpDate: string | null }>(
@@ -844,14 +859,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
       );
 
       await storage.deleteAllLoanCases();
+
+      // ✅ Remove FOS agents not present in this Excel file
+      let agentsRemoved = 0;
+      const allFosAgents = await storage.query(`SELECT id, name FROM fos_agents WHERE role = 'fos'`);
+      for (const agent of allFosAgents.rows) {
+        const agentNameLower = (agent.name || "").toLowerCase().trim();
+        if (!fosNamesInExcel.has(agentNameLower)) {
+          // Delete their cases, salary, depositions, attendance, sessions first
+          await storage.query(`DELETE FROM loan_cases WHERE agent_id = $1`, [agent.id]);
+          await storage.query(`DELETE FROM bkt_cases WHERE agent_id = $1`, [agent.id]);
+          await storage.query(`DELETE FROM required_deposits WHERE agent_id = $1`, [agent.id]);
+          await storage.query(`DELETE FROM depositions WHERE agent_id = $1`, [agent.id]).catch(() => {});
+          await storage.query(`DELETE FROM attendance WHERE agent_id = $1`, [agent.id]).catch(() => {});
+          await storage.query(`DELETE FROM salary WHERE agent_id = $1`, [agent.id]).catch(() => {});
+          await storage.query(`DELETE FROM user_sessions WHERE sess::jsonb->>'agentId' = $1::text`, [agent.id]).catch(() => {});
+          await storage.query(`DELETE FROM fos_agents WHERE id = $1`, [agent.id]);
+          agentsRemoved++;
+          console.log(`[import] Removed FOS agent not in Excel: ${agent.name}`);
+        }
+      }
+
       const existingAgents = await storage.getAllAgentsWithAdmin();
       const agentByName: Record<string, number> = {};
       for (const a of existingAgents) {
         if (a.name) agentByName[a.name.toLowerCase().trim()] = a.id;
       }
+
       let imported = 0, skipped = 0, agentsCreated = 0;
       const errors: string[] = [];
-      const dataRows = rawRows.slice(headerRowIdx + 1);
+
       for (let i = 0; i < dataRows.length; i++) {
         const row = dataRows[i];
         const mapped: Record<string, any> = {};
@@ -862,6 +899,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (!mapped.loan_no) { skipped++; continue; }
         if (!mapped.customer_name) { skipped++; continue; }
         if (isRepeatHeaderRow(mapped)) { skipped++; continue; }
+
         let agentId: number | null = null;
         if (mapped.fos_name) {
           const fosLower = mapped.fos_name.toLowerCase().trim();
@@ -880,6 +918,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             }
           }
         }
+
         try {
           await storage.upsertLoanCase({
             agentId, fosName: mapped.fos_name || null, loanNo: mapped.loan_no,
@@ -899,7 +938,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             loanMaturityDate: parseDate(mapped.loan_maturity_date),
             tenor: mapped.tenor ? parseInt(mapped.tenor) || null : null,
             pro: mapped.pro || null,
-            status: normalizeStatus(mapped.status), // ✅ from Excel
+            status: normalizeStatus(mapped.status),
             latestFeedback: mapped.latest_feedback || null,
             feedbackComments: mapped.feedback_comments || null,
             telecallerPtpDate: parseDate(mapped.telecaller_ptp_date),
@@ -919,13 +958,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         );
       }
 
-      res.json({ imported, updated: 0, skipped, agentsCreated, total: dataRows.length, errors: errors.slice(0, 20) });
+      res.json({ imported, updated: 0, skipped, agentsCreated, agentsRemoved, total: dataRows.length, errors: errors.slice(0, 20) });
     } catch (e: any) {
       res.status(500).json({ message: e.message });
     }
   });
 
   // ✅ BKT Import — Excel is source of truth, only PTP dates preserved
+  // ✅ FOS agents NOT in BKT Excel are automatically removed
   app.post("/api/admin/import-bkt", requireAdmin, upload.single("file"), async (req, res) => {
     try {
       if (!req.file) return res.status(400).json({ message: "No file uploaded" });
@@ -934,7 +974,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const worksheet2 = ejWorkbook2.worksheets.find((ws) => ws.name.toUpperCase() === "ALLO") || ejWorkbook2.worksheets[0];
       const rawRows: any[][] = worksheetToRows(worksheet2, true);
       if (rawRows.length === 0)
-        return res.json({ imported: 0, updated: 0, skipped: 0, agentsCreated: 0, errors: [] });
+        return res.json({ imported: 0, updated: 0, skipped: 0, agentsCreated: 0, agentsRemoved: 0, errors: [] });
+
       let headerRowIdx = -1;
       let colIdxMap: Record<number, string> = {};
       for (let r = 0; r < Math.min(rawRows.length, 15); r++) {
@@ -951,6 +992,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Could not find header row." });
       }
 
+      // ✅ Collect all FOS names present in this BKT Excel file
+      const fosNamesInBktExcel = new Set<string>();
+      const dataRows = rawRows.slice(headerRowIdx + 1);
+      for (const row of dataRows) {
+        const mapped: Record<string, any> = {};
+        for (const [colIdx, dbField] of Object.entries(colIdxMap)) {
+          const val = row[Number(colIdx)];
+          mapped[dbField] = val !== undefined && val !== "" ? String(val).trim() : null;
+        }
+        if (mapped.fos_name && mapped.loan_no && mapped.customer_name && !isRepeatHeaderRow(mapped)) {
+          fosNamesInBktExcel.add(mapped.fos_name.toLowerCase().trim());
+        }
+      }
+
       // Save only PTP dates — Excel status overwrites everything else
       const ptpBktSave = await storage.query(`SELECT loan_no, ptp_date, telecaller_ptp_date FROM bkt_cases WHERE status = 'PTP'`);
       const ptpBktMap = new Map<string, { ptpDate: string | null; telecallerPtpDate: string | null }>(
@@ -958,14 +1013,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
       );
 
       await storage.deleteAllBktCases();
+
+      // ✅ Remove FOS agents not present in this BKT Excel file
+      let agentsRemoved = 0;
+      const allFosAgentsBkt = await storage.query(`SELECT id, name FROM fos_agents WHERE role = 'fos'`);
+      for (const agent of allFosAgentsBkt.rows) {
+        const agentNameLower = (agent.name || "").toLowerCase().trim();
+        if (!fosNamesInBktExcel.has(agentNameLower)) {
+          await storage.query(`DELETE FROM loan_cases WHERE agent_id = $1`, [agent.id]);
+          await storage.query(`DELETE FROM bkt_cases WHERE agent_id = $1`, [agent.id]);
+          await storage.query(`DELETE FROM required_deposits WHERE agent_id = $1`, [agent.id]);
+          await storage.query(`DELETE FROM depositions WHERE agent_id = $1`, [agent.id]).catch(() => {});
+          await storage.query(`DELETE FROM attendance WHERE agent_id = $1`, [agent.id]).catch(() => {});
+          await storage.query(`DELETE FROM salary WHERE agent_id = $1`, [agent.id]).catch(() => {});
+          await storage.query(`DELETE FROM user_sessions WHERE sess::jsonb->>'agentId' = $1::text`, [agent.id]).catch(() => {});
+          await storage.query(`DELETE FROM fos_agents WHERE id = $1`, [agent.id]);
+          agentsRemoved++;
+          console.log(`[import-bkt] Removed FOS agent not in Excel: ${agent.name}`);
+        }
+      }
+
       const existingAgents = await storage.getAllAgentsWithAdmin();
       const agentByName: Record<string, number> = {};
       for (const a of existingAgents) {
         if (a.name) agentByName[a.name.toLowerCase().trim()] = a.id;
       }
+
       let imported = 0, skipped = 0, agentsCreated = 0;
       const errors: string[] = [];
-      const dataRows = rawRows.slice(headerRowIdx + 1);
+
       for (let i = 0; i < dataRows.length; i++) {
         const row = dataRows[i];
         const mapped: Record<string, any> = {};
@@ -976,11 +1052,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (!mapped.loan_no) { skipped++; continue; }
         if (!mapped.customer_name) { skipped++; continue; }
         if (isRepeatHeaderRow(mapped)) { skipped++; continue; }
+
         const bktVal = mapped.bkt ? parseInt(mapped.bkt) : null;
         let caseCategory = "penal";
         if (bktVal === 1) caseCategory = "bkt1";
         else if (bktVal === 2) caseCategory = "bkt2";
         else if (bktVal === 3) caseCategory = "bkt3";
+
         let agentId: number | null = null;
         if (mapped.fos_name) {
           const fosLower = mapped.fos_name.toLowerCase().trim();
@@ -999,6 +1077,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             }
           }
         }
+
         try {
           await storage.upsertBktCase({
             caseCategory, agentId, fosName: mapped.fos_name || null,
@@ -1020,7 +1099,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             loanMaturityDate: parseDate(mapped.loan_maturity_date),
             tenor: mapped.tenor ? parseInt(mapped.tenor) || null : null,
             pro: mapped.pro || null,
-            status: normalizeStatus(mapped.status), // ✅ from Excel
+            status: normalizeStatus(mapped.status),
             telecallerPtpDate: parseDate(mapped.telecaller_ptp_date),
           });
           imported++;
@@ -1038,7 +1117,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         );
       }
 
-      res.json({ imported, updated: 0, skipped, agentsCreated, total: dataRows.length, errors: errors.slice(0, 20) });
+      res.json({ imported, updated: 0, skipped, agentsCreated, agentsRemoved, total: dataRows.length, errors: errors.slice(0, 20) });
     } catch (e: any) {
       res.status(500).json({ message: e.message });
     }
@@ -1427,36 +1506,87 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Background job: PTP push — 9 AM and 1 PM daily
   const ptpReminderSentDates = new Set<string>();
   async function runPtpPushJob() {
     try {
       const now = new Date();
       const hour = now.getHours();
       const todayKey = now.toISOString().slice(0, 10);
-      if (hour !== 9 || ptpReminderSentDates.has(todayKey)) return;
-      const agents = await storage.query(`SELECT id, name, push_token FROM fos_agents WHERE role = 'fos' AND push_token IS NOT NULL AND push_token <> ''`);
+
+      const isMorning = hour === 9;
+      const isAfternoon = hour === 13;
+      if (!isMorning && !isAfternoon) return;
+
+      const slotKey = `${todayKey}-${hour}`;
+      if (ptpReminderSentDates.has(slotKey)) return;
+
+      const agents = await storage.query(
+        `SELECT id, name, push_token FROM fos_agents WHERE role = 'fos' AND push_token IS NOT NULL AND push_token <> ''`
+      );
       for (const agent of agents.rows) {
-        const result = await storage.query(`SELECT COUNT(*) AS cnt FROM (SELECT id FROM loan_cases WHERE agent_id = $1 AND ((status = 'PTP' AND (ptp_date IS NULL OR ptp_date <= CURRENT_DATE)) OR (telecaller_ptp_date IS NOT NULL AND telecaller_ptp_date <= CURRENT_DATE)) UNION ALL SELECT id FROM bkt_cases WHERE agent_id = $1 AND ((status = 'PTP' AND (ptp_date IS NULL OR ptp_date <= CURRENT_DATE)) OR (telecaller_ptp_date IS NOT NULL AND telecaller_ptp_date <= CURRENT_DATE))) t`, [agent.id]);
+        const result = await storage.query(
+          `SELECT COUNT(*) AS cnt FROM (
+            SELECT id FROM loan_cases WHERE agent_id = $1
+              AND ((status = 'PTP' AND (ptp_date IS NULL OR ptp_date <= CURRENT_DATE))
+              OR (telecaller_ptp_date IS NOT NULL AND telecaller_ptp_date <= CURRENT_DATE))
+            UNION ALL
+            SELECT id FROM bkt_cases WHERE agent_id = $1
+              AND ((status = 'PTP' AND (ptp_date IS NULL OR ptp_date <= CURRENT_DATE))
+              OR (telecaller_ptp_date IS NOT NULL AND telecaller_ptp_date <= CURRENT_DATE))
+          ) t`,
+          [agent.id]
+        );
         const cnt = parseInt(result.rows[0]?.cnt || "0", 10);
-        if (cnt > 0) await sendExpoPush(agent.push_token, "📅 PTP Due Today", `You have ${cnt} PTP case${cnt !== 1 ? "s" : ""} due today. Open the app to follow up now.`, { screen: "dashboard" });
+        if (cnt > 0) {
+          await sendExpoPush(
+            agent.push_token,
+            isMorning ? "📅 Good Morning — PTP Due Today" : "📅 Afternoon Reminder — PTP Cases",
+            `You have ${cnt} PTP case${cnt !== 1 ? "s" : ""} due today. Please follow up now!`,
+            { screen: "dashboard" }
+          );
+        }
       }
-      ptpReminderSentDates.add(todayKey);
+      ptpReminderSentDates.add(slotKey);
     } catch (_) {}
   }
   runPtpPushJob();
   setInterval(runPtpPushJob, 30 * 60 * 1000);
 
+  // Background job: hourly deposit reminder until screenshot uploaded
   async function runReminderJob() {
     try {
-      const result = await storage.query(`SELECT rd.id, rd.agent_id, rd.amount, fa.push_token FROM required_deposits rd JOIN fos_agents fa ON fa.id = rd.agent_id WHERE rd.screenshot_url IS NULL AND rd.reminder_sent = FALSE AND rd.created_at < NOW() - INTERVAL '2 hours' AND fa.push_token IS NOT NULL AND fa.push_token <> ''`);
+      const result = await storage.query(`
+        SELECT rd.id, rd.agent_id, rd.amount, rd.created_at,
+               rd.last_reminder_at, fa.push_token
+        FROM required_deposits rd
+        JOIN fos_agents fa ON fa.id = rd.agent_id
+        WHERE rd.screenshot_url IS NULL
+          AND fa.push_token IS NOT NULL
+          AND fa.push_token <> ''
+          AND (
+            rd.last_reminder_at IS NULL
+            OR rd.last_reminder_at < NOW() - INTERVAL '1 hour'
+          )
+      `);
       for (const row of result.rows) {
-        await sendExpoPush(row.push_token, "⏰ Deposit Screenshot Overdue", `You have not uploaded your payment screenshot for ₹${parseFloat(row.amount).toLocaleString("en-IN")}. Please upload it now.`);
-        await storage.query(`UPDATE required_deposits SET reminder_sent = TRUE WHERE id = $1`, [row.id]);
+        const createdAt = new Date(row.created_at);
+        const hoursElapsed = Math.floor((Date.now() - createdAt.getTime()) / 3600000);
+        const amtStr = parseFloat(row.amount).toLocaleString("en-IN");
+        await sendExpoPush(
+          row.push_token,
+          hoursElapsed === 0 ? "💰 Deposit Assigned" : `⏰ Deposit Reminder — ${hoursElapsed}h Pending`,
+          hoursElapsed === 0
+            ? `Admin has assigned you a deposit of ₹${amtStr}. Please upload screenshot within 2 hours.`
+            : `Upload your payment screenshot of ₹${amtStr} now! You have been reminded ${hoursElapsed} time${hoursElapsed !== 1 ? "s" : ""}.`,
+          { screen: "deposition" }
+        );
+        await storage.query(`UPDATE required_deposits SET last_reminder_at = NOW() WHERE id = $1`, [row.id]);
       }
     } catch (_) {}
   }
   runReminderJob();
-  setInterval(runReminderJob, 5 * 60 * 1000);
+  setInterval(runReminderJob, 60 * 60 * 1000);
 
   const httpServer = createServer(app);
   return httpServer;
