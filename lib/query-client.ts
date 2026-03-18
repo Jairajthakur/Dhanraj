@@ -1,9 +1,8 @@
 import { Platform } from "react-native";
 import Constants from "expo-constants";
 import { QueryClient, QueryFunction } from "@tanstack/react-query";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 
-// ─── Get API URL — never throws ─────────────────────────────────────────────
+// ─── Get API URL — NEVER throws, always returns valid URL ────────────────────
 export function getApiUrl(): string {
   // 1. EAS build-time env var
   const easApiUrl = process.env.EXPO_PUBLIC_API_URL;
@@ -17,7 +16,7 @@ export function getApiUrl(): string {
     return envDomain.startsWith("http") ? envDomain : `https://${envDomain}`;
   }
 
-  // 3. app.json extra.apiUrl — most reliable on native APK builds
+  // 3. app.json extra.apiUrl — most reliable for APK builds
   const extraUrl = Constants.expoConfig?.extra?.apiUrl as string | undefined;
   if (extraUrl) return extraUrl;
 
@@ -26,7 +25,7 @@ export function getApiUrl(): string {
     return "https://dhanraj-production.up.railway.app";
   }
 
-  // 5. Expo Go dev fallback
+  // 5. Expo Go dev server detection
   const candidates: (string | undefined)[] = [
     (Constants.expoConfig as any)?.hostUri,
     (Constants as any).expoGoConfig?.debuggerHost,
@@ -46,22 +45,12 @@ export function getApiUrl(): string {
     }
   }
 
-  // ✅ FIXED: Never throw — always return hardcoded fallback
-  console.warn("[API] Could not detect API URL — using hardcoded fallback");
+  // ✅ FIXED: Never throw — hardcoded fallback so APK never crashes
+  console.warn("[API] Using hardcoded fallback URL");
   return "https://dhanraj-production.up.railway.app";
 }
 
-// ─── Safe token getter — works on web AND native ─────────────────────────────
-async function getToken(): Promise<string | null> {
-  try {
-    if (Platform.OS === "web") return localStorage.getItem("token");
-    return await AsyncStorage.getItem("token");
-  } catch {
-    return null;
-  }
-}
-
-// ─── Safe fetch wrapper ──────────────────────────────────────────────────────
+// ─── Safe fetch helper ───────────────────────────────────────────────────────
 async function throwIfResNotOk(res: Response) {
   if (!res.ok) {
     const text = (await res.text()) || res.statusText;
@@ -69,27 +58,29 @@ async function throwIfResNotOk(res: Response) {
   }
 }
 
+// ─── Safe URL builder — never throws ────────────────────────────────────────
+function buildUrl(path: string, base: string): string {
+  try {
+    return new URL(path, base).toString();
+  } catch {
+    return `${base}${path}`;
+  }
+}
+
+// ─── apiRequest (used by old web code) ──────────────────────────────────────
 export async function apiRequest(
   method: string,
   route: string,
   data?: unknown,
 ): Promise<Response> {
   const baseUrl = getApiUrl();
-  let url: string;
-  try {
-    url = new URL(route, baseUrl).toString();
-  } catch {
-    url = `${baseUrl}${route}`;
-  }
+  const url = buildUrl(route, baseUrl);
 
-  // ✅ FIXED: async token — no localStorage on native
-  const token = await getToken();
-
+  // ✅ FIXED: No localStorage — use credentials/cookies only (matches backend)
   const res = await fetch(url, {
     method,
     headers: {
       ...(data ? { "Content-Type": "application/json" } : {}),
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
     body: data ? JSON.stringify(data) : undefined,
     credentials: "include",
@@ -108,19 +99,11 @@ export const getQueryFn: <T>(options: {
   ({ on401: unauthorizedBehavior }) =>
   async ({ queryKey }) => {
     const baseUrl = getApiUrl();
-    let url: string;
-    try {
-      url = new URL(queryKey.join("/") as string, baseUrl).toString();
-    } catch {
-      url = `${baseUrl}${queryKey.join("/")}`;
-    }
+    const url = buildUrl(queryKey.join("/") as string, baseUrl);
 
-    // ✅ FIXED: async token — no localStorage on native
-    const token = await getToken();
-
+    // ✅ FIXED: No localStorage — cookies only
     const res = await fetch(url, {
       credentials: "include",
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
     });
 
     if (unauthorizedBehavior === "returnNull" && res.status === 401) {
