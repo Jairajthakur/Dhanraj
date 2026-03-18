@@ -1,18 +1,7 @@
-import { fetch } from "expo/fetch";
 import { Platform } from "react-native";
 import Constants from "expo-constants";
 import { QueryClient, QueryFunction } from "@tanstack/react-query";
 
-/**
- * Gets the base URL for the Express API server.
- *
- * Priority:
- *  1. EXPO_PUBLIC_API_URL — set in eas.json env for APK builds (most reliable for production)
- *  2. EXPO_PUBLIC_DOMAIN env var (baked in by Metro from workflow env)
- *  3. app.json extra.apiUrl (always baked in by Expo — most reliable for native)
- *  4. Web: window.location.origin (deployed web — same domain as backend)
- *  5. Native fallback: derive host from Expo manifest connection data
- */
 export function getApiUrl(): string {
   // 1. EAS build-time env var — set in eas.json for APK/production builds
   const easApiUrl = process.env.EXPO_PUBLIC_API_URL;
@@ -23,24 +12,21 @@ export function getApiUrl(): string {
   // 2. Env var baked in by Metro
   const envDomain = process.env.EXPO_PUBLIC_DOMAIN;
   if (envDomain) {
-    const url = envDomain.startsWith("http") ? envDomain : `https://${envDomain}`;
-    console.log("[getApiUrl] using EXPO_PUBLIC_DOMAIN:", url);
-    return url;
+    return envDomain.startsWith("http") ? envDomain : `https://${envDomain}`;
   }
 
   // 3. app.json extra.apiUrl — always baked in, most reliable on native
   const extraUrl = Constants.expoConfig?.extra?.apiUrl as string | undefined;
   if (extraUrl) {
-    console.log("[getApiUrl] using extra.apiUrl:", extraUrl);
     return extraUrl;
   }
 
-  // 3. Web fallback — deployed app shares domain with Express backend
-  if (Platform.OS === "web" && typeof window !== "undefined") {
-    return window.location.origin;
+  // 4. Web — always use production Railway URL directly
+  if (Platform.OS === "web") {
+    return "https://dhanraj-production.up.railway.app";
   }
 
-  // 4. Native/Expo Go last resort — extract host from manifest connection data
+  // 5. Native/Expo Go last resort
   const candidates: (string | undefined)[] = [
     (Constants.expoConfig as any)?.hostUri,
     (Constants as any).expoGoConfig?.debuggerHost,
@@ -81,9 +67,14 @@ export async function apiRequest(
   const baseUrl = getApiUrl();
   const url = new URL(route, baseUrl);
 
+  const token = localStorage.getItem("token");
+
   const res = await fetch(url.toString(), {
     method,
-    headers: data ? { "Content-Type": "application/json" } : {},
+    headers: {
+      ...(data ? { "Content-Type": "application/json" } : {}),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
     body: data ? JSON.stringify(data) : undefined,
     credentials: "include",
   });
@@ -101,8 +92,11 @@ export const getQueryFn: <T>(options: {
     const baseUrl = getApiUrl();
     const url = new URL(queryKey.join("/") as string, baseUrl);
 
+    const token = localStorage.getItem("token");
+
     const res = await fetch(url.toString(), {
       credentials: "include",
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
     });
 
     if (unauthorizedBehavior === "returnNull" && res.status === 401) {
