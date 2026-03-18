@@ -1,28 +1,62 @@
 module.exports = ({ config }) => {
   return {
     ...config,
-    platforms: ["ios", "android", "web"],
+    name: "Dhanraj Enterprises",
+    slug: "dhanraj-enterprises",
+    owner: "jai234",
+    version: "1.0.0",
+    orientation: "portrait",
+    scheme: "dhanrajenterprises",
+    userInterfaceStyle: "automatic",
+    newArchEnabled: true,
+
+    icon: "./assets/images/dhanraj-logo.png",
+
+    splash: {
+      image: "./assets/images/dhanraj-logo.png",
+      resizeMode: "contain",
+      backgroundColor: "#ECEAE4",
+    },
+
+    ios: {
+      supportsTablet: false,
+      bundleIdentifier: "com.dhanrajenterprises.app",
+    },
+
+    android: {
+      package: "com.dhanrajenterprises.app",
+      adaptiveIcon: {
+        foregroundImage: "./assets/images/dhanraj-logo.png",
+        backgroundColor: "#ECEAE4",
+        backgroundImage: "./assets/images/android-icon-background.png",
+        monochromeImage: "./assets/images/android-icon-monochrome.png",
+      },
+    },
+
     web: {
       bundler: "metro",
       output: "static",
+      favicon: "./assets/images/dhanraj-logo.png",
     },
-    experiments: {
-      baseUrl: "/Dhanraj",
-    },
+
     plugins: [
+      "expo-router",
+      "expo-web-browser",
       [
-        "expo-font",
+        "expo-notifications",
         {
-          fonts: [
-            "./node_modules/@expo-google-fonts/outfit/Outfit_400Regular.ttf",
-            "./node_modules/@expo/vector-icons/build/vendor/react-native-vector-icons/Fonts/Ionicons.ttf",
-            "./node_modules/@expo/vector-icons/build/vendor/react-native-vector-icons/Fonts/MaterialIcons.ttf",
-          ],
+          icon: "./assets/images/dhanraj-logo.png",
+          color: "#111111",
         },
       ],
     ],
+
+    experiments: {
+      typedRoutes: true,
+      reactCompiler: true,
+    },
+
     extra: {
-      ...config.extra,
       apiUrl: "https://dhanraj-production.up.railway.app",
       eas: {
         projectId: "1b09251a-4423-4759-a22b-fc2f0a44fd8e",
