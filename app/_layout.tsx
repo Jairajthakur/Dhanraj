@@ -6,7 +6,7 @@ import {
   useRootNavigationState,
 } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
-import React, { useEffect } from "react";
+import React, { useEffect, useState } from "react";
 import { Text, View, Platform } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import { useFonts, Outfit_400Regular } from "@expo-google-fonts/outfit";
@@ -28,35 +28,36 @@ function RootLayoutNav() {
     if (!navigationState?.key || isLoading) return;
 
     const inLogin = segments[0] === "login";
-    if (!agent && !inLogin) {
-      router.replace("/login");
+    const inApp   = segments[0] === "(app)";
+    const inAdmin  = segments[0] === "(admin)";
+    const inRepo   = segments[0] === "(repo)";
+
+    // Not logged in → go to login
+    if (!agent) {
+      if (!inLogin) router.replace("/login");
       return;
     }
-    if (agent?.role === "admin") {
-      router.replace("/(admin)");
-      return;
-    }
-    if (agent?.role === "fos") {
-      router.replace("/(app)/dashboard");
-      return;
-    }
-    if (agent?.role === "repo") {
-      router.replace("/(repo)");
-      return;
-    }
-  }, [agent, isLoading, navigationState?.key]);
+
+    // Already in correct area → don't redirect (prevents infinite loop)
+    if (agent.role === "admin" && inAdmin) return;
+    if (agent.role === "fos"   && inApp)   return;
+    if (agent.role === "repo"  && inRepo)  return;
+
+    // Redirect to correct area
+    if (agent.role === "admin") router.replace("/(admin)");
+    else if (agent.role === "fos") router.replace("/(app)/dashboard");
+    else if (agent.role === "repo") router.replace("/(repo)");
+  }, [agent, isLoading, navigationState?.key, segments]);
 
   if (isLoading) {
     return (
-      <View
-        style={{
-          flex: 1,
-          justifyContent: "center",
-          alignItems: "center",
-          backgroundColor: "#ECEAE4",
-        }}
-      >
-        <Text style={{ color: "#0D0D0D" }}>Loading...</Text>
+      <View style={{
+        flex: 1,
+        justifyContent: "center",
+        alignItems: "center",
+        backgroundColor: "#ECEAE4",
+      }}>
+        <Text style={{ color: "#0D0D0D", fontSize: 14 }}>Loading...</Text>
       </View>
     );
   }
@@ -74,20 +75,27 @@ function RootLayoutNav() {
 }
 
 export default function RootLayout() {
+  const [fontTimeout, setFontTimeout] = useState(false);
   const [fontsLoaded, fontError] = useFonts(
     Platform.OS === "web" ? {} : { Outfit_400Regular }
   );
 
-  const appReady = Platform.OS === "web" ? true : fontsLoaded || !!fontError;
+  // Safety: never block on font loading forever
+  useEffect(() => {
+    const t = setTimeout(() => setFontTimeout(true), 3000);
+    return () => clearTimeout(t);
+  }, []);
+
+  const appReady =
+    Platform.OS === "web" ? true : fontsLoaded || !!fontError || fontTimeout;
 
   useEffect(() => {
-    if (appReady) {
-      SplashScreen.hideAsync();
-    }
+    if (appReady) SplashScreen.hideAsync();
   }, [appReady]);
 
+  // Return empty View (not null) to prevent blank screen on Android
   if (!appReady) {
-    return null;
+    return <View style={{ flex: 1, backgroundColor: "#ECEAE4" }} />;
   }
 
   return (
