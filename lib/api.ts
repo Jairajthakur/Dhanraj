@@ -4,7 +4,7 @@ import { getApiUrl } from "./query-client";
 
 const SESSION_KEY = "session_agent";
 
-// ─── Agent cache — works on both web and native ─────────────────────────────
+// ─── Agent cache — web uses localStorage, native uses AsyncStorage ───────────
 export const agentCache = {
   get: async (): Promise<any | null> => {
     try {
@@ -19,27 +19,42 @@ export const agentCache = {
   set: async (agent: any): Promise<void> => {
     try {
       const v = JSON.stringify(agent);
-      if (Platform.OS === "web") { localStorage.setItem(SESSION_KEY, v); return; }
+      if (Platform.OS === "web") {
+        localStorage.setItem(SESSION_KEY, v);
+        return;
+      }
       await AsyncStorage.setItem(SESSION_KEY, v);
     } catch {}
   },
   clear: async (): Promise<void> => {
     try {
-      if (Platform.OS === "web") { localStorage.removeItem(SESSION_KEY); return; }
+      if (Platform.OS === "web") {
+        localStorage.removeItem(SESSION_KEY);
+        return;
+      }
       await AsyncStorage.removeItem(SESSION_KEY);
     } catch {}
   },
 };
 
-// ─── Core request function ───────────────────────────────────────────────────
+// ─── Safe URL builder ────────────────────────────────────────────────────────
+function buildUrl(route: string, base: string): string {
+  try {
+    return new URL(route, base).toString();
+  } catch {
+    return `${base}${route}`;
+  }
+}
+
+// ─── Core request ────────────────────────────────────────────────────────────
 async function apiRequest(method: string, route: string, data?: any) {
   const baseUrl = getApiUrl();
-  const url = new URL(route, baseUrl);
+  const url = buildUrl(route, baseUrl);
 
-  const res = await fetch(url.toString(), {
+  const res = await fetch(url, {
     method,
     headers: { "Content-Type": "application/json" },
-    credentials: "include", // session cookie auth — matches your Express backend
+    credentials: "include",
     body: data ? JSON.stringify(data) : undefined,
   });
 
@@ -75,7 +90,6 @@ export const api = {
       if (res?.agent) await agentCache.set(res.agent);
       return res;
     } catch (e: any) {
-      // On native: fall back to cache if server unreachable
       if (Platform.OS !== "web") {
         const cached = await agentCache.get();
         if (cached) return { agent: cached };
@@ -104,11 +118,10 @@ export const api = {
   changePassword: (data: any) => apiRequest("PUT", "/api/auth/password", data),
   getProfile: () => apiRequest("GET", "/api/profile"),
 
-  // ✅ Push token — only called after agent is confirmed logged in
   savePushToken: async (token: string) => {
     try {
       await apiRequest("POST", "/api/push-token", { token });
-      console.log("[Push] Token saved to server ✅");
+      console.log("[Push] Token saved ✅");
     } catch (e: any) {
       console.error("[Push] Failed to save token:", e.message);
     }
