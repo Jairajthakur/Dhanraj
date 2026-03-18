@@ -35,7 +35,6 @@ module.exports = ({ config }) => {
 
     web: {
       bundler: "metro",
-      output: "static",
       favicon: "./assets/images/dhanraj-logo.png",
     },
 
