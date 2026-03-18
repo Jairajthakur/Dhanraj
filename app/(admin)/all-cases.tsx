@@ -481,7 +481,7 @@ export default function AllCasesScreen() {
 
   const agentGroups = useMemo(() => {
     const cases = data?.cases || [];
-    const groups: Record
+    const groups: Record<
       string,
       {
         agentId: number;
