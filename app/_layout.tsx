@@ -6,8 +6,8 @@ import {
   useRootNavigationState,
 } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
-import React, { useEffect } from "react";
-import { Text, View, Platform } from "react-native";
+import React, { useEffect, useRef } from "react";
+import { Text, View, Platform, Animated, Easing } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import { useFonts, Outfit_400Regular } from "@expo-google-fonts/outfit";
 import { queryClient } from "../lib/query-client";
@@ -19,6 +19,207 @@ import {
 
 SplashScreen.preventAutoHideAsync();
 
+function CoolLoadingScreen() {
+  const dot1 = useRef(new Animated.Value(0)).current;
+  const dot2 = useRef(new Animated.Value(0)).current;
+  const dot3 = useRef(new Animated.Value(0)).current;
+  const logoScale = useRef(new Animated.Value(0.8)).current;
+  const logoOpacity = useRef(new Animated.Value(0)).current;
+  const ringScale = useRef(new Animated.Value(0.6)).current;
+  const ringOpacity = useRef(new Animated.Value(0.6)).current;
+
+  useEffect(() => {
+    // Logo entrance
+    Animated.parallel([
+      Animated.spring(logoScale, {
+        toValue: 1,
+        tension: 50,
+        friction: 7,
+        useNativeDriver: true,
+      }),
+      Animated.timing(logoOpacity, {
+        toValue: 1,
+        duration: 600,
+        useNativeDriver: true,
+      }),
+    ]).start();
+
+    // Pulsing ring behind logo
+    Animated.loop(
+      Animated.sequence([
+        Animated.parallel([
+          Animated.timing(ringScale, {
+            toValue: 1.3,
+            duration: 1200,
+            easing: Easing.out(Easing.ease),
+            useNativeDriver: true,
+          }),
+          Animated.timing(ringOpacity, {
+            toValue: 0,
+            duration: 1200,
+            useNativeDriver: true,
+          }),
+        ]),
+        Animated.parallel([
+          Animated.timing(ringScale, {
+            toValue: 0.6,
+            duration: 0,
+            useNativeDriver: true,
+          }),
+          Animated.timing(ringOpacity, {
+            toValue: 0.6,
+            duration: 0,
+            useNativeDriver: true,
+          }),
+        ]),
+      ])
+    ).start();
+
+    // Bouncing dots
+    const animateDot = (dot: Animated.Value, delay: number) =>
+      Animated.loop(
+        Animated.sequence([
+          Animated.delay(delay),
+          Animated.timing(dot, {
+            toValue: -14,
+            duration: 320,
+            easing: Easing.out(Easing.quad),
+            useNativeDriver: true,
+          }),
+          Animated.timing(dot, {
+            toValue: 0,
+            duration: 320,
+            easing: Easing.in(Easing.quad),
+            useNativeDriver: true,
+          }),
+          Animated.delay(400),
+        ])
+      );
+
+    const a1 = animateDot(dot1, 0);
+    const a2 = animateDot(dot2, 160);
+    const a3 = animateDot(dot3, 320);
+    a1.start();
+    a2.start();
+    a3.start();
+
+    return () => {
+      a1.stop();
+      a2.stop();
+      a3.stop();
+    };
+  }, []);
+
+  return (
+    <View
+      style={{
+        flex: 1,
+        backgroundColor: "#ECEAE4",
+        justifyContent: "center",
+        alignItems: "center",
+        gap: 40,
+      }}
+    >
+      {/* Logo section */}
+      <Animated.View
+        style={{
+          transform: [{ scale: logoScale }],
+          opacity: logoOpacity,
+          alignItems: "center",
+          gap: 20,
+        }}
+      >
+        {/* Pulsing ring */}
+        <View style={{ width: 100, height: 100, justifyContent: "center", alignItems: "center" }}>
+          <Animated.View
+            style={{
+              position: "absolute",
+              width: 100,
+              height: 100,
+              borderRadius: 28,
+              borderWidth: 2,
+              borderColor: "#111111",
+              transform: [{ scale: ringScale }, { rotate: "45deg" }],
+              opacity: ringOpacity,
+            }}
+          />
+          {/* Diamond logo */}
+          <View
+            style={{
+              width: 72,
+              height: 72,
+              backgroundColor: "#111111",
+              borderRadius: 20,
+              transform: [{ rotate: "45deg" }],
+              justifyContent: "center",
+              alignItems: "center",
+              shadowColor: "#111111",
+              shadowOffset: { width: 0, height: 8 },
+              shadowOpacity: 0.25,
+              shadowRadius: 16,
+              elevation: 12,
+            }}
+          />
+          {/* D letter on top */}
+          <View style={{ position: "absolute" }}>
+            <Text
+              style={{
+                color: "#fff",
+                fontSize: 28,
+                fontWeight: "900",
+                letterSpacing: -1,
+              }}
+            >
+              D
+            </Text>
+          </View>
+        </View>
+
+        <View style={{ alignItems: "center", gap: 4 }}>
+          <Text
+            style={{
+              fontSize: 24,
+              fontWeight: "800",
+              color: "#111111",
+              letterSpacing: -0.5,
+            }}
+          >
+            Dhanraj
+          </Text>
+          <Text
+            style={{
+              fontSize: 11,
+              fontWeight: "600",
+              color: "#888888",
+              letterSpacing: 3.5,
+              textTransform: "uppercase",
+            }}
+          >
+            Enterprises
+          </Text>
+        </View>
+      </Animated.View>
+
+      {/* Bouncing dots */}
+      <View style={{ flexDirection: "row", gap: 10, alignItems: "center" }}>
+        {[dot1, dot2, dot3].map((dot, i) => (
+          <Animated.View
+            key={i}
+            style={{
+              width: 8,
+              height: 8,
+              borderRadius: 4,
+              backgroundColor: "#111111",
+              opacity: 0.6,
+              transform: [{ translateY: dot }],
+            }}
+          />
+        ))}
+      </View>
+    </View>
+  );
+}
+
 function RootLayoutNav() {
   const { agent, isLoading } = useAuth();
   const segments = useSegments();
@@ -28,34 +229,26 @@ function RootLayoutNav() {
     if (!navigationState?.key || isLoading) return;
 
     const inLogin = segments[0] === "login";
-
-    if (!agent) {
-      if (!inLogin) router.replace("/login");
+    if (!agent && !inLogin) {
+      router.replace("/login");
       return;
     }
-
-    if (agent.role === "admin") {
+    if (agent?.role === "admin") {
       router.replace("/(admin)");
-    } else if (agent.role === "fos") {
+      return;
+    }
+    if (agent?.role === "fos") {
       router.replace("/(app)/dashboard");
-    } else if (agent.role === "repo") {
+      return;
+    }
+    if (agent?.role === "repo") {
       router.replace("/(repo)");
+      return;
     }
   }, [agent, isLoading, navigationState?.key]);
 
   if (isLoading) {
-    return (
-      <View
-        style={{
-          flex: 1,
-          justifyContent: "center",
-          alignItems: "center",
-          backgroundColor: "#ECEAE4",
-        }}
-      >
-        <Text style={{ color: "#0D0D0D" }}>Loading...</Text>
-      </View>
-    );
+    return <CoolLoadingScreen />;
   }
 
   return (
@@ -83,20 +276,8 @@ export default function RootLayout() {
     }
   }, [appReady]);
 
-  // ✅ FIXED: No more blank screen
   if (!appReady) {
-    return (
-      <View
-        style={{
-          flex: 1,
-          justifyContent: "center",
-          alignItems: "center",
-          backgroundColor: "#ECEAE4",
-        }}
-      >
-        <Text>Loading App...</Text>
-      </View>
-    );
+    return null;
   }
 
   return (
