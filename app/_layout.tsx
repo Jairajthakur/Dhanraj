@@ -42,30 +42,61 @@ function CoolLoadingScreen() {
   }, []);
 
   return (
-    <View style={{ flex: 1, backgroundColor: "#ECEAE4", justifyContent: "center", alignItems: "center", gap: 40 }}>
-      <Animated.View style={{ transform: [{ scale: logoScale }], opacity: logoOpacity, alignItems: "center", gap: 20 }}>
+    <View style={{
+      flex: 1,
+      backgroundColor: "#ECEAE4",
+      justifyContent: "center",
+      alignItems: "center",
+    }}>
+      {/* Logo section — no gap on Animated.View */}
+      <Animated.View style={{
+        transform: [{ scale: logoScale }],
+        opacity: logoOpacity,
+        alignItems: "center",
+      }}>
+        {/* Diamond + D */}
         <View style={{ width: 100, height: 100, justifyContent: "center", alignItems: "center" }}>
           <View style={{
-            width: 72, height: 72, backgroundColor: "#111111", borderRadius: 20,
-            transform: [{ rotate: "45deg" }], justifyContent: "center", alignItems: "center",
-            shadowColor: "#111111", shadowOffset: { width: 0, height: 8 },
-            shadowOpacity: 0.25, shadowRadius: 16, elevation: 12,
+            width: 72,
+            height: 72,
+            backgroundColor: "#111111",
+            borderRadius: 20,
+            transform: [{ rotate: "45deg" }],
+            shadowColor: "#111111",
+            shadowOffset: { width: 0, height: 8 },
+            shadowOpacity: 0.25,
+            shadowRadius: 16,
+            elevation: 12,
           }} />
           <View style={{ position: "absolute" }}>
-            <Text style={{ color: "#fff", fontSize: 28, fontWeight: "900", letterSpacing: -1 }}>D</Text>
+            <Text style={{ color: "#fff", fontSize: 28, fontWeight: "900", letterSpacing: -1 }}>
+              D
+            </Text>
           </View>
         </View>
-        <View style={{ alignItems: "center", gap: 4 }}>
-          <Text style={{ fontSize: 24, fontWeight: "800", color: "#111111", letterSpacing: -0.5 }}>Dhanraj</Text>
-          <Text style={{ fontSize: 11, fontWeight: "600", color: "#888888", letterSpacing: 3.5, textTransform: "uppercase" }}>Enterprises</Text>
+
+        {/* Text below logo */}
+        <View style={{ alignItems: "center", marginTop: 20 }}>
+          <Text style={{ fontSize: 24, fontWeight: "800", color: "#111111", letterSpacing: -0.5 }}>
+            Dhanraj
+          </Text>
+          <Text style={{ fontSize: 11, fontWeight: "600", color: "#888888", letterSpacing: 3.5, textTransform: "uppercase", marginTop: 4 }}>
+            Enterprises
+          </Text>
         </View>
       </Animated.View>
 
-      <View style={{ flexDirection: "row", gap: 10, alignItems: "center" }}>
+      {/* Bouncing dots */}
+      <View style={{ flexDirection: "row", alignItems: "center", marginTop: 48 }}>
         {[dot1, dot2, dot3].map((dot, i) => (
           <Animated.View key={i} style={{
-            width: 8, height: 8, borderRadius: 4, backgroundColor: "#111111",
-            opacity: 0.6, transform: [{ translateY: dot }],
+            width: 8,
+            height: 8,
+            borderRadius: 4,
+            backgroundColor: "#111111",
+            opacity: 0.6,
+            marginHorizontal: 5,
+            transform: [{ translateY: dot }],
           }} />
         ))}
       </View>
