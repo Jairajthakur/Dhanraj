@@ -810,8 +810,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // ✅ Excel Import — Excel is source of truth, only PTP dates preserved
-  // ✅ FOS agents NOT in Excel are automatically removed
+  // ✅ Excel Import — Excel is source of truth, only PTP dates preserved, absent FOS agents removed
   app.post("/api/admin/import", requireAdmin, upload.single("file"), async (req, res) => {
     try {
       if (!req.file) return res.status(400).json({ message: "No file uploaded" });
@@ -821,7 +820,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const rawRows: any[][] = worksheetToRows(worksheet1, true);
       if (rawRows.length === 0)
         return res.json({ imported: 0, updated: 0, skipped: 0, agentsCreated: 0, agentsRemoved: 0, errors: [] });
-
       let headerRowIdx = -1;
       let colIdxMap: Record<number, string> = {};
       for (let r = 0; r < Math.min(rawRows.length, 15); r++) {
@@ -838,21 +836,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Could not find header row. Expected columns like: LOAN NO, CUSTOMER NAME, FOS NAME, POS, BKT" });
       }
 
-      // ✅ Collect all FOS names present in this Excel file
+      // Collect all FOS names in this Excel
       const fosNamesInExcel = new Set<string>();
-      const dataRows = rawRows.slice(headerRowIdx + 1);
-      for (const row of dataRows) {
+      const dataRowsPreScan = rawRows.slice(headerRowIdx + 1);
+      for (const row of dataRowsPreScan) {
         const mapped: Record<string, any> = {};
         for (const [colIdx, dbField] of Object.entries(colIdxMap)) {
           const val = row[Number(colIdx)];
           mapped[dbField] = val !== undefined && val !== "" ? String(val).trim() : null;
         }
-        if (mapped.fos_name && mapped.loan_no && mapped.customer_name && !isRepeatHeaderRow(mapped)) {
+        if (mapped.fos_name && !isRepeatHeaderRow(mapped)) {
           fosNamesInExcel.add(mapped.fos_name.toLowerCase().trim());
         }
       }
 
-      // Save only PTP dates — Excel status overwrites everything else
+      // Save only PTP dates
       const ptpLoanSave = await storage.query(`SELECT loan_no, ptp_date, telecaller_ptp_date FROM loan_cases WHERE status = 'PTP'`);
       const ptpLoanMap = new Map<string, { ptpDate: string | null; telecallerPtpDate: string | null }>(
         ptpLoanSave.rows.map((r: any) => [r.loan_no, { ptpDate: r.ptp_date, telecallerPtpDate: r.telecaller_ptp_date }])
@@ -860,30 +858,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       await storage.deleteAllLoanCases();
 
-      // ✅ Remove FOS agents not present in this Excel file
+      // ✅ Remove FOS agents not in Excel
+      const existingFosAgents = await storage.query(`SELECT id, name FROM fos_agents WHERE role = 'fos'`);
       let agentsRemoved = 0;
-      const allFosAgents = await storage.query(`SELECT id, name FROM fos_agents WHERE role = 'fos'`);
-      for (const agent of allFosAgents.rows) {
-        const agentNameLower = (agent.name || "").toLowerCase().trim();
-        if (!fosNamesInExcel.has(agentNameLower)) {
-          // Delete their cases, salary, depositions, attendance, sessions first
-         // Remove agent and all their related data safely
-try {
-  await storage.query(`DELETE FROM loan_cases WHERE agent_id = $1`, [agent.id]);
-  await storage.query(`DELETE FROM bkt_cases WHERE agent_id = $1`, [agent.id]);
-  await storage.query(`DELETE FROM bkt_perf_summary WHERE agent_id = $1`, [agent.id]);
-  await storage.query(`DELETE FROM attendance WHERE agent_id = $1`, [agent.id]);
-  await storage.query(`DELETE FROM required_deposits WHERE agent_id = $1`, [agent.id]);
-  await storage.query(`DELETE FROM salary WHERE agent_id = $1`, [agent.id]);
-  await storage.query(`DELETE FROM depositions WHERE agent_id = $1`, [agent.id]);
-  await storage.query(`DELETE FROM user_sessions WHERE sess::text LIKE $1`, [`%"agentId":${agent.id}%`]);
-  await storage.query(`DELETE FROM fos_agents WHERE id = $1`, [agent.id]);
-  agentsRemoved++;
-  console.log(`[import] Removed FOS agent not in Excel: ${agent.name}`);
-} catch (delErr: any) {
-  console.error(`[import] Could not remove agent ${agent.name}:`, delErr.message);
-  // Don't block the import if agent deletion fails
-}
+      for (const agent of existingFosAgents.rows) {
+        const nameLower = (agent.name || "").toLowerCase().trim();
+        if (!fosNamesInExcel.has(nameLower)) {
+          try {
+            await storage.query(`DELETE FROM loan_cases WHERE agent_id = $1`, [agent.id]);
+            await storage.query(`DELETE FROM bkt_cases WHERE agent_id = $1`, [agent.id]);
+            await storage.query(`DELETE FROM bkt_perf_summary WHERE agent_id = $1`, [agent.id]);
+            await storage.query(`DELETE FROM attendance WHERE agent_id = $1`, [agent.id]);
+            await storage.query(`DELETE FROM required_deposits WHERE agent_id = $1`, [agent.id]);
+            await storage.query(`DELETE FROM salary WHERE agent_id = $1`, [agent.id]);
+            await storage.query(`DELETE FROM depositions WHERE agent_id = $1`, [agent.id]);
+            await storage.query(`DELETE FROM user_sessions WHERE sess::text LIKE $1`, [`%"agentId":${agent.id}%`]);
+            await storage.query(`DELETE FROM fos_agents WHERE id = $1`, [agent.id]);
+            agentsRemoved++;
+            console.log(`[import] Removed FOS agent not in Excel: ${agent.name}`);
+          } catch (delErr: any) {
+            console.error(`[import] Could not remove agent ${agent.name}:`, delErr.message);
+          }
         }
       }
 
@@ -892,10 +887,9 @@ try {
       for (const a of existingAgents) {
         if (a.name) agentByName[a.name.toLowerCase().trim()] = a.id;
       }
-
       let imported = 0, skipped = 0, agentsCreated = 0;
       const errors: string[] = [];
-
+      const dataRows = rawRows.slice(headerRowIdx + 1);
       for (let i = 0; i < dataRows.length; i++) {
         const row = dataRows[i];
         const mapped: Record<string, any> = {};
@@ -906,7 +900,6 @@ try {
         if (!mapped.loan_no) { skipped++; continue; }
         if (!mapped.customer_name) { skipped++; continue; }
         if (isRepeatHeaderRow(mapped)) { skipped++; continue; }
-
         let agentId: number | null = null;
         if (mapped.fos_name) {
           const fosLower = mapped.fos_name.toLowerCase().trim();
@@ -925,7 +918,6 @@ try {
             }
           }
         }
-
         try {
           await storage.upsertLoanCase({
             agentId, fosName: mapped.fos_name || null, loanNo: mapped.loan_no,
@@ -957,7 +949,6 @@ try {
         }
       }
 
-      // Restore only PTP dates
       for (const [loanNo, ptpData] of ptpLoanMap) {
         await storage.query(
           `UPDATE loan_cases SET status = 'PTP', ptp_date = $1, telecaller_ptp_date = $2 WHERE loan_no = $3`,
@@ -971,8 +962,7 @@ try {
     }
   });
 
-  // ✅ BKT Import — Excel is source of truth, only PTP dates preserved
-  // ✅ FOS agents NOT in BKT Excel are automatically removed
+  // ✅ BKT Import — Excel is source of truth, only PTP dates preserved, absent FOS agents removed
   app.post("/api/admin/import-bkt", requireAdmin, upload.single("file"), async (req, res) => {
     try {
       if (!req.file) return res.status(400).json({ message: "No file uploaded" });
@@ -982,7 +972,6 @@ try {
       const rawRows: any[][] = worksheetToRows(worksheet2, true);
       if (rawRows.length === 0)
         return res.json({ imported: 0, updated: 0, skipped: 0, agentsCreated: 0, agentsRemoved: 0, errors: [] });
-
       let headerRowIdx = -1;
       let colIdxMap: Record<number, string> = {};
       for (let r = 0; r < Math.min(rawRows.length, 15); r++) {
@@ -999,21 +988,21 @@ try {
         return res.status(400).json({ message: "Could not find header row." });
       }
 
-      // ✅ Collect all FOS names present in this BKT Excel file
+      // Collect all FOS names in this BKT Excel
       const fosNamesInBktExcel = new Set<string>();
-      const dataRows = rawRows.slice(headerRowIdx + 1);
-      for (const row of dataRows) {
+      const bktDataRowsPreScan = rawRows.slice(headerRowIdx + 1);
+      for (const row of bktDataRowsPreScan) {
         const mapped: Record<string, any> = {};
         for (const [colIdx, dbField] of Object.entries(colIdxMap)) {
           const val = row[Number(colIdx)];
           mapped[dbField] = val !== undefined && val !== "" ? String(val).trim() : null;
         }
-        if (mapped.fos_name && mapped.loan_no && mapped.customer_name && !isRepeatHeaderRow(mapped)) {
+        if (mapped.fos_name && !isRepeatHeaderRow(mapped)) {
           fosNamesInBktExcel.add(mapped.fos_name.toLowerCase().trim());
         }
       }
 
-      // Save only PTP dates — Excel status overwrites everything else
+      // Save only PTP dates
       const ptpBktSave = await storage.query(`SELECT loan_no, ptp_date, telecaller_ptp_date FROM bkt_cases WHERE status = 'PTP'`);
       const ptpBktMap = new Map<string, { ptpDate: string | null; telecallerPtpDate: string | null }>(
         ptpBktSave.rows.map((r: any) => [r.loan_no, { ptpDate: r.ptp_date, telecallerPtpDate: r.telecaller_ptp_date }])
@@ -1021,22 +1010,27 @@ try {
 
       await storage.deleteAllBktCases();
 
-      // ✅ Remove FOS agents not present in this BKT Excel file
+      // ✅ Remove FOS agents not in BKT Excel
+      const existingFosBktAgents = await storage.query(`SELECT id, name FROM fos_agents WHERE role = 'fos'`);
       let agentsRemoved = 0;
-      const allFosAgentsBkt = await storage.query(`SELECT id, name FROM fos_agents WHERE role = 'fos'`);
-      for (const agent of allFosAgentsBkt.rows) {
-        const agentNameLower = (agent.name || "").toLowerCase().trim();
-        if (!fosNamesInBktExcel.has(agentNameLower)) {
-          await storage.query(`DELETE FROM loan_cases WHERE agent_id = $1`, [agent.id]);
-          await storage.query(`DELETE FROM bkt_cases WHERE agent_id = $1`, [agent.id]);
-          await storage.query(`DELETE FROM required_deposits WHERE agent_id = $1`, [agent.id]);
-          await storage.query(`DELETE FROM depositions WHERE agent_id = $1`, [agent.id]).catch(() => {});
-          await storage.query(`DELETE FROM attendance WHERE agent_id = $1`, [agent.id]).catch(() => {});
-          await storage.query(`DELETE FROM salary WHERE agent_id = $1`, [agent.id]).catch(() => {});
-          await storage.query(`DELETE FROM user_sessions WHERE sess::jsonb->>'agentId' = $1::text`, [agent.id]).catch(() => {});
-          await storage.query(`DELETE FROM fos_agents WHERE id = $1`, [agent.id]);
-          agentsRemoved++;
-          console.log(`[import-bkt] Removed FOS agent not in Excel: ${agent.name}`);
+      for (const agent of existingFosBktAgents.rows) {
+        const nameLower = (agent.name || "").toLowerCase().trim();
+        if (!fosNamesInBktExcel.has(nameLower)) {
+          try {
+            await storage.query(`DELETE FROM loan_cases WHERE agent_id = $1`, [agent.id]);
+            await storage.query(`DELETE FROM bkt_cases WHERE agent_id = $1`, [agent.id]);
+            await storage.query(`DELETE FROM bkt_perf_summary WHERE agent_id = $1`, [agent.id]);
+            await storage.query(`DELETE FROM attendance WHERE agent_id = $1`, [agent.id]);
+            await storage.query(`DELETE FROM required_deposits WHERE agent_id = $1`, [agent.id]);
+            await storage.query(`DELETE FROM salary WHERE agent_id = $1`, [agent.id]);
+            await storage.query(`DELETE FROM depositions WHERE agent_id = $1`, [agent.id]);
+            await storage.query(`DELETE FROM user_sessions WHERE sess::text LIKE $1`, [`%"agentId":${agent.id}%`]);
+            await storage.query(`DELETE FROM fos_agents WHERE id = $1`, [agent.id]);
+            agentsRemoved++;
+            console.log(`[import-bkt] Removed FOS agent not in BKT Excel: ${agent.name}`);
+          } catch (delErr: any) {
+            console.error(`[import-bkt] Could not remove agent ${agent.name}:`, delErr.message);
+          }
         }
       }
 
@@ -1045,10 +1039,9 @@ try {
       for (const a of existingAgents) {
         if (a.name) agentByName[a.name.toLowerCase().trim()] = a.id;
       }
-
       let imported = 0, skipped = 0, agentsCreated = 0;
       const errors: string[] = [];
-
+      const dataRows = rawRows.slice(headerRowIdx + 1);
       for (let i = 0; i < dataRows.length; i++) {
         const row = dataRows[i];
         const mapped: Record<string, any> = {};
@@ -1059,13 +1052,11 @@ try {
         if (!mapped.loan_no) { skipped++; continue; }
         if (!mapped.customer_name) { skipped++; continue; }
         if (isRepeatHeaderRow(mapped)) { skipped++; continue; }
-
         const bktVal = mapped.bkt ? parseInt(mapped.bkt) : null;
         let caseCategory = "penal";
         if (bktVal === 1) caseCategory = "bkt1";
         else if (bktVal === 2) caseCategory = "bkt2";
         else if (bktVal === 3) caseCategory = "bkt3";
-
         let agentId: number | null = null;
         if (mapped.fos_name) {
           const fosLower = mapped.fos_name.toLowerCase().trim();
@@ -1084,7 +1075,6 @@ try {
             }
           }
         }
-
         try {
           await storage.upsertBktCase({
             caseCategory, agentId, fosName: mapped.fos_name || null,
@@ -1116,7 +1106,6 @@ try {
         }
       }
 
-      // Restore only PTP dates
       for (const [loanNo, ptpData] of ptpBktMap) {
         await storage.query(
           `UPDATE bkt_cases SET status = 'PTP', ptp_date = $1, telecaller_ptp_date = $2 WHERE loan_no = $3`,
@@ -1513,21 +1502,20 @@ try {
     }
   });
 
-  // Background job: PTP push — 9 AM and 1 PM daily
+  // ─── Background Jobs ──────────────────────────────────────────────────────
+
+  // 1. PTP push — 9 AM and 1 PM daily
   const ptpReminderSentDates = new Set<string>();
   async function runPtpPushJob() {
     try {
       const now = new Date();
       const hour = now.getHours();
       const todayKey = now.toISOString().slice(0, 10);
-
       const isMorning = hour === 9;
       const isAfternoon = hour === 13;
       if (!isMorning && !isAfternoon) return;
-
       const slotKey = `${todayKey}-${hour}`;
       if (ptpReminderSentDates.has(slotKey)) return;
-
       const agents = await storage.query(
         `SELECT id, name, push_token FROM fos_agents WHERE role = 'fos' AND push_token IS NOT NULL AND push_token <> ''`
       );
@@ -1560,7 +1548,7 @@ try {
   runPtpPushJob();
   setInterval(runPtpPushJob, 30 * 60 * 1000);
 
-  // Background job: hourly deposit reminder until screenshot uploaded
+  // 2. Hourly deposit reminder until screenshot uploaded
   async function runReminderJob() {
     try {
       const result = await storage.query(`
@@ -1585,15 +1573,66 @@ try {
           hoursElapsed === 0 ? "💰 Deposit Assigned" : `⏰ Deposit Reminder — ${hoursElapsed}h Pending`,
           hoursElapsed === 0
             ? `Admin has assigned you a deposit of ₹${amtStr}. Please upload screenshot within 2 hours.`
-            : `Upload your payment screenshot of ₹${amtStr} now! You have been reminded ${hoursElapsed} time${hoursElapsed !== 1 ? "s" : ""}.`,
+            : `Upload your payment screenshot of ₹${amtStr} now! ${hoursElapsed}h elapsed — please upload immediately.`,
           { screen: "deposition" }
         );
-        await storage.query(`UPDATE required_deposits SET last_reminder_at = NOW() WHERE id = $1`, [row.id]);
+        await storage.query(
+          `UPDATE required_deposits SET last_reminder_at = NOW() WHERE id = $1`,
+          [row.id]
+        );
       }
     } catch (_) {}
   }
   runReminderJob();
   setInterval(runReminderJob, 60 * 60 * 1000);
+
+  // 3. Daily 7 PM batch summary to all FOS
+  const batchReminderSentDates = new Set<string>();
+  async function runBatchReminderJob() {
+    try {
+      const now = new Date();
+      const hour = now.getHours();
+      const todayKey = now.toISOString().slice(0, 10);
+      if (hour !== 19) return;
+      if (batchReminderSentDates.has(todayKey)) return;
+      const agents = await storage.query(
+        `SELECT id, name, push_token FROM fos_agents WHERE role = 'fos' AND push_token IS NOT NULL AND push_token <> ''`
+      );
+      for (const agent of agents.rows) {
+        const statsResult = await storage.query(
+          `SELECT
+            COUNT(*) FILTER (WHERE status = 'Paid')::int AS paid_count,
+            COUNT(*) FILTER (WHERE status = 'Unpaid')::int AS unpaid_count,
+            COUNT(*) FILTER (WHERE status = 'PTP')::int AS ptp_count,
+            COUNT(*)::int AS total
+          FROM (
+            SELECT status FROM loan_cases WHERE agent_id = $1
+            UNION ALL
+            SELECT status FROM bkt_cases WHERE agent_id = $1
+          ) t`,
+          [agent.id]
+        );
+        const s = statsResult.rows[0];
+        const total = parseInt(s?.total || "0", 10);
+        const paid = parseInt(s?.paid_count || "0", 10);
+        const ptp = parseInt(s?.ptp_count || "0", 10);
+        const unpaid = parseInt(s?.unpaid_count || "0", 10);
+        if (total === 0) continue;
+        await sendExpoPush(
+          agent.push_token,
+          "📊 End of Day Summary",
+          `Today: ✅ ${paid} Paid | 🔄 ${ptp} PTP | ❌ ${unpaid} Unpaid out of ${total} total cases. Keep it up!`,
+          { screen: "dashboard", type: "daily_summary" }
+        );
+      }
+      batchReminderSentDates.add(todayKey);
+      console.log(`[batch-reminder] Sent daily 7PM summary to ${agents.rows.length} FOS agents`);
+    } catch (e: any) {
+      console.error("[batch-reminder] Error:", e.message);
+    }
+  }
+  runBatchReminderJob();
+  setInterval(runBatchReminderJob, 30 * 60 * 1000);
 
   const httpServer = createServer(app);
   return httpServer;
