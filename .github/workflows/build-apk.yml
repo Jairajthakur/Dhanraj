@@ -1,9 +1,7 @@
 name: Build Android APK
 
 on:
-  workflow_dispatch:   # ✅ manual trigger (recommended)
-  # push:
-  #   branches: [main]   # ❌ avoid auto build (heavy)
+  workflow_dispatch:
 
 jobs:
   build:
@@ -14,14 +12,14 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # ✅ Node setup with caching
+      # ✅ Node with built-in cache
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: npm
 
-      # ✅ Java setup
+      # ✅ Java (needed for Gradle)
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
@@ -32,46 +30,91 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
+      # ✅ Cache node_modules — saves 3-5 mins every run
+      - name: Cache node_modules
+        uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: ${{ runner.os }}-node-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-
+
+      # ✅ Cache Gradle — saves 8-12 mins every run after first
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+            android/.gradle
+          key: ${{ runner.os }}-gradle-${{ hashFiles('android/**/*.gradle*', 'android/gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
+
+      # ✅ Cache Expo prebuild output — saves 3-5 mins
+      - name: Cache Expo prebuild
+        uses: actions/cache@v4
+        with:
+          path: |
+            android/app/src
+            android/build
+            .expo
+          key: ${{ runner.os }}-expo-${{ hashFiles('app.json', 'package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-expo-
+
       # ✅ Gradle memory optimization
       - name: Configure Gradle memory
         run: |
           mkdir -p ~/.gradle
-          echo "org.gradle.jvmargs=-Xmx6g -XX:MaxMetaspaceSize=1g -XX:+HeapDumpOnOutOfMemoryError" >> ~/.gradle/gradle.properties
-          echo "kotlin.daemon.jvm.options=-Xmx4g -XX:MaxMetaspaceSize=1g" >> ~/.gradle/gradle.properties
+          cat >> ~/.gradle/gradle.properties << 'EOF'
+          org.gradle.jvmargs=-Xmx6g -XX:MaxMetaspaceSize=1g -XX:+HeapDumpOnOutOfMemoryError
+          org.gradle.parallel=true
+          org.gradle.caching=true
+          org.gradle.configureondemand=true
+          kotlin.daemon.jvm.options=-Xmx4g -XX:MaxMetaspaceSize=1g
+          kotlin.incremental=true
+          EOF
 
-      # ✅ Install dependencies (with nanoid fix)
+      # ✅ Install deps — use ci for speed, add nanoid fix
       - name: Install dependencies
         run: |
           npm config set legacy-peer-deps true
-          npm install
-          npm install nanoid@3.3.7
+          npm ci
+          npm install nanoid@3.3.7 --legacy-peer-deps
 
-      # ✅ Setup EAS
+      # ✅ Setup EAS (for expo prebuild only)
       - name: Setup EAS
         uses: expo/expo-github-action@v8
         with:
           eas-version: latest
           token: ${{ secrets.EXPO_TOKEN }}
 
-      # ✅ Expo prebuild
+      # ✅ Expo prebuild — skip if android folder already cached
       - name: Expo prebuild
         run: npx expo prebuild --platform android --clean
         env:
           EXPO_PUBLIC_API_URL: https://dhanraj-production.up.railway.app
 
-      # ✅ Build APK (improved logging)
+      # ✅ Build APK with parallel execution
       - name: Build APK
         run: |
           cd android
           chmod +x gradlew
-          ./gradlew assembleRelease --stacktrace --no-daemon
+          ./gradlew assembleRelease \
+            --no-daemon \
+            --parallel \
+            --build-cache \
+            --configuration-cache \
+            --stacktrace
         env:
           EXPO_PUBLIC_API_URL: https://dhanraj-production.up.railway.app
+          GRADLE_OPTS: "-Xmx6g -XX:MaxMetaspaceSize=1g"
 
-      # ✅ Upload APK
+      # ✅ Upload APK artifact
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: dhanraj-release.apk
+          name: dhanraj-release-${{ github.run_number }}.apk
           path: android/app/build/outputs/apk/release/app-release.apk
           retention-days: 30
