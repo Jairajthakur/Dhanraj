@@ -1,5 +1,7 @@
 {
-  "install": {
-    "cmd": "npm install --legacy-peer-deps"
+  "steps": {
+    "install": {
+      "cmd": "npm install --legacy-peer-deps"
+    }
   }
 }
