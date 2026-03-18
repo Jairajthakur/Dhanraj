@@ -11,7 +11,8 @@
       "resourceClass": "medium",
       "env": {
         "EXPO_PUBLIC_API_URL": "https://dhanraj-production.up.railway.app",
-        "EAS_BUILD_NO_EXPO_GO_WARNING": "true"
+        "EAS_BUILD_NO_EXPO_GO_WARNING": "true",
+        "CI": "false"
       }
     }
   },
