@@ -12,7 +12,10 @@ import { StatusBar } from "expo-status-bar";
 import { useFonts, Outfit_400Regular } from "@expo-google-fonts/outfit";
 import { queryClient } from "../lib/query-client";
 import { AuthProvider, useAuth } from "../context/AuthContext";
-import { SafeAreaProvider } from "react-native-safe-area-context";
+import {
+  SafeAreaProvider,
+  initialWindowMetrics,
+} from "react-native-safe-area-context";
 
 SplashScreen.preventAutoHideAsync();
 
@@ -72,12 +75,10 @@ function RootLayoutNav() {
 
 export default function RootLayout() {
   const [fontsLoaded, fontError] = useFonts(
-    Platform.OS === "web"
-      ? {}
-      : { Outfit_400Regular }
+    Platform.OS === "web" ? {} : { Outfit_400Regular }
   );
 
-  const appReady = Platform.OS === "web" ? true : (fontsLoaded || !!fontError);
+  const appReady = Platform.OS === "web" ? true : fontsLoaded || !!fontError;
 
   useEffect(() => {
     if (appReady) {
@@ -91,7 +92,16 @@ export default function RootLayout() {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <SafeAreaProvider>
+      <SafeAreaProvider
+        initialMetrics={
+          Platform.OS === "web"
+            ? {
+                insets: { top: 0, left: 0, right: 0, bottom: 0 },
+                frame: { x: 0, y: 0, width: 0, height: 0 },
+              }
+            : initialWindowMetrics
+        }
+      >
         <StatusBar style="dark" />
         <AuthProvider>
           <RootLayoutNav />
