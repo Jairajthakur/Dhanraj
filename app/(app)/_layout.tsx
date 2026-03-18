@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import {
-  View, Text, Pressable, StyleSheet, Modal, Animated, ScrollView,
-  Platform, Alert
+  View, Text, Pressable, StyleSheet, Modal, Animated,
+  ScrollView, Platform, Alert
 } from "react-native";
 import { Stack, router } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -9,13 +9,10 @@ import { Ionicons } from "@expo/vector-icons";
 import Colors from "@/constants/colors";
 import { useAuth } from "@/context/AuthContext";
 import { api } from "@/lib/api";
-import * as Haptics from "expo-haptics";
 
-// ✅ Only import and configure notifications on native platforms
+// ✅ Notifications ONLY on native — never on web
 if (Platform.OS !== "web") {
   const Notifications = require("expo-notifications");
-  const Constants = require("expo-constants").default;
-
   Notifications.setNotificationHandler({
     handleNotification: async () => ({
       shouldShowAlert: true,
@@ -23,7 +20,6 @@ if (Platform.OS !== "web") {
       shouldSetBadge: true,
     }),
   });
-
   if (Platform.OS === "android") {
     Notifications.setNotificationChannelAsync("default", {
       name: "FOS Alerts",
@@ -38,7 +34,7 @@ if (Platform.OS !== "web") {
 }
 
 async function registerPushToken() {
-  if (Platform.OS === "web") return; // ✅ already guarded, but be explicit
+  if (Platform.OS === "web") return;
   try {
     const Notifications = require("expo-notifications");
     const Constants = require("expo-constants").default;
@@ -50,7 +46,8 @@ async function registerPushToken() {
     }
     if (finalStatus !== "granted") return;
     const projectId =
-      Constants.expoConfig?.extra?.eas?.projectId ?? "468697d4-4263-4646-ac41-82c2d6b71207";
+      Constants.expoConfig?.extra?.eas?.projectId ??
+      "1b09251a-4423-4759-a22b-fc2f0a44fd8e";
     const tokenData = await Notifications.getExpoPushTokenAsync({ projectId });
     if (tokenData?.data) {
       await api.savePushToken(tokenData.data);
@@ -59,36 +56,24 @@ async function registerPushToken() {
 }
 
 const MENU_ITEMS = [
-  { key: "dashboard", label: "Dashboard", icon: "home" as const, screen: "/(app)/dashboard" },
-  { key: "allocation", label: "My Cases", icon: "list" as const, screen: "/(app)/allocation" },
-  { key: "ready-payment", label: "Ready Payment", icon: "phone-portrait" as const, screen: "/(app)/ready-payment" },
-  { key: "deposition", label: "Deposition", icon: "cash" as const, screen: "/(app)/deposition" },
-  { key: "performance", label: "Performance", icon: "stats-chart" as const, screen: "/(app)/performance" },
-  { key: "id-card", label: "ID Card", icon: "card" as const, screen: "/(app)/id-card" },
-  { key: "attendance", label: "Attendance", icon: "checkmark-circle" as const, screen: "attendance" },
-  { key: "salary", label: "Salary", icon: "wallet" as const, screen: "/(app)/salary" },
-  { key: "change-password", label: "Change Password", icon: "lock-closed" as const, screen: "/(app)/change-password" },
+  { key: "dashboard",       label: "Dashboard",       icon: "home"             as const, screen: "/(app)/dashboard" },
+  { key: "allocation",      label: "My Cases",        icon: "list"             as const, screen: "/(app)/allocation" },
+  { key: "ready-payment",   label: "Ready Payment",   icon: "phone-portrait"   as const, screen: "/(app)/ready-payment" },
+  { key: "deposition",      label: "Deposition",      icon: "cash"             as const, screen: "/(app)/deposition" },
+  { key: "performance",     label: "Performance",     icon: "stats-chart"      as const, screen: "/(app)/performance" },
+  { key: "id-card",         label: "ID Card",         icon: "card"             as const, screen: "/(app)/id-card" },
+  { key: "attendance",      label: "Attendance",      icon: "checkmark-circle" as const, screen: "attendance" },
+  { key: "salary",          label: "Salary",          icon: "wallet"           as const, screen: "/(app)/salary" },
+  { key: "change-password", label: "Change Password", icon: "lock-closed"      as const, screen: "/(app)/change-password" },
 ];
-
-interface DrawerProps {
-  visible: boolean;
-  onClose: () => void;
-  agentName: string;
-}
 
 function AttendanceModal({ visible, onClose }: { visible: boolean; onClose: () => void }) {
   const [loading, setLoading] = useState(false);
-
   const handle = async (type: "in" | "out") => {
     setLoading(true);
     try {
-      if (type === "in") {
-        await api.checkIn();
-        Alert.alert("Success", "Checked in successfully!");
-      } else {
-        await api.checkOut();
-        Alert.alert("Success", "Checked out successfully!");
-      }
+      if (type === "in") { await api.checkIn(); Alert.alert("Success", "Checked in successfully!"); }
+      else { await api.checkOut(); Alert.alert("Success", "Checked out successfully!"); }
       onClose();
     } catch (e: any) {
       Alert.alert("Error", e.message);
@@ -96,7 +81,6 @@ function AttendanceModal({ visible, onClose }: { visible: boolean; onClose: () =
       setLoading(false);
     }
   };
-
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <Pressable style={styles.modalOverlay} onPress={onClose}>
@@ -105,19 +89,11 @@ function AttendanceModal({ visible, onClose }: { visible: boolean; onClose: () =
             <Ionicons name="checkmark-circle" size={24} color={Colors.primary} />
             <Text style={styles.attTitle}>Mark Attendance</Text>
           </View>
-          <Pressable
-            style={[styles.attBtn, { borderTopWidth: 1, borderTopColor: Colors.border }]}
-            onPress={() => handle("in")}
-            disabled={loading}
-          >
+          <Pressable style={[styles.attBtn, { borderTopWidth: 1, borderTopColor: Colors.border }]} onPress={() => handle("in")} disabled={loading}>
             <Ionicons name="log-in-outline" size={20} color={Colors.success} />
             <Text style={[styles.attBtnText, { color: Colors.success }]}>CHECK IN</Text>
           </Pressable>
-          <Pressable
-            style={[styles.attBtn, { borderTopWidth: 1, borderTopColor: Colors.border }]}
-            onPress={() => handle("out")}
-            disabled={loading}
-          >
+          <Pressable style={[styles.attBtn, { borderTopWidth: 1, borderTopColor: Colors.border }]} onPress={() => handle("out")} disabled={loading}>
             <Ionicons name="log-out-outline" size={20} color={Colors.warning} />
             <Text style={[styles.attBtnText, { color: Colors.warning }]}>CHECK OUT</Text>
           </Pressable>
@@ -130,14 +106,18 @@ function AttendanceModal({ visible, onClose }: { visible: boolean; onClose: () =
   );
 }
 
-function Drawer({ visible, onClose, agentName }: DrawerProps) {
+function Drawer({ visible, onClose, agentName }: { visible: boolean; onClose: () => void; agentName: string }) {
   const insets = useSafeAreaInsets();
   const { logout } = useAuth();
   const [attVisible, setAttVisible] = useState(false);
 
   const handleNav = (item: typeof MENU_ITEMS[0]) => {
+    // ✅ Haptics guard
     if (Platform.OS !== "web") {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      try {
+        const Haptics = require("expo-haptics");
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      } catch (_) {}
     }
     onClose();
     if (item.key === "attendance") {
@@ -148,18 +128,10 @@ function Drawer({ visible, onClose, agentName }: DrawerProps) {
   };
 
   const handleLogout = async () => {
-    try {
-      await logout();
-      router.replace("/login");
-    } catch {}
+    try { await logout(); router.replace("/login"); } catch {}
   };
 
-  const initials = agentName
-    .split(" ")
-    .map((w) => w[0])
-    .join("")
-    .toUpperCase()
-    .slice(0, 2);
+  const initials = agentName.split(" ").map((w) => w[0]).join("").toUpperCase().slice(0, 2);
 
   return (
     <>
@@ -178,7 +150,6 @@ function Drawer({ visible, onClose, agentName }: DrawerProps) {
                 </View>
               </View>
             </View>
-
             <ScrollView style={styles.drawerMenu} showsVerticalScrollIndicator={false}>
               <View style={styles.menuSection}>
                 {MENU_ITEMS.map((item) => (
@@ -195,7 +166,6 @@ function Drawer({ visible, onClose, agentName }: DrawerProps) {
                   </Pressable>
                 ))}
               </View>
-
               <View style={[styles.menuSection, { marginTop: 8 }]}>
                 <Pressable
                   style={({ pressed }) => [styles.drawerItem, pressed && styles.drawerItemPressed]}
@@ -221,7 +191,7 @@ export default function AppLayout() {
   const { agent } = useAuth();
 
   useEffect(() => {
-    registerPushToken(); // ✅ already guarded inside the function
+    registerPushToken();
   }, []);
 
   return (
@@ -270,123 +240,28 @@ export default function AppLayout() {
 }
 
 const styles = StyleSheet.create({
-  headerMenuBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: Colors.surfaceAlt,
-    marginLeft: -4,
-  },
-  headerLogo: {
-    width: 32,
-    height: 32,
-    borderRadius: 10,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: Colors.primary + "18",
-  },
+  headerMenuBtn: { width: 36, height: 36, borderRadius: 10, alignItems: "center", justifyContent: "center", backgroundColor: Colors.surfaceAlt, marginLeft: -4 },
+  headerLogo: { width: 32, height: 32, borderRadius: 10, alignItems: "center", justifyContent: "center", backgroundColor: Colors.primary + "18" },
   drawerOverlay: { flex: 1, flexDirection: "row" },
   drawerBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.65)" },
-  drawerContainer: {
-    width: "82%",
-    maxWidth: 310,
-    backgroundColor: Colors.surface,
-    position: "absolute",
-    left: 0,
-    top: 0,
-    bottom: 0,
-    borderRightWidth: 1,
-    borderRightColor: Colors.borderLight,
-  },
-  drawerHeader: {
-    backgroundColor: Colors.background,
-    paddingHorizontal: 20,
-    paddingBottom: 24,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 14,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
-  },
-  drawerAvatarCircle: {
-    width: 54,
-    height: 54,
-    borderRadius: 27,
-    backgroundColor: Colors.surfaceElevated,
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 2,
-    borderColor: Colors.border,
-  },
+  drawerContainer: { width: "82%", maxWidth: 310, backgroundColor: Colors.surface, position: "absolute", left: 0, top: 0, bottom: 0, borderRightWidth: 1, borderRightColor: Colors.borderLight },
+  drawerHeader: { backgroundColor: Colors.background, paddingHorizontal: 20, paddingBottom: 24, flexDirection: "row", alignItems: "center", gap: 14, borderBottomWidth: 1, borderBottomColor: Colors.border },
+  drawerAvatarCircle: { width: 54, height: 54, borderRadius: 27, backgroundColor: Colors.surfaceElevated, alignItems: "center", justifyContent: "center", borderWidth: 2, borderColor: Colors.border },
   drawerAvatarText: { color: Colors.text, fontSize: 20, fontWeight: "800" },
   drawerHeaderInfo: { flex: 1, gap: 6 },
   drawerName: { color: Colors.text, fontSize: 16, fontWeight: "800", letterSpacing: -0.2 },
-  drawerRoleBadge: {
-    backgroundColor: Colors.border,
-    borderRadius: 6,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    alignSelf: "flex-start",
-  },
+  drawerRoleBadge: { backgroundColor: Colors.border, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3, alignSelf: "flex-start" },
   drawerRoleText: { color: Colors.textSecondary, fontSize: 11, fontWeight: "700", letterSpacing: 0.5 },
   drawerMenu: { flex: 1, paddingTop: 8 },
-  menuSection: {
-    marginHorizontal: 12,
-    backgroundColor: Colors.surfaceAlt,
-    borderRadius: 14,
-    overflow: "hidden",
-    borderWidth: 1,
-    borderColor: Colors.border,
-  },
-  drawerItem: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 14,
-    paddingVertical: 14,
-    gap: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: Colors.border,
-  },
+  menuSection: { marginHorizontal: 12, backgroundColor: Colors.surfaceAlt, borderRadius: 14, overflow: "hidden", borderWidth: 1, borderColor: Colors.border },
+  drawerItem: { flexDirection: "row", alignItems: "center", paddingHorizontal: 14, paddingVertical: 14, gap: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: Colors.border },
   drawerItemPressed: { backgroundColor: Colors.border },
-  drawerIconWrap: {
-    width: 32,
-    height: 32,
-    borderRadius: 9,
-    backgroundColor: Colors.primary + "18",
-    alignItems: "center",
-    justifyContent: "center",
-  },
+  drawerIconWrap: { width: 32, height: 32, borderRadius: 9, backgroundColor: Colors.primary + "18", alignItems: "center", justifyContent: "center" },
   drawerItemText: { flex: 1, fontSize: 14, color: Colors.text, fontWeight: "600" },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.65)",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  attendanceCard: {
-    width: 300,
-    backgroundColor: Colors.surface,
-    borderRadius: 20,
-    overflow: "hidden",
-    borderWidth: 1,
-    borderColor: Colors.borderLight,
-  },
-  attHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    padding: 20,
-    paddingBottom: 18,
-  },
+  modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.65)", justifyContent: "center", alignItems: "center" },
+  attendanceCard: { width: 300, backgroundColor: Colors.surface, borderRadius: 20, overflow: "hidden", borderWidth: 1, borderColor: Colors.borderLight },
+  attHeader: { flexDirection: "row", alignItems: "center", gap: 10, padding: 20, paddingBottom: 18 },
   attTitle: { fontSize: 17, fontWeight: "700", color: Colors.text },
-  attBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 10,
-    paddingVertical: 18,
-  },
+  attBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 10, paddingVertical: 18 },
   attBtnText: { fontSize: 14, fontWeight: "800", letterSpacing: 1 },
 });
