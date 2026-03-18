@@ -867,16 +867,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const agentNameLower = (agent.name || "").toLowerCase().trim();
         if (!fosNamesInExcel.has(agentNameLower)) {
           // Delete their cases, salary, depositions, attendance, sessions first
-          await storage.query(`DELETE FROM loan_cases WHERE agent_id = $1`, [agent.id]);
-          await storage.query(`DELETE FROM bkt_cases WHERE agent_id = $1`, [agent.id]);
-          await storage.query(`DELETE FROM required_deposits WHERE agent_id = $1`, [agent.id]);
-          await storage.query(`DELETE FROM depositions WHERE agent_id = $1`, [agent.id]).catch(() => {});
-          await storage.query(`DELETE FROM attendance WHERE agent_id = $1`, [agent.id]).catch(() => {});
-          await storage.query(`DELETE FROM salary WHERE agent_id = $1`, [agent.id]).catch(() => {});
-          await storage.query(`DELETE FROM user_sessions WHERE sess::jsonb->>'agentId' = $1::text`, [agent.id]).catch(() => {});
-          await storage.query(`DELETE FROM fos_agents WHERE id = $1`, [agent.id]);
-          agentsRemoved++;
-          console.log(`[import] Removed FOS agent not in Excel: ${agent.name}`);
+         // Remove agent and all their related data safely
+try {
+  await storage.query(`DELETE FROM loan_cases WHERE agent_id = $1`, [agent.id]);
+  await storage.query(`DELETE FROM bkt_cases WHERE agent_id = $1`, [agent.id]);
+  await storage.query(`DELETE FROM bkt_perf_summary WHERE agent_id = $1`, [agent.id]);
+  await storage.query(`DELETE FROM attendance WHERE agent_id = $1`, [agent.id]);
+  await storage.query(`DELETE FROM required_deposits WHERE agent_id = $1`, [agent.id]);
+  await storage.query(`DELETE FROM salary WHERE agent_id = $1`, [agent.id]);
+  await storage.query(`DELETE FROM depositions WHERE agent_id = $1`, [agent.id]);
+  await storage.query(`DELETE FROM user_sessions WHERE sess::text LIKE $1`, [`%"agentId":${agent.id}%`]);
+  await storage.query(`DELETE FROM fos_agents WHERE id = $1`, [agent.id]);
+  agentsRemoved++;
+  console.log(`[import] Removed FOS agent not in Excel: ${agent.name}`);
+} catch (delErr: any) {
+  console.error(`[import] Could not remove agent ${agent.name}:`, delErr.message);
+  // Don't block the import if agent deletion fails
+}
         }
       }
 
