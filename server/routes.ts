@@ -262,7 +262,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     next();
   }
 
-  // Repo
   app.get("/api/repo/cases", requireRepo, async (req, res) => {
     try {
       const cases = await storage.getAllLoanCases();
@@ -272,7 +271,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Auth
   app.post("/api/auth/login", async (req, res) => {
     try {
       const { username, password } = req.body;
@@ -304,7 +302,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // FOS: Cases
   app.get("/api/cases", requireAuth, async (req, res) => {
     try {
       const cases = await storage.getLoanCasesByAgent(req.session.agentId!);
@@ -335,13 +332,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const ynVal = rollback_yn === true || rollback_yn === "true" ? true : rollback_yn === false || rollback_yn === "false" ? false : null;
       const toBool = (v: any) => v === true || v === "true" ? true : v === false || v === "false" ? false : null;
       const caseId = Number(req.params.id);
-
       const oldRow = await storage.query(
         `SELECT status, rollback_yn, pos::numeric AS pos, agent_id, bkt, pro FROM loan_cases WHERE id = $1`,
         [caseId]
       );
       const old = oldRow.rows[0];
-
       const extraFields = {
         ...(customer_available !== undefined && { customerAvailable: toBool(customer_available) }),
         ...(vehicle_available !== undefined && { vehicleAvailable: toBool(vehicle_available) }),
@@ -355,7 +350,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ...(workable !== undefined && { workable: toBool(workable) }),
       };
       await storage.updateLoanCaseFeedback(caseId, status, feedback, comments, ptp_date, ynVal, extraFields);
-
       if (old && old.bkt && old.agent_id && (old.pro || "").toUpperCase() !== "UC") {
         const pos = parseFloat(old.pos) || 0;
         const bktKey = `bkt${old.bkt}`;
@@ -368,14 +362,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const dRb = !wasRb && nowRb ? pos : wasRb && !nowRb ? -pos : 0;
         await storage.applyBktPerfDelta(old.agent_id, bktKey, dPos, -dPos, dCount, -dCount, dRb, -dRb);
       }
-
       res.json({ success: true });
     } catch (e: any) {
       res.status(500).json({ message: e.message });
     }
   });
 
-  // Stats
   app.get("/api/stats", requireAuth, async (req, res) => {
     try {
       const stats = await storage.getAgentStats(req.session.agentId!);
@@ -393,23 +385,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
                ptp_date, telecaller_ptp_date,
                (status = 'PTP' AND (ptp_date IS NULL OR ptp_date <= CURRENT_DATE)) AS fos_ptp,
                (telecaller_ptp_date IS NOT NULL AND telecaller_ptp_date <= CURRENT_DATE) AS tele_ptp
-        FROM loan_cases
-        WHERE agent_id = $1
-          AND (
-            (status = 'PTP' AND (ptp_date IS NULL OR ptp_date <= CURRENT_DATE))
-            OR (telecaller_ptp_date IS NOT NULL AND telecaller_ptp_date <= CURRENT_DATE)
-          )
+        FROM loan_cases WHERE agent_id = $1
+          AND ((status = 'PTP' AND (ptp_date IS NULL OR ptp_date <= CURRENT_DATE))
+            OR (telecaller_ptp_date IS NOT NULL AND telecaller_ptp_date <= CURRENT_DATE))
         UNION ALL
         SELECT 'bkt' AS source, id, customer_name, loan_no, pos::numeric AS pos,
                ptp_date, telecaller_ptp_date,
                (status = 'PTP' AND (ptp_date IS NULL OR ptp_date <= CURRENT_DATE)) AS fos_ptp,
                (telecaller_ptp_date IS NOT NULL AND telecaller_ptp_date <= CURRENT_DATE) AS tele_ptp
-        FROM bkt_cases
-        WHERE agent_id = $1
-          AND (
-            (status = 'PTP' AND (ptp_date IS NULL OR ptp_date <= CURRENT_DATE))
-            OR (telecaller_ptp_date IS NOT NULL AND telecaller_ptp_date <= CURRENT_DATE)
-          )
+        FROM bkt_cases WHERE agent_id = $1
+          AND ((status = 'PTP' AND (ptp_date IS NULL OR ptp_date <= CURRENT_DATE))
+            OR (telecaller_ptp_date IS NOT NULL AND telecaller_ptp_date <= CURRENT_DATE))
         ORDER BY customer_name
       `, [agentId]);
       res.json({ count: result.rows.length, cases: result.rows });
@@ -418,7 +404,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Attendance
   app.get("/api/attendance/today", requireAuth, async (req, res) => {
     try {
       const att = await storage.getTodayAttendance(req.session.agentId!);
@@ -446,7 +431,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Salary
   app.get("/api/salary", requireAuth, async (req, res) => {
     try {
       const salary = await storage.getSalaryDetails(req.session.agentId!);
@@ -456,7 +440,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Depositions
   app.get("/api/depositions", requireAuth, async (req, res) => {
     try {
       const deps = await storage.getDepositions(req.session.agentId!);
@@ -475,7 +458,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Change Password
   app.put("/api/auth/password", requireAuth, async (req, res) => {
     try {
       const { currentPassword, newPassword } = req.body;
@@ -490,7 +472,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Admin Routes
   app.get("/api/admin/agents", requireAdmin, async (req, res) => {
     try {
       const agents = await storage.getAllAgents();
@@ -554,7 +535,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Required Deposits
   app.get("/api/admin/required-deposits", requireAdmin, async (req, res) => {
     try {
       const deposits = await storage.getAllRequiredDeposits();
@@ -572,18 +552,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const deposit = await storage.createRequiredDeposit({
         agentId: Number(agentId), amount: Number(amount), description, dueDate,
       });
-      const agentRow = await storage.query(
-        "SELECT push_token FROM fos_agents WHERE id = $1",
-        [Number(agentId)]
-      );
+      const agentRow = await storage.query("SELECT push_token FROM fos_agents WHERE id = $1", [Number(agentId)]);
       const pushToken = agentRow.rows[0]?.push_token;
       if (pushToken) {
         const amtStr = Number(amount).toLocaleString("en-IN");
-        await sendExpoPush(
-          pushToken,
-          "Deposit Required",
-          `Admin has assigned you a deposit of ₹${amtStr}. Please deposit within 2 hours.`
-        );
+        await sendExpoPush(pushToken, "Deposit Required", `Admin has assigned you a deposit of ₹${amtStr}. Please deposit within 2 hours.`);
       }
       res.json({ deposit });
     } catch (e: any) {
@@ -613,10 +586,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { token } = req.body;
       if (!token) return res.status(400).json({ message: "token required" });
-      await storage.query(
-        "UPDATE fos_agents SET push_token = $1 WHERE id = $2",
-        [token, req.session.agentId!]
-      );
+      await storage.query("UPDATE fos_agents SET push_token = $1 WHERE id = $2", [token, req.session.agentId!]);
       res.json({ success: true });
     } catch (e: any) {
       res.status(500).json({ message: e.message });
@@ -639,20 +609,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/admin/test-push/:agentId", requireAdmin, async (req, res) => {
     try {
-      const agentRow = await storage.query(
-        "SELECT id, name, push_token FROM fos_agents WHERE id = $1",
-        [Number(req.params.agentId)]
-      );
+      const agentRow = await storage.query("SELECT id, name, push_token FROM fos_agents WHERE id = $1", [Number(req.params.agentId)]);
       const agent = agentRow.rows[0];
       if (!agent) return res.status(404).json({ message: "Agent not found" });
-      if (!agent.push_token)
-        return res.status(400).json({ message: "Agent has no push token registered." });
-      const result = await sendExpoPush(
-        agent.push_token,
-        "🔔 Test Notification",
-        `Hello ${agent.name}! This is a test notification from the admin panel.`,
-        { type: "test" }
-      );
+      if (!agent.push_token) return res.status(400).json({ message: "Agent has no push token registered." });
+      const result = await sendExpoPush(agent.push_token, "🔔 Test Notification", `Hello ${agent.name}! This is a test notification from the admin panel.`, { type: "test" });
       res.json({ success: result.ok, ...result, agentName: agent.name });
     } catch (e: any) {
       res.status(500).json({ message: e.message });
@@ -661,26 +622,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/admin/test-push-all", requireAdmin, async (req, res) => {
     try {
-      const agents = await storage.query(
-        "SELECT id, name, push_token FROM fos_agents WHERE role = 'fos' AND push_token IS NOT NULL AND push_token <> ''"
-      );
-      if (agents.rows.length === 0)
-        return res.json({ sent: 0, message: "No agents have push tokens registered yet." });
+      const agents = await storage.query("SELECT id, name, push_token FROM fos_agents WHERE role = 'fos' AND push_token IS NOT NULL AND push_token <> ''");
+      if (agents.rows.length === 0) return res.json({ sent: 0, message: "No agents have push tokens registered yet." });
       const results: any[] = [];
       for (const agent of agents.rows) {
-        const r = await sendExpoPush(
-          agent.push_token,
-          "🔔 Test Notification",
-          `Hello ${agent.name}! Admin sent a test notification.`,
-          { type: "test" }
-        );
+        const r = await sendExpoPush(agent.push_token, "🔔 Test Notification", `Hello ${agent.name}! Admin sent a test notification.`, { type: "test" });
         results.push({ agentId: agent.id, name: agent.name, ...r });
       }
-      res.json({
-        sent: results.filter((r) => r.ok).length,
-        total: results.length,
-        results,
-      });
+      res.json({ sent: results.filter((r) => r.ok).length, total: results.length, results });
     } catch (e: any) {
       res.status(500).json({ message: e.message });
     }
@@ -689,10 +638,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/profile-photo", requireAuth, async (req, res) => {
     try {
       const { photoUrl } = req.body;
-      await storage.query(
-        "UPDATE fos_agents SET photo_url = $1 WHERE id = $2",
-        [photoUrl, req.session.agentId!]
-      );
+      await storage.query("UPDATE fos_agents SET photo_url = $1 WHERE id = $2", [photoUrl, req.session.agentId!]);
       res.json({ success: true });
     } catch (e: any) {
       res.status(500).json({ message: e.message });
@@ -701,76 +647,44 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/profile", requireAuth, async (req, res) => {
     try {
-      const result = await storage.query(
-        "SELECT id, name, username, role, phone, photo_url FROM fos_agents WHERE id = $1",
-        [req.session.agentId!]
-      );
+      const result = await storage.query("SELECT id, name, username, role, phone, photo_url FROM fos_agents WHERE id = $1", [req.session.agentId!]);
       res.json(result.rows[0] || {});
     } catch (e: any) {
       res.status(500).json({ message: e.message });
     }
   });
 
-  app.post(
-    "/api/required-deposits/:id/screenshot",
-    requireAuth,
-    screenshotUpload.single("screenshot"),
-    async (req, res) => {
-      try {
-        const depositId = Number(req.params.id);
-        if (!req.file) return res.status(400).json({ message: "No file uploaded" });
-        const baseUrl = process.env.RAILWAY_PUBLIC_DOMAIN
-          ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`
-          : process.env.APP_URL || "";
-        const screenshotUrl = `${baseUrl}/uploads/screenshots/${req.file.filename}`;
-        await storage.query(
-          "UPDATE required_deposits SET screenshot_url = $1, screenshot_uploaded_at = NOW() WHERE id = $2 AND agent_id = $3",
-          [screenshotUrl, depositId, req.session.agentId!]
-        );
-        const adminRow = await storage.query(
-          "SELECT push_token FROM fos_agents WHERE role = 'admin' AND push_token IS NOT NULL LIMIT 1"
-        );
-        const adminToken = adminRow.rows[0]?.push_token;
-        if (adminToken) {
-          const agentRow = await storage.query(
-            "SELECT name FROM fos_agents WHERE id = $1",
-            [req.session.agentId!]
-          );
-          const agentName = agentRow.rows[0]?.name || "A FOS agent";
-          await sendExpoPush(
-            adminToken,
-            "📸 Screenshot Uploaded",
-            `${agentName} has uploaded a payment screenshot. Please verify.`
-          );
-        }
-        res.json({ success: true, screenshotUrl });
-      } catch (e: any) {
-        res.status(500).json({ message: e.message });
+  app.post("/api/required-deposits/:id/screenshot", requireAuth, screenshotUpload.single("screenshot"), async (req, res) => {
+    try {
+      const depositId = Number(req.params.id);
+      if (!req.file) return res.status(400).json({ message: "No file uploaded" });
+      const baseUrl = process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : process.env.APP_URL || "";
+      const screenshotUrl = `${baseUrl}/uploads/screenshots/${req.file.filename}`;
+      await storage.query("UPDATE required_deposits SET screenshot_url = $1, screenshot_uploaded_at = NOW() WHERE id = $2 AND agent_id = $3", [screenshotUrl, depositId, req.session.agentId!]);
+      const adminRow = await storage.query("SELECT push_token FROM fos_agents WHERE role = 'admin' AND push_token IS NOT NULL LIMIT 1");
+      const adminToken = adminRow.rows[0]?.push_token;
+      if (adminToken) {
+        const agentRow = await storage.query("SELECT name FROM fos_agents WHERE id = $1", [req.session.agentId!]);
+        const agentName = agentRow.rows[0]?.name || "A FOS agent";
+        await sendExpoPush(adminToken, "📸 Screenshot Uploaded", `${agentName} has uploaded a payment screenshot. Please verify.`);
       }
+      res.json({ success: true, screenshotUrl });
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
     }
-  );
+  });
 
   app.put("/api/admin/required-deposits/:id/verify", requireAdmin, async (req, res) => {
     try {
-      await storage.query(
-        "UPDATE required_deposits SET alarm_scheduled = TRUE WHERE id = $1",
-        [Number(req.params.id)]
-      );
+      await storage.query("UPDATE required_deposits SET alarm_scheduled = TRUE WHERE id = $1", [Number(req.params.id)]);
       const depositRow = await storage.query(
-        `SELECT rd.agent_id, rd.amount, fa.push_token, fa.name
-         FROM required_deposits rd
-         JOIN fos_agents fa ON fa.id = rd.agent_id
-         WHERE rd.id = $1`,
+        `SELECT rd.agent_id, rd.amount, fa.push_token, fa.name FROM required_deposits rd JOIN fos_agents fa ON fa.id = rd.agent_id WHERE rd.id = $1`,
         [Number(req.params.id)]
       );
       const deposit = depositRow.rows[0];
       if (deposit?.push_token) {
         const amtStr = parseFloat(deposit.amount).toLocaleString("en-IN");
-        await sendExpoPush(
-          deposit.push_token,
-          "✅ Deposit Verified",
-          `Your payment screenshot of ₹${amtStr} has been verified by admin.`
-        );
+        await sendExpoPush(deposit.push_token, "✅ Deposit Verified", `Your payment screenshot of ₹${amtStr} has been verified by admin.`);
       }
       res.json({ success: true });
     } catch (e: any) {
@@ -864,10 +778,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const ynVal = rollback_yn === true || rollback_yn === "true" ? true : rollback_yn === false || rollback_yn === "false" ? false : null;
       const toBool = (v: any) => v === true || v === "true" ? true : v === false || v === "false" ? false : null;
       const caseId = Number(req.params.id);
-      const oldRow = await storage.query(
-        `SELECT status, rollback_yn, pos::numeric AS pos, agent_id, case_category, pro FROM bkt_cases WHERE id = $1`,
-        [caseId]
-      );
+      const oldRow = await storage.query(`SELECT status, rollback_yn, pos::numeric AS pos, agent_id, case_category, pro FROM bkt_cases WHERE id = $1`, [caseId]);
       const old = oldRow.rows[0];
       const bktExtraFields = {
         ...(customer_available !== undefined && { customerAvailable: toBool(customer_available) }),
@@ -900,7 +811,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // ✅ Excel Import — preserves manually set Paid/Unpaid/Rollback statuses
+  // ✅ Excel Import — Excel is source of truth, only PTP dates preserved
   app.post("/api/admin/import", requireAdmin, upload.single("file"), async (req, res) => {
     try {
       if (!req.file) return res.status(400).json({ message: "No file uploaded" });
@@ -923,25 +834,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (matched >= 3) { headerRowIdx = r; colIdxMap = tempMap; break; }
       }
       if (headerRowIdx === -1) {
-        return res.status(400).json({
-          message: "Could not find header row. Expected columns like: LOAN NO, CUSTOMER NAME, FOS NAME, POS, BKT",
-        });
+        return res.status(400).json({ message: "Could not find header row. Expected columns like: LOAN NO, CUSTOMER NAME, FOS NAME, POS, BKT" });
       }
 
-      // ✅ Save PTP dates AND manually set statuses + rollback before wiping
-      const ptpLoanSave = await storage.query(
-        `SELECT loan_no, ptp_date, telecaller_ptp_date FROM loan_cases WHERE status = 'PTP'`
-      );
+      // Save only PTP dates — Excel status overwrites everything else
+      const ptpLoanSave = await storage.query(`SELECT loan_no, ptp_date, telecaller_ptp_date FROM loan_cases WHERE status = 'PTP'`);
       const ptpLoanMap = new Map<string, { ptpDate: string | null; telecallerPtpDate: string | null }>(
         ptpLoanSave.rows.map((r: any) => [r.loan_no, { ptpDate: r.ptp_date, telecallerPtpDate: r.telecaller_ptp_date }])
-      );
-
-      // ✅ Save ALL manually set Paid statuses and rollback_yn
-      const manualStatusSave = await storage.query(
-        `SELECT loan_no, status, rollback_yn FROM loan_cases WHERE status = 'Paid' OR rollback_yn = true`
-      );
-      const manualStatusMap = new Map<string, { status: string; rollback_yn: boolean }>(
-        manualStatusSave.rows.map((r: any) => [r.loan_no, { status: r.status, rollback_yn: r.rollback_yn }])
       );
 
       await storage.deleteAllLoanCases();
@@ -971,16 +870,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
           } else {
             try {
               const username = fosLower.replace(/\s+/g, ".").replace(/[^a-z0-9.]/g, "");
-              const newAgent = await storage.createFosAgent({
-                name: mapped.fos_name, username, password: randomBytes(16).toString("hex"),
-              });
+              const newAgent = await storage.createFosAgent({ name: mapped.fos_name, username, password: randomBytes(16).toString("hex") });
               agentByName[fosLower] = newAgent.id;
               agentId = newAgent.id;
               agentsCreated++;
             } catch {
-              const found = await storage.getAgentByUsername(
-                mapped.fos_name.toLowerCase().trim().replace(/\s+/g, ".").replace(/[^a-z0-9.]/g, "")
-              );
+              const found = await storage.getAgentByUsername(mapped.fos_name.toLowerCase().trim().replace(/\s+/g, ".").replace(/[^a-z0-9.]/g, ""));
               if (found) { agentByName[fosLower] = found.id; agentId = found.id; }
             }
           }
@@ -1003,7 +898,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
             firstEmiDueDate: parseDate(mapped.first_emi_due_date),
             loanMaturityDate: parseDate(mapped.loan_maturity_date),
             tenor: mapped.tenor ? parseInt(mapped.tenor) || null : null,
-            pro: mapped.pro || null, status: normalizeStatus(mapped.status),
+            pro: mapped.pro || null,
+            status: normalizeStatus(mapped.status), // ✅ from Excel
             latestFeedback: mapped.latest_feedback || null,
             feedbackComments: mapped.feedback_comments || null,
             telecallerPtpDate: parseDate(mapped.telecaller_ptp_date),
@@ -1015,7 +911,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
 
-      // ✅ Restore PTP statuses
+      // Restore only PTP dates
       for (const [loanNo, ptpData] of ptpLoanMap) {
         await storage.query(
           `UPDATE loan_cases SET status = 'PTP', ptp_date = $1, telecaller_ptp_date = $2 WHERE loan_no = $3`,
@@ -1023,35 +919,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
         );
       }
 
-      // ✅ Restore manually set Paid statuses and rollback_yn
-      // Only restore if the loan still exists after import (it may be a new allocation)
-      for (const [loanNo, savedData] of manualStatusMap) {
-        // Don't overwrite PTP cases
-        if (ptpLoanMap.has(loanNo)) continue;
-        await storage.query(
-          `UPDATE loan_cases SET status = $1, rollback_yn = $2 WHERE loan_no = $3`,
-          [savedData.status, savedData.rollback_yn, loanNo]
-        );
-      }
-
-      res.json({
-        imported, updated: 0, skipped, agentsCreated,
-        total: dataRows.length, errors: errors.slice(0, 20),
-      });
+      res.json({ imported, updated: 0, skipped, agentsCreated, total: dataRows.length, errors: errors.slice(0, 20) });
     } catch (e: any) {
       res.status(500).json({ message: e.message });
     }
   });
 
-  // ✅ BKT Import — preserves manually set Paid/Unpaid/Rollback statuses
+  // ✅ BKT Import — Excel is source of truth, only PTP dates preserved
   app.post("/api/admin/import-bkt", requireAdmin, upload.single("file"), async (req, res) => {
     try {
       if (!req.file) return res.status(400).json({ message: "No file uploaded" });
       const ejWorkbook2 = new ExcelJS.Workbook();
       await ejWorkbook2.xlsx.load(req.file.buffer);
-      const worksheet2 =
-        ejWorkbook2.worksheets.find((ws) => ws.name.toUpperCase() === "ALLO") ||
-        ejWorkbook2.worksheets[0];
+      const worksheet2 = ejWorkbook2.worksheets.find((ws) => ws.name.toUpperCase() === "ALLO") || ejWorkbook2.worksheets[0];
       const rawRows: any[][] = worksheetToRows(worksheet2, true);
       if (rawRows.length === 0)
         return res.json({ imported: 0, updated: 0, skipped: 0, agentsCreated: 0, errors: [] });
@@ -1071,20 +951,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Could not find header row." });
       }
 
-      // ✅ Save PTP dates before wiping
-      const ptpBktSave = await storage.query(
-        `SELECT loan_no, ptp_date, telecaller_ptp_date FROM bkt_cases WHERE status = 'PTP'`
-      );
+      // Save only PTP dates — Excel status overwrites everything else
+      const ptpBktSave = await storage.query(`SELECT loan_no, ptp_date, telecaller_ptp_date FROM bkt_cases WHERE status = 'PTP'`);
       const ptpBktMap = new Map<string, { ptpDate: string | null; telecallerPtpDate: string | null }>(
         ptpBktSave.rows.map((r: any) => [r.loan_no, { ptpDate: r.ptp_date, telecallerPtpDate: r.telecaller_ptp_date }])
-      );
-
-      // ✅ Save manually set Paid statuses and rollback_yn for BKT cases
-      const manualBktStatusSave = await storage.query(
-        `SELECT loan_no, status, rollback_yn FROM bkt_cases WHERE status = 'Paid' OR rollback_yn = true`
-      );
-      const manualBktStatusMap = new Map<string, { status: string; rollback_yn: boolean }>(
-        manualBktStatusSave.rows.map((r: any) => [r.loan_no, { status: r.status, rollback_yn: r.rollback_yn }])
       );
 
       await storage.deleteAllBktCases();
@@ -1119,20 +989,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
           } else {
             try {
               const username = fosLower.replace(/\s+/g, ".").replace(/[^a-z0-9.]/g, "");
-              const newAgent = await storage.createFosAgent({
-                name: mapped.fos_name, username, password: randomBytes(16).toString("hex"),
-              });
+              const newAgent = await storage.createFosAgent({ name: mapped.fos_name, username, password: randomBytes(16).toString("hex") });
               agentByName[fosLower] = newAgent.id;
               agentId = newAgent.id;
               agentsCreated++;
             } catch {
-              const found = await storage.getAgentByUsername(
-                mapped.fos_name.toLowerCase().trim().replace(/\s+/g, ".").replace(/[^a-z0-9.]/g, "")
-              );
-              if (found) {
-                agentByName[mapped.fos_name.toLowerCase().trim()] = found.id;
-                agentId = found.id;
-              }
+              const found = await storage.getAgentByUsername(mapped.fos_name.toLowerCase().trim().replace(/\s+/g, ".").replace(/[^a-z0-9.]/g, ""));
+              if (found) { agentByName[mapped.fos_name.toLowerCase().trim()] = found.id; agentId = found.id; }
             }
           }
         }
@@ -1156,7 +1019,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
             firstEmiDueDate: parseDate(mapped.first_emi_due_date),
             loanMaturityDate: parseDate(mapped.loan_maturity_date),
             tenor: mapped.tenor ? parseInt(mapped.tenor) || null : null,
-            pro: mapped.pro || null, status: normalizeStatus(mapped.status),
+            pro: mapped.pro || null,
+            status: normalizeStatus(mapped.status), // ✅ from Excel
             telecallerPtpDate: parseDate(mapped.telecaller_ptp_date),
           });
           imported++;
@@ -1166,7 +1030,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
 
-      // ✅ Restore PTP statuses
+      // Restore only PTP dates
       for (const [loanNo, ptpData] of ptpBktMap) {
         await storage.query(
           `UPDATE bkt_cases SET status = 'PTP', ptp_date = $1, telecaller_ptp_date = $2 WHERE loan_no = $3`,
@@ -1174,61 +1038,37 @@ export async function registerRoutes(app: Express): Promise<Server> {
         );
       }
 
-      // ✅ Restore manually set Paid statuses and rollback_yn for BKT
-      for (const [loanNo, savedData] of manualBktStatusMap) {
-        if (ptpBktMap.has(loanNo)) continue;
-        await storage.query(
-          `UPDATE bkt_cases SET status = $1, rollback_yn = $2 WHERE loan_no = $3`,
-          [savedData.status, savedData.rollback_yn, loanNo]
-        );
-      }
-
-      res.json({
-        imported, updated: 0, skipped, agentsCreated,
-        total: dataRows.length, errors: errors.slice(0, 20),
-      });
+      res.json({ imported, updated: 0, skipped, agentsCreated, total: dataRows.length, errors: errors.slice(0, 20) });
     } catch (e: any) {
       res.status(500).json({ message: e.message });
     }
   });
 
-  // PTP Export
   app.get("/api/admin/ptp-export", requireAdmin, async (req, res) => {
     try {
       const result = await storage.query(`
         SELECT fa.name AS fos_name, lc.customer_name, lc.loan_no, lc.mobile_no,
-               lc.address, lc.ptp_date, lc.telecaller_ptp_date, lc.pos,
-               lc.bkt::text AS bkt, lc.status
+               lc.address, lc.ptp_date, lc.telecaller_ptp_date, lc.pos, lc.bkt::text AS bkt, lc.status
         FROM loan_cases lc LEFT JOIN fos_agents fa ON lc.agent_id = fa.id
         WHERE lc.status = 'PTP' OR lc.telecaller_ptp_date IS NOT NULL
         UNION ALL
         SELECT fa.name AS fos_name, bc.customer_name, bc.loan_no, bc.mobile_no,
-               bc.address, bc.ptp_date, bc.telecaller_ptp_date, bc.pos,
-               bc.case_category AS bkt, bc.status
+               bc.address, bc.ptp_date, bc.telecaller_ptp_date, bc.pos, bc.case_category AS bkt, bc.status
         FROM bkt_cases bc LEFT JOIN fos_agents fa ON bc.agent_id = fa.id
         WHERE bc.status = 'PTP' OR bc.telecaller_ptp_date IS NOT NULL
         ORDER BY fos_name NULLS LAST, telecaller_ptp_date NULLS LAST
       `);
       const rows = result.rows.map((r: any) => ({
-        "FOS Name": r.fos_name || "",
-        "Customer Name": r.customer_name || "",
-        "Loan No": r.loan_no || "",
-        "Mobile No": r.mobile_no || "",
-        "Address": r.address || "",
-        "Telecaller PTP Date": r.telecaller_ptp_date
-          ? String(r.telecaller_ptp_date).slice(0, 10)
-          : "",
+        "FOS Name": r.fos_name || "", "Customer Name": r.customer_name || "",
+        "Loan No": r.loan_no || "", "Mobile No": r.mobile_no || "", "Address": r.address || "",
+        "Telecaller PTP Date": r.telecaller_ptp_date ? String(r.telecaller_ptp_date).slice(0, 10) : "",
         "FOS PTP Date": r.ptp_date ? String(r.ptp_date).slice(0, 10) : "",
-        "POS": r.pos || "",
-        "BKT": r.bkt || "",
-        "Status": r.status || "",
+        "POS": r.pos || "", "BKT": r.bkt || "", "Status": r.status || "",
       }));
       const exportWb = new ExcelJS.Workbook();
       const exportWs = exportWb.addWorksheet("PTP Cases");
       const exportRows = rows.length ? rows : [{ "FOS Name": "No PTP cases found" }];
-      exportWs.columns = Object.keys(exportRows[0]).map((key) => ({
-        header: key, key, width: 20,
-      }));
+      exportWs.columns = Object.keys(exportRows[0]).map((key) => ({ header: key, key, width: 20 }));
       exportRows.forEach((row) => exportWs.addRow(row));
       exportWs.getRow(1).font = { bold: true };
       const buf = await exportWb.xlsx.writeBuffer();
@@ -1240,82 +1080,47 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Feedback Export
   app.get("/api/admin/feedback-export", requireAdmin, async (req, res) => {
     try {
       const result = await storage.query(`
-        SELECT
-          TO_CHAR(COALESCE(lc.created_at, NOW()), 'DD-Mon') AS allu_date,
+        SELECT TO_CHAR(COALESCE(lc.created_at, NOW()), 'DD-Mon') AS allu_date,
           lc.loan_no, lc.app_id, lc.customer_name, lc.bkt::text AS bkt, lc.pro,
-          'NANDED'::text AS branch,
-          lc.customer_available, lc.vehicle_available, lc.third_party,
-          lc.third_party_name, lc.third_party_number, lc.feedback_code,
-          lc.latest_feedback, lc.ptp_date, lc.projection, lc.non_starter,
-          lc.kyc_purchase, lc.workable, lc.status, lc.feedback_comments,
-          fa.name AS fos_name
-        FROM loan_cases lc
-        LEFT JOIN fos_agents fa ON lc.agent_id = fa.id
-        WHERE lc.latest_feedback IS NOT NULL
-           OR lc.feedback_code IS NOT NULL
-           OR lc.status IN ('Paid', 'PTP')
+          'NANDED'::text AS branch, lc.customer_available, lc.vehicle_available, lc.third_party,
+          lc.third_party_name, lc.third_party_number, lc.feedback_code, lc.latest_feedback,
+          lc.ptp_date, lc.projection, lc.non_starter, lc.kyc_purchase, lc.workable,
+          lc.status, lc.feedback_comments, fa.name AS fos_name
+        FROM loan_cases lc LEFT JOIN fos_agents fa ON lc.agent_id = fa.id
+        WHERE lc.latest_feedback IS NOT NULL OR lc.feedback_code IS NOT NULL OR lc.status IN ('Paid', 'PTP')
         UNION ALL
-        SELECT
-          TO_CHAR(COALESCE(bc.created_at, NOW()), 'DD-Mon') AS allu_date,
+        SELECT TO_CHAR(COALESCE(bc.created_at, NOW()), 'DD-Mon') AS allu_date,
           bc.loan_no, bc.app_id, bc.customer_name, bc.case_category AS bkt, bc.pro,
-          'NANDED'::text AS branch,
-          bc.customer_available, bc.vehicle_available, bc.third_party,
-          bc.third_party_name, bc.third_party_number, bc.feedback_code,
-          bc.latest_feedback, bc.ptp_date, bc.projection, bc.non_starter,
-          bc.kyc_purchase, bc.workable, bc.status, bc.feedback_comments,
-          fa.name AS fos_name
-        FROM bkt_cases bc
-        LEFT JOIN fos_agents fa ON bc.agent_id = fa.id
-        WHERE bc.latest_feedback IS NOT NULL
-           OR bc.feedback_code IS NOT NULL
-           OR bc.status IN ('Paid', 'PTP')
+          'NANDED'::text AS branch, bc.customer_available, bc.vehicle_available, bc.third_party,
+          bc.third_party_name, bc.third_party_number, bc.feedback_code, bc.latest_feedback,
+          bc.ptp_date, bc.projection, bc.non_starter, bc.kyc_purchase, bc.workable,
+          bc.status, bc.feedback_comments, fa.name AS fos_name
+        FROM bkt_cases bc LEFT JOIN fos_agents fa ON bc.agent_id = fa.id
+        WHERE bc.latest_feedback IS NOT NULL OR bc.feedback_code IS NOT NULL OR bc.status IN ('Paid', 'PTP')
         ORDER BY fos_name NULLS LAST, loan_no
       `);
-      const yn = (v: any) =>
-        v === true || v === "true" || v === "t" || v === 1 ? "Y"
-        : v === false || v === "false" || v === "f" || v === 0 ? "N" : "";
+      const yn = (v: any) => v === true || v === "true" || v === "t" || v === 1 ? "Y" : v === false || v === "false" || v === "f" || v === 0 ? "N" : "";
       const rows = result.rows.map((r: any) => ({
-        "Allu Date": r.allu_date || "",
-        "LOAN NO": r.loan_no || "",
-        "APP ID": r.app_id || "",
-        "CUSTOMERNAME": r.customer_name || "",
-        "Bkt": r.bkt || "",
-        "Pro": r.pro || "",
-        "Branch": r.branch || "",
-        "Customer Y/N": yn(r.customer_available),
-        "Vehicle Y/N": yn(r.vehicle_available),
-        "Third_party Y/N": yn(r.third_party),
+        "Allu Date": r.allu_date || "", "LOAN NO": r.loan_no || "", "APP ID": r.app_id || "",
+        "CUSTOMERNAME": r.customer_name || "", "Bkt": r.bkt || "", "Pro": r.pro || "", "Branch": r.branch || "",
+        "Customer Y/N": yn(r.customer_available), "Vehicle Y/N": yn(r.vehicle_available), "Third_party Y/N": yn(r.third_party),
         "Third Party Name": r.third_party === true || r.third_party === "true" || r.third_party === "t" ? r.third_party_name || "" : "",
         "Third Party Number": r.third_party === true || r.third_party === "true" || r.third_party === "t" ? r.third_party_number || "" : "",
         "FEEDBACK CODE": r.feedback_code != null ? String(r.feedback_code) : "",
         "Details FEEDBACK": r.latest_feedback != null ? String(r.latest_feedback) : "",
         "PTP DATE": r.ptp_date ? (r.ptp_date instanceof Date ? r.ptp_date.toISOString().slice(0, 10) : String(r.ptp_date).slice(0, 10)) : "",
         "Projection": r.projection != null ? String(r.projection) : "",
-        "NON_STARTER (Y/N)": yn(r.non_starter),
-        "KYC PURCHASE (Y/N)": yn(r.kyc_purchase),
+        "NON_STARTER (Y/N)": yn(r.non_starter), "KYC PURCHASE (Y/N)": yn(r.kyc_purchase),
         "Workable/Non": r.workable === true || r.workable === "true" || r.workable === "t" ? "WORKABLE" : r.workable === false || r.workable === "false" || r.workable === "f" ? "NONWORKABLE" : "",
-        "Comments": r.feedback_comments || "",
-        "Status": r.status || "",
-        "FOS Name": r.fos_name || "",
+        "Comments": r.feedback_comments || "", "Status": r.status || "", "FOS Name": r.fos_name || "",
       }));
       const wb = new ExcelJS.Workbook();
       const ws = wb.addWorksheet("Feedback Report");
-      const exportRows = rows.length ? rows : [{
-        "Allu Date": "", "LOAN NO": "No feedback found", "APP ID": "", "CUSTOMERNAME": "",
-        "Bkt": "", "Pro": "", "Branch": "", "Customer Y/N": "", "Vehicle Y/N": "",
-        "Third_party Y/N": "", "Third Party Name": "", "Third Party Number": "",
-        "FEEDBACK CODE": "", "Details FEEDBACK": "", "PTP DATE": "", "Projection": "",
-        "NON_STARTER (Y/N)": "", "KYC PURCHASE (Y/N)": "", "Workable/Non": "",
-        "Comments": "", "Status": "", "FOS Name": "",
-      }];
-      ws.columns = Object.keys(exportRows[0]).map((key) => ({
-        header: key, key,
-        width: ["CUSTOMERNAME", "Details FEEDBACK", "Comments"].includes(key) ? 30 : 16,
-      }));
+      const exportRows = rows.length ? rows : [{ "Allu Date": "", "LOAN NO": "No feedback found", "APP ID": "", "CUSTOMERNAME": "", "Bkt": "", "Pro": "", "Branch": "", "Customer Y/N": "", "Vehicle Y/N": "", "Third_party Y/N": "", "Third Party Name": "", "Third Party Number": "", "FEEDBACK CODE": "", "Details FEEDBACK": "", "PTP DATE": "", "Projection": "", "NON_STARTER (Y/N)": "", "KYC PURCHASE (Y/N)": "", "Workable/Non": "", "Comments": "", "Status": "", "FOS Name": "" }];
+      ws.columns = Object.keys(exportRows[0]).map((key) => ({ header: key, key, width: ["CUSTOMERNAME", "Details FEEDBACK", "Comments"].includes(key) ? 30 : 16 }));
       exportRows.forEach((row) => ws.addRow(row));
       ws.getRow(1).eachCell((cell) => {
         cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFFF00" } };
@@ -1353,12 +1158,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
           SELECT *, CASE LOWER(REPLACE(bkt, ' ', ''))
             WHEN '1' THEN 'bkt1' WHEN '2' THEN 'bkt2' WHEN '3' THEN 'bkt3'
             WHEN 'bkt1' THEN 'bkt1' WHEN 'bkt2' THEN 'bkt2' WHEN 'bkt3' THEN 'bkt3'
-            ELSE LOWER(REPLACE(bkt, ' ', '')) END AS bkt_norm
-          FROM bkt_perf_summary
+            ELSE LOWER(REPLACE(bkt, ' ', '')) END AS bkt_norm FROM bkt_perf_summary
         ),
         latest AS (
-          SELECT DISTINCT ON (fos_name, bkt_norm) * FROM norm
-          ORDER BY fos_name, bkt_norm, uploaded_at DESC
+          SELECT DISTINCT ON (fos_name, bkt_norm) * FROM norm ORDER BY fos_name, bkt_norm, uploaded_at DESC
         )
         SELECT fos_name, bkt_norm AS bkt,
           COALESCE(pos_paid, 0) AS pos_paid, COALESCE(pos_unpaid, 0) AS pos_unpaid,
@@ -1381,31 +1184,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const result = await storage.query(`
         WITH
         imported_norm AS (
-          SELECT *,
-            CASE LOWER(REPLACE(bkt, ' ', ''))
-              WHEN '1' THEN 'bkt1' WHEN '2' THEN 'bkt2' WHEN '3' THEN 'bkt3'
-              WHEN 'bkt1' THEN 'bkt1' WHEN 'bkt2' THEN 'bkt2' WHEN 'bkt3' THEN 'bkt3'
-              ELSE LOWER(REPLACE(bkt, ' ', ''))
-            END AS bkt_norm
+          SELECT *, CASE LOWER(REPLACE(bkt, ' ', ''))
+            WHEN '1' THEN 'bkt1' WHEN '2' THEN 'bkt2' WHEN '3' THEN 'bkt3'
+            WHEN 'bkt1' THEN 'bkt1' WHEN 'bkt2' THEN 'bkt2' WHEN 'bkt3' THEN 'bkt3'
+            ELSE LOWER(REPLACE(bkt, ' ', '')) END AS bkt_norm
           FROM bkt_perf_summary WHERE agent_id = $1
         ),
-        imported_latest AS (
-          SELECT DISTINCT ON (bkt_norm) * FROM imported_norm ORDER BY bkt_norm, uploaded_at DESC
-        ),
-        covered_bkts AS (
-          SELECT bkt_norm FROM imported_latest WHERE bkt_norm IN ('bkt1','bkt2','bkt3')
-        ),
+        imported_latest AS (SELECT DISTINCT ON (bkt_norm) * FROM imported_norm ORDER BY bkt_norm, uploaded_at DESC),
+        covered_bkts AS (SELECT bkt_norm FROM imported_latest WHERE bkt_norm IN ('bkt1','bkt2','bkt3')),
         live_cases AS (
           SELECT LOWER(REPLACE(bc.case_category,' ','')) AS bkt, bc.pos::numeric AS pos, bc.status, bc.rollback_yn
-          FROM bkt_cases bc
-          WHERE bc.agent_id = $1
+          FROM bkt_cases bc WHERE bc.agent_id = $1
             AND LOWER(REPLACE(bc.case_category,' ','')) IN ('bkt1','bkt2','bkt3')
             AND LOWER(REPLACE(bc.case_category,' ','')) NOT IN (SELECT bkt_norm FROM covered_bkts)
             AND UPPER(COALESCE(bc.pro,'')) <> 'UC'
           UNION ALL
           SELECT 'bkt' || lc.bkt::text AS bkt, lc.pos::numeric AS pos, lc.status, lc.rollback_yn
-          FROM loan_cases lc
-          WHERE lc.agent_id = $1
+          FROM loan_cases lc WHERE lc.agent_id = $1
             AND lc.bkt IS NOT NULL
             AND 'bkt' || lc.bkt::text NOT IN (SELECT bkt_norm FROM covered_bkts)
             AND UPPER(COALESCE(lc.pro,'')) <> 'UC'
@@ -1444,7 +1239,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // BKT Perf Summary Excel import
   app.post("/api/admin/import-bkt-perf", requireAdmin, upload.single("file"), async (req, res) => {
     try {
       if (!req.file) return res.status(400).json({ message: "No file uploaded" });
@@ -1457,18 +1251,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (v === "" || v === null || v === undefined) return 0;
         return parseFloat(String(v).replace(/[,%₹\s]/g, "")) || 0;
       };
-      const toPct = (v: any): number => {
-        const raw = cn(v);
-        return raw > 0 && raw <= 1 ? raw * 100 : raw;
-      };
+      const toPct = (v: any): number => { const raw = cn(v); return raw > 0 && raw <= 1 ? raw * 100 : raw; };
       const manualBkt = String(req.body?.bkt || "").trim();
       let bktValue = manualBkt || "";
       if (!bktValue) {
         for (const row of rawRows.slice(0, 15)) {
           for (let i = 0; i < row.length - 1; i++) {
-            if (String(row[i]).toLowerCase().trim() === "bkt" && String(row[i + 1]).trim()) {
-              bktValue = String(row[i + 1]).trim(); break;
-            }
+            if (String(row[i]).toLowerCase().trim() === "bkt" && String(row[i + 1]).trim()) { bktValue = String(row[i + 1]).trim(); break; }
           }
           if (bktValue) break;
         }
@@ -1498,9 +1287,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
         break;
       }
-      if (headerIdx === -1) {
-        return res.status(400).json({ message: "Could not find header row. Expected columns: Fos_Name, Values, PAID, UNPAID, Grand Total, Percentage, RollBack" });
-      }
+      if (headerIdx === -1) return res.status(400).json({ message: "Could not find header row." });
       const fosData: Record<string, any> = {};
       let currentFos = "";
       for (let r = headerIdx + 1; r < rawRows.length; r++) {
@@ -1510,9 +1297,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (fosCell.toLowerCase().includes("grand total")) continue;
         if (fosCell && fosCell.toLowerCase() !== "grand total") currentFos = fosCell;
         if (!currentFos || !valCell) continue;
-        if (!fosData[currentFos]) {
-          fosData[currentFos] = { posPaid: 0, posUnpaid: 0, posGrandTotal: 0, posPercentage: 0, countPaid: 0, countUnpaid: 0, countTotal: 0, rollbackPaid: 0, rollbackGrandTotal: 0, rollbackPercentage: 0 };
-        }
+        if (!fosData[currentFos]) fosData[currentFos] = { posPaid: 0, posUnpaid: 0, posGrandTotal: 0, posPercentage: 0, countPaid: 0, countUnpaid: 0, countTotal: 0, rollbackPaid: 0, rollbackGrandTotal: 0, rollbackPercentage: 0 };
         const d = fosData[currentFos];
         if (valCell.includes("sum of pos") || valCell.includes("sum of po")) {
           d.posPaid = cPaid >= 0 ? cn(row[cPaid]) : d.posPaid;
@@ -1535,14 +1320,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       const existingAgents = await storage.getAllAgentsWithAdmin();
       const agentByName: Record<string, number> = {};
-      for (const a of existingAgents) {
-        if (a.name) agentByName[a.name.toLowerCase().trim()] = a.id;
-      }
+      for (const a of existingAgents) { if (a.name) agentByName[a.name.toLowerCase().trim()] = a.id; }
       let imported = 0, skipped = 0;
       const errors: string[] = [];
-      const fosNames = Object.keys(fosData);
-      for (let i = 0; i < fosNames.length; i++) {
-        const fosName = fosNames[i];
+      for (const fosName of Object.keys(fosData)) {
         const d = fosData[fosName];
         if (bktValue === "penal") d.posGrandTotal = d.posPaid + d.posUnpaid;
         const fosLower = fosName.toLowerCase();
@@ -1553,8 +1334,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             const newAgent = await storage.createFosAgent({ name: fosName, username, password: randomBytes(16).toString("hex") });
             agentByName[fosLower] = newAgent.id; agentId = newAgent.id;
           } catch {
-            const uname = fosLower.replace(/\s+/g, ".").replace(/[^a-z0-9.]/g, "");
-            const found = await storage.getAgentByUsername(uname);
+            const found = await storage.getAgentByUsername(fosLower.replace(/\s+/g, ".").replace(/[^a-z0-9.]/g, ""));
             if (found) { agentByName[fosLower] = found.id; agentId = found.id; }
           }
         }
@@ -1567,17 +1347,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
             rollbackGrandTotal: d.rollbackGrandTotal, rollbackPercentage: d.rollbackPercentage,
           });
           imported++;
-        } catch (e: any) {
-          errors.push(`${fosName}: ${e.message}`); skipped++;
-        }
+        } catch (e: any) { errors.push(`${fosName}: ${e.message}`); skipped++; }
       }
-      res.json({ imported, skipped, total: fosNames.length, bkt: bktValue, errors: errors.slice(0, 20) });
+      res.json({ imported, skipped, total: Object.keys(fosData).length, bkt: bktValue, errors: errors.slice(0, 20) });
     } catch (e: any) {
       res.status(500).json({ message: e.message });
     }
   });
 
-  // Reset all feedback for a FOS agent
   app.post("/api/admin/reset-feedback/agent/:agentId", requireAdmin, async (req, res) => {
     try {
       const agentId = Number(req.params.agentId);
@@ -1591,7 +1368,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Reset feedback for a single case
   app.post("/api/admin/reset-feedback/case/:caseId", requireAdmin, async (req, res) => {
     try {
       const caseId = Number(req.params.caseId);
@@ -1604,7 +1380,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Admin update case status (Paid / Unpaid / Rollback)
   app.put("/api/admin/cases/:id/status", requireAdmin, async (req, res) => {
     try {
       const caseId = Number(req.params.id);
@@ -1652,7 +1427,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Background job: daily PTP push at 9 AM
   const ptpReminderSentDates = new Set<string>();
   async function runPtpPushJob() {
     try {
@@ -1664,9 +1438,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       for (const agent of agents.rows) {
         const result = await storage.query(`SELECT COUNT(*) AS cnt FROM (SELECT id FROM loan_cases WHERE agent_id = $1 AND ((status = 'PTP' AND (ptp_date IS NULL OR ptp_date <= CURRENT_DATE)) OR (telecaller_ptp_date IS NOT NULL AND telecaller_ptp_date <= CURRENT_DATE)) UNION ALL SELECT id FROM bkt_cases WHERE agent_id = $1 AND ((status = 'PTP' AND (ptp_date IS NULL OR ptp_date <= CURRENT_DATE)) OR (telecaller_ptp_date IS NOT NULL AND telecaller_ptp_date <= CURRENT_DATE))) t`, [agent.id]);
         const cnt = parseInt(result.rows[0]?.cnt || "0", 10);
-        if (cnt > 0) {
-          await sendExpoPush(agent.push_token, "📅 PTP Due Today", `You have ${cnt} PTP case${cnt !== 1 ? "s" : ""} due today. Open the app to follow up now.`, { screen: "dashboard" });
-        }
+        if (cnt > 0) await sendExpoPush(agent.push_token, "📅 PTP Due Today", `You have ${cnt} PTP case${cnt !== 1 ? "s" : ""} due today. Open the app to follow up now.`, { screen: "dashboard" });
       }
       ptpReminderSentDates.add(todayKey);
     } catch (_) {}
@@ -1674,7 +1446,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
   runPtpPushJob();
   setInterval(runPtpPushJob, 30 * 60 * 1000);
 
-  // Background job: deposits overdue by 2h
   async function runReminderJob() {
     try {
       const result = await storage.query(`SELECT rd.id, rd.agent_id, rd.amount, fa.push_token FROM required_deposits rd JOIN fos_agents fa ON fa.id = rd.agent_id WHERE rd.screenshot_url IS NULL AND rd.reminder_sent = FALSE AND rd.created_at < NOW() - INTERVAL '2 hours' AND fa.push_token IS NOT NULL AND fa.push_token <> ''`);
