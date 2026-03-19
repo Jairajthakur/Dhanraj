@@ -38,8 +38,6 @@ yarn-error.*
 
 # Secrets - be specific, not *.json
 .env
-google-services.json
-firebase-service-account.json
 
 # Replit / local
 attached_assets/
