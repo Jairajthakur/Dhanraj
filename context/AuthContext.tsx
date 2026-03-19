@@ -7,6 +7,7 @@ import React, {
 } from "react";
 import { AppState, AppStateStatus, Platform } from "react-native";
 import { api, agentCache, tokenStore } from "../lib/api";
+import { registerPushToken } from "./usePushNotifications";
 
 interface Agent {
   id: number;
@@ -41,31 +42,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const bootstrap = async () => {
       try {
-        // Step 1: Load cached agent immediately (prevents flash to login)
         const cached = await agentCache.get();
-        if (cached && !cancelled) {
-          setAgent(cached);
-        }
+        if (cached && !cancelled) setAgent(cached);
 
-        // Step 2: Verify with server
         const res = await api.me();
         if (!cancelled && res?.agent) {
           setAgent(res.agent);
           await agentCache.set(res.agent);
+          if (res?.token && Platform.OS !== "web") {
+            await tokenStore.set(res.token);
+          }
+          // Re-register push token on app launch
+          if (Platform.OS !== "web") {
+            registerPushToken().catch(() => {});
+          }
         }
       } catch (e: any) {
         if (!cancelled) {
           const cached = await agentCache.get();
           const isAuthError = e?.message === "Unauthorized";
-
           if (isAuthError || !cached) {
-            // Genuine 401 or no cache — clear everything and force login
             await agentCache.clear();
             await tokenStore.clear();
             setAgent(null);
           } else {
-            // Network/server error — keep the cached agent alive
-            // This prevents blank screen on APK when cookies fail
             setAgent(cached);
           }
         }
@@ -74,10 +74,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     };
 
-    // Safety net — never stay stuck on loading screen
     const timeout = setTimeout(() => {
       if (!cancelled) {
-        console.warn("[Auth] Bootstrap timed out — falling back to cache");
         agentCache.get().then((cached) => {
           if (!cancelled) {
             if (cached) setAgent(cached);
@@ -88,17 +86,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }, 6000);
 
     bootstrap().finally(() => clearTimeout(timeout));
-
-    return () => {
-      cancelled = true;
-      clearTimeout(timeout);
-    };
+    return () => { cancelled = true; clearTimeout(timeout); };
   }, []);
 
-  // ─── Re-validate on foreground (native only) ────────────────────────────
+  // ─── Re-validate on foreground ──────────────────────────────────────────
   useEffect(() => {
     if (Platform.OS === "web") return;
-
     const handleAppStateChange = async (nextState: AppStateStatus) => {
       if (nextState !== "active") return;
       try {
@@ -110,16 +103,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           await agentCache.set(res.agent);
         }
       } catch (e: any) {
-        // Only log out on explicit 401, not network errors
         if (e?.message === "Unauthorized") {
           await agentCache.clear();
           await tokenStore.clear();
           setAgent(null);
         }
-        // Otherwise keep existing agent (network hiccup)
       }
     };
-
     const subscription = AppState.addEventListener("change", handleAppStateChange);
     return () => subscription.remove();
   }, []);
@@ -131,11 +121,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const res = await api.login(username, password);
       if (!res?.agent) throw new Error("Invalid response from server");
       await agentCache.set(res.agent);
-      // Save token for native APK (bearer auth)
       if (res?.token && Platform.OS !== "web") {
         await tokenStore.set(res.token);
       }
       setAgent(res.agent);
+
+      // ✅ Register push token after login
+      if (Platform.OS !== "web") {
+        registerPushToken().catch((e) =>
+          console.warn("[Push] Token registration failed:", e.message)
+        );
+      }
     } finally {
       setIsLoading(false);
     }
@@ -143,11 +139,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // ─── Logout ─────────────────────────────────────────────────────────────
   const logout = async () => {
-    try {
-      await api.logout();
-    } catch (_) {
-      // Ignore server errors on logout
-    }
+    try { await api.logout(); } catch (_) {}
     await agentCache.clear();
     await tokenStore.clear();
     setAgent(null);
