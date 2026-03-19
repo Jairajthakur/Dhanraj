@@ -16,6 +16,8 @@ import {
   SafeAreaProvider,
   initialWindowMetrics,
 } from "react-native-safe-area-context";
+// ✅ FIXED: Import usePushNotifications
+import { usePushNotifications } from "@/lib/notifications";
 
 SplashScreen.preventAutoHideAsync();
 
@@ -24,9 +26,13 @@ function RootLayoutNav() {
   const segments = useSegments();
   const navigationState = useRootNavigationState();
 
+  // ✅ FIXED: Call push notifications hook here — inside AuthProvider,
+  // so it runs after login and has access to auth context.
+  // Only register on native (not web) and only when agent is logged in.
+  usePushNotifications();
+
   useEffect(() => {
     if (!navigationState?.key || isLoading) return;
-
     const inLogin = segments[0] === "login";
     const inApp   = segments[0] === "(app)";
     const inAdmin  = segments[0] === "(admin)";
