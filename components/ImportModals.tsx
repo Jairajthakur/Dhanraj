@@ -1,33 +1,24 @@
 import React, { useState, useRef } from "react";
 import {
-  View,
-  Text,
-  StyleSheet,
-  Pressable,
-  ActivityIndicator,
-  Modal,
-  Alert,
-  Platform,
+  View, Text, StyleSheet, Pressable, ActivityIndicator,
+  Modal, Alert, Platform,
 } from "react-native";
 import * as DocumentPicker from "expo-document-picker";
-import * as FileSystem from "expo-file-system"; // ✅ NOT /legacy
+import * as FileSystem from "expo-file-system";
 import { Ionicons } from "@expo/vector-icons";
 import Colors from "@/constants/colors";
 import { tokenStore } from "@/lib/api";
 import { getApiUrl } from "@/lib/query-client";
-import { fetch as expoFetch } from "expo/fetch";
 
 // ─── Safe base64 → Uint8Array (no atob dependency) ───────────────────────────
 function base64ToBytes(base64: string): Uint8Array {
   const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
   const lookup = new Uint8Array(256);
   for (let i = 0; i < chars.length; i++) lookup[chars.charCodeAt(i)] = i;
-
   const len = base64.length;
   let bufferLength = Math.floor(len * 0.75);
   if (base64[len - 1] === "=") bufferLength--;
   if (base64[len - 2] === "=") bufferLength--;
-
   const bytes = new Uint8Array(bufferLength);
   let p = 0;
   for (let i = 0; i < len; i += 4) {
@@ -52,14 +43,13 @@ async function uploadExcelFile(
   const formData = new FormData();
 
   if (Platform.OS !== "web" && nativeFile.uri) {
-    // ✅ Read as base64 using stable API (no /legacy)
+    // ✅ FIXED: Use string literal "base64" — EncodingType enum is unreliable
     const base64 = await FileSystem.readAsStringAsync(nativeFile.uri, {
-      encoding: FileSystem.EncodingType.Base64,
+      encoding: "base64" as any,
     });
     const bytes = base64ToBytes(base64);
     const blob = new Blob([bytes], {
-      type:
-        nativeFile.type ||
+      type: nativeFile.type ||
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     });
     formData.append("file", blob, nativeFile.name);
@@ -71,14 +61,16 @@ async function uploadExcelFile(
     Object.entries(extraFields).forEach(([k, v]) => formData.append(k, v));
   }
 
-  // Attach Bearer token for APK auth
+  // ✅ Bearer token for APK auth
   const headers: Record<string, string> = {};
   if (Platform.OS !== "web") {
     const token = await tokenStore.get();
     if (token) headers["Authorization"] = `Bearer ${token}`;
   }
 
-  const res = await expoFetch(url, {
+  // ✅ FIXED: Use native fetch (not expoFetch) for FormData/Blob uploads
+  // expoFetch does not handle Blob in FormData correctly on Android
+  const res = await fetch(url, {
     method: "POST",
     body: formData,
     credentials: "include",
@@ -122,8 +114,7 @@ function useFilePicker() {
         setNativeFile({
           uri: asset.uri,
           name: asset.name,
-          type:
-            asset.mimeType ||
+          type: asset.mimeType ||
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         });
       }
@@ -200,32 +191,39 @@ export function ImportModal({
           )}
           <Pressable style={importStyles.pickBtn} onPress={pickFile}>
             <Ionicons name="folder-open" size={20} color={Colors.primary} />
-            <Text style={importStyles.pickBtnText}>{fileName ?? "Choose Excel File (.xlsx)"}</Text>
+            <Text style={importStyles.pickBtnText}>
+              {fileName ?? "Choose Excel File (.xlsx)"}
+            </Text>
             {fileName && (
               <Pressable onPress={reset} hitSlop={8}>
                 <Ionicons name="close-circle" size={18} color={Colors.textMuted} />
               </Pressable>
             )}
           </Pressable>
+
           {result && (
             <View style={importStyles.resultBox}>
-              <Text style={importStyles.resultTitle}>Import Complete</Text>
+              <Text style={importStyles.resultTitle}>✅ Import Complete</Text>
               <View style={importStyles.resultGrid}>
                 {[
-                  { label: "New Cases", val: result.imported, color: Colors.success },
-                  { label: "Updated", val: result.updated, color: Colors.info },
-                  { label: "Skipped", val: result.skipped, color: Colors.warning },
+                  { label: "New Cases",   val: result.imported,      color: Colors.success },
+                  { label: "Updated",     val: result.updated,       color: Colors.info },
+                  { label: "Skipped",     val: result.skipped,       color: Colors.warning },
                   { label: "FOS Created", val: result.agentsCreated, color: Colors.primary },
                 ].map((s) => (
                   <View key={s.label} style={importStyles.resultItem}>
-                    <Text style={[importStyles.resultNum, { color: s.color }]}>{s.val}</Text>
+                    <Text style={[importStyles.resultNum, { color: s.color }]}>
+                      {s.val ?? 0}
+                    </Text>
                     <Text style={importStyles.resultLabel}>{s.label}</Text>
                   </View>
                 ))}
               </View>
               {result.errors?.length > 0 && (
                 <View style={importStyles.errorList}>
-                  <Text style={importStyles.errorTitle}>Errors ({result.errors.length}):</Text>
+                  <Text style={importStyles.errorTitle}>
+                    Errors ({result.errors.length}):
+                  </Text>
                   {result.errors.slice(0, 5).map((e: string, i: number) => (
                     <Text key={i} style={importStyles.errorItem}>• {e}</Text>
                   ))}
@@ -233,18 +231,23 @@ export function ImportModal({
               )}
             </View>
           )}
+
           <View style={importStyles.btnRow}>
             <Pressable style={importStyles.cancelBtn} onPress={handleClose}>
               <Text style={importStyles.cancelText}>Close</Text>
             </Pressable>
             <Pressable
               style={[importStyles.importBtn, (!nativeFile || loading) && { opacity: 0.5 }]}
-              onPress={handleImport} disabled={!nativeFile || loading}
+              onPress={handleImport}
+              disabled={!nativeFile || loading}
             >
-              {loading ? <ActivityIndicator color="#fff" size="small" /> : (
-                <><Ionicons name="cloud-upload" size={18} color="#fff" />
-                  <Text style={importStyles.importText}>Import</Text></>
-              )}
+              {loading
+                ? <ActivityIndicator color="#fff" size="small" />
+                : <>
+                    <Ionicons name="cloud-upload" size={18} color="#fff" />
+                    <Text style={importStyles.importText}>Import</Text>
+                  </>
+              }
             </Pressable>
           </View>
         </View>
@@ -273,8 +276,11 @@ export function BktPerfImportModal({
     setLoading(true);
     setResult(null);
     try {
-      const extraFields = selectedBkt !== "Auto-detect" ? { bkt: selectedBkt } : undefined;
-      const data = await uploadExcelFile(nativeFile, "/api/admin/import-bkt-perf", extraFields);
+      const extraFields =
+        selectedBkt !== "Auto-detect" ? { bkt: selectedBkt } : undefined;
+      const data = await uploadExcelFile(
+        nativeFile, "/api/admin/import-bkt-perf", extraFields
+      );
       setResult(data);
       onDone();
     } catch (e: any) {
@@ -301,65 +307,87 @@ export function BktPerfImportModal({
               Pivot table Excel with POS + Rollback data. Select BKT if auto-detection fails.
             </Text>
           </View>
+
           <View style={bktSelStyles.container}>
             <Text style={bktSelStyles.label}>BKT / Sheet:</Text>
             <View style={bktSelStyles.row}>
               {BKT_OPTIONS.map((opt) => (
-                <Pressable key={opt}
+                <Pressable
+                  key={opt}
                   style={[bktSelStyles.chip, selectedBkt === opt && bktSelStyles.chipActive]}
                   onPress={() => setSelectedBkt(opt)}
                 >
-                  <Text style={[bktSelStyles.chipText, selectedBkt === opt && bktSelStyles.chipTextActive]}>
+                  <Text style={[
+                    bktSelStyles.chipText,
+                    selectedBkt === opt && bktSelStyles.chipTextActive,
+                  ]}>
                     {opt}
                   </Text>
                 </Pressable>
               ))}
             </View>
           </View>
+
           {Platform.OS === "web" && (
             // @ts-ignore
             <input ref={fileInputRef} type="file" accept=".xlsx,.xls"
               style={{ display: "none" }} onChange={onWebChange} />
           )}
+
           <Pressable style={importStyles.pickBtn} onPress={pickFile}>
             <Ionicons name="folder-open" size={20} color={Colors.primary} />
-            <Text style={importStyles.pickBtnText}>{fileName ?? "Choose Excel File (.xlsx)"}</Text>
+            <Text style={importStyles.pickBtnText}>
+              {fileName ?? "Choose Excel File (.xlsx)"}
+            </Text>
             {fileName && (
               <Pressable onPress={reset} hitSlop={8}>
                 <Ionicons name="close-circle" size={18} color={Colors.textMuted} />
               </Pressable>
             )}
           </Pressable>
+
           {result && (
             <View style={importStyles.resultBox}>
               <Text style={importStyles.resultTitle}>
-                Import Complete · BKT {result.bkt ?? selectedBkt}
+                ✅ Import Complete · BKT {result.bkt ?? selectedBkt}
               </Text>
               <View style={importStyles.resultGrid}>
                 <View style={importStyles.resultItem}>
-                  <Text style={[importStyles.resultNum, { color: Colors.success }]}>{result.imported}</Text>
+                  <Text style={[importStyles.resultNum, { color: Colors.success }]}>
+                    {result.imported}
+                  </Text>
                   <Text style={importStyles.resultLabel}>Imported</Text>
                 </View>
                 <View style={importStyles.resultItem}>
-                  <Text style={[importStyles.resultNum, { color: Colors.warning }]}>{result.skipped}</Text>
+                  <Text style={[importStyles.resultNum, { color: Colors.warning }]}>
+                    {result.skipped}
+                  </Text>
                   <Text style={importStyles.resultLabel}>Skipped</Text>
                 </View>
               </View>
             </View>
           )}
+
           <View style={importStyles.btnRow}>
             <Pressable style={importStyles.cancelBtn} onPress={handleClose}>
               <Text style={importStyles.cancelText}>Close</Text>
             </Pressable>
             <Pressable
-              style={[importStyles.importBtn, { backgroundColor: Colors.primary },
-                (!nativeFile || loading) && { opacity: 0.5 }]}
-              onPress={handleImport} disabled={!nativeFile || loading}
+              style={[
+                importStyles.importBtn,
+                { backgroundColor: Colors.primary },
+                (!nativeFile || loading) && { opacity: 0.5 },
+              ]}
+              onPress={handleImport}
+              disabled={!nativeFile || loading}
             >
-              {loading ? <ActivityIndicator color="#fff" size="small" /> : (
-                <><Ionicons name="cloud-upload" size={18} color="#fff" />
-                  <Text style={importStyles.importText}>Import</Text></>
-              )}
+              {loading
+                ? <ActivityIndicator color="#fff" size="small" />
+                : <>
+                    <Ionicons name="cloud-upload" size={18} color="#fff" />
+                    <Text style={importStyles.importText}>Import</Text>
+                  </>
+              }
             </Pressable>
           </View>
         </View>
@@ -372,10 +400,13 @@ export function BktPerfImportModal({
 const importStyles = StyleSheet.create({
   overlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" },
   sheet: {
-    backgroundColor: Colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24,
-    padding: 24, gap: 16, maxHeight: "90%",
+    backgroundColor: Colors.surface, borderTopLeftRadius: 24,
+    borderTopRightRadius: 24, padding: 24, gap: 16, maxHeight: "90%",
   },
-  handle: { width: 40, height: 4, backgroundColor: Colors.border, borderRadius: 2, alignSelf: "center", marginBottom: 4 },
+  handle: {
+    width: 40, height: 4, backgroundColor: Colors.border,
+    borderRadius: 2, alignSelf: "center", marginBottom: 4,
+  },
   header: { flexDirection: "row", alignItems: "center", gap: 10 },
   title: { fontSize: 20, fontWeight: "700", color: Colors.text },
   infoBox: {
@@ -389,24 +420,30 @@ const importStyles = StyleSheet.create({
     borderRadius: 12, padding: 16,
   },
   pickBtnText: { flex: 1, fontSize: 14, color: Colors.primary, fontWeight: "500" },
-  resultBox: { backgroundColor: Colors.surfaceAlt, borderRadius: 12, padding: 16, gap: 12 },
+  resultBox: {
+    backgroundColor: Colors.surfaceAlt, borderRadius: 12, padding: 16, gap: 12,
+  },
   resultTitle: { fontSize: 15, fontWeight: "700", color: Colors.text },
   resultGrid: { flexDirection: "row", gap: 8 },
   resultItem: { flex: 1, alignItems: "center", gap: 4 },
   resultNum: { fontSize: 24, fontWeight: "800" },
-  resultLabel: { fontSize: 11, color: Colors.textSecondary, fontWeight: "600", textAlign: "center" },
+  resultLabel: {
+    fontSize: 11, color: Colors.textSecondary,
+    fontWeight: "600", textAlign: "center",
+  },
   errorList: { gap: 4 },
   errorTitle: { fontSize: 13, fontWeight: "700", color: Colors.danger },
   errorItem: { fontSize: 12, color: Colors.textSecondary },
   btnRow: { flexDirection: "row", gap: 12 },
   cancelBtn: {
-    flex: 1, paddingVertical: 14, borderRadius: 12, alignItems: "center",
-    borderWidth: 1, borderColor: Colors.border,
+    flex: 1, paddingVertical: 14, borderRadius: 12,
+    alignItems: "center", borderWidth: 1, borderColor: Colors.border,
   },
   cancelText: { fontSize: 15, fontWeight: "600", color: Colors.textSecondary },
   importBtn: {
-    flex: 2, paddingVertical: 14, borderRadius: 12, alignItems: "center",
-    backgroundColor: Colors.primary, flexDirection: "row", justifyContent: "center", gap: 8,
+    flex: 2, paddingVertical: 14, borderRadius: 12,
+    alignItems: "center", backgroundColor: Colors.primary,
+    flexDirection: "row", justifyContent: "center", gap: 8,
   },
   importText: { fontSize: 15, fontWeight: "700", color: "#fff" },
 });
