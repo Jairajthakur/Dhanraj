@@ -17,7 +17,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Ionicons } from "@expo/vector-icons";
 import Colors from "@/constants/colors";
-import { api } from "@/lib/api";
+import { api, tokenStore } from "@/lib/api";
 import { getApiUrl } from "@/lib/query-client";
 
 const STATUS_COLORS: Record<string, string> = {
@@ -508,6 +508,7 @@ export default function AllCasesScreen() {
     );
   }, [data]);
 
+  // ✅ FIXED: Use tokenStore instead of localStorage (works on Android)
   const handleResetAgentFeedback = (agentId: number, agentName: string) => {
     Alert.alert(
       "Reset Agent Feedback",
@@ -520,7 +521,7 @@ export default function AllCasesScreen() {
           onPress: async () => {
             setResettingAgent(agentId);
             try {
-              const token = localStorage.getItem("token");
+              const token = await tokenStore.get();
               const url = new URL(
                 `/api/admin/reset-feedback/agent/${agentId}`,
                 getApiUrl()
@@ -548,9 +549,10 @@ export default function AllCasesScreen() {
     );
   };
 
+  // ✅ FIXED: Use tokenStore instead of localStorage (works on Android)
   const handleResetCase = async (caseId: number) => {
     try {
-      const token = localStorage.getItem("token");
+      const token = await tokenStore.get();
       const url = new URL(
         `/api/admin/reset-feedback/case/${caseId}`,
         getApiUrl()
