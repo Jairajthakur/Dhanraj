@@ -1,52 +1,43 @@
 name: Build Android APK
-
 on:
   workflow_dispatch:
-
 env:
   EXPO_PUBLIC_API_URL: https://dhanraj-production.up.railway.app
-
 jobs:
   build:
     name: Build APK
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # ✅ FIXED: Node 22 (LTS, supported, not deprecated)
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
 
-      # ✅ FIXED: Java 17
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: 17
 
-      # ✅ FIXED: Android SDK
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      # ✅ Cache node_modules — gracefully skipped if cache service is down
       - name: Cache node_modules
         uses: actions/cache@v4
-        continue-on-error: true   # ← won't fail build if cache is unavailable
+        continue-on-error: true
         with:
           path: node_modules
           key: ${{ runner.os }}-node-${{ hashFiles('package.json') }}
           restore-keys: |
             ${{ runner.os }}-node-
 
-      # ✅ Cache Gradle — gracefully skipped if cache service is down
       - name: Cache Gradle
         uses: actions/cache@v4
-        continue-on-error: true   # ← won't fail build if cache is unavailable
+        continue-on-error: true
         with:
           path: |
             ~/.gradle/caches
@@ -55,17 +46,15 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-gradle-
 
-      # ✅ Cache Expo
       - name: Cache Expo
         uses: actions/cache@v4
-        continue-on-error: true   # ← won't fail build if cache is unavailable
+        continue-on-error: true
         with:
           path: .expo
-          key: ${{ runner.os }}-expo-${{ hashFiles('app.json') }}
+          key: ${{ runner.os }}-expo-${{ hashFiles('app.config.js') }}
           restore-keys: |
             ${{ runner.os }}-expo-
 
-      # ✅ Gradle memory optimization
       - name: Configure Gradle memory
         run: |
           mkdir -p ~/.gradle
@@ -78,25 +67,25 @@ jobs:
           kotlin.incremental=true
           EOF
 
-      # ✅ Install dependencies
       - name: Install dependencies
         run: |
           npm config set legacy-peer-deps true
           npm install --legacy-peer-deps
           npm install nanoid@3.3.7 --legacy-peer-deps
 
-      # ✅ Setup EAS
       - name: Setup EAS
         uses: expo/expo-github-action@v8
         with:
           eas-version: latest
           token: ${{ secrets.EXPO_TOKEN }}
 
-      # ✅ Expo prebuild
+      # ✅ Write google-services.json from GitHub Secret
+      - name: Create google-services.json
+        run: echo '${{ secrets.GOOGLE_SERVICES_JSON }}' > ./google-services.json
+
       - name: Expo prebuild
         run: npx expo prebuild --platform android --clean
 
-      # ✅ Build APK
       - name: Build APK
         run: |
           cd android
@@ -109,7 +98,6 @@ jobs:
         env:
           GRADLE_OPTS: "-Xmx6g -XX:MaxMetaspaceSize=1g"
 
-      # ✅ Upload APK
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
