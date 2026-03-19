@@ -4,7 +4,8 @@ import {
   Modal, Alert, Platform,
 } from "react-native";
 import * as DocumentPicker from "expo-document-picker";
-import * as FileSystem from "expo-file-system";
+// ✅ FIXED: Use legacy import to avoid deprecated readAsStringAsync error in Expo SDK v54
+import * as FileSystem from "expo-file-system/legacy";
 import { Ionicons } from "@expo/vector-icons";
 import Colors from "@/constants/colors";
 import { tokenStore } from "@/lib/api";
@@ -43,9 +44,9 @@ async function uploadExcelFile(
   const formData = new FormData();
 
   if (Platform.OS !== "web" && nativeFile.uri) {
-    // ✅ FIXED: Use string literal "base64" — EncodingType enum is unreliable
+    // ✅ FIXED: expo-file-system/legacy still supports readAsStringAsync safely
     const base64 = await FileSystem.readAsStringAsync(nativeFile.uri, {
-      encoding: "base64" as any,
+      encoding: FileSystem.EncodingType.Base64,
     });
     const bytes = base64ToBytes(base64);
     const blob = new Blob([bytes], {
@@ -68,7 +69,7 @@ async function uploadExcelFile(
     if (token) headers["Authorization"] = `Bearer ${token}`;
   }
 
-  // ✅ FIXED: Use native fetch (not expoFetch) for FormData/Blob uploads
+  // ✅ Use native fetch (not expoFetch) for FormData/Blob uploads
   // expoFetch does not handle Blob in FormData correctly on Android
   const res = await fetch(url, {
     method: "POST",
@@ -78,9 +79,14 @@ async function uploadExcelFile(
   });
 
   if (!res.ok) {
-    const text = await res.text();
-    let msg = text;
-    try { msg = JSON.parse(text).message; } catch {}
+    const text = await res.text().catch(() => "");
+    let msg = `HTTP ${res.status}`;
+    try {
+      const json = JSON.parse(text);
+      msg = json.message || json.error || msg;
+    } catch {
+      if (text) msg = text;
+    }
     throw new Error(msg || "Import failed");
   }
 
