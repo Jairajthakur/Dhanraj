@@ -4,6 +4,7 @@ import * as Notifications from "expo-notifications";
 import * as Device from "expo-device";
 import Constants from "expo-constants";
 import { api } from "@/lib/api";
+import { useAuth } from "@/context/AuthContext";
 
 // ─── Configure how notifications appear when app is foregrounded ─────────────
 Notifications.setNotificationHandler({
@@ -35,7 +36,6 @@ export async function registerPushToken(): Promise<string | null> {
   // Request permissions
   const { status: existingStatus } = await Notifications.getPermissionsAsync();
   let finalStatus = existingStatus;
-
   if (existingStatus !== "granted") {
     const { status } = await Notifications.requestPermissionsAsync();
     finalStatus = status;
@@ -49,16 +49,16 @@ export async function registerPushToken(): Promise<string | null> {
   // Get Expo push token
   try {
     const projectId =
-      Constants.expoConfig?.extra?.eas?.projectId ?? "1b09251a-4423-4759-a22b-fc2f0a44fd8e";
+      Constants.expoConfig?.extra?.eas?.projectId ??
+      "1b09251a-4423-4759-a22b-fc2f0a44fd8e";
 
     const tokenData = await Notifications.getExpoPushTokenAsync({ projectId });
     const token = tokenData.data;
-
     console.log("[Push] Token:", token);
 
     // Save to backend
     await api.savePushToken(token);
-
+    console.log("[Push] Token saved to server ✅");
     return token;
   } catch (e: any) {
     console.error("[Push] Failed to get token:", e.message);
@@ -66,20 +66,27 @@ export async function registerPushToken(): Promise<string | null> {
   }
 }
 
-// ─── Hook — call this inside AuthProvider after login ────────────────────────
+// ─── Hook — call this inside RootLayoutNav (inside AuthProvider) ──────────────
+// ✅ FIXED: Re-registers token whenever agent changes (login/logout)
 export function usePushNotifications() {
+  const { agent } = useAuth();
+
   useEffect(() => {
     if (Platform.OS === "web") return;
 
+    // ✅ Only register when agent is logged in
+    if (!agent) return;
+
+    console.log("[Push] Agent logged in, registering push token...");
     registerPushToken();
 
-    // Handle notification tap when app is backgrounded
+    // Handle notification tap when app is backgrounded/closed
     const sub = Notifications.addNotificationResponseReceivedListener((response) => {
       const data = response.notification.request.content.data;
       console.log("[Push] Notification tapped:", data);
-      // You can add navigation here based on data.screen
+      // Navigation can be added here based on data.screen
     });
 
     return () => sub.remove();
-  }, []);
+  }, [agent?.id]); // ✅ Re-run when agent changes (login/logout)
 }
