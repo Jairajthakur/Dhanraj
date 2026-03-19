@@ -5,7 +5,7 @@ import { getApiUrl } from "./query-client";
 const SESSION_KEY = "session_agent";
 const TOKEN_KEY = "auth_token";
 
-// ─── Agent cache — web uses localStorage, native uses AsyncStorage ───────────
+// ─── Agent cache ─────────────────────────────────────────────────────────────
 export const agentCache = {
   get: async (): Promise<any | null> => {
     try {
@@ -15,40 +15,30 @@ export const agentCache = {
       }
       const v = await AsyncStorage.getItem(SESSION_KEY);
       return v ? JSON.parse(v) : null;
-    } catch {
-      return null;
-    }
+    } catch { return null; }
   },
   set: async (agent: any): Promise<void> => {
     try {
       const v = JSON.stringify(agent);
-      if (Platform.OS === "web") {
-        localStorage.setItem(SESSION_KEY, v);
-        return;
-      }
+      if (Platform.OS === "web") { localStorage.setItem(SESSION_KEY, v); return; }
       await AsyncStorage.setItem(SESSION_KEY, v);
     } catch {}
   },
   clear: async (): Promise<void> => {
     try {
-      if (Platform.OS === "web") {
-        localStorage.removeItem(SESSION_KEY);
-        return;
-      }
+      if (Platform.OS === "web") { localStorage.removeItem(SESSION_KEY); return; }
       await AsyncStorage.removeItem(SESSION_KEY);
     } catch {}
   },
 };
 
-// ─── Token store (native only) ────────────────────────────────────────────────
+// ─── Token store ─────────────────────────────────────────────────────────────
 export const tokenStore = {
   get: async (): Promise<string | null> => {
     try {
       if (Platform.OS === "web") return null;
       return await AsyncStorage.getItem(TOKEN_KEY);
-    } catch {
-      return null;
-    }
+    } catch { return null; }
   },
   set: async (token: string): Promise<void> => {
     try {
@@ -66,11 +56,8 @@ export const tokenStore = {
 
 // ─── Safe URL builder ────────────────────────────────────────────────────────
 function buildUrl(route: string, base: string): string {
-  try {
-    return new URL(route, base).toString();
-  } catch {
-    return `${base}${route}`;
-  }
+  try { return new URL(route, base).toString(); }
+  catch { return `${base}${route}`; }
 }
 
 // ─── Core request ────────────────────────────────────────────────────────────
@@ -78,16 +65,13 @@ async function apiRequest(method: string, route: string, data?: any) {
   const baseUrl = getApiUrl();
   const url = buildUrl(route, baseUrl);
 
-  // Build headers — attach Bearer token on native (cookies unreliable on Android)
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
   };
 
   if (Platform.OS !== "web") {
     const token = await tokenStore.get();
-    if (token) {
-      headers["Authorization"] = `Bearer ${token}`;
-    }
+    if (token) headers["Authorization"] = `Bearer ${token}`;
   }
 
   const res = await fetch(url, {
@@ -108,15 +92,10 @@ async function apiRequest(method: string, route: string, data?: any) {
     throw new Error((json as any).message || "API Error");
   }
 
-  // Guard against empty / non-JSON responses
   const text = await res.text();
   if (!text) return {};
-  try {
-    return JSON.parse(text);
-  } catch {
-    console.error("[API] Non-JSON response:", text);
-    return {};
-  }
+  try { return JSON.parse(text); }
+  catch { return {}; }
 }
 
 // ─── API ─────────────────────────────────────────────────────────────────────
@@ -124,19 +103,14 @@ export const api = {
   login: async (username: string, password: string) => {
     const res = await apiRequest("POST", "/api/auth/login", { username, password });
     if (res?.agent) await agentCache.set(res.agent);
-    // Store token for native APK auth
-    if (res?.token && Platform.OS !== "web") {
-      await tokenStore.set(res.token);
-    }
+    if (res?.token && Platform.OS !== "web") await tokenStore.set(res.token);
     return res;
   },
 
   logout: async () => {
     await agentCache.clear();
     await tokenStore.clear();
-    try {
-      await apiRequest("POST", "/api/auth/logout");
-    } catch {}
+    try { await apiRequest("POST", "/api/auth/logout"); } catch {}
   },
 
   me: async () => {
@@ -144,14 +118,10 @@ export const api = {
       const res = await apiRequest("GET", "/api/auth/me");
       if (res?.agent) {
         await agentCache.set(res.agent);
-        // Refresh token if server sends a new one
-        if (res?.token && Platform.OS !== "web") {
-          await tokenStore.set(res.token);
-        }
+        if (res?.token && Platform.OS !== "web") await tokenStore.set(res.token);
       }
       return res;
     } catch (e: any) {
-      // On native, fall back to cache on non-401 errors (network/cookie issues)
       if (Platform.OS !== "web" && e?.message !== "Unauthorized") {
         const cached = await agentCache.get();
         if (cached) return { agent: cached };
@@ -207,8 +177,19 @@ export const api = {
       apiRequest("POST", "/api/admin/required-deposits", data),
     deleteRequiredDeposit: (id: number) =>
       apiRequest("DELETE", `/api/admin/required-deposits/${id}`),
+
+    // ✅ Verify screenshot
     verifyDeposit: (id: number) =>
       apiRequest("PUT", `/api/admin/required-deposits/${id}/verify`),
+
+    // ✅ FIXED: was called verifyScreenshot in depositions screen
+    verifyScreenshot: (id: number) =>
+      apiRequest("PUT", `/api/admin/required-deposits/${id}/verify`),
+
+    // ✅ NEW: Mark cash collected
+    markCashCollected: (id: number) =>
+      apiRequest("PUT", `/api/admin/required-deposits/${id}/cash-collected`),
+
     getAttendance: () => apiRequest("GET", "/api/admin/attendance"),
     getBktPerformance: () => apiRequest("GET", "/api/admin/bkt-performance"),
     getBktPerfSummary: () => apiRequest("GET", "/api/admin/bkt-perf-summary"),
@@ -224,6 +205,8 @@ export const api = {
       apiRequest("POST", `/api/admin/reset-feedback/agent/${agentId}`),
     resetFeedbackCase: (caseId: number, table: "loan" | "bkt") =>
       apiRequest("POST", `/api/admin/reset-feedback/case/${caseId}`, { table }),
+
+    // ✅ File uploads with Bearer token on native
     importCases: async (file: File) => {
       const form = new FormData();
       form.append("file", file);
