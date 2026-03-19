@@ -16,33 +16,47 @@ Notifications.setNotificationHandler({
 });
 
 export async function registerPushToken(): Promise<string | null> {
-  // Push notifications only work on real devices
+  console.log("[Push] Starting registration...");
+  console.log("[Push] Platform:", Platform.OS);
+  console.log("[Push] Is device:", Device.isDevice);
+
   if (!Device.isDevice) {
-    console.log("[Push] Not a real device — skipping push registration");
+    console.log("[Push] Not a real device — skipping");
     return null;
   }
 
-  // Android channel setup (required for Android 8+)
+  // Android channel setup
   if (Platform.OS === "android") {
-    await Notifications.setNotificationChannelAsync("default", {
-      name: "Default",
-      importance: Notifications.AndroidImportance.MAX,
-      vibrationPattern: [0, 250, 250, 250],
-      lightColor: "#FF231F7C",
-      sound: "default",
-    });
+    try {
+      await Notifications.setNotificationChannelAsync("default", {
+        name: "Default",
+        importance: Notifications.AndroidImportance.MAX,
+        vibrationPattern: [0, 250, 250, 250],
+        lightColor: "#FF231F7C",
+        sound: "default",
+      });
+      console.log("[Push] Android channel created ✅");
+    } catch (e: any) {
+      console.error("[Push] Channel creation failed:", e.message);
+    }
   }
 
   // Request permissions
-  const { status: existingStatus } = await Notifications.getPermissionsAsync();
-  let finalStatus = existingStatus;
-  if (existingStatus !== "granted") {
-    const { status } = await Notifications.requestPermissionsAsync();
-    finalStatus = status;
-  }
-
-  if (finalStatus !== "granted") {
-    console.log("[Push] Permission not granted");
+  try {
+    const { status: existingStatus } = await Notifications.getPermissionsAsync();
+    console.log("[Push] Existing permission status:", existingStatus);
+    let finalStatus = existingStatus;
+    if (existingStatus !== "granted") {
+      const { status } = await Notifications.requestPermissionsAsync();
+      finalStatus = status;
+      console.log("[Push] New permission status:", finalStatus);
+    }
+    if (finalStatus !== "granted") {
+      console.log("[Push] Permission denied — cannot register");
+      return null;
+    }
+  } catch (e: any) {
+    console.error("[Push] Permission check failed:", e.message);
     return null;
   }
 
@@ -52,40 +66,43 @@ export async function registerPushToken(): Promise<string | null> {
       Constants.expoConfig?.extra?.eas?.projectId ??
       "1b09251a-4423-4759-a22b-fc2f0a44fd8e";
 
+    console.log("[Push] Using projectId:", projectId);
+    console.log("[Push] expoConfig extra:", JSON.stringify(Constants.expoConfig?.extra));
+
     const tokenData = await Notifications.getExpoPushTokenAsync({ projectId });
     const token = tokenData.data;
-    console.log("[Push] Token:", token);
+    console.log("[Push] Token received:", token);
 
-    // Save to backend
+    console.log("[Push] Saving token to server...");
     await api.savePushToken(token);
     console.log("[Push] Token saved to server ✅");
     return token;
   } catch (e: any) {
-    console.error("[Push] Failed to get token:", e.message);
+    console.error("[Push] FAILED:", e.message);
+    console.error("[Push] Error code:", (e as any)?.code);
+    console.error("[Push] Full error:", JSON.stringify(e, Object.getOwnPropertyNames(e)));
     return null;
   }
 }
 
 // ─── Hook — must be called inside AuthProvider ────────────────────────────────
-// ✅ FIXED: Re-registers token whenever agent logs in
 export function usePushNotifications() {
   const { agent } = useAuth();
 
   useEffect(() => {
     if (Platform.OS === "web") return;
-
-    // Only register when agent is logged in
-    if (!agent) return;
-
-    console.log("[Push] Agent logged in, registering push token...");
+    if (!agent) {
+      console.log("[Push] No agent — skipping registration");
+      return;
+    }
+    console.log("[Push] Agent logged in:", agent.id, agent.name);
     registerPushToken();
 
-    // Handle notification tap when app is backgrounded/closed
     const sub = Notifications.addNotificationResponseReceivedListener((response) => {
       const data = response.notification.request.content.data;
       console.log("[Push] Notification tapped:", data);
     });
 
     return () => sub.remove();
-  }, [agent?.id]); // Re-run when agent changes
+  }, [agent?.id]);
 }
