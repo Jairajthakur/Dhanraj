@@ -1,6 +1,6 @@
 import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "node:http";
-import { randomBytes } from "node:crypto";
+import { randomBytes, createHmac } from "node:crypto";
 import session from "express-session";
 import connectPgSimple from "connect-pg-simple";
 import multer from "multer";
@@ -11,6 +11,33 @@ import fs from "node:fs";
 import express from "express";
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
+
+// ─── JWT helpers (no external dependency) ────────────────────────────────────
+const JWT_SECRET = process.env.JWT_SECRET || process.env.SESSION_SECRET || "fos-jwt-secret-2024";
+
+function base64url(str: string): string {
+  return Buffer.from(str).toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
+}
+
+function signToken(payload: { agentId: number; role: string }): string {
+  const header = base64url(JSON.stringify({ alg: "HS256", typ: "JWT" }));
+  const body = base64url(JSON.stringify({ ...payload, iat: Math.floor(Date.now() / 1000), exp: Math.floor(Date.now() / 1000) + 7 * 24 * 3600 }));
+  const sig = createHmac("sha256", JWT_SECRET).update(`${header}.${body}`).digest("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
+  return `${header}.${body}.${sig}`;
+}
+
+function verifyToken(token: string): { agentId: number; role: string } | null {
+  try {
+    const [header, body, sig] = token.split(".");
+    const expected = createHmac("sha256", JWT_SECRET).update(`${header}.${body}`).digest("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
+    if (sig !== expected) return null;
+    const payload = JSON.parse(Buffer.from(body, "base64").toString());
+    if (payload.exp && payload.exp < Math.floor(Date.now() / 1000)) return null;
+    return { agentId: payload.agentId, role: payload.role };
+  } catch {
+    return null;
+  }
+}
 
 function worksheetToRows(worksheet: ExcelJS.Worksheet, rawStrings: boolean): any[][] {
   const rawRows: any[][] = [];
@@ -67,13 +94,8 @@ async function sendExpoPush(
       method: "POST",
       headers: { "Content-Type": "application/json", "Accept": "application/json" },
       body: JSON.stringify({
-        to: pushToken,
-        title,
-        body,
-        sound: "default",
-        priority: "high",
-        channelId: "default",
-        data,
+        to: pushToken, title, body,
+        sound: "default", priority: "high", channelId: "default", data,
       }),
     });
     const json: any = await resp.json().catch(() => ({}));
@@ -244,21 +266,62 @@ export async function registerRoutes(app: Express): Promise<Server> {
     })
   );
 
+  // ─── Auth middleware — supports BOTH session (web) and Bearer token (APK) ──
   function requireAuth(req: Request, res: Response, next: any) {
-    if (!req.session.agentId) return res.status(401).json({ message: "Unauthorized" });
-    next();
+    // 1. Session auth (web)
+    if (req.session.agentId) return next();
+
+    // 2. Bearer token auth (native APK)
+    const authHeader = req.headers.authorization;
+    if (authHeader?.startsWith("Bearer ")) {
+      const token = authHeader.slice(7);
+      const payload = verifyToken(token);
+      if (payload) {
+        req.session.agentId = payload.agentId;
+        req.session.role = payload.role;
+        return next();
+      }
+    }
+
+    return res.status(401).json({ message: "Unauthorized" });
   }
 
   function requireAdmin(req: Request, res: Response, next: any) {
-    if (!req.session.agentId || req.session.role !== "admin")
-      return res.status(403).json({ message: "Forbidden" });
-    next();
+    // 1. Session auth (web)
+    if (req.session.agentId && req.session.role === "admin") return next();
+
+    // 2. Bearer token auth (native APK)
+    const authHeader = req.headers.authorization;
+    if (authHeader?.startsWith("Bearer ")) {
+      const token = authHeader.slice(7);
+      const payload = verifyToken(token);
+      if (payload && payload.role === "admin") {
+        req.session.agentId = payload.agentId;
+        req.session.role = payload.role;
+        return next();
+      }
+    }
+
+    return res.status(403).json({ message: "Forbidden" });
   }
 
   function requireRepo(req: Request, res: Response, next: any) {
-    if (!req.session.agentId || req.session.role !== "repo")
-      return res.status(403).json({ message: "Forbidden" });
-    next();
+    // 1. Session auth (web)
+    if (req.session.agentId && req.session.role === "repo") return next();
+
+    // 2. Bearer token auth (native APK)
+    const authHeader = req.headers.authorization;
+    if (authHeader?.startsWith("Bearer ")) {
+      const token = authHeader.slice(7);
+      const payload = verifyToken(token);
+      if (payload && payload.role === "repo") {
+        req.session.agentId = payload.agentId;
+        req.session.role = payload.role;
+        return next();
+      }
+    }
+
+    return res.status(403).json({ message: "Forbidden" });
   }
 
   app.get("/api/repo/cases", requireRepo, async (req, res) => {
@@ -270,6 +333,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ─── LOGIN — now returns token for APK ───────────────────────────────────
   app.post("/api/auth/login", async (req, res) => {
     try {
       const { username, password } = req.body;
@@ -280,7 +344,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       req.session.agentId = agent.id;
       req.session.role = agent.role;
       const { password: _, ...safeAgent } = agent;
-      res.json({ agent: safeAgent });
+
+      // ✅ Generate JWT token for native APK (Bearer auth)
+      const token = signToken({ agentId: agent.id, role: agent.role });
+
+      res.json({ agent: safeAgent, token });
     } catch (e: any) {
       res.status(500).json({ message: e.message });
     }
@@ -290,12 +358,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
     req.session.destroy(() => res.json({ success: true }));
   });
 
+  // ─── ME — also returns refreshed token ───────────────────────────────────
   app.get("/api/auth/me", requireAuth, async (req, res) => {
     try {
       const agent = await storage.getAgentById(req.session.agentId!);
       if (!agent) return res.status(404).json({ message: "Not found" });
       const { password: _, ...safeAgent } = agent;
-      res.json({ agent: safeAgent });
+
+      // ✅ Return a fresh token so APK stays authenticated
+      const token = signToken({ agentId: agent.id, role: agent.role });
+
+      res.json({ agent: safeAgent, token });
     } catch (e: any) {
       res.status(500).json({ message: e.message });
     }
@@ -810,7 +883,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // ✅ Excel Import — Excel is source of truth, only PTP dates preserved, absent FOS agents removed
   app.post("/api/admin/import", requireAdmin, upload.single("file"), async (req, res) => {
     try {
       if (!req.file) return res.status(400).json({ message: "No file uploaded" });
@@ -835,8 +907,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (headerRowIdx === -1) {
         return res.status(400).json({ message: "Could not find header row. Expected columns like: LOAN NO, CUSTOMER NAME, FOS NAME, POS, BKT" });
       }
-
-      // Collect all FOS names in this Excel
       const fosNamesInExcel = new Set<string>();
       const dataRowsPreScan = rawRows.slice(headerRowIdx + 1);
       for (const row of dataRowsPreScan) {
@@ -849,16 +919,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
           fosNamesInExcel.add(mapped.fos_name.toLowerCase().trim());
         }
       }
-
-      // Save only PTP dates
       const ptpLoanSave = await storage.query(`SELECT loan_no, ptp_date, telecaller_ptp_date FROM loan_cases WHERE status = 'PTP'`);
       const ptpLoanMap = new Map<string, { ptpDate: string | null; telecallerPtpDate: string | null }>(
         ptpLoanSave.rows.map((r: any) => [r.loan_no, { ptpDate: r.ptp_date, telecallerPtpDate: r.telecaller_ptp_date }])
       );
-
       await storage.deleteAllLoanCases();
-
-      // ✅ Remove FOS agents not in Excel
       const existingFosAgents = await storage.query(`SELECT id, name FROM fos_agents WHERE role = 'fos'`);
       let agentsRemoved = 0;
       for (const agent of existingFosAgents.rows) {
@@ -875,13 +940,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
             await storage.query(`DELETE FROM user_sessions WHERE sess::text LIKE $1`, [`%"agentId":${agent.id}%`]);
             await storage.query(`DELETE FROM fos_agents WHERE id = $1`, [agent.id]);
             agentsRemoved++;
-            console.log(`[import] Removed FOS agent not in Excel: ${agent.name}`);
           } catch (delErr: any) {
             console.error(`[import] Could not remove agent ${agent.name}:`, delErr.message);
           }
         }
       }
-
       const existingAgents = await storage.getAllAgentsWithAdmin();
       const agentByName: Record<string, number> = {};
       for (const a of existingAgents) {
@@ -948,21 +1011,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
           skipped++;
         }
       }
-
       for (const [loanNo, ptpData] of ptpLoanMap) {
         await storage.query(
           `UPDATE loan_cases SET status = 'PTP', ptp_date = $1, telecaller_ptp_date = $2 WHERE loan_no = $3`,
           [ptpData.ptpDate, ptpData.telecallerPtpDate, loanNo]
         );
       }
-
       res.json({ imported, updated: 0, skipped, agentsCreated, agentsRemoved, total: dataRows.length, errors: errors.slice(0, 20) });
     } catch (e: any) {
       res.status(500).json({ message: e.message });
     }
   });
 
-  // ✅ BKT Import — Excel is source of truth, only PTP dates preserved, absent FOS agents removed
   app.post("/api/admin/import-bkt", requireAdmin, upload.single("file"), async (req, res) => {
     try {
       if (!req.file) return res.status(400).json({ message: "No file uploaded" });
@@ -984,11 +1044,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
         if (matched >= 3) { headerRowIdx = r; colIdxMap = tempMap; break; }
       }
-      if (headerRowIdx === -1) {
-        return res.status(400).json({ message: "Could not find header row." });
-      }
-
-      // Collect all FOS names in this BKT Excel
+      if (headerRowIdx === -1) return res.status(400).json({ message: "Could not find header row." });
       const fosNamesInBktExcel = new Set<string>();
       const bktDataRowsPreScan = rawRows.slice(headerRowIdx + 1);
       for (const row of bktDataRowsPreScan) {
@@ -1001,16 +1057,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
           fosNamesInBktExcel.add(mapped.fos_name.toLowerCase().trim());
         }
       }
-
-      // Save only PTP dates
       const ptpBktSave = await storage.query(`SELECT loan_no, ptp_date, telecaller_ptp_date FROM bkt_cases WHERE status = 'PTP'`);
       const ptpBktMap = new Map<string, { ptpDate: string | null; telecallerPtpDate: string | null }>(
         ptpBktSave.rows.map((r: any) => [r.loan_no, { ptpDate: r.ptp_date, telecallerPtpDate: r.telecaller_ptp_date }])
       );
-
       await storage.deleteAllBktCases();
-
-      // ✅ Remove FOS agents not in BKT Excel
       const existingFosBktAgents = await storage.query(`SELECT id, name FROM fos_agents WHERE role = 'fos'`);
       let agentsRemoved = 0;
       for (const agent of existingFosBktAgents.rows) {
@@ -1027,13 +1078,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
             await storage.query(`DELETE FROM user_sessions WHERE sess::text LIKE $1`, [`%"agentId":${agent.id}%`]);
             await storage.query(`DELETE FROM fos_agents WHERE id = $1`, [agent.id]);
             agentsRemoved++;
-            console.log(`[import-bkt] Removed FOS agent not in BKT Excel: ${agent.name}`);
           } catch (delErr: any) {
             console.error(`[import-bkt] Could not remove agent ${agent.name}:`, delErr.message);
           }
         }
       }
-
       const existingAgents = await storage.getAllAgentsWithAdmin();
       const agentByName: Record<string, number> = {};
       for (const a of existingAgents) {
@@ -1105,14 +1154,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
           skipped++;
         }
       }
-
       for (const [loanNo, ptpData] of ptpBktMap) {
         await storage.query(
           `UPDATE bkt_cases SET status = 'PTP', ptp_date = $1, telecaller_ptp_date = $2 WHERE loan_no = $3`,
           [ptpData.ptpDate, ptpData.telecallerPtpDate, loanNo]
         );
       }
-
       res.json({ imported, updated: 0, skipped, agentsCreated, agentsRemoved, total: dataRows.length, errors: errors.slice(0, 20) });
     } catch (e: any) {
       res.status(500).json({ message: e.message });
@@ -1503,8 +1550,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // ─── Background Jobs ──────────────────────────────────────────────────────
-
-  // 1. PTP push — 9 AM and 1 PM daily
   const ptpReminderSentDates = new Set<string>();
   async function runPtpPushJob() {
     try {
@@ -1548,7 +1593,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
   runPtpPushJob();
   setInterval(runPtpPushJob, 30 * 60 * 1000);
 
-  // 2. Hourly deposit reminder until screenshot uploaded
   async function runReminderJob() {
     try {
       const result = await storage.query(`
@@ -1576,17 +1620,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
             : `Upload your payment screenshot of ₹${amtStr} now! ${hoursElapsed}h elapsed — please upload immediately.`,
           { screen: "deposition" }
         );
-        await storage.query(
-          `UPDATE required_deposits SET last_reminder_at = NOW() WHERE id = $1`,
-          [row.id]
-        );
+        await storage.query(`UPDATE required_deposits SET last_reminder_at = NOW() WHERE id = $1`, [row.id]);
       }
     } catch (_) {}
   }
   runReminderJob();
   setInterval(runReminderJob, 60 * 60 * 1000);
 
-  // 3. Daily 7 PM batch summary to all FOS
   const batchReminderSentDates = new Set<string>();
   async function runBatchReminderJob() {
     try {
@@ -1626,7 +1666,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         );
       }
       batchReminderSentDates.add(todayKey);
-      console.log(`[batch-reminder] Sent daily 7PM summary to ${agents.rows.length} FOS agents`);
     } catch (e: any) {
       console.error("[batch-reminder] Error:", e.message);
     }
