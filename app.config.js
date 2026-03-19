@@ -8,7 +8,7 @@ module.exports = ({ config }) => {
     orientation: "portrait",
     scheme: "dhanrajenterprises",
     userInterfaceStyle: "automatic",
-    newArchEnabled: true, // ✅ Required by react-native-reanimated
+    newArchEnabled: true,
     icon: "./assets/images/dhanraj-logo.png",
     splash: {
       image: "./assets/images/dhanraj-logo.png",
@@ -21,7 +21,7 @@ module.exports = ({ config }) => {
     },
     android: {
       package: "com.dhanrajenterprises.app",
-      googleServicesFile: "./google-services.json", // ✅ Required for FCM/push
+      googleServicesFile: "./google-services.json",
       backgroundColor: "#ECEAE4",
       adaptiveIcon: {
         foregroundImage: "./assets/images/dhanraj-logo.png",
@@ -45,6 +45,8 @@ module.exports = ({ config }) => {
         {
           icon: "./assets/images/dhanraj-logo.png",
           color: "#111111",
+          // ✅ Required for Android 13+ notification permissions
+          sounds: ["./assets/sounds/notification.wav"],
         },
       ],
     ],
