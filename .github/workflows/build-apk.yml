@@ -79,7 +79,6 @@ jobs:
           eas-version: latest
           token: ${{ secrets.EXPO_TOKEN }}
 
-      # ✅ Write google-services.json from GitHub Secret
       - name: Create google-services.json
         run: echo '${{ secrets.GOOGLE_SERVICES_JSON }}' > ./google-services.json
 
@@ -104,3 +103,11 @@ jobs:
           name: dhanraj-release-${{ github.run_number }}.apk
           path: android/app/build/outputs/apk/release/app-release.apk
           retention-days: 30
+
+      - name: Upload APK (debug fallback)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dhanraj-debug-${{ github.run_number }}.apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 7
