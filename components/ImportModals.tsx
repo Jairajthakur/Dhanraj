@@ -4,35 +4,10 @@ import {
   Modal, Alert, Platform,
 } from "react-native";
 import * as DocumentPicker from "expo-document-picker";
-// ✅ FIXED: Use legacy import to avoid deprecated readAsStringAsync error in Expo SDK v54
-import * as FileSystem from "expo-file-system/legacy";
 import { Ionicons } from "@expo/vector-icons";
 import Colors from "@/constants/colors";
 import { tokenStore } from "@/lib/api";
 import { getApiUrl } from "@/lib/query-client";
-
-// ─── Safe base64 → Uint8Array (no atob dependency) ───────────────────────────
-function base64ToBytes(base64: string): Uint8Array {
-  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-  const lookup = new Uint8Array(256);
-  for (let i = 0; i < chars.length; i++) lookup[chars.charCodeAt(i)] = i;
-  const len = base64.length;
-  let bufferLength = Math.floor(len * 0.75);
-  if (base64[len - 1] === "=") bufferLength--;
-  if (base64[len - 2] === "=") bufferLength--;
-  const bytes = new Uint8Array(bufferLength);
-  let p = 0;
-  for (let i = 0; i < len; i += 4) {
-    const a = lookup[base64.charCodeAt(i)];
-    const b = lookup[base64.charCodeAt(i + 1)];
-    const c = lookup[base64.charCodeAt(i + 2)];
-    const d = lookup[base64.charCodeAt(i + 3)];
-    bytes[p++] = (a << 2) | (b >> 4);
-    if (i + 2 < len && base64[i + 2] !== "=") bytes[p++] = ((b & 15) << 4) | (c >> 2);
-    if (i + 3 < len && base64[i + 3] !== "=") bytes[p++] = ((c & 3) << 6) | d;
-  }
-  return bytes;
-}
 
 // ─── Shared file upload helper ────────────────────────────────────────────────
 async function uploadExcelFile(
@@ -44,15 +19,10 @@ async function uploadExcelFile(
   const formData = new FormData();
 
   if (Platform.OS !== "web" && nativeFile.uri) {
-    // ✅ FIXED: expo-file-system/legacy still supports readAsStringAsync safely
-    const base64 = await FileSystem.readAsStringAsync(nativeFile.uri, {
-      encoding: FileSystem.EncodingType.Base64,
-    });
-    const bytes = base64ToBytes(base64);
-    const blob = new Blob([bytes], {
-      type: nativeFile.type ||
-        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    });
+    // ✅ FIXED: Use fetch() to get blob — completely removes expo-file-system dependency
+    // No APK rebuild needed. Works with Expo SDK v54+
+    const response = await fetch(nativeFile.uri);
+    const blob = await response.blob();
     formData.append("file", blob, nativeFile.name);
   } else {
     formData.append("file", nativeFile as any);
@@ -69,8 +39,6 @@ async function uploadExcelFile(
     if (token) headers["Authorization"] = `Bearer ${token}`;
   }
 
-  // ✅ Use native fetch (not expoFetch) for FormData/Blob uploads
-  // expoFetch does not handle Blob in FormData correctly on Android
   const res = await fetch(url, {
     method: "POST",
     body: formData,
