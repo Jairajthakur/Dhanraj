@@ -3,27 +3,21 @@ import {
   View,
   Text,
   StyleSheet,
-  ScrollView,
   Pressable,
   ActivityIndicator,
   Modal,
   Alert,
   Platform,
-  Linking,
 } from "react-native";
 import * as DocumentPicker from "expo-document-picker";
-import * as FileSystem from "expo-file-system";
-import * as Sharing from "expo-sharing";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import * as FileSystem from "expo-file-system"; // ✅ NOT /legacy
 import { Ionicons } from "@expo/vector-icons";
-import { router } from "expo-router";
 import Colors from "@/constants/colors";
-import { api, tokenStore } from "@/lib/api";
+import { tokenStore } from "@/lib/api";
 import { getApiUrl } from "@/lib/query-client";
 import { fetch as expoFetch } from "expo/fetch";
 
-// ─── atob polyfill for Android (not available on older API levels) ──────────
+// ─── Safe base64 → Uint8Array (no atob dependency) ───────────────────────────
 function base64ToBytes(base64: string): Uint8Array {
   const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
   const lookup = new Uint8Array(256);
@@ -48,7 +42,7 @@ function base64ToBytes(base64: string): Uint8Array {
   return bytes;
 }
 
-// ─── Shared file upload helper ──────────────────────────────────────────────
+// ─── Shared file upload helper ────────────────────────────────────────────────
 async function uploadExcelFile(
   nativeFile: any,
   endpoint: string,
@@ -58,7 +52,7 @@ async function uploadExcelFile(
   const formData = new FormData();
 
   if (Platform.OS !== "web" && nativeFile.uri) {
-    // ✅ Native: read as base64, convert using safe polyfill (no atob dependency)
+    // ✅ Read as base64 using stable API (no /legacy)
     const base64 = await FileSystem.readAsStringAsync(nativeFile.uri, {
       encoding: FileSystem.EncodingType.Base64,
     });
@@ -70,7 +64,6 @@ async function uploadExcelFile(
     });
     formData.append("file", blob, nativeFile.name);
   } else {
-    // Web: file object works directly
     formData.append("file", nativeFile as any);
   }
 
@@ -78,7 +71,7 @@ async function uploadExcelFile(
     Object.entries(extraFields).forEach(([k, v]) => formData.append(k, v));
   }
 
-  // Attach Bearer token on native for APK auth
+  // Attach Bearer token for APK auth
   const headers: Record<string, string> = {};
   if (Platform.OS !== "web") {
     const token = await tokenStore.get();
@@ -95,16 +88,14 @@ async function uploadExcelFile(
   if (!res.ok) {
     const text = await res.text();
     let msg = text;
-    try {
-      msg = JSON.parse(text).message;
-    } catch {}
+    try { msg = JSON.parse(text).message; } catch {}
     throw new Error(msg || "Import failed");
   }
 
   return res.json();
 }
 
-// ─── Shared file picker hook ─────────────────────────────────────────────────
+// ─── Shared file picker hook ──────────────────────────────────────────────────
 function useFilePicker() {
   const [fileName, setFileName] = useState<string | null>(null);
   const [nativeFile, setNativeFile] = useState<any>(null);
@@ -157,14 +148,9 @@ function useFilePicker() {
   return { fileName, nativeFile, fileInputRef, pickFile, onWebChange, reset };
 }
 
-// ─── ImportModal ─────────────────────────────────────────────────────────────
-function ImportModal({
-  visible,
-  onClose,
-  onDone,
-  endpoint,
-  title,
-  infoText,
+// ─── ImportModal ──────────────────────────────────────────────────────────────
+export function ImportModal({
+  visible, onClose, onDone, endpoint, title, infoText,
 }: {
   visible: boolean;
   onClose: () => void;
@@ -175,14 +161,10 @@ function ImportModal({
 }) {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<any>(null);
-  const { fileName, nativeFile, fileInputRef, pickFile, onWebChange, reset } =
-    useFilePicker();
+  const { fileName, nativeFile, fileInputRef, pickFile, onWebChange, reset } = useFilePicker();
 
   const handleImport = async () => {
-    if (!nativeFile) {
-      Alert.alert("Error", "Please select an Excel file first.");
-      return;
-    }
+    if (!nativeFile) { Alert.alert("Error", "Please select an Excel file first."); return; }
     setLoading(true);
     setResult(null);
     try {
@@ -196,19 +178,10 @@ function ImportModal({
     }
   };
 
-  const handleClose = () => {
-    reset();
-    setResult(null);
-    onClose();
-  };
+  const handleClose = () => { reset(); setResult(null); onClose(); };
 
   return (
-    <Modal
-      visible={visible}
-      transparent
-      animationType="slide"
-      onRequestClose={handleClose}
-    >
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={handleClose}>
       <View style={importStyles.overlay}>
         <View style={importStyles.sheet}>
           <View style={importStyles.handle} />
@@ -216,35 +189,24 @@ function ImportModal({
             <Ionicons name="document-attach" size={22} color={Colors.primary} />
             <Text style={importStyles.title}>{title}</Text>
           </View>
-
           <View style={importStyles.infoBox}>
             <Ionicons name="information-circle" size={16} color={Colors.info} />
             <Text style={importStyles.infoText}>{infoText}</Text>
           </View>
-
           {Platform.OS === "web" && (
             // @ts-ignore
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".xlsx,.xls,.csv"
-              style={{ display: "none" }}
-              onChange={onWebChange}
-            />
+            <input ref={fileInputRef} type="file" accept=".xlsx,.xls,.csv"
+              style={{ display: "none" }} onChange={onWebChange} />
           )}
-
           <Pressable style={importStyles.pickBtn} onPress={pickFile}>
             <Ionicons name="folder-open" size={20} color={Colors.primary} />
-            <Text style={importStyles.pickBtnText}>
-              {fileName ?? "Choose Excel File (.xlsx)"}
-            </Text>
+            <Text style={importStyles.pickBtnText}>{fileName ?? "Choose Excel File (.xlsx)"}</Text>
             {fileName && (
               <Pressable onPress={reset} hitSlop={8}>
                 <Ionicons name="close-circle" size={18} color={Colors.textMuted} />
               </Pressable>
             )}
           </Pressable>
-
           {result && (
             <View style={importStyles.resultBox}>
               <Text style={importStyles.resultTitle}>Import Complete</Text>
@@ -253,54 +215,35 @@ function ImportModal({
                   { label: "New Cases", val: result.imported, color: Colors.success },
                   { label: "Updated", val: result.updated, color: Colors.info },
                   { label: "Skipped", val: result.skipped, color: Colors.warning },
-                  {
-                    label: "FOS Created",
-                    val: result.agentsCreated,
-                    color: Colors.primary,
-                  },
+                  { label: "FOS Created", val: result.agentsCreated, color: Colors.primary },
                 ].map((s) => (
                   <View key={s.label} style={importStyles.resultItem}>
-                    <Text style={[importStyles.resultNum, { color: s.color }]}>
-                      {s.val}
-                    </Text>
+                    <Text style={[importStyles.resultNum, { color: s.color }]}>{s.val}</Text>
                     <Text style={importStyles.resultLabel}>{s.label}</Text>
                   </View>
                 ))}
               </View>
               {result.errors?.length > 0 && (
                 <View style={importStyles.errorList}>
-                  <Text style={importStyles.errorTitle}>
-                    Errors ({result.errors.length}):
-                  </Text>
+                  <Text style={importStyles.errorTitle}>Errors ({result.errors.length}):</Text>
                   {result.errors.slice(0, 5).map((e: string, i: number) => (
-                    <Text key={i} style={importStyles.errorItem}>
-                      • {e}
-                    </Text>
+                    <Text key={i} style={importStyles.errorItem}>• {e}</Text>
                   ))}
                 </View>
               )}
             </View>
           )}
-
           <View style={importStyles.btnRow}>
             <Pressable style={importStyles.cancelBtn} onPress={handleClose}>
               <Text style={importStyles.cancelText}>Close</Text>
             </Pressable>
             <Pressable
-              style={[
-                importStyles.importBtn,
-                (!nativeFile || loading) && { opacity: 0.5 },
-              ]}
-              onPress={handleImport}
-              disabled={!nativeFile || loading}
+              style={[importStyles.importBtn, (!nativeFile || loading) && { opacity: 0.5 }]}
+              onPress={handleImport} disabled={!nativeFile || loading}
             >
-              {loading ? (
-                <ActivityIndicator color="#fff" size="small" />
-              ) : (
-                <>
-                  <Ionicons name="cloud-upload" size={18} color="#fff" />
-                  <Text style={importStyles.importText}>Import</Text>
-                </>
+              {loading ? <ActivityIndicator color="#fff" size="small" /> : (
+                <><Ionicons name="cloud-upload" size={18} color="#fff" />
+                  <Text style={importStyles.importText}>Import</Text></>
               )}
             </Pressable>
           </View>
@@ -313,10 +256,8 @@ function ImportModal({
 // ─── BktPerfImportModal ───────────────────────────────────────────────────────
 const BKT_OPTIONS = ["Auto-detect", "1", "2", "3", "Penal"];
 
-function BktPerfImportModal({
-  visible,
-  onClose,
-  onDone,
+export function BktPerfImportModal({
+  visible, onClose, onDone,
 }: {
   visible: boolean;
   onClose: () => void;
@@ -325,24 +266,15 @@ function BktPerfImportModal({
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<any>(null);
   const [selectedBkt, setSelectedBkt] = useState("Auto-detect");
-  const { fileName, nativeFile, fileInputRef, pickFile, onWebChange, reset } =
-    useFilePicker();
+  const { fileName, nativeFile, fileInputRef, pickFile, onWebChange, reset } = useFilePicker();
 
   const handleImport = async () => {
-    if (!nativeFile) {
-      Alert.alert("Error", "Please select an Excel file first.");
-      return;
-    }
+    if (!nativeFile) { Alert.alert("Error", "Please select an Excel file first."); return; }
     setLoading(true);
     setResult(null);
     try {
-      const extraFields =
-        selectedBkt !== "Auto-detect" ? { bkt: selectedBkt } : undefined;
-      const data = await uploadExcelFile(
-        nativeFile,
-        "/api/admin/import-bkt-perf",
-        extraFields
-      );
+      const extraFields = selectedBkt !== "Auto-detect" ? { bkt: selectedBkt } : undefined;
+      const data = await uploadExcelFile(nativeFile, "/api/admin/import-bkt-perf", extraFields);
       setResult(data);
       onDone();
     } catch (e: any) {
@@ -352,19 +284,10 @@ function BktPerfImportModal({
     }
   };
 
-  const handleClose = () => {
-    reset();
-    setResult(null);
-    onClose();
-  };
+  const handleClose = () => { reset(); setResult(null); onClose(); };
 
   return (
-    <Modal
-      visible={visible}
-      transparent
-      animationType="slide"
-      onRequestClose={handleClose}
-    >
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={handleClose}>
       <View style={importStyles.overlay}>
         <View style={importStyles.sheet}>
           <View style={importStyles.handle} />
@@ -372,63 +295,41 @@ function BktPerfImportModal({
             <Ionicons name="bar-chart" size={22} color={Colors.primary} />
             <Text style={importStyles.title}>Import BKT Performance Summary</Text>
           </View>
-
           <View style={importStyles.infoBox}>
             <Ionicons name="information-circle" size={16} color={Colors.info} />
             <Text style={importStyles.infoText}>
-              Pivot table Excel with POS + Rollback data. Select BKT if
-              auto-detection fails.
+              Pivot table Excel with POS + Rollback data. Select BKT if auto-detection fails.
             </Text>
           </View>
-
           <View style={bktSelStyles.container}>
             <Text style={bktSelStyles.label}>BKT / Sheet:</Text>
             <View style={bktSelStyles.row}>
               {BKT_OPTIONS.map((opt) => (
-                <Pressable
-                  key={opt}
-                  style={[
-                    bktSelStyles.chip,
-                    selectedBkt === opt && bktSelStyles.chipActive,
-                  ]}
+                <Pressable key={opt}
+                  style={[bktSelStyles.chip, selectedBkt === opt && bktSelStyles.chipActive]}
                   onPress={() => setSelectedBkt(opt)}
                 >
-                  <Text
-                    style={[
-                      bktSelStyles.chipText,
-                      selectedBkt === opt && bktSelStyles.chipTextActive,
-                    ]}
-                  >
+                  <Text style={[bktSelStyles.chipText, selectedBkt === opt && bktSelStyles.chipTextActive]}>
                     {opt}
                   </Text>
                 </Pressable>
               ))}
             </View>
           </View>
-
           {Platform.OS === "web" && (
             // @ts-ignore
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".xlsx,.xls"
-              style={{ display: "none" }}
-              onChange={onWebChange}
-            />
+            <input ref={fileInputRef} type="file" accept=".xlsx,.xls"
+              style={{ display: "none" }} onChange={onWebChange} />
           )}
-
           <Pressable style={importStyles.pickBtn} onPress={pickFile}>
             <Ionicons name="folder-open" size={20} color={Colors.primary} />
-            <Text style={importStyles.pickBtnText}>
-              {fileName ?? "Choose Excel File (.xlsx)"}
-            </Text>
+            <Text style={importStyles.pickBtnText}>{fileName ?? "Choose Excel File (.xlsx)"}</Text>
             {fileName && (
               <Pressable onPress={reset} hitSlop={8}>
                 <Ionicons name="close-circle" size={18} color={Colors.textMuted} />
               </Pressable>
             )}
           </Pressable>
-
           {result && (
             <View style={importStyles.resultBox}>
               <Text style={importStyles.resultTitle}>
@@ -436,45 +337,28 @@ function BktPerfImportModal({
               </Text>
               <View style={importStyles.resultGrid}>
                 <View style={importStyles.resultItem}>
-                  <Text
-                    style={[importStyles.resultNum, { color: Colors.success }]}
-                  >
-                    {result.imported}
-                  </Text>
+                  <Text style={[importStyles.resultNum, { color: Colors.success }]}>{result.imported}</Text>
                   <Text style={importStyles.resultLabel}>Imported</Text>
                 </View>
                 <View style={importStyles.resultItem}>
-                  <Text
-                    style={[importStyles.resultNum, { color: Colors.warning }]}
-                  >
-                    {result.skipped}
-                  </Text>
+                  <Text style={[importStyles.resultNum, { color: Colors.warning }]}>{result.skipped}</Text>
                   <Text style={importStyles.resultLabel}>Skipped</Text>
                 </View>
               </View>
             </View>
           )}
-
           <View style={importStyles.btnRow}>
             <Pressable style={importStyles.cancelBtn} onPress={handleClose}>
               <Text style={importStyles.cancelText}>Close</Text>
             </Pressable>
             <Pressable
-              style={[
-                importStyles.importBtn,
-                { backgroundColor: Colors.primary },
-                (!nativeFile || loading) && { opacity: 0.5 },
-              ]}
-              onPress={handleImport}
-              disabled={!nativeFile || loading}
+              style={[importStyles.importBtn, { backgroundColor: Colors.primary },
+                (!nativeFile || loading) && { opacity: 0.5 }]}
+              onPress={handleImport} disabled={!nativeFile || loading}
             >
-              {loading ? (
-                <ActivityIndicator color="#fff" size="small" />
-              ) : (
-                <>
-                  <Ionicons name="cloud-upload" size={18} color="#fff" />
-                  <Text style={importStyles.importText}>Import</Text>
-                </>
+              {loading ? <ActivityIndicator color="#fff" size="small" /> : (
+                <><Ionicons name="cloud-upload" size={18} color="#fff" />
+                  <Text style={importStyles.importText}>Import</Text></>
               )}
             </Pressable>
           </View>
@@ -484,183 +368,58 @@ function BktPerfImportModal({
   );
 }
 
-// ─── Styles ──────────────────────────────────────────────────────────────────
+// ─── Styles ───────────────────────────────────────────────────────────────────
 const importStyles = StyleSheet.create({
-  overlay: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.5)",
-    justifyContent: "flex-end",
-  },
+  overlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" },
   sheet: {
-    backgroundColor: "#fff",
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    padding: 20,
-    paddingBottom: 36,
+    backgroundColor: Colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24,
+    padding: 24, gap: 16, maxHeight: "90%",
   },
-  handle: {
-    width: 40,
-    height: 4,
-    backgroundColor: "#ddd",
-    borderRadius: 2,
-    alignSelf: "center",
-    marginBottom: 16,
-  },
-  header: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    marginBottom: 12,
-  },
-  title: {
-    fontSize: 16,
-    fontWeight: "600",
-    color: "#111",
-  },
+  handle: { width: 40, height: 4, backgroundColor: Colors.border, borderRadius: 2, alignSelf: "center", marginBottom: 4 },
+  header: { flexDirection: "row", alignItems: "center", gap: 10 },
+  title: { fontSize: 20, fontWeight: "700", color: Colors.text },
   infoBox: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    gap: 6,
-    backgroundColor: "#f0f8ff",
-    borderRadius: 8,
-    padding: 10,
-    marginBottom: 14,
+    flexDirection: "row", gap: 8, backgroundColor: Colors.info + "15",
+    borderRadius: 12, padding: 12, alignItems: "flex-start",
   },
-  infoText: {
-    flex: 1,
-    fontSize: 13,
-    color: "#444",
-    lineHeight: 18,
-  },
+  infoText: { flex: 1, fontSize: 12, color: Colors.textSecondary, lineHeight: 18 },
   pickBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    borderWidth: 1.5,
-    borderColor: Colors.primary,
-    borderStyle: "dashed",
-    borderRadius: 10,
-    padding: 14,
-    marginBottom: 14,
+    flexDirection: "row", alignItems: "center", gap: 10,
+    borderWidth: 2, borderColor: Colors.primary, borderStyle: "dashed",
+    borderRadius: 12, padding: 16,
   },
-  pickBtnText: {
-    flex: 1,
-    fontSize: 14,
-    color: Colors.primary,
-  },
-  resultBox: {
-    backgroundColor: "#f9f9f9",
-    borderRadius: 10,
-    padding: 14,
-    marginBottom: 14,
-  },
-  resultTitle: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: "#111",
-    marginBottom: 10,
-  },
-  resultGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 10,
-  },
-  resultItem: {
-    alignItems: "center",
-    minWidth: 70,
-  },
-  resultNum: {
-    fontSize: 22,
-    fontWeight: "700",
-  },
-  resultLabel: {
-    fontSize: 11,
-    color: "#888",
-    marginTop: 2,
-  },
-  errorList: {
-    marginTop: 10,
-  },
-  errorTitle: {
-    fontSize: 13,
-    fontWeight: "600",
-    color: "#c00",
-    marginBottom: 4,
-  },
-  errorItem: {
-    fontSize: 12,
-    color: "#555",
-    lineHeight: 18,
-  },
-  btnRow: {
-    flexDirection: "row",
-    gap: 10,
-  },
+  pickBtnText: { flex: 1, fontSize: 14, color: Colors.primary, fontWeight: "500" },
+  resultBox: { backgroundColor: Colors.surfaceAlt, borderRadius: 12, padding: 16, gap: 12 },
+  resultTitle: { fontSize: 15, fontWeight: "700", color: Colors.text },
+  resultGrid: { flexDirection: "row", gap: 8 },
+  resultItem: { flex: 1, alignItems: "center", gap: 4 },
+  resultNum: { fontSize: 24, fontWeight: "800" },
+  resultLabel: { fontSize: 11, color: Colors.textSecondary, fontWeight: "600", textAlign: "center" },
+  errorList: { gap: 4 },
+  errorTitle: { fontSize: 13, fontWeight: "700", color: Colors.danger },
+  errorItem: { fontSize: 12, color: Colors.textSecondary },
+  btnRow: { flexDirection: "row", gap: 12 },
   cancelBtn: {
-    flex: 1,
-    padding: 14,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: "#ddd",
-    alignItems: "center",
+    flex: 1, paddingVertical: 14, borderRadius: 12, alignItems: "center",
+    borderWidth: 1, borderColor: Colors.border,
   },
-  cancelText: {
-    fontSize: 15,
-    color: "#555",
-    fontWeight: "500",
-  },
+  cancelText: { fontSize: 15, fontWeight: "600", color: Colors.textSecondary },
   importBtn: {
-    flex: 2,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-    padding: 14,
-    borderRadius: 10,
-    backgroundColor: Colors.primary,
+    flex: 2, paddingVertical: 14, borderRadius: 12, alignItems: "center",
+    backgroundColor: Colors.primary, flexDirection: "row", justifyContent: "center", gap: 8,
   },
-  importText: {
-    fontSize: 15,
-    color: "#fff",
-    fontWeight: "600",
-  },
+  importText: { fontSize: 15, fontWeight: "700", color: "#fff" },
 });
 
 const bktSelStyles = StyleSheet.create({
-  container: {
-    marginBottom: 14,
-  },
-  label: {
-    fontSize: 13,
-    fontWeight: "600",
-    color: "#555",
-    marginBottom: 8,
-  },
-  row: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-  },
+  container: { gap: 6 },
+  label: { fontSize: 12, fontWeight: "700", color: Colors.textSecondary },
+  row: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   chip: {
-    paddingHorizontal: 14,
-    paddingVertical: 7,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: "#ddd",
-    backgroundColor: "#f5f5f5",
+    paddingHorizontal: 14, paddingVertical: 7, borderRadius: 20,
+    backgroundColor: Colors.surfaceAlt, borderWidth: 1.5, borderColor: Colors.border,
   },
-  chipActive: {
-    borderColor: Colors.primary,
-    backgroundColor: Colors.primary + "15",
-  },
-  chipText: {
-    fontSize: 13,
-    color: "#555",
-  },
-  chipTextActive: {
-    color: Colors.primary,
-    fontWeight: "600",
-  },
+  chipActive: { backgroundColor: Colors.primary + "20", borderColor: Colors.primary },
+  chipText: { fontSize: 13, fontWeight: "600", color: Colors.textMuted },
+  chipTextActive: { color: Colors.primary, fontWeight: "800" },
 });
-
-export { ImportModal, BktPerfImportModal };
