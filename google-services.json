@@ -1,0 +1,48 @@
+{
+  "project_info": {
+    "project_number": "995995227872",
+    "project_id": "dhanraj-1e114",
+    "storage_bucket": "dhanraj-1e114.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:995995227872:android:7d3784a6eb3cc166fce285",
+        "android_client_info": {
+          "package_name": "com.dhanraj"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBXb0bAu_MHw6Jt0MB50KQG2R0fWl9K2iY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:995995227872:android:7d237f373e04ff6cfce285",
+        "android_client_info": {
+          "package_name": "com.dhanrajenterprises.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBXb0bAu_MHw6Jt0MB50KQG2R0fWl9K2iY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
