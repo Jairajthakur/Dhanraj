@@ -1266,11 +1266,3 @@ export async function registerRoutes(app: Express): Promise<Server> {
   const httpServer = createServer(app);
   return httpServer;
 }
-```
-
----
-
-After pushing this to GitHub, Railway will deploy and you'll see in logs:
-```
-[push] Using EXPO_ACCESS_TOKEN ✅
-[push] Sent OK ✅ to: ExponentPushToken[57rEO2KBcthn
