@@ -45,8 +45,6 @@ module.exports = ({ config }) => {
         {
           icon: "./assets/images/dhanraj-logo.png",
           color: "#111111",
-          // ✅ Required for Android 13+ notification permissions
-          sounds: ["./assets/sounds/notification.wav"],
         },
       ],
     ],
