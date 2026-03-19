@@ -10,55 +10,78 @@ import { tokenStore } from "@/lib/api";
 import { getApiUrl } from "@/lib/query-client";
 
 // ─── Shared file upload helper ────────────────────────────────────────────────
+// Uses XMLHttpRequest instead of fetch() — Android supports XHR FormData with
+// file URIs natively without needing Blob or expo-file-system at all.
 async function uploadExcelFile(
   nativeFile: any,
   endpoint: string,
   extraFields?: Record<string, string>
 ): Promise<any> {
   const url = new URL(endpoint, getApiUrl()).toString();
-  const formData = new FormData();
 
-  if (Platform.OS !== "web" && nativeFile.uri) {
-    // ✅ FIXED: Use fetch() to get blob — completely removes expo-file-system dependency
-    // No APK rebuild needed. Works with Expo SDK v54+
-    const response = await fetch(nativeFile.uri);
-    const blob = await response.blob();
-    formData.append("file", blob, nativeFile.name);
-  } else {
+  // Web path — use standard fetch with File object
+  if (Platform.OS === "web") {
+    const formData = new FormData();
     formData.append("file", nativeFile as any);
-  }
-
-  if (extraFields) {
-    Object.entries(extraFields).forEach(([k, v]) => formData.append(k, v));
-  }
-
-  // ✅ Bearer token for APK auth
-  const headers: Record<string, string> = {};
-  if (Platform.OS !== "web") {
-    const token = await tokenStore.get();
-    if (token) headers["Authorization"] = `Bearer ${token}`;
-  }
-
-  const res = await fetch(url, {
-    method: "POST",
-    body: formData,
-    credentials: "include",
-    headers: Object.keys(headers).length > 0 ? headers : undefined,
-  });
-
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    let msg = `HTTP ${res.status}`;
-    try {
-      const json = JSON.parse(text);
-      msg = json.message || json.error || msg;
-    } catch {
-      if (text) msg = text;
+    if (extraFields) {
+      Object.entries(extraFields).forEach(([k, v]) => formData.append(k, v));
     }
-    throw new Error(msg || "Import failed");
+    const res = await fetch(url, {
+      method: "POST",
+      body: formData,
+      credentials: "include",
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      let msg = `HTTP ${res.status}`;
+      try { const json = JSON.parse(text); msg = json.message || json.error || msg; } catch { if (text) msg = text; }
+      throw new Error(msg);
+    }
+    return res.json();
   }
 
-  return res.json();
+  // ✅ Native Android/iOS path — use XMLHttpRequest with file URI directly
+  // XHR on React Native handles local file:// URIs in FormData natively
+  const token = await tokenStore.get();
+
+  return new Promise((resolve, reject) => {
+    const formData = new FormData();
+
+    // Append file using RN's special object format for local URIs
+    formData.append("file", {
+      uri: nativeFile.uri,
+      name: nativeFile.name,
+      type: nativeFile.type ||
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    } as any);
+
+    if (extraFields) {
+      Object.entries(extraFields).forEach(([k, v]) => formData.append(k, v));
+    }
+
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", url);
+
+    // Set auth header
+    if (token) xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try { resolve(JSON.parse(xhr.responseText)); }
+        catch { resolve({}); }
+      } else {
+        let msg = `HTTP ${xhr.status}`;
+        try { const json = JSON.parse(xhr.responseText); msg = json.message || json.error || msg; } catch {}
+        reject(new Error(msg));
+      }
+    };
+
+    xhr.onerror = () => reject(new Error("Network error during upload"));
+    xhr.ontimeout = () => reject(new Error("Upload timed out"));
+    xhr.timeout = 60000; // 60 second timeout
+
+    xhr.send(formData);
+  });
 }
 
 // ─── Shared file picker hook ──────────────────────────────────────────────────
