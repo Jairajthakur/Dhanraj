@@ -3,6 +3,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getApiUrl } from "./query-client";
 
 const SESSION_KEY = "session_agent";
+const TOKEN_KEY = "auth_token";
 
 // ─── Agent cache — web uses localStorage, native uses AsyncStorage ───────────
 export const agentCache = {
@@ -14,7 +15,9 @@ export const agentCache = {
       }
       const v = await AsyncStorage.getItem(SESSION_KEY);
       return v ? JSON.parse(v) : null;
-    } catch { return null; }
+    } catch {
+      return null;
+    }
   },
   set: async (agent: any): Promise<void> => {
     try {
@@ -37,6 +40,30 @@ export const agentCache = {
   },
 };
 
+// ─── Token store (native only) ────────────────────────────────────────────────
+export const tokenStore = {
+  get: async (): Promise<string | null> => {
+    try {
+      if (Platform.OS === "web") return null;
+      return await AsyncStorage.getItem(TOKEN_KEY);
+    } catch {
+      return null;
+    }
+  },
+  set: async (token: string): Promise<void> => {
+    try {
+      if (Platform.OS === "web") return;
+      await AsyncStorage.setItem(TOKEN_KEY, token);
+    } catch {}
+  },
+  clear: async (): Promise<void> => {
+    try {
+      if (Platform.OS === "web") return;
+      await AsyncStorage.removeItem(TOKEN_KEY);
+    } catch {}
+  },
+};
+
 // ─── Safe URL builder ────────────────────────────────────────────────────────
 function buildUrl(route: string, base: string): string {
   try {
@@ -51,15 +78,28 @@ async function apiRequest(method: string, route: string, data?: any) {
   const baseUrl = getApiUrl();
   const url = buildUrl(route, baseUrl);
 
+  // Build headers — attach Bearer token on native (cookies unreliable on Android)
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+
+  if (Platform.OS !== "web") {
+    const token = await tokenStore.get();
+    if (token) {
+      headers["Authorization"] = `Bearer ${token}`;
+    }
+  }
+
   const res = await fetch(url, {
     method,
-    headers: { "Content-Type": "application/json" },
+    headers,
     credentials: "include",
     body: data ? JSON.stringify(data) : undefined,
   });
 
   if (res.status === 401) {
     await agentCache.clear();
+    await tokenStore.clear();
     throw new Error("Unauthorized");
   }
 
@@ -68,7 +108,15 @@ async function apiRequest(method: string, route: string, data?: any) {
     throw new Error((json as any).message || "API Error");
   }
 
-  return res.json();
+  // Guard against empty / non-JSON responses
+  const text = await res.text();
+  if (!text) return {};
+  try {
+    return JSON.parse(text);
+  } catch {
+    console.error("[API] Non-JSON response:", text);
+    return {};
+  }
 }
 
 // ─── API ─────────────────────────────────────────────────────────────────────
@@ -76,21 +124,35 @@ export const api = {
   login: async (username: string, password: string) => {
     const res = await apiRequest("POST", "/api/auth/login", { username, password });
     if (res?.agent) await agentCache.set(res.agent);
+    // Store token for native APK auth
+    if (res?.token && Platform.OS !== "web") {
+      await tokenStore.set(res.token);
+    }
     return res;
   },
 
   logout: async () => {
     await agentCache.clear();
-    try { await apiRequest("POST", "/api/auth/logout"); } catch {}
+    await tokenStore.clear();
+    try {
+      await apiRequest("POST", "/api/auth/logout");
+    } catch {}
   },
 
   me: async () => {
     try {
       const res = await apiRequest("GET", "/api/auth/me");
-      if (res?.agent) await agentCache.set(res.agent);
+      if (res?.agent) {
+        await agentCache.set(res.agent);
+        // Refresh token if server sends a new one
+        if (res?.token && Platform.OS !== "web") {
+          await tokenStore.set(res.token);
+        }
+      }
       return res;
     } catch (e: any) {
-      if (Platform.OS !== "web") {
+      // On native, fall back to cache on non-401 errors (network/cookie issues)
+      if (Platform.OS !== "web" && e?.message !== "Unauthorized") {
         const cached = await agentCache.get();
         if (cached) return { agent: cached };
       }
@@ -150,36 +212,51 @@ export const api = {
     getAttendance: () => apiRequest("GET", "/api/admin/attendance"),
     getBktPerformance: () => apiRequest("GET", "/api/admin/bkt-performance"),
     getBktPerfSummary: () => apiRequest("GET", "/api/admin/bkt-perf-summary"),
-    updateCaseStatus: (id: number, data: {
-      status: "Paid" | "Unpaid" | "PTP";
-      rollback_yn?: boolean | null;
-      table: "loan" | "bkt";
-    }) => apiRequest("PUT", `/api/admin/cases/${id}/status`, data),
+    updateCaseStatus: (
+      id: number,
+      data: {
+        status: "Paid" | "Unpaid" | "PTP";
+        rollback_yn?: boolean | null;
+        table: "loan" | "bkt";
+      }
+    ) => apiRequest("PUT", `/api/admin/cases/${id}/status`, data),
     resetFeedbackAgent: (agentId: number) =>
       apiRequest("POST", `/api/admin/reset-feedback/agent/${agentId}`),
     resetFeedbackCase: (caseId: number, table: "loan" | "bkt") =>
       apiRequest("POST", `/api/admin/reset-feedback/case/${caseId}`, { table }),
-    importCases: (file: File) => {
+    importCases: async (file: File) => {
       const form = new FormData();
       form.append("file", file);
+      const token = await tokenStore.get();
       return fetch(`${getApiUrl()}/api/admin/import`, {
-        method: "POST", credentials: "include", body: form,
-      }).then(r => r.json());
+        method: "POST",
+        credentials: "include",
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        body: form,
+      }).then((r) => r.json());
     },
-    importBkt: (file: File) => {
+    importBkt: async (file: File) => {
       const form = new FormData();
       form.append("file", file);
+      const token = await tokenStore.get();
       return fetch(`${getApiUrl()}/api/admin/import-bkt`, {
-        method: "POST", credentials: "include", body: form,
-      }).then(r => r.json());
+        method: "POST",
+        credentials: "include",
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        body: form,
+      }).then((r) => r.json());
     },
-    importBktPerf: (file: File, bkt?: string) => {
+    importBktPerf: async (file: File, bkt?: string) => {
       const form = new FormData();
       form.append("file", file);
       if (bkt) form.append("bkt", bkt);
+      const token = await tokenStore.get();
       return fetch(`${getApiUrl()}/api/admin/import-bkt-perf`, {
-        method: "POST", credentials: "include", body: form,
-      }).then(r => r.json());
+        method: "POST",
+        credentials: "include",
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        body: form,
+      }).then((r) => r.json());
     },
     getPushStatus: () => apiRequest("GET", "/api/admin/push-status"),
     testPush: (agentId: number) =>
