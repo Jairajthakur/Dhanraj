@@ -66,15 +66,15 @@ export async function registerPushToken(): Promise<string | null> {
   }
 }
 
-// ─── Hook — call this inside RootLayoutNav (inside AuthProvider) ──────────────
-// ✅ FIXED: Re-registers token whenever agent changes (login/logout)
+// ─── Hook — must be called inside AuthProvider ────────────────────────────────
+// ✅ FIXED: Re-registers token whenever agent logs in
 export function usePushNotifications() {
   const { agent } = useAuth();
 
   useEffect(() => {
     if (Platform.OS === "web") return;
 
-    // ✅ Only register when agent is logged in
+    // Only register when agent is logged in
     if (!agent) return;
 
     console.log("[Push] Agent logged in, registering push token...");
@@ -84,9 +84,8 @@ export function usePushNotifications() {
     const sub = Notifications.addNotificationResponseReceivedListener((response) => {
       const data = response.notification.request.content.data;
       console.log("[Push] Notification tapped:", data);
-      // Navigation can be added here based on data.screen
     });
 
     return () => sub.remove();
-  }, [agent?.id]); // ✅ Re-run when agent changes (login/logout)
+  }, [agent?.id]); // Re-run when agent changes
 }
