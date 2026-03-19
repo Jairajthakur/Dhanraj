@@ -87,9 +87,18 @@ async function apiRequest(method: string, route: string, data?: any) {
     throw new Error("Unauthorized");
   }
 
+  // ✅ FIXED: improved error extraction — shows real server error instead of generic "API Error"
   if (!res.ok) {
-    const json = await res.json().catch(() => ({}));
-    throw new Error((json as any).message || "API Error");
+    const text = await res.text().catch(() => "");
+    let msg = `HTTP ${res.status}`;
+    try {
+      const json = JSON.parse(text);
+      msg = json.message || json.error || msg;
+    } catch {
+      if (text) msg = text;
+    }
+    console.error(`[API] ${method} ${route} → ${res.status}:`, msg);
+    throw new Error(msg);
   }
 
   const text = await res.text();
