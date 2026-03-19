@@ -8,23 +8,21 @@ module.exports = ({ config }) => {
     orientation: "portrait",
     scheme: "dhanrajenterprises",
     userInterfaceStyle: "automatic",
-    newArchEnabled: true,
-
+    newArchEnabled: false,
     icon: "./assets/images/dhanraj-logo.png",
-
     splash: {
       image: "./assets/images/dhanraj-logo.png",
       resizeMode: "contain",
       backgroundColor: "#ECEAE4",
     },
-
     ios: {
       supportsTablet: false,
       bundleIdentifier: "com.dhanrajenterprises.app",
     },
-
     android: {
       package: "com.dhanrajenterprises.app",
+      googleServicesFile: "./google-services.json", // ✅ ADDED
+      backgroundColor: "#ECEAE4",
       adaptiveIcon: {
         foregroundImage: "./assets/images/dhanraj-logo.png",
         backgroundColor: "#ECEAE4",
@@ -32,14 +30,15 @@ module.exports = ({ config }) => {
         monochromeImage: "./assets/images/android-icon-monochrome.png",
       },
     },
-
     web: {
       bundler: "metro",
       favicon: "./assets/images/dhanraj-logo.png",
+      output: "static",
+      baseUrl: "/Dhanraj/",
     },
-
     plugins: [
       "expo-router",
+      "expo-font",
       "expo-web-browser",
       [
         "expo-notifications",
@@ -49,12 +48,10 @@ module.exports = ({ config }) => {
         },
       ],
     ],
-
     experiments: {
       typedRoutes: true,
-      reactCompiler: true,
+      reactCompiler: false,
     },
-
     extra: {
       apiUrl: "https://dhanraj-production.up.railway.app",
       eas: {
