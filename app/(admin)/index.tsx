@@ -229,12 +229,17 @@ export default function AdminDashboard() {
     );
   };
 
-  const { data, isLoading } = useQuery({
+  // ✅ FIX: staleTime:0 + refetchOnMount so stats always refresh when screen opens
+  const { data, isLoading, refetch } = useQuery({
     queryKey: ["/api/admin/stats"],
     queryFn: () => api.admin.getStats(),
+    staleTime: 0,
+    refetchOnMount: true,
   });
 
-  const stats = data?.stats || [];
+  // ✅ FIX: handle both { stats: [...] } and plain [...] response shapes
+  const stats = Array.isArray(data) ? data : (data?.stats || []);
+
   const totalAgents = stats.length;
   const totalCases  = stats.reduce((s: number, a: any) => s + (a.total      || 0), 0);
   const totalPaid   = stats.reduce((s: number, a: any) => s + (a.paid       || 0), 0);
@@ -395,11 +400,11 @@ export default function AdminDashboard() {
         {/* Summary Grid */}
         <View style={styles.summaryGrid}>
           {[
-            { icon: "people"          as const, num: totalAgents, label: "FOS Agents", color: Colors.primary },
-            { icon: "document-text"   as const, num: totalCases,  label: "Total Cases", color: Colors.info },
-            { icon: "checkmark-circle"as const, num: totalPaid,   label: "Paid",        color: Colors.success },
-            { icon: "close-circle"    as const, num: totalUnpaid, label: "Unpaid",      color: Colors.danger },
-            { icon: "calendar"        as const, num: totalPTP,    label: "PTP",         color: Colors.statusPTP },
+            { icon: "people"           as const, num: totalAgents, label: "FOS Agents", color: Colors.primary },
+            { icon: "document-text"    as const, num: totalCases,  label: "Total Cases", color: Colors.info },
+            { icon: "checkmark-circle" as const, num: totalPaid,   label: "Paid",        color: Colors.success },
+            { icon: "close-circle"     as const, num: totalUnpaid, label: "Unpaid",      color: Colors.danger },
+            { icon: "calendar"         as const, num: totalPTP,    label: "PTP",         color: Colors.statusPTP },
           ].map((s) => (
             <View key={s.label} style={[styles.summaryCard, { borderTopColor: s.color }]}>
               <Ionicons name={s.icon} size={24} color={s.color} />
@@ -440,7 +445,7 @@ export default function AdminDashboard() {
         )}
       </ScrollView>
 
-      {/* ─── Modals (imported from components/ImportModals.tsx) ─── */}
+      {/* ─── Modals ─── */}
       <ImportModal
         visible={importVisible}
         onClose={() => setImportVisible(false)}
@@ -448,8 +453,17 @@ export default function AdminDashboard() {
         title="Import Allocation Excel"
         infoText="Excel columns: LOAN NO, APP ID, CUSTOMER NAME, EMI, EMI_DUE, CBC, LPP, CBC+LPP, POS, BKT, ROLLBACK, CLEARANCE, ADDRESS, FIRST_EMI_DUE_DATE, LOAN_MATURITY_DATE, ASSET_MAKE, REGISTRATION_NO, ENGINE_NO, CHASSIS_NO, REFERENCE_ADDRESS, TEN, NUMBER, PRO, FOS_NAME, STATUS, DETAIL FB"
         onDone={() => {
+          // ✅ FIX: invalidate ALL relevant queries so dashboard refreshes
+          // immediately after allocation upload — no manual refresh needed
           qc.invalidateQueries({ queryKey: ["/api/admin/stats"] });
           qc.invalidateQueries({ queryKey: ["/api/admin/cases"] });
+          qc.invalidateQueries({ queryKey: ["/api/admin/agents"] });
+          qc.invalidateQueries({ queryKey: ["/api/cases"] });
+          qc.invalidateQueries({ queryKey: ["/api/stats"] });
+          qc.invalidateQueries({ queryKey: ["/api/admin/bkt-cases"] });
+          qc.invalidateQueries({ queryKey: ["/api/bkt-cases"] });
+          // ✅ Also directly refetch the stats query used by this screen
+          refetch();
         }}
       />
       <BktPerfImportModal
