@@ -1,21 +1,21 @@
 {
   "project_info": {
-    "project_number": "995995227872",
-    "project_id": "dhanraj-1e114",
-    "storage_bucket": "dhanraj-1e114.firebasestorage.app"
+    "project_number": "205427963927",
+    "project_id": "dhanraj-enterprise-3b826",
+    "storage_bucket": "dhanraj-enterprise-3b826.firebasestorage.app"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:995995227872:android:7d237f373e04ff6cfce285",
+        "mobilesdk_app_id": "1:205427963927:android:e72c2f61e8abe8a62f8452",
         "android_client_info": {
-          "package_name": "com.dhanrajenterprises.app"
+          "package_name": "com.dhanraj.app"
         }
       },
       "oauth_client": [],
       "api_key": [
         {
-          "current_key": "AIzaSyBXb0bAu_MHw6Jt0MB50KQG2R0fWl9K2iY"
+          "current_key": "AIzaSyCDTEBFaaPMTeiELVGxc_9_0TZuvh3dkwk"
         }
       ],
       "services": {
