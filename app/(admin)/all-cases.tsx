@@ -34,6 +34,17 @@ function fmt(v: any, prefix = "") {
   return String(v);
 }
 
+function fmtDate(v: any): string {
+  if (!v) return "";
+  return String(v).slice(0, 10);
+}
+
+function fmtBool(v: any): string {
+  if (v === true || v === "true" || v === "t") return "Yes";
+  if (v === false || v === "false" || v === "f") return "No";
+  return "";
+}
+
 function TableRow({
   label,
   value,
@@ -49,6 +60,7 @@ function TableRow({
     value !== null && value !== undefined && value !== ""
       ? String(value)
       : "";
+  if (!display) return null; // ✅ Skip empty rows
   return (
     <View style={[detailStyles.row, even && { backgroundColor: Colors.surfaceAlt }]}>
       <View style={detailStyles.labelCell}>
@@ -71,7 +83,7 @@ function TableRow({
             </Text>
           </Pressable>
         ) : (
-          <Text style={detailStyles.valueText}>{display || "—"}</Text>
+          <Text style={detailStyles.valueText}>{display}</Text>
         )}
       </View>
     </View>
@@ -199,83 +211,90 @@ function CaseDetailModal({
   tableType: "loan" | "bkt";
   onClose: () => void;
   onResetCase: (id: number) => void;
-  onStatusUpdated: () => void;
+  onStatusUpdated: () => Promise<void>;
 }) {
   const insets = useSafeAreaInsets();
   const [resetting, setResetting] = useState(false);
   const [localItem, setLocalItem] = useState(item);
 
-  // ✅ FIXED: Sync localItem when item prop changes
   useEffect(() => {
     if (item) setLocalItem(item);
   }, [item]);
 
-  const statusColor = localItem ? (STATUS_COLORS[localItem.status] || Colors.primary) : Colors.primary;
+  const statusColor = localItem
+    ? STATUS_COLORS[localItem.status] || Colors.primary
+    : Colors.primary;
 
+  // ✅ All fields from your actual DB schema, grouped into sections
   const rows = localItem ? [
-    { label: "Feedback Code",    value: localItem.feedback_code },
-    { label: "Detail Feedback",  value: localItem.latest_feedback },
-    { label: "Comments",         value: localItem.feedback_comments },
-    {
-      label: "Customer Avail.",
-      value: localItem.customer_available === true ? "Y" : localItem.customer_available === false ? "N" : "",
-    },
-    {
-      label: "Vehicle Avail.",
-      value: localItem.vehicle_available === true ? "Y" : localItem.vehicle_available === false ? "N" : "",
-    },
-    {
-      label: "Third Party",
-      value: localItem.third_party === true ? "Y" : localItem.third_party === false ? "N" : "",
-    },
-    ...(localItem.third_party === true
+    // ── Feedback ──────────────────────────────────────────────
+    { section: "Feedback" },
+    { label: "Feedback Code",     value: localItem.feedback_code },
+    { label: "Detail Feedback",   value: localItem.latest_feedback },
+    { label: "Comments",          value: localItem.feedback_comments },
+    { label: "Feedback Date",     value: fmtDate(localItem.feedback_date) },
+    { label: "Customer Avail.",   value: fmtBool(localItem.customer_available) },
+    { label: "Vehicle Avail.",    value: fmtBool(localItem.vehicle_available) },
+    { label: "Third Party",       value: fmtBool(localItem.third_party) },
+    ...(localItem.third_party === true || localItem.third_party === "true" || localItem.third_party === "t"
       ? [
           { label: "Third Party Name",   value: localItem.third_party_name },
           { label: "Third Party Number", value: localItem.third_party_number, phone: true },
         ]
       : []),
-    { label: "Projection",   value: localItem.projection },
-    {
-      label: "Non Starter",
-      value: localItem.non_starter === true ? "Y" : localItem.non_starter === false ? "N" : "",
-    },
-    {
-      label: "KYC Purchase",
-      value: localItem.kyc_purchase === true ? "Y" : localItem.kyc_purchase === false ? "N" : "",
-    },
+    { label: "Projection",        value: localItem.projection },
+    { label: "Non Starter",       value: fmtBool(localItem.non_starter) },
+    { label: "KYC Purchase",      value: fmtBool(localItem.kyc_purchase) },
     {
       label: "Workable",
-      value: localItem.workable === true ? "Workable" : localItem.workable === false ? "Non Workable" : "",
+      value: localItem.workable === true || localItem.workable === "true" || localItem.workable === "t"
+        ? "Workable"
+        : localItem.workable === false || localItem.workable === "false" || localItem.workable === "f"
+        ? "Non Workable" : "",
     },
-    {
-      label: "PTP Date",
-      value: localItem.ptp_date ? String(localItem.ptp_date).slice(0, 10) : "",
-    },
-    { label: "FOS Agent",     value: localItem.agent_name },
-    { label: "Status",        value: localItem.status },
-    { label: "Customer Name", value: localItem.customer_name },
-    { label: "Loan No",       value: localItem.loan_no },
-    { label: "BKT",           value: localItem.bkt },
-    { label: "APP ID",        value: localItem.app_id },
-    { label: "Address",       value: localItem.address },
-    { label: "Mobile No",     value: localItem.mobile_no, phone: true },
-    { label: "Ref Address",   value: localItem.reference_address },
-    { label: "POS",           value: fmt(localItem.pos, "₹") },
-    { label: "EMI",           value: fmt(localItem.emi_amount, "₹") },
-    { label: "EMI Due",       value: fmt(localItem.emi_due, "₹") },
-    { label: "CBC",           value: fmt(localItem.cbc, "₹") },
-    { label: "LPP",           value: fmt(localItem.lpp, "₹") },
-    { label: "CBC + LPP",     value: fmt(localItem.cbc_lpp, "₹") },
-    { label: "Rollback",      value: fmt(localItem.rollback, "₹") },
-    { label: "Clearance",     value: fmt(localItem.clearance, "₹") },
-    { label: "Tenor",         value: localItem.tenor },
-    { label: "Product",       value: localItem.pro },
-    { label: "Asset Make",    value: localItem.asset_make },
-    { label: "Reg No",        value: localItem.registration_no },
-    { label: "Engine No",     value: localItem.engine_no },
-    { label: "Chassis No",    value: localItem.chassis_no },
-    { label: "First EMI Date",value: localItem.first_emi_due_date },
-    { label: "Maturity Date", value: localItem.loan_maturity_date },
+    { label: "PTP Date",          value: fmtDate(localItem.ptp_date) },
+    { label: "Telecaller PTP",    value: fmtDate(localItem.telecaller_ptp_date) },
+
+    // ── Case Info ─────────────────────────────────────────────
+    { section: "Case Info" },
+    { label: "Status",            value: localItem.status },
+    { label: "FOS Agent",         value: localItem.agent_name },  // ✅ fos_name aliased as agent_name from backend
+    { label: "Company",           value: localItem.company_name },
+    { label: "Customer Name",     value: localItem.customer_name },
+    { label: "Loan No",           value: localItem.loan_no },
+    { label: "APP ID",            value: localItem.app_id },
+    { label: "BKT",               value: localItem.bkt },
+    { label: "Mobile No",         value: localItem.mobile_no, phone: true },
+    { label: "Address",           value: localItem.address },
+    { label: "Ref Address",       value: localItem.reference_address },
+    { label: "Ref 1 Name",        value: localItem.ref1_name },
+    { label: "Ref 1 Mobile",      value: localItem.ref1_mobile, phone: true },
+    { label: "Ref 2 Name",        value: localItem.ref2_name },
+    { label: "Ref 2 Mobile",      value: localItem.ref2_mobile, phone: true },
+    { label: "Ref Number",        value: localItem.ref_number },
+
+    // ── Financial ─────────────────────────────────────────────
+    { section: "Financial" },
+    { label: "POS",               value: fmt(localItem.pos, "₹") },
+    { label: "EMI",               value: fmt(localItem.emi_amount, "₹") },
+    { label: "EMI Due",           value: fmt(localItem.emi_due, "₹") },
+    { label: "CBC",               value: fmt(localItem.cbc, "₹") },
+    { label: "LPP",               value: fmt(localItem.lpp, "₹") },
+    { label: "CBC + LPP",         value: fmt(localItem.cbc_lpp, "₹") },
+    { label: "Rollback",          value: fmt(localItem.rollback, "₹") },
+    { label: "Clearance",         value: fmt(localItem.clearance, "₹") },
+
+    // ── Vehicle ───────────────────────────────────────────────
+    { section: "Vehicle" },
+    { label: "Asset Name",        value: localItem.asset_name },
+    { label: "Asset Make",        value: localItem.asset_make },
+    { label: "Reg No",            value: localItem.registration_no },
+    { label: "Engine No",         value: localItem.engine_no },
+    { label: "Chassis No",        value: localItem.chassis_no },
+    { label: "Tenor",             value: localItem.tenor },
+    { label: "Product",           value: localItem.pro },
+    { label: "First EMI Date",    value: fmtDate(localItem.first_emi_due_date) },
+    { label: "Maturity Date",     value: fmtDate(localItem.loan_maturity_date) },
   ] : [];
 
   const handleResetCase = () => {
@@ -302,7 +321,6 @@ function CaseDetailModal({
   };
 
   return (
-    // ✅ FIXED: visible uses item prop directly, not localItem
     <Modal
       visible={!!item}
       transparent={false}
@@ -316,7 +334,9 @@ function CaseDetailModal({
               <Pressable onPress={onClose} style={detailStyles.backBtn}>
                 <Ionicons name="arrow-back" size={22} color="#fff" />
               </Pressable>
-              <Text style={detailStyles.headerTitle}>Case Details</Text>
+              <Text style={detailStyles.headerTitle} numberOfLines={1}>
+                {localItem.customer_name}
+              </Text>
               <View style={detailStyles.statusPill}>
                 <Text style={[detailStyles.statusPillText, { color: statusColor }]}>
                   {localItem.status}
@@ -328,10 +348,7 @@ function CaseDetailModal({
               <StatusActionBar
                 item={localItem}
                 tableType={tableType}
-                onUpdated={() => {
-                  onStatusUpdated();
-                  setLocalItem((prev: any) => ({ ...prev }));
-                }}
+                onUpdated={() => { onStatusUpdated(); }}
               />
             </View>
 
@@ -358,15 +375,24 @@ function CaseDetailModal({
             )}
 
             <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false}>
-              {rows.map((r, i) => (
-                <TableRow
-                  key={r.label}
-                  label={r.label}
-                  value={r.value}
-                  phone={(r as any).phone}
-                  even={i % 2 === 1}
-                />
-              ))}
+              {rows.map((r, i) => {
+                if ((r as any).section) {
+                  return (
+                    <View key={(r as any).section} style={detailStyles.sectionHeader}>
+                      <Text style={detailStyles.sectionHeaderText}>{(r as any).section}</Text>
+                    </View>
+                  );
+                }
+                return (
+                  <TableRow
+                    key={r.label}
+                    label={r.label!}
+                    value={r.value}
+                    phone={(r as any).phone}
+                    even={i % 2 === 1}
+                  />
+                );
+              })}
               <View style={{ height: insets.bottom + 24 }} />
             </ScrollView>
           </>
@@ -408,6 +434,19 @@ export default function AllCasesScreen() {
     qc.invalidateQueries({ queryKey: ["/api/admin/stats"] });
   };
 
+  // ✅ Invalidate + sync selectedCase with fresh server data
+  const invalidateAndSyncSelected = async () => {
+    invalidateAll();
+    if (selectedCase) {
+      try {
+        await qc.refetchQueries({ queryKey });
+        const freshData = qc.getQueryData<any>(queryKey);
+        const freshItem = freshData?.cases?.find((c: any) => c.id === selectedCase.id);
+        if (freshItem) setSelectedCase(freshItem);
+      } catch (_) {}
+    }
+  };
+
   const filtered = useMemo(() => {
     const cases = data?.cases || [];
     const q = search.toLowerCase().trim();
@@ -437,7 +476,6 @@ export default function AllCasesScreen() {
     return Object.values(groups).sort((a, b) => a.agentName.localeCompare(b.agentName));
   }, [data]);
 
-  // ✅ FIXED: tokenStore instead of localStorage
   const handleResetAgentFeedback = (agentId: number, agentName: string) => {
     Alert.alert(
       "Reset Agent Feedback",
@@ -472,7 +510,6 @@ export default function AllCasesScreen() {
     );
   };
 
-  // ✅ FIXED: tokenStore instead of localStorage
   const handleResetCase = async (caseId: number) => {
     try {
       const token = await tokenStore.get();
@@ -716,7 +753,7 @@ export default function AllCasesScreen() {
         tableType={selectedTableType}
         onClose={() => setSelectedCase(null)}
         onResetCase={handleResetCase}
-        onStatusUpdated={invalidateAll}
+        onStatusUpdated={invalidateAndSyncSelected}
       />
 
       {agentCasesModal && (
@@ -917,9 +954,11 @@ const detailStyles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: Colors.background },
   header: { flexDirection: "row", alignItems: "center", paddingHorizontal: 12, paddingVertical: 14, gap: 10 },
   backBtn: { padding: 4 },
-  headerTitle: { flex: 1, fontSize: 18, fontWeight: "700", color: "#fff" },
+  headerTitle: { flex: 1, fontSize: 16, fontWeight: "700", color: "#fff" },
   statusPill: { backgroundColor: "rgba(255,255,255,0.9)", borderRadius: 16, paddingHorizontal: 10, paddingVertical: 4 },
   statusPillText: { fontSize: 11, fontWeight: "800" },
+  sectionHeader: { backgroundColor: Colors.primary + "18", paddingHorizontal: 16, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: Colors.primary + "30" },
+  sectionHeaderText: { fontSize: 12, fontWeight: "800", color: Colors.primary, textTransform: "uppercase", letterSpacing: 0.8 },
   resetCaseBtn: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: Colors.danger + "12", borderBottomWidth: 1, borderBottomColor: Colors.danger + "30", paddingHorizontal: 16, paddingVertical: 12 },
   resetCaseBtnText: { fontSize: 13, fontWeight: "700", color: Colors.danger },
   noFeedbackBanner: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: Colors.surfaceAlt, borderBottomWidth: 1, borderBottomColor: Colors.border, paddingHorizontal: 16, paddingVertical: 10 },
