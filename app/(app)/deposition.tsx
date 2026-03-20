@@ -1,458 +1,478 @@
-import React, { useState, useMemo, useCallback } from "react";
+import React, { useState, useCallback } from "react";
 import {
-  View, Text, StyleSheet, FlatList, Pressable, Modal, TextInput,
-  Alert, ActivityIndicator, ScrollView, Linking, Platform, Image
+  View, Text, StyleSheet, FlatList, Pressable, Modal,
+  TextInput, Alert, ScrollView, Platform, Image, ActivityIndicator,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Ionicons, MaterialIcons } from "@expo/vector-icons";
-import * as Haptics from "expo-haptics";
 import * as ImagePicker from "expo-image-picker";
+import * as Haptics from "expo-haptics";
 import Colors from "@/constants/colors";
 import { api } from "@/lib/api";
 import { getApiUrl } from "@/lib/query-client";
+import { tokenStore } from "@/lib/api";
 
-async function openUpiApp(deepLink: string, fallback: string) {
-  try {
-    await Linking.openURL(deepLink);
-  } catch {
-    try { await Linking.openURL(fallback); } catch { Alert.alert("Error", "Could not open payment app."); }
+// ─── helpers ──────────────────────────────────────────────────────────────────
+const fmt = (n: any) => parseFloat(n || 0).toLocaleString("en-IN");
+const fmtDate = (d: any) => d ? new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "";
+
+async function uploadScreenshotForDep(depositId: number, uri: string): Promise<string> {
+  const base = getApiUrl();
+  const token = Platform.OS !== "web" ? await tokenStore.get() : null;
+  const form = new FormData();
+  form.append("screenshot", { uri, name: `dep_${depositId}.jpg`, type: "image/jpeg" } as any);
+  const headers: Record<string, string> = {};
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+  const res = await fetch(`${base}/api/fos-depositions/${depositId}/pay-online`, {
+    method: "POST", body: form, credentials: "include",
+    headers: Object.keys(headers).length > 0 ? headers : undefined,
+  });
+  if (!res.ok) {
+    const j = await res.json().catch(() => ({}));
+    throw new Error(j.message || "Upload failed");
+  }
+  const data = await res.json();
+  return data.screenshotUrl || "";
+}
+
+async function payCash(depositId: number, cashAmount: number): Promise<void> {
+  const base = getApiUrl();
+  const token = Platform.OS !== "web" ? await tokenStore.get() : null;
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+  const res = await fetch(`${base}/api/fos-depositions/${depositId}/pay-cash`, {
+    method: "POST", headers, credentials: "include",
+    body: JSON.stringify({ cashAmount }),
+  });
+  if (!res.ok) {
+    const j = await res.json().catch(() => ({}));
+    throw new Error(j.message || "Failed");
   }
 }
 
-function ScreenshotThumb({ uri }: { uri: string }) {
-  const src = uri.startsWith("http") ? uri : `${getApiUrl()}${uri}`;
-  return (
-    <Image
-      source={{ uri: src }}
-      style={{ width: 80, height: 80, borderRadius: 8, marginTop: 8 }}
-      resizeMode="cover"
-    />
-  );
-}
+// ─── Payment Method Sheet ─────────────────────────────────────────────────────
+function PaymentSheet({ visible, item, onClose, onPaid }: any) {
+  const [mode, setMode] = useState<"select" | "cash" | "online">("select");
+  const [cashAmt, setCashAmt] = useState("");
+  const [loading, setLoading] = useState(false);
 
-function PendingDepositCard({ item, onScreenshotUploaded }: { item: any; onScreenshotUploaded: () => void }) {
-  const [uploading, setUploading] = useState(false);
-  const amount = parseFloat(item.amount || 0);
-  const amountStr = amount.toFixed(2);
-  const note = encodeURIComponent(item.description || "FOS Deposit");
-  const hasScreenshot = !!item.screenshot_url;
+  const reset = () => { setMode("select"); setCashAmt(""); };
 
-  const handleUploadScreenshot = async () => {
+  const handleCash = async () => {
+    const amt = parseFloat(cashAmt);
+    if (!amt || amt <= 0) { Alert.alert("Error", "Enter a valid amount"); return; }
+    setLoading(true);
+    try {
+      await payCash(item.id, amt);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      onPaid();
+      reset();
+      onClose();
+    } catch (e: any) { Alert.alert("Error", e.message); }
+    finally { setLoading(false); }
+  };
+
+  const handleOnline = async () => {
     try {
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ["images"],
-        quality: 0.8,
+        quality: 0.85,
         allowsEditing: false,
       });
       if (result.canceled || !result.assets?.[0]) return;
-      setUploading(true);
-      await api.uploadScreenshot(item.id, result.assets[0].uri);
+      setLoading(true);
+      await uploadScreenshotForDep(item.id, result.assets[0].uri);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      onScreenshotUploaded();
-    } catch (e: any) {
-      Alert.alert("Upload Failed", e.message);
-    } finally {
-      setUploading(false);
-    }
-  };
-
-  const handlePay = (appName: string, deepLink: string, fallback: string) => {
-    Alert.alert(
-      `Pay via ${appName}`,
-      `Amount: ₹${amount.toLocaleString("en-IN")}`,
-      [
-        { text: "Cancel", style: "cancel" },
-        { text: `Open ${appName}`, onPress: () => openUpiApp(deepLink, fallback) },
-      ]
-    );
+      onPaid();
+      reset();
+      onClose();
+    } catch (e: any) { Alert.alert("Error", e.message); }
+    finally { setLoading(false); }
   };
 
   return (
-    <View style={pStyles.card}>
-      <View style={pStyles.cardHeader}>
-        <View style={pStyles.amountRow}>
-          <Ionicons name="alert-circle" size={18} color={Colors.warning} />
-          <Text style={pStyles.amount}>₹{amount.toLocaleString("en-IN")}</Text>
-        </View>
-        {hasScreenshot ? (
-          <View style={[pStyles.statusTag, { backgroundColor: Colors.success + "20", borderColor: Colors.success + "50" }]}>
-            <Ionicons name="checkmark-circle" size={12} color={Colors.success} />
-            <Text style={[pStyles.statusText, { color: Colors.success }]}>Uploaded</Text>
-          </View>
-        ) : (
-          <View style={pStyles.pendingTag}>
-            <Text style={pStyles.pendingText}>PENDING</Text>
-          </View>
-        )}
-      </View>
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={() => { reset(); onClose(); }}>
+      <View style={pay.overlay}>
+        <View style={pay.sheet}>
+          <View style={pay.handle} />
 
-      {item.description ? <Text style={pStyles.desc}>{item.description}</Text> : null}
-      <Text style={pStyles.addedOn}>
-        Assigned: {item.created_at ? new Date(item.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : ""}
-      </Text>
+          {item && (
+            <View style={pay.infoCard}>
+              <View style={{ flex: 1 }}>
+                <Text style={pay.infoName} numberOfLines={1}>{item.customer_name || "Deposition"}</Text>
+                {item.loan_no && <Text style={pay.infoMeta}>{item.loan_no}</Text>}
+              </View>
+              <Text style={pay.infoAmt}>₹{fmt(item.amount)}</Text>
+            </View>
+          )}
 
-      {hasScreenshot ? (
-        <ScreenshotThumb uri={item.screenshot_url} />
-      ) : (
-        <>
-          <View style={pStyles.divider} />
-          <Text style={pStyles.payLabel}>Pay Now</Text>
-          <View style={pStyles.upiRow}>
-            <Pressable
-              style={[pStyles.upiBtn, { backgroundColor: "#5f259f" }]}
-              onPress={() => handlePay("PhonePe", `phonepe://pay?am=${amountStr}&tn=${note}&cu=INR`, "https://phon.pe/store")}
-            >
-              <Text style={pStyles.upiEmoji}>📱</Text>
-              <Text style={pStyles.upiLabel}>PhonePe</Text>
-            </Pressable>
-            <Pressable
-              style={[pStyles.upiBtn, { backgroundColor: "#1a73e8" }]}
-              onPress={() => handlePay("Google Pay", `tez://upi/pay?am=${amountStr}&tn=${note}&cu=INR`, "https://pay.google.com")}
-            >
-              <Text style={pStyles.upiEmoji}>💳</Text>
-              <Text style={pStyles.upiLabel}>GPay</Text>
-            </Pressable>
-            <Pressable
-              style={[pStyles.upiBtn, { backgroundColor: "#00BAF2" }]}
-              onPress={() => handlePay("Paytm", `paytmmp://pay?am=${amountStr}&tn=${note}&cu=INR`, "https://paytm.com")}
-            >
-              <Text style={pStyles.upiEmoji}>💰</Text>
-              <Text style={pStyles.upiLabel}>Paytm</Text>
-            </Pressable>
-          </View>
-          <Pressable
-            style={pStyles.anyUpiBtn}
-            onPress={() => Alert.alert("Pay via UPI", `Amount: ₹${amount.toLocaleString("en-IN")}`, [
-              { text: "Cancel", style: "cancel" },
-              { text: "Pay Now", onPress: () => Linking.openURL(`upi://pay?am=${amountStr}&tn=${note}&cu=INR`) },
-            ])}
-          >
-            <Ionicons name="qr-code-outline" size={16} color={Colors.primary} />
-            <Text style={pStyles.anyUpiText}>Any other UPI App</Text>
-          </Pressable>
-        </>
-      )}
+          {mode === "select" && (
+            <>
+              <Text style={pay.title}>How did you pay?</Text>
+              <View style={pay.optRow}>
+                <Pressable style={[pay.opt, { borderColor: Colors.success }]} onPress={() => setMode("cash")}>
+                  <View style={[pay.optIcon, { backgroundColor: Colors.success + "15" }]}>
+                    <Ionicons name="cash-outline" size={28} color={Colors.success} />
+                  </View>
+                  <Text style={[pay.optLabel, { color: Colors.success }]}>Paid in Cash</Text>
+                  <Text style={pay.optHint}>Enter cash amount</Text>
+                </Pressable>
 
-      <Pressable
-        style={[pStyles.uploadBtn, hasScreenshot && { backgroundColor: Colors.surfaceAlt, borderColor: Colors.border }, uploading && { opacity: 0.6 }]}
-        onPress={handleUploadScreenshot}
-        disabled={uploading}
-      >
-        {uploading ? (
-          <ActivityIndicator size="small" color={hasScreenshot ? Colors.textSecondary : "#fff"} />
-        ) : (
-          <>
-            <Ionicons name={hasScreenshot ? "refresh-outline" : "camera-outline"} size={16} color={hasScreenshot ? Colors.textSecondary : "#fff"} />
-            <Text style={[pStyles.uploadBtnText, hasScreenshot && { color: Colors.textSecondary }]}>
-              {hasScreenshot ? "Replace Screenshot" : "Upload Payment Screenshot"}
-            </Text>
-          </>
-        )}
-      </Pressable>
-    </View>
-  );
-}
+                <Pressable style={[pay.opt, { borderColor: "#2563eb" }]} onPress={handleOnline} disabled={loading}>
+                  <View style={[pay.optIcon, { backgroundColor: "#2563eb15" }]}>
+                    {loading ? <ActivityIndicator color="#2563eb" /> : <Ionicons name="phone-portrait-outline" size={28} color="#2563eb" />}
+                  </View>
+                  <Text style={[pay.optLabel, { color: "#2563eb" }]}>Paid Online</Text>
+                  <Text style={pay.optHint}>Upload screenshot</Text>
+                </Pressable>
+              </View>
 
-function AddDepositionModal({ visible, cases, onClose, onSave }: any) {
-  const [selectedCase, setSelectedCase] = useState<any>(null);
-  const [amount, setAmount] = useState("");
-  const [receiptNo, setReceiptNo] = useState("");
-  const [notes, setNotes] = useState("");
-  const [loading, setLoading] = useState(false);
-
-  const paidCases = useMemo(() => (cases || []).filter((c: any) => c.status === "Paid"), [cases]);
-  const reset = () => { setSelectedCase(null); setAmount(""); setReceiptNo(""); setNotes(""); };
-
-  const save = async () => {
-    if (!selectedCase) { Alert.alert("Error", "Please select a case"); return; }
-    if (!amount || isNaN(parseFloat(amount))) { Alert.alert("Error", "Please enter a valid amount"); return; }
-    setLoading(true);
-    try {
-      const today = new Date().toISOString().split("T")[0];
-      await api.createDeposition({ loanCaseId: selectedCase.id, amount: parseFloat(amount), depositionDate: today, receiptNo, notes });
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      reset(); onSave(); onClose();
-    } catch (e: any) {
-      Alert.alert("Error", e.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <View style={depStyles.overlay}>
-        <View style={depStyles.sheet}>
-          <View style={depStyles.handle} />
-          <Text style={depStyles.title}>Record Cash Deposition</Text>
-          <Text style={depStyles.label}>Select Paid Case</Text>
-          <ScrollView style={{ maxHeight: 160 }} showsVerticalScrollIndicator={false}>
-            {paidCases.map((c: any) => (
-              <Pressable
-                key={c.id}
-                style={[depStyles.caseItem, selectedCase?.id === c.id && depStyles.caseItemSelected]}
-                onPress={() => setSelectedCase(c)}
-              >
-                <Text style={[depStyles.caseItemText, selectedCase?.id === c.id && { color: "#fff" }]} numberOfLines={1}>
-                  {c.customer_name} — BKT {c.bkt}
-                </Text>
-                {selectedCase?.id === c.id && <Ionicons name="checkmark-circle" size={16} color="#fff" />}
+              <Pressable style={pay.cancelBtn} onPress={() => { reset(); onClose(); }}>
+                <Text style={pay.cancelText}>Cancel</Text>
               </Pressable>
-            ))}
-            {paidCases.length === 0 && <Text style={depStyles.noCases}>No paid cases available</Text>}
-          </ScrollView>
-          <Text style={depStyles.label}>Amount (₹)</Text>
-          <TextInput
-            style={depStyles.input}
-            placeholder="Enter amount"
-            placeholderTextColor={Colors.textMuted}
-            value={amount}
-            onChangeText={setAmount}
-            keyboardType="numeric"
-          />
-          <Text style={depStyles.label}>Receipt No (Optional)</Text>
-          <TextInput
-            style={depStyles.input}
-            placeholder="Enter receipt number"
-            placeholderTextColor={Colors.textMuted}
-            value={receiptNo}
-            onChangeText={setReceiptNo}
-          />
-          <Text style={depStyles.label}>Notes (Optional)</Text>
-          <TextInput
-            style={[depStyles.input, { minHeight: 60, textAlignVertical: "top" }]}
-            placeholder="Notes..."
-            placeholderTextColor={Colors.textMuted}
-            value={notes}
-            onChangeText={setNotes}
-            multiline
-          />
-          <View style={depStyles.btnRow}>
-            <Pressable style={depStyles.cancelBtn} onPress={() => { reset(); onClose(); }}>
-              <Text style={depStyles.cancelText}>Cancel</Text>
-            </Pressable>
-            <Pressable style={[depStyles.saveBtn, loading && { opacity: 0.6 }]} onPress={save} disabled={loading}>
-              {loading ? <ActivityIndicator color="#fff" size="small" /> : <Text style={depStyles.saveText}>Submit</Text>}
-            </Pressable>
-          </View>
+            </>
+          )}
+
+          {mode === "cash" && (
+            <>
+              <Text style={pay.title}>Enter Cash Amount</Text>
+              <View style={pay.cashRow}>
+                <Text style={pay.rupee}>₹</Text>
+                <TextInput
+                  style={pay.cashInput}
+                  placeholder="0"
+                  placeholderTextColor={Colors.textMuted}
+                  value={cashAmt}
+                  onChangeText={setCashAmt}
+                  keyboardType="numeric"
+                  autoFocus
+                />
+              </View>
+              <Text style={pay.cashHint}>
+                Total assigned: ₹{fmt(item?.amount)}
+              </Text>
+              <View style={pay.cashBtnRow}>
+                <Pressable style={pay.backBtn} onPress={() => setMode("select")}>
+                  <Ionicons name="arrow-back" size={18} color={Colors.textSecondary} />
+                  <Text style={pay.backText}>Back</Text>
+                </Pressable>
+                <Pressable
+                  style={[pay.confirmBtn, loading && { opacity: 0.6 }]}
+                  onPress={handleCash}
+                  disabled={loading}
+                >
+                  {loading
+                    ? <ActivityIndicator color="#fff" size="small" />
+                    : <><Ionicons name="checkmark" size={18} color="#fff" /><Text style={pay.confirmText}>Confirm Cash</Text></>
+                  }
+                </Pressable>
+              </View>
+            </>
+          )}
         </View>
       </View>
     </Modal>
   );
 }
 
-export default function DepositionScreen() {
+// ─── Deposition Card ──────────────────────────────────────────────────────────
+function DepositionCard({ item, onPayPressed }: { item: any; onPayPressed: (item: any) => void }) {
+  const isPending = item.payment_method === "pending";
+  const isCash = item.payment_method === "cash";
+  const isOnline = item.payment_method === "online";
+  const amount = parseFloat(item.amount || 0);
+
+  const borderColor = isPending ? Colors.warning : isCash ? Colors.success : "#2563eb";
+
+  const screenshotSrc = item.screenshot_url
+    ? (item.screenshot_url.startsWith("http") ? item.screenshot_url : `${getApiUrl()}${item.screenshot_url}`)
+    : null;
+
+  return (
+    <View style={[card.root, { borderLeftColor: borderColor }]}>
+      {/* Header */}
+      <View style={card.header}>
+        <View style={{ flex: 1 }}>
+          <Text style={card.name} numberOfLines={1}>{item.customer_name || "Assigned Deposit"}</Text>
+          {item.loan_no && (
+            <Text style={card.meta}>{item.loan_no}{item.bkt ? ` · BKT ${item.bkt}` : ""}</Text>
+          )}
+          <Text style={card.date}>Assigned: {fmtDate(item.created_at)}</Text>
+        </View>
+        <View style={{ alignItems: "flex-end", gap: 4 }}>
+          <Text style={[card.amount, { color: borderColor }]}>₹{fmt(amount)}</Text>
+          {/* Status badge */}
+          <View style={[card.badge, { backgroundColor: borderColor + "20" }]}>
+            <Text style={[card.badgeText, { color: borderColor }]}>
+              {isPending ? "⏳ Pending" : isCash ? "💵 Cash" : "📲 Online"}
+            </Text>
+          </View>
+        </View>
+      </View>
+
+      {/* Sub amounts */}
+      {(parseFloat(item.cash_amount) > 0 || parseFloat(item.online_amount) > 0) && (
+        <View style={card.subRow}>
+          {parseFloat(item.cash_amount) > 0 && (
+            <Text style={card.subAmt}>💵 Cash: ₹{fmt(item.cash_amount)}</Text>
+          )}
+          {parseFloat(item.online_amount) > 0 && (
+            <Text style={[card.subAmt, { color: "#2563eb" }]}>📲 Online: ₹{fmt(item.online_amount)}</Text>
+          )}
+        </View>
+      )}
+
+      {/* Screenshot thumbnail */}
+      {screenshotSrc && (
+        <View style={card.screenshotRow}>
+          <Image source={{ uri: screenshotSrc }} style={card.thumb} resizeMode="cover" />
+          <View style={card.screenshotInfo}>
+            <Ionicons name="checkmark-circle" size={14} color="#2563eb" />
+            <Text style={{ fontSize: 12, color: "#2563eb", fontWeight: "600" }}>Screenshot uploaded</Text>
+          </View>
+        </View>
+      )}
+
+      {item.notes && <Text style={card.notes}>{item.notes}</Text>}
+
+      {/* Pay button — show if pending */}
+      {isPending && (
+        <Pressable style={card.payBtn} onPress={() => onPayPressed(item)}>
+          <Ionicons name="wallet-outline" size={16} color="#fff" />
+          <Text style={card.payBtnText}>Mark as Paid</Text>
+        </Pressable>
+      )}
+
+      {/* Replace screenshot for online */}
+      {isOnline && (
+        <Pressable style={[card.payBtn, { backgroundColor: "#2563eb" }]} onPress={() => onPayPressed(item)}>
+          <Ionicons name="camera-outline" size={16} color="#fff" />
+          <Text style={card.payBtnText}>Replace Screenshot</Text>
+        </Pressable>
+      )}
+    </View>
+  );
+}
+
+// ─── Main Screen ──────────────────────────────────────────────────────────────
+export default function FosDepositionScreen() {
   const insets = useSafeAreaInsets();
   const qc = useQueryClient();
-  const [showAdd, setShowAdd] = useState(false);
+  const [payItem, setPayItem] = useState<any>(null);
 
-  const { data: depsData, isLoading: depsLoading } = useQuery({
-    queryKey: ["/api/depositions"],
-    queryFn: () => api.getDepositions(),
-  });
-  const { data: casesData } = useQuery({
-    queryKey: ["/api/cases"],
-    queryFn: () => api.getCases(),
-  });
-  const { data: reqData, isLoading: reqLoading, refetch: refetchReq } = useQuery({
-    queryKey: ["/api/required-deposits"],
-    queryFn: () => api.getRequiredDeposits(),
+  const { data: depData, isLoading } = useQuery({
+    queryKey: ["/api/fos-depositions"],
+    queryFn: async () => {
+      const base = getApiUrl();
+      const token = Platform.OS !== "web" ? await tokenStore.get() : null;
+      const headers: Record<string, string> = {};
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+      const res = await fetch(`${base}/api/fos-depositions`, { headers, credentials: "include" });
+      if (!res.ok) throw new Error("Failed to load depositions");
+      return res.json();
+    },
     staleTime: 0,
   });
 
-  const depositions = depsData?.depositions || [];
-  const pendingDeposits: any[] = reqData?.deposits || [];
-  const totalPending = pendingDeposits.reduce((s: number, d: any) => s + parseFloat(d.amount || 0), 0);
+  const depositions: any[] = depData?.depositions || [];
 
-  const onScreenshotUploaded = useCallback(() => {
-    qc.invalidateQueries({ queryKey: ["/api/required-deposits"] });
+  const totalAssigned = depositions.reduce((s, d) => s + parseFloat(d.amount || 0), 0);
+  const totalCash = depositions.reduce((s, d) => s + parseFloat(d.cash_amount || 0), 0);
+  const totalOnline = depositions.reduce((s, d) => s + parseFloat(d.online_amount || 0), 0);
+  const pendingCount = depositions.filter((d) => d.payment_method === "pending").length;
+
+  const onPaid = useCallback(() => {
+    qc.invalidateQueries({ queryKey: ["/api/fos-depositions"] });
   }, [qc]);
 
-  const listHeader = useMemo(() => (
-    <View style={{ gap: 12, marginBottom: 8 }}>
-      {reqLoading ? (
-        <ActivityIndicator color={Colors.primary} size="small" style={{ marginVertical: 8 }} />
-      ) : pendingDeposits.length > 0 ? (
-        <View>
-          <View style={styles.sectionHeader}>
-            <View style={styles.sectionTitleRow}>
-              <Ionicons name="alert-circle" size={18} color={Colors.warning} />
-              <Text style={styles.sectionTitle}>Pending Deposits</Text>
-              <View style={styles.countBadge}>
-                <Text style={styles.countText}>{pendingDeposits.length}</Text>
-              </View>
-            </View>
-            <Text style={styles.sectionTotal}>Total: ₹{totalPending.toLocaleString("en-IN")}</Text>
-          </View>
-          {pendingDeposits.map((item: any) => (
-            <PendingDepositCard key={item.id} item={item} onScreenshotUploaded={onScreenshotUploaded} />
-          ))}
-          <View style={styles.dividerSection} />
-        </View>
-      ) : null}
-      <View style={styles.sectionHeader}>
-        <View style={styles.sectionTitleRow}>
-          <Ionicons name="receipt" size={18} color={Colors.primary} />
-          <Text style={styles.sectionTitle}>Deposition History</Text>
-        </View>
-        <Text style={styles.sectionTotal}>{depositions.length} records</Text>
+  if (isLoading) {
+    return (
+      <View style={{ flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: Colors.background }}>
+        <ActivityIndicator color={Colors.primary} size="large" />
       </View>
-    </View>
-  ), [reqLoading, pendingDeposits, totalPending, depositions.length, onScreenshotUploaded]);
+    );
+  }
 
   return (
     <View style={{ flex: 1, backgroundColor: Colors.background }}>
       <FlatList
-        contentContainerStyle={[
-          styles.container,
-          { paddingBottom: insets.bottom + 100, paddingTop: Platform.OS === "web" ? 67 : 12 },
-        ]}
         data={depositions}
         keyExtractor={(item) => String(item.id)}
-        ListHeaderComponent={listHeader}
-        renderItem={({ item }) => (
-          <View style={styles.card}>
-            <View style={styles.cardHeader}>
-              <View style={styles.amountBadge}>
-                <Text style={styles.amountText}>₹{parseFloat(item.amount).toLocaleString("en-IN")}</Text>
+        contentContainerStyle={[
+          main.container,
+          { paddingBottom: insets.bottom + 32, paddingTop: Platform.OS === "web" ? 67 : 12 },
+          depositions.length === 0 && { flex: 1 },
+        ]}
+        ListHeaderComponent={
+          depositions.length > 0 ? (
+            <View style={{ gap: 12, marginBottom: 4 }}>
+              {/* Summary cards */}
+              <View style={main.summaryRow}>
+                <View style={[main.sumCard, { borderTopColor: Colors.warning }]}>
+                  <Ionicons name="time-outline" size={18} color={Colors.warning} />
+                  <Text style={main.sumNum}>{pendingCount}</Text>
+                  <Text style={main.sumLabel}>Pending</Text>
+                </View>
+                <View style={[main.sumCard, { borderTopColor: Colors.success }]}>
+                  <Ionicons name="cash-outline" size={18} color={Colors.success} />
+                  <Text style={[main.sumNum, { color: Colors.success }]}>₹{fmt(totalCash)}</Text>
+                  <Text style={main.sumLabel}>Cash Paid</Text>
+                </View>
+                <View style={[main.sumCard, { borderTopColor: "#2563eb" }]}>
+                  <Ionicons name="phone-portrait-outline" size={18} color="#2563eb" />
+                  <Text style={[main.sumNum, { color: "#2563eb" }]}>₹{fmt(totalOnline)}</Text>
+                  <Text style={main.sumLabel}>Online Paid</Text>
+                </View>
               </View>
-              <Text style={styles.date}>{item.deposition_date}</Text>
+
+              {/* Total banner */}
+              <View style={main.totalBanner}>
+                <View>
+                  <Text style={main.totalLabel}>Total Assigned</Text>
+                  <Text style={main.totalAmt}>₹{fmt(totalAssigned)}</Text>
+                </View>
+                {pendingCount > 0 && (
+                  <View style={main.pendingAlert}>
+                    <Ionicons name="alert-circle" size={14} color={Colors.warning} />
+                    <Text style={main.pendingAlertText}>{pendingCount} awaiting payment</Text>
+                  </View>
+                )}
+              </View>
+
+              <Text style={main.sectionTitle}>Your Assigned Deposits</Text>
             </View>
-            {item.customer_name && <Text style={styles.customerName} numberOfLines={1}>{item.customer_name}</Text>}
-            {item.loan_no && <Text style={styles.loanNo}>Loan: {item.loan_no} | BKT: {item.bkt}</Text>}
-            {item.receipt_no && <Text style={styles.receipt}>Receipt: {item.receipt_no}</Text>}
-            {item.notes && <Text style={styles.notes}>{item.notes}</Text>}
-          </View>
+          ) : null
+        }
+        renderItem={({ item }) => (
+          <DepositionCard item={item} onPayPressed={setPayItem} />
         )}
+        ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
         ListEmptyComponent={
-          depsLoading ? null : (
-            <View style={styles.empty}>
-              <MaterialIcons name="receipt-long" size={40} color={Colors.textMuted} />
-              <Text style={styles.emptyText}>No deposition records yet</Text>
+          <View style={main.empty}>
+            <View style={main.emptyIcon}>
+              <Ionicons name="wallet-outline" size={44} color={Colors.primary} />
             </View>
-          )
+            <Text style={main.emptyTitle}>No Deposits Assigned</Text>
+            <Text style={main.emptyText}>Admin hasn't assigned any deposits to you yet.</Text>
+          </View>
         }
       />
 
-      <View style={[styles.fab, { bottom: insets.bottom + 24 }]}>
-        <Pressable
-          style={({ pressed }) => [styles.fabBtn, pressed && { opacity: 0.85 }]}
-          onPress={() => setShowAdd(true)}
-        >
-          <Ionicons name="add" size={24} color="#fff" />
-          <Text style={styles.fabText}>Record Deposition</Text>
-        </Pressable>
-      </View>
-
-      <AddDepositionModal
-        visible={showAdd}
-        cases={casesData?.cases || []}
-        onClose={() => setShowAdd(false)}
-        onSave={() => qc.invalidateQueries({ queryKey: ["/api/depositions"] })}
+      <PaymentSheet
+        visible={!!payItem}
+        item={payItem}
+        onClose={() => setPayItem(null)}
+        onPaid={onPaid}
       />
     </View>
   );
 }
 
-const styles = StyleSheet.create({
+// ─── Styles ───────────────────────────────────────────────────────────────────
+const main = StyleSheet.create({
   container: { padding: 16, gap: 10 },
-  sectionHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 8 },
-  sectionTitleRow: { flexDirection: "row", alignItems: "center", gap: 6 },
-  sectionTitle: { fontSize: 15, fontWeight: "800", color: Colors.text },
-  sectionTotal: { fontSize: 12, color: Colors.textSecondary, fontWeight: "600" },
-  countBadge: { backgroundColor: Colors.warning, borderRadius: 10, paddingHorizontal: 6, paddingVertical: 2 },
-  countText: { fontSize: 11, fontWeight: "800", color: "#fff" },
-  dividerSection: { height: 1, backgroundColor: Colors.border, marginVertical: 12 },
-  card: {
-    backgroundColor: Colors.surface, borderRadius: 14, padding: 14, gap: 6,
+  summaryRow: { flexDirection: "row", gap: 10 },
+  sumCard: {
+    flex: 1, backgroundColor: Colors.surface, borderRadius: 14, padding: 12,
+    borderTopWidth: 3, alignItems: "center", gap: 3,
     shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 6, elevation: 2,
-    borderLeftWidth: 4, borderLeftColor: Colors.success,
   },
-  cardHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
-  amountBadge: { backgroundColor: Colors.success + "15", paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20 },
-  amountText: { fontSize: 16, fontWeight: "800", color: Colors.success },
-  date: { fontSize: 12, color: Colors.textSecondary },
-  customerName: { fontSize: 14, fontWeight: "700", color: Colors.text, textTransform: "uppercase" },
-  loanNo: { fontSize: 12, color: Colors.textMuted },
-  receipt: { fontSize: 12, color: Colors.textSecondary },
-  notes: { fontSize: 12, color: Colors.textSecondary, fontStyle: "italic" },
-  fab: { position: "absolute", left: 16, right: 16 },
-  fabBtn: {
-    backgroundColor: Colors.primary, borderRadius: 16, paddingVertical: 16, flexDirection: "row",
-    alignItems: "center", justifyContent: "center", gap: 10,
-    shadowColor: Colors.primary, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.4, shadowRadius: 8, elevation: 6,
+  sumNum: { fontSize: 14, fontWeight: "800", color: Colors.text },
+  sumLabel: { fontSize: 10, color: Colors.textSecondary, fontWeight: "600", textAlign: "center" },
+  totalBanner: {
+    backgroundColor: Colors.primary, borderRadius: 16, padding: 18,
+    flexDirection: "row", justifyContent: "space-between", alignItems: "center",
+    shadowColor: Colors.primary, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 5,
   },
-  fabText: { color: "#fff", fontSize: 16, fontWeight: "700" },
-  empty: { alignItems: "center", gap: 8, paddingVertical: 32 },
-  emptyText: { fontSize: 14, color: Colors.textMuted },
+  totalLabel: { color: "rgba(255,255,255,0.8)", fontSize: 13, fontWeight: "600" },
+  totalAmt: { color: "#fff", fontSize: 28, fontWeight: "800", marginTop: 2 },
+  pendingAlert: {
+    flexDirection: "row", alignItems: "center", gap: 6,
+    backgroundColor: "rgba(255,255,255,0.2)", paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20,
+  },
+  pendingAlertText: { color: "#fff", fontSize: 12, fontWeight: "700" },
+  sectionTitle: { fontSize: 15, fontWeight: "800", color: Colors.text, marginTop: 4 },
+  empty: { flex: 1, justifyContent: "center", alignItems: "center", gap: 12 },
+  emptyIcon: {
+    width: 80, height: 80, borderRadius: 40,
+    backgroundColor: Colors.primary + "12", justifyContent: "center", alignItems: "center",
+  },
+  emptyTitle: { fontSize: 18, fontWeight: "800", color: Colors.text },
+  emptyText: { fontSize: 14, color: Colors.textMuted, textAlign: "center", maxWidth: 260 },
 });
 
-const pStyles = StyleSheet.create({
-  card: {
-    backgroundColor: Colors.surface, borderRadius: 14, padding: 14, gap: 10,
-    borderLeftWidth: 4, borderLeftColor: Colors.warning, marginBottom: 10,
+const card = StyleSheet.create({
+  root: {
+    backgroundColor: Colors.surface, borderRadius: 16, padding: 16,
+    borderLeftWidth: 4,
     shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 8, elevation: 3,
   },
-  cardHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
-  amountRow: { flexDirection: "row", alignItems: "center", gap: 8 },
-  amount: { fontSize: 22, fontWeight: "800", color: Colors.warning },
-  pendingTag: {
-    backgroundColor: Colors.warning + "20", paddingHorizontal: 10, paddingVertical: 4,
-    borderRadius: 20, borderWidth: 1, borderColor: Colors.warning + "50",
-  },
-  statusTag: {
-    flexDirection: "row", alignItems: "center", gap: 4,
-    paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20, borderWidth: 1,
-  },
-  statusText: { fontSize: 10, fontWeight: "800", letterSpacing: 0.3 },
-  pendingText: { fontSize: 10, fontWeight: "800", color: Colors.warning, letterSpacing: 0.5 },
-  desc: { fontSize: 13, color: Colors.textSecondary },
-  addedOn: { fontSize: 11, color: Colors.textMuted },
-  divider: { height: StyleSheet.hairlineWidth, backgroundColor: Colors.border },
-  payLabel: { fontSize: 11, fontWeight: "700", color: Colors.textSecondary, textTransform: "uppercase", letterSpacing: 0.5 },
-  upiRow: { flexDirection: "row", gap: 8 },
-  upiBtn: { flex: 1, borderRadius: 12, paddingVertical: 12, alignItems: "center", gap: 4 },
-  upiEmoji: { fontSize: 20 },
-  upiLabel: { fontSize: 12, fontWeight: "700", color: "#fff" },
-  anyUpiBtn: {
-    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6,
-    backgroundColor: Colors.primary + "10", borderRadius: 10, paddingVertical: 10,
-    borderWidth: 1, borderColor: Colors.primary + "30",
-  },
-  anyUpiText: { fontSize: 13, fontWeight: "600", color: Colors.primary },
-  uploadBtn: {
+  header: { flexDirection: "row", alignItems: "flex-start", gap: 8 },
+  name: { fontSize: 15, fontWeight: "700", color: Colors.text },
+  meta: { fontSize: 12, color: Colors.textSecondary, marginTop: 2 },
+  date: { fontSize: 11, color: Colors.textMuted, marginTop: 2 },
+  amount: { fontSize: 20, fontWeight: "800" },
+  badge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20 },
+  badgeText: { fontSize: 11, fontWeight: "700" },
+  subRow: { flexDirection: "row", gap: 12, marginTop: 8, flexWrap: "wrap" },
+  subAmt: { fontSize: 13, fontWeight: "600", color: Colors.success },
+  screenshotRow: { flexDirection: "row", alignItems: "center", gap: 10, marginTop: 10 },
+  thumb: { width: 56, height: 56, borderRadius: 8 },
+  screenshotInfo: { flexDirection: "row", alignItems: "center", gap: 4 },
+  notes: { fontSize: 12, color: Colors.textSecondary, fontStyle: "italic", marginTop: 8 },
+  payBtn: {
     flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8,
-    backgroundColor: Colors.primary, borderRadius: 10, paddingVertical: 12,
-    borderWidth: 1, borderColor: Colors.primary,
+    backgroundColor: Colors.primary, borderRadius: 12, paddingVertical: 13, marginTop: 12,
   },
-  uploadBtnText: { fontSize: 13, fontWeight: "700", color: "#fff" },
+  payBtnText: { fontSize: 14, fontWeight: "700", color: "#fff" },
 });
 
-const depStyles = StyleSheet.create({
+const pay = StyleSheet.create({
   overlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" },
   sheet: {
-    backgroundColor: Colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24,
-    padding: 24, gap: 10, maxHeight: "90%",
+    backgroundColor: Colors.surface, borderTopLeftRadius: 28, borderTopRightRadius: 28,
+    padding: 24, gap: 16,
   },
-  handle: { width: 40, height: 4, backgroundColor: Colors.border, borderRadius: 2, alignSelf: "center", marginBottom: 8 },
-  title: { fontSize: 20, fontWeight: "700", color: Colors.text, marginBottom: 4 },
-  label: { fontSize: 12, fontWeight: "700", color: Colors.textSecondary, textTransform: "uppercase", letterSpacing: 0.5 },
-  caseItem: {
-    padding: 12, borderRadius: 10, backgroundColor: Colors.surfaceAlt,
-    borderWidth: 1, borderColor: Colors.border, marginBottom: 6,
+  handle: { width: 40, height: 4, backgroundColor: Colors.border, borderRadius: 2, alignSelf: "center", marginBottom: 4 },
+  infoCard: {
     flexDirection: "row", alignItems: "center", justifyContent: "space-between",
+    backgroundColor: Colors.surfaceAlt, borderRadius: 14, padding: 14,
   },
-  caseItemSelected: { backgroundColor: Colors.primary, borderColor: Colors.primary },
-  caseItemText: { fontSize: 13, fontWeight: "600", color: Colors.text, flex: 1 },
-  noCases: { fontSize: 13, color: Colors.textMuted, textAlign: "center", padding: 12 },
-  input: {
-    borderWidth: 1, borderColor: Colors.border, borderRadius: 12, padding: 14,
-    fontSize: 15, color: Colors.text, backgroundColor: Colors.surfaceAlt,
+  infoName: { fontSize: 15, fontWeight: "700", color: Colors.text },
+  infoMeta: { fontSize: 12, color: Colors.textSecondary, marginTop: 2 },
+  infoAmt: { fontSize: 22, fontWeight: "800", color: Colors.primary },
+  title: { fontSize: 18, fontWeight: "800", color: Colors.text, textAlign: "center" },
+  optRow: { flexDirection: "row", gap: 12 },
+  opt: {
+    flex: 1, borderRadius: 16, padding: 18, alignItems: "center", gap: 8,
+    backgroundColor: Colors.surface, borderWidth: 2,
+    shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.08, shadowRadius: 8, elevation: 3,
   },
-  btnRow: { flexDirection: "row", gap: 12, marginTop: 8 },
-  cancelBtn: { flex: 1, paddingVertical: 14, borderRadius: 12, borderWidth: 1, borderColor: Colors.border, alignItems: "center" },
+  optIcon: { width: 56, height: 56, borderRadius: 28, justifyContent: "center", alignItems: "center" },
+  optLabel: { fontSize: 15, fontWeight: "800" },
+  optHint: { fontSize: 11, color: Colors.textMuted, textAlign: "center" },
+  cancelBtn: {
+    borderWidth: 1, borderColor: Colors.border, borderRadius: 12,
+    paddingVertical: 13, alignItems: "center",
+  },
   cancelText: { fontSize: 15, fontWeight: "600", color: Colors.textSecondary },
-  saveBtn: { flex: 2, paddingVertical: 14, borderRadius: 12, backgroundColor: Colors.primary, alignItems: "center" },
-  saveText: { fontSize: 15, fontWeight: "700", color: "#fff" },
+  cashRow: {
+    flexDirection: "row", alignItems: "center",
+    borderWidth: 2, borderColor: Colors.success, borderRadius: 16, padding: 16, gap: 4,
+  },
+  rupee: { fontSize: 28, fontWeight: "800", color: Colors.success },
+  cashInput: { flex: 1, fontSize: 36, fontWeight: "800", color: Colors.text },
+  cashHint: { fontSize: 12, color: Colors.textMuted, textAlign: "center" },
+  cashBtnRow: { flexDirection: "row", gap: 10 },
+  backBtn: {
+    flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6,
+    borderWidth: 1, borderColor: Colors.border, borderRadius: 12, paddingVertical: 13,
+  },
+  backText: { fontSize: 14, fontWeight: "600", color: Colors.textSecondary },
+  confirmBtn: {
+    flex: 2, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8,
+    backgroundColor: Colors.success, borderRadius: 12, paddingVertical: 13,
+  },
+  confirmText: { fontSize: 14, fontWeight: "700", color: "#fff" },
 });
