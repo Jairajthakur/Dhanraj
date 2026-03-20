@@ -1,119 +1,502 @@
-import React, { useState } from "react";
+import React, { useState, useRef } from "react";
 import {
-  View, Text, StyleSheet, FlatList, ActivityIndicator, Pressable, Modal,
-  TextInput, Alert, ScrollView, Platform, Image
+  View, Text, StyleSheet, FlatList, Pressable, Modal,
+  TextInput, Alert, ScrollView, Platform, Image,
+  ActivityIndicator, Animated,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Ionicons, MaterialIcons } from "@expo/vector-icons";
+import * as DocumentPicker from "expo-document-picker";
 import Colors from "@/constants/colors";
 import { api } from "@/lib/api";
-import { getApiUrl } from "@/lib/query-client";
+import { getApiUrl, tokenStore } from "@/lib/api";
 
-type Tab = "required" | "history";
+// ─── helpers ──────────────────────────────────────────────────────────────────
+const fmt = (n: any) => parseFloat(n || 0).toLocaleString("en-IN");
+const fmtDate = (d: any) => d ? new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "";
+const fmtDateTime = (d: any) => d ? new Date(d).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : "";
 
-// ─── Add Deposit Modal ────────────────────────────────────────────────────────
-function AddDepositModal({
-  visible, onClose, agents,
-}: { visible: boolean; onClose: () => void; agents: any[] }) {
-  const qc = useQueryClient();
-  const [agentId, setAgentId] = useState<string>("");
-  const [amount, setAmount] = useState("");
-  const [description, setDescription] = useState("");
+async function apiReq(method: string, route: string, data?: any) {
+  const base = getApiUrl();
+  const token = Platform.OS !== "web" ? await tokenStore.get() : null;
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+  const res = await fetch(`${base}${route}`, {
+    method, headers, credentials: "include",
+    body: data ? JSON.stringify(data) : undefined,
+  });
+  if (!res.ok) {
+    const j = await res.json().catch(() => ({}));
+    throw new Error(j.message || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+async function uploadFile(uri: string, name: string, type: string, route: string): Promise<any> {
+  const base = getApiUrl();
+  const token = Platform.OS !== "web" ? await tokenStore.get() : null;
+  const form = new FormData();
+  form.append("file", { uri, name, type } as any);
+  const headers: Record<string, string> = {};
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+  const res = await fetch(`${base}${route}`, {
+    method: "POST", body: form, credentials: "include",
+    headers: Object.keys(headers).length > 0 ? headers : undefined,
+  });
+  if (!res.ok) {
+    const j = await res.json().catch(() => ({}));
+    throw new Error(j.message || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+// ─── Payment Modal (admin updates payment on a deposition) ───────────────────
+function PaymentModal({ visible, item, onClose, onSaved }: any) {
+  const [method, setMethod] = useState<"cash" | "online" | "both">("cash");
+  const [cashAmt, setCashAmt] = useState("");
+  const [onlineAmt, setOnlineAmt] = useState("");
   const [loading, setLoading] = useState(false);
 
   const save = async () => {
-    if (!agentId) { Alert.alert("Error", "Please select an agent"); return; }
-    if (!amount || isNaN(Number(amount)) || Number(amount) <= 0) {
-      Alert.alert("Error", "Enter a valid amount"); return;
-    }
+    const cash = parseFloat(cashAmt) || 0;
+    const online = parseFloat(onlineAmt) || 0;
+    if (method === "cash" && cash <= 0) { Alert.alert("Error", "Enter cash amount"); return; }
+    if (method === "online" && online <= 0) { Alert.alert("Error", "Enter online amount"); return; }
     setLoading(true);
     try {
-      await api.admin.createRequiredDeposit({
-        agentId: Number(agentId), amount: Number(amount), description,
+      await apiReq("PUT", `/api/admin/fos-depositions/${item.id}/payment`, {
+        paymentMethod: method,
+        cashAmount: method === "online" ? 0 : cash,
+        onlineAmount: method === "cash" ? 0 : online,
       });
-      setAgentId(""); setAmount(""); setDescription("");
+      onSaved();
       onClose();
-      qc.invalidateQueries({ queryKey: ["/api/admin/required-deposits"] });
-    } catch (e: any) {
-      Alert.alert("Error", e.message);
-    } finally {
-      setLoading(false);
-    }
+    } catch (e: any) { Alert.alert("Error", e.message); }
+    finally { setLoading(false); }
   };
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <View style={modalStyles.overlay}>
-        <ScrollView style={modalStyles.sheet} showsVerticalScrollIndicator={false}>
-          <View style={modalStyles.handle} />
-          <Text style={modalStyles.title}>Add Required Deposit</Text>
-          <Text style={modalStyles.subtitle}>Assign a deposit amount to a FOS agent</Text>
+      <View style={ms.overlay}>
+        <View style={ms.sheet}>
+          <View style={ms.handle} />
+          <Text style={ms.title}>Update Payment</Text>
+          {item && (
+            <View style={ms.infoRow}>
+              <Text style={ms.infoName}>{item.customer_name || "—"}</Text>
+              <Text style={ms.infoAmt}>₹{fmt(item.amount)}</Text>
+            </View>
+          )}
 
-          <Text style={modalStyles.label}>Select FOS Agent</Text>
-          <View style={{ gap: 6, marginBottom: 4 }}>
-            {agents.map((a) => (
-              <Pressable
-                key={a.id}
-                style={[
-                  modalStyles.agentItem,
-                  agentId === String(a.id) && modalStyles.agentItemSelected,
-                ]}
-                onPress={() => setAgentId(String(a.id))}
-              >
-                <Ionicons
-                  name="person-circle" size={20}
-                  color={agentId === String(a.id) ? "#fff" : Colors.primary}
-                />
-                <Text style={[
-                  modalStyles.agentItemText,
-                  agentId === String(a.id) && { color: "#fff" },
-                ]}>
-                  {a.name}
+          <Text style={ms.label}>Payment Method</Text>
+          <View style={ms.segRow}>
+            {(["cash", "online", "both"] as const).map((m) => (
+              <Pressable key={m} style={[ms.seg, method === m && ms.segActive]} onPress={() => setMethod(m)}>
+                <Text style={[ms.segText, method === m && ms.segTextActive]}>
+                  {m === "cash" ? "💵 Cash" : m === "online" ? "📲 Online" : "🔀 Both"}
                 </Text>
-                {agentId === String(a.id) && (
-                  <Ionicons name="checkmark-circle" size={18} color="#fff" />
-                )}
               </Pressable>
             ))}
           </View>
 
-          <Text style={modalStyles.label}>Amount (₹)</Text>
-          <TextInput
-            style={modalStyles.input}
-            placeholder="Enter amount to deposit"
-            placeholderTextColor={Colors.textMuted}
-            keyboardType="numeric"
-            value={amount}
-            onChangeText={setAmount}
-          />
+          {(method === "cash" || method === "both") && (
+            <>
+              <Text style={ms.label}>Cash Amount (₹)</Text>
+              <TextInput style={ms.input} placeholder="0" placeholderTextColor={Colors.textMuted}
+                value={cashAmt} onChangeText={setCashAmt} keyboardType="numeric" />
+            </>
+          )}
 
-          <Text style={modalStyles.label}>Description (Optional)</Text>
-          <TextInput
-            style={modalStyles.input}
-            placeholder="e.g. Cash collected 01-03-2026"
-            placeholderTextColor={Colors.textMuted}
-            value={description}
-            onChangeText={setDescription}
-          />
+          {(method === "online" || method === "both") && (
+            <>
+              <Text style={ms.label}>Online Amount (₹)</Text>
+              <TextInput style={ms.input} placeholder="0" placeholderTextColor={Colors.textMuted}
+                value={onlineAmt} onChangeText={setOnlineAmt} keyboardType="numeric" />
+            </>
+          )}
 
-          <View style={modalStyles.btnRow}>
-            <Pressable style={modalStyles.cancelBtn} onPress={onClose}>
-              <Text style={modalStyles.cancelText}>Cancel</Text>
+          <View style={ms.btnRow}>
+            <Pressable style={ms.cancel} onPress={onClose}>
+              <Text style={ms.cancelTxt}>Cancel</Text>
             </Pressable>
-            <Pressable
-              style={[modalStyles.saveBtn, loading && { opacity: 0.6 }]}
-              onPress={save}
-              disabled={loading}
-            >
-              {loading
-                ? <ActivityIndicator color="#fff" size="small" />
-                : <Text style={modalStyles.saveText}>Add Deposit</Text>
-              }
+            <Pressable style={[ms.save, loading && { opacity: 0.6 }]} onPress={save} disabled={loading}>
+              {loading ? <ActivityIndicator color="#fff" size="small" /> : <Text style={ms.saveTxt}>Save</Text>}
             </Pressable>
           </View>
-          <View style={{ height: 40 }} />
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+// ─── Add Deposition Modal ─────────────────────────────────────────────────────
+function AddDepositionModal({ visible, onClose, onSaved, agents, paidCases }: any) {
+  const [selectedAgent, setSelectedAgent] = useState<any>(null);
+  const [selectedCase, setSelectedCase] = useState<any>(null);
+  const [amount, setAmount] = useState("");
+  const [cashAmt, setCashAmt] = useState("");
+  const [onlineAmt, setOnlineAmt] = useState("");
+  const [method, setMethod] = useState<"pending" | "cash" | "online" | "both">("pending");
+  const [notes, setNotes] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const reset = () => {
+    setSelectedAgent(null); setSelectedCase(null);
+    setAmount(""); setCashAmt(""); setOnlineAmt(""); setNotes(""); setMethod("pending");
+  };
+
+  const save = async () => {
+    if (!selectedAgent) { Alert.alert("Error", "Select a FOS agent"); return; }
+    const totalAmt = parseFloat(amount) || (parseFloat(cashAmt || "0") + parseFloat(onlineAmt || "0"));
+    if (!totalAmt) { Alert.alert("Error", "Enter amount"); return; }
+    setLoading(true);
+    try {
+      await apiReq("POST", "/api/admin/fos-depositions", {
+        agentId: selectedAgent.id,
+        loanNo: selectedCase?.loan_no || null,
+        customerName: selectedCase?.customer_name || null,
+        bkt: selectedCase?.bkt || null,
+        source: selectedCase?.source || "loan",
+        amount: totalAmt,
+        cashAmount: parseFloat(cashAmt || "0"),
+        onlineAmount: parseFloat(onlineAmt || "0"),
+        paymentMethod: method,
+        notes,
+      });
+      reset(); onSaved(); onClose();
+    } catch (e: any) { Alert.alert("Error", e.message); }
+    finally { setLoading(false); }
+  };
+
+  const agentCases = (paidCases || []).filter((c: any) => c.agent_id === selectedAgent?.id);
+
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={() => { reset(); onClose(); }}>
+      <View style={ms.overlay}>
+        <ScrollView style={[ms.sheet, { maxHeight: "92%" }]} showsVerticalScrollIndicator={false}>
+          <View style={ms.handle} />
+          <Text style={ms.title}>Add Deposition Record</Text>
+
+          <Text style={ms.label}>FOS Agent</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 4 }}>
+            <View style={{ flexDirection: "row", gap: 8 }}>
+              {(agents || []).filter((a: any) => a.role === "fos").map((a: any) => (
+                <Pressable key={a.id}
+                  style={[add.agentChip, selectedAgent?.id === a.id && add.agentChipActive]}
+                  onPress={() => { setSelectedAgent(a); setSelectedCase(null); }}>
+                  <Text style={[add.agentChipText, selectedAgent?.id === a.id && { color: "#fff" }]}>{a.name}</Text>
+                </Pressable>
+              ))}
+            </View>
+          </ScrollView>
+
+          {selectedAgent && agentCases.length > 0 && (
+            <>
+              <Text style={ms.label}>Case (Paid in last 24hr) — Optional</Text>
+              <ScrollView style={{ maxHeight: 140 }} showsVerticalScrollIndicator={false}>
+                {agentCases.map((c: any) => (
+                  <Pressable key={`${c.source}-${c.id}`}
+                    style={[add.caseRow, selectedCase?.id === c.id && selectedCase?.source === c.source && add.caseRowActive]}
+                    onPress={() => {
+                      setSelectedCase(selectedCase?.id === c.id ? null : c);
+                      setAmount(parseFloat(c.pos || 0).toString());
+                    }}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={[add.caseName, selectedCase?.id === c.id && { color: "#fff" }]} numberOfLines={1}>
+                        {c.customer_name}
+                      </Text>
+                      <Text style={[add.caseMeta, selectedCase?.id === c.id && { color: "rgba(255,255,255,0.75)" }]}>
+                        {c.loan_no} · BKT {c.bkt} · ₹{fmt(c.pos)}
+                      </Text>
+                    </View>
+                    {selectedCase?.id === c.id && <Ionicons name="checkmark-circle" size={18} color="#fff" />}
+                  </Pressable>
+                ))}
+              </ScrollView>
+            </>
+          )}
+
+          <Text style={ms.label}>Total Amount (₹)</Text>
+          <TextInput style={ms.input} placeholder="0" placeholderTextColor={Colors.textMuted}
+            value={amount} onChangeText={setAmount} keyboardType="numeric" />
+
+          <Text style={ms.label}>Payment Method</Text>
+          <View style={ms.segRow}>
+            {(["pending", "cash", "online", "both"] as const).map((m) => (
+              <Pressable key={m} style={[ms.seg, method === m && ms.segActive]} onPress={() => setMethod(m)}>
+                <Text style={[ms.segText, method === m && ms.segTextActive]}>
+                  {m === "pending" ? "⏳" : m === "cash" ? "💵" : m === "online" ? "📲" : "🔀"}
+                  {" "}{m.charAt(0).toUpperCase() + m.slice(1)}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+
+          {(method === "cash" || method === "both") && (
+            <>
+              <Text style={ms.label}>Cash Amount (₹)</Text>
+              <TextInput style={ms.input} placeholder="0" placeholderTextColor={Colors.textMuted}
+                value={cashAmt} onChangeText={setCashAmt} keyboardType="numeric" />
+            </>
+          )}
+          {(method === "online" || method === "both") && (
+            <>
+              <Text style={ms.label}>Online Amount (₹)</Text>
+              <TextInput style={ms.input} placeholder="0" placeholderTextColor={Colors.textMuted}
+                value={onlineAmt} onChangeText={setOnlineAmt} keyboardType="numeric" />
+            </>
+          )}
+
+          <Text style={ms.label}>Notes (optional)</Text>
+          <TextInput style={[ms.input, { minHeight: 56, textAlignVertical: "top" }]}
+            placeholder="Notes..." placeholderTextColor={Colors.textMuted}
+            value={notes} onChangeText={setNotes} multiline />
+
+          <View style={[ms.btnRow, { marginBottom: 32 }]}>
+            <Pressable style={ms.cancel} onPress={() => { reset(); onClose(); }}>
+              <Text style={ms.cancelTxt}>Cancel</Text>
+            </Pressable>
+            <Pressable style={[ms.save, loading && { opacity: 0.6 }]} onPress={save} disabled={loading}>
+              {loading ? <ActivityIndicator color="#fff" size="small" /> : <Text style={ms.saveTxt}>Save</Text>}
+            </Pressable>
+          </View>
         </ScrollView>
+      </View>
+    </Modal>
+  );
+}
+
+// ─── FOS Detail Modal ─────────────────────────────────────────────────────────
+function FosDetailModal({ visible, agentId, agentName, onClose, onUpdated }: any) {
+  const qc = useQueryClient();
+  const [payItem, setPayItem] = useState<any>(null);
+  const [screenshotUrl, setScreenshotUrl] = useState<string | null>(null);
+
+  const { data, isLoading, refetch } = useQuery({
+    queryKey: [`/api/admin/fos-depositions/${agentId}`],
+    queryFn: () => apiReq("GET", `/api/admin/fos-depositions/${agentId}`),
+    enabled: visible && !!agentId,
+  });
+
+  const depositions = data?.depositions || [];
+  const paidCases = data?.paidCases || [];
+
+  const handleDelete = (id: number) => {
+    Alert.alert("Delete", "Remove this deposition record?", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Delete", style: "destructive",
+        onPress: async () => {
+          try {
+            await apiReq("DELETE", `/api/admin/fos-depositions/${id}`);
+            refetch(); onUpdated();
+          } catch (e: any) { Alert.alert("Error", e.message); }
+        },
+      },
+    ]);
+  };
+
+  const payMethodColor = (m: string) => {
+    if (m === "cash") return Colors.success;
+    if (m === "online") return "#2563eb";
+    if (m === "both") return Colors.primary;
+    return Colors.warning;
+  };
+
+  const payMethodLabel = (m: string) => {
+    if (m === "cash") return "💵 Cash";
+    if (m === "online") return "📲 Online";
+    if (m === "both") return "🔀 Both";
+    return "⏳ Pending";
+  };
+
+  return (
+    <>
+      <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+        <View style={{ flex: 1, backgroundColor: Colors.background }}>
+          {/* Header */}
+          <View style={fd.header}>
+            <Pressable onPress={onClose} style={fd.backBtn}>
+              <Ionicons name="arrow-back" size={22} color={Colors.text} />
+            </Pressable>
+            <View style={{ flex: 1 }}>
+              <Text style={fd.headerTitle}>{agentName}</Text>
+              <Text style={fd.headerSub}>{depositions.length} depositions</Text>
+            </View>
+          </View>
+
+          {isLoading ? (
+            <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
+              <ActivityIndicator color={Colors.primary} size="large" />
+            </View>
+          ) : (
+            <FlatList
+              data={depositions}
+              keyExtractor={(item) => String(item.id)}
+              contentContainerStyle={{ padding: 16, gap: 10, paddingBottom: 40 }}
+              ListHeaderComponent={
+                paidCases.length > 0 ? (
+                  <View style={fd.paidSection}>
+                    <View style={fd.paidHeader}>
+                      <Ionicons name="checkmark-circle" size={16} color={Colors.success} />
+                      <Text style={fd.paidHeaderText}>Paid Cases (Last 24hr) — {paidCases.length}</Text>
+                    </View>
+                    {paidCases.map((c: any) => (
+                      <View key={`${c.source}-${c.id}`} style={fd.paidCaseRow}>
+                        <View style={{ flex: 1 }}>
+                          <Text style={fd.paidCaseName}>{c.customer_name}</Text>
+                          <Text style={fd.paidCaseMeta}>{c.loan_no} · BKT {c.bkt}</Text>
+                        </View>
+                        <Text style={fd.paidCaseAmt}>₹{fmt(c.pos)}</Text>
+                      </View>
+                    ))}
+                  </View>
+                ) : null
+              }
+              renderItem={({ item }) => {
+                const color = payMethodColor(item.payment_method);
+                const screenshotSrc = item.screenshot_url
+                  ? (item.screenshot_url.startsWith("http") ? item.screenshot_url : `${getApiUrl()}${item.screenshot_url}`)
+                  : null;
+                return (
+                  <View style={[fd.card, { borderLeftColor: color }]}>
+                    <View style={fd.cardTop}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={fd.cardName}>{item.customer_name || "—"}</Text>
+                        {item.loan_no && <Text style={fd.cardMeta}>{item.loan_no} · BKT {item.bkt || "—"}</Text>}
+                        <Text style={fd.cardDate}>{fmtDateTime(item.created_at)}</Text>
+                      </View>
+                      <View style={{ alignItems: "flex-end", gap: 6 }}>
+                        <Text style={[fd.cardAmt, { color }]}>₹{fmt(item.amount)}</Text>
+                        <Pressable onPress={() => handleDelete(item.id)}>
+                          <Ionicons name="trash-outline" size={16} color={Colors.danger} />
+                        </Pressable>
+                      </View>
+                    </View>
+
+                    <View style={fd.payRow}>
+                      <View style={[fd.payBadge, { backgroundColor: color + "20" }]}>
+                        <Text style={[fd.payBadgeText, { color }]}>{payMethodLabel(item.payment_method)}</Text>
+                      </View>
+                      {parseFloat(item.cash_amount) > 0 && (
+                        <Text style={fd.subAmt}>Cash: ₹{fmt(item.cash_amount)}</Text>
+                      )}
+                      {parseFloat(item.online_amount) > 0 && (
+                        <Text style={[fd.subAmt, { color: "#2563eb" }]}>Online: ₹{fmt(item.online_amount)}</Text>
+                      )}
+                    </View>
+
+                    {screenshotSrc && (
+                      <Pressable onPress={() => setScreenshotUrl(screenshotSrc)} style={fd.thumbRow}>
+                        <Image source={{ uri: screenshotSrc }} style={fd.thumb} resizeMode="cover" />
+                        <Text style={fd.thumbHint}>Tap to view screenshot</Text>
+                      </Pressable>
+                    )}
+
+                    {item.notes && <Text style={fd.notes}>{item.notes}</Text>}
+
+                    <Pressable style={fd.updatePayBtn} onPress={() => setPayItem(item)}>
+                      <Ionicons name="pencil-outline" size={14} color={Colors.primary} />
+                      <Text style={fd.updatePayText}>Update Payment</Text>
+                    </Pressable>
+                  </View>
+                );
+              }}
+              ListEmptyComponent={
+                <View style={fd.empty}>
+                  <Ionicons name="receipt-outline" size={44} color={Colors.textMuted} />
+                  <Text style={fd.emptyText}>No deposition records</Text>
+                </View>
+              }
+            />
+          )}
+        </View>
+      </Modal>
+
+      <PaymentModal
+        visible={!!payItem}
+        item={payItem}
+        onClose={() => setPayItem(null)}
+        onSaved={() => { refetch(); onUpdated(); setPayItem(null); }}
+      />
+
+      {/* Screenshot viewer */}
+      <Modal visible={!!screenshotUrl} transparent animationType="fade" onRequestClose={() => setScreenshotUrl(null)}>
+        <Pressable style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.92)", justifyContent: "center", alignItems: "center" }}
+          onPress={() => setScreenshotUrl(null)}>
+          <Image source={{ uri: screenshotUrl! }} style={{ width: "92%", height: "72%", borderRadius: 12 }} resizeMode="contain" />
+          <Pressable style={{ marginTop: 20, backgroundColor: "rgba(255,255,255,0.15)", paddingHorizontal: 28, paddingVertical: 10, borderRadius: 20 }}
+            onPress={() => setScreenshotUrl(null)}>
+            <Text style={{ color: "#fff", fontWeight: "700", fontSize: 15 }}>Close</Text>
+          </Pressable>
+        </Pressable>
+      </Modal>
+    </>
+  );
+}
+
+// ─── Import Modal ─────────────────────────────────────────────────────────────
+function ImportModal({ visible, onClose, onImported }: any) {
+  const [file, setFile] = useState<any>(null);
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState<any>(null);
+
+  const pickFile = async () => {
+    if (Platform.OS === "web") return;
+    try {
+      const r = await DocumentPicker.getDocumentAsync({ type: ["*/*"], copyToCacheDirectory: true });
+      if (!r.canceled && r.assets?.[0]) {
+        setFile({ uri: r.assets[0].uri, name: r.assets[0].name, type: r.assets[0].mimeType || "application/octet-stream" });
+      }
+    } catch { Alert.alert("Error", "Could not open file picker"); }
+  };
+
+  const doImport = async () => {
+    if (!file) { Alert.alert("Error", "Select a file first"); return; }
+    setLoading(true);
+    try {
+      const res = await uploadFile(file.uri, file.name, file.type, "/api/admin/import-depositions");
+      setResult(res); onImported();
+    } catch (e: any) { Alert.alert("Import Failed", e.message); }
+    finally { setLoading(false); }
+  };
+
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <View style={ms.overlay}>
+        <View style={ms.sheet}>
+          <View style={ms.handle} />
+          <Text style={ms.title}>Import Depositions Excel</Text>
+          <Text style={{ fontSize: 12, color: Colors.textSecondary, marginBottom: 12 }}>
+            Expected columns: FOS Name, Customer Name, Loan No, Amount, Amount Paid in Cash, Amount Paid Online, Date
+          </Text>
+
+          <Pressable style={imp.pickBtn} onPress={pickFile}>
+            <Ionicons name="folder-open" size={20} color={Colors.primary} />
+            <Text style={imp.pickText}>{file?.name ?? "Choose Excel File (.xlsx)"}</Text>
+            {file && <Pressable onPress={() => setFile(null)} hitSlop={8}><Ionicons name="close-circle" size={18} color={Colors.textMuted} /></Pressable>}
+          </Pressable>
+
+          {result && (
+            <View style={imp.result}>
+              <Text style={imp.resultTitle}>✅ Import Complete</Text>
+              <Text style={imp.resultText}>Imported: {result.imported} · Skipped: {result.skipped}</Text>
+              {result.errors?.length > 0 && <Text style={{ fontSize: 11, color: Colors.danger }}>{result.errors[0]}</Text>}
+            </View>
+          )}
+
+          <View style={ms.btnRow}>
+            <Pressable style={ms.cancel} onPress={() => { setFile(null); setResult(null); onClose(); }}>
+              <Text style={ms.cancelTxt}>Close</Text>
+            </Pressable>
+            <Pressable style={[ms.save, (!file || loading) && { opacity: 0.5 }]} onPress={doImport} disabled={!file || loading}>
+              {loading ? <ActivityIndicator color="#fff" size="small" /> : (
+                <><Ionicons name="cloud-upload" size={16} color="#fff" /><Text style={ms.saveTxt}> Import</Text></>
+              )}
+            </Pressable>
+          </View>
+        </View>
       </View>
     </Modal>
   );
@@ -123,14 +506,14 @@ function AddDepositModal({
 export default function AdminDepositionsScreen() {
   const insets = useSafeAreaInsets();
   const qc = useQueryClient();
-  const [tab, setTab] = useState<Tab>("required");
   const [addVisible, setAddVisible] = useState(false);
-  const [screenshotModalUrl, setScreenshotModalUrl] = useState<string | null>(null);
-  const [actionLoading, setActionLoading] = useState<number | null>(null);
+  const [importVisible, setImportVisible] = useState(false);
+  const [selectedFos, setSelectedFos] = useState<{ id: number; name: string } | null>(null);
+  const [downloading, setDownloading] = useState(false);
 
-  const { data: reqData, isLoading: reqLoading } = useQuery({
-    queryKey: ["/api/admin/required-deposits"],
-    queryFn: () => api.admin.getRequiredDeposits(),
+  const { data, isLoading, refetch } = useQuery({
+    queryKey: ["/api/admin/fos-depositions"],
+    queryFn: () => apiReq("GET", "/api/admin/fos-depositions"),
   });
 
   const { data: agentsData } = useQuery({
@@ -138,659 +521,313 @@ export default function AdminDepositionsScreen() {
     queryFn: () => api.admin.getAgents(),
   });
 
-  const required: any[] = reqData?.deposits || [];
-  const agents = (agentsData?.agents || []).filter((a: any) => a.role !== "admin");
+  const { data: paidCasesData } = useQuery({
+    queryKey: ["/api/admin/paid-cases-24h"],
+    queryFn: () => apiReq("GET", "/api/admin/cases").then((r: any) => ({
+      cases: (r.cases || []).filter((c: any) => {
+        if (c.status !== "Paid") return false;
+        const updated = new Date(c.updated_at || c.created_at || 0);
+        return Date.now() - updated.getTime() < 24 * 3600 * 1000;
+      })
+    })),
+  });
 
-  // ✅ Split into pending and history
-  const pendingDeposits = required.filter(
-    (d) => !d.cash_collected && !d.alarm_scheduled
-  );
-  const screenshotUploaded = required.filter(
-    (d) => d.screenshot_url && !d.alarm_scheduled && !d.cash_collected
-  );
-  const historyDeposits = required.filter(
-    (d) => d.cash_collected || d.alarm_scheduled
-  );
+  const grouped: any[] = data?.grouped || [];
+  const agents = agentsData?.agents || [];
+  const paidCases = paidCasesData?.cases || [];
 
-  const totalPending = required
-    .filter((d) => !d.cash_collected)
-    .reduce((s: number, d: any) => s + parseFloat(d.amount || 0), 0);
-  const totalCollected = historyDeposits
-    .reduce((s: number, d: any) => s + parseFloat(d.amount || 0), 0);
+  const totalAmount = grouped.reduce((s, g) => s + (g.totalAmount || 0), 0);
+  const totalCash = grouped.reduce((s, g) => s + (g.totalCash || 0), 0);
+  const totalOnline = grouped.reduce((s, g) => s + (g.totalOnline || 0), 0);
 
-  // ─── Handlers ───────────────────────────────────────────────────────────────
-  const handleDelete = (id: number) => {
-    Alert.alert("Delete Deposit", "Remove this required deposit?", [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Delete", style: "destructive",
-        onPress: async () => {
-          try {
-            await api.admin.deleteRequiredDeposit(id);
-            qc.invalidateQueries({ queryKey: ["/api/admin/required-deposits"] });
-          } catch (e: any) {
-            Alert.alert("Error", e.message);
-          }
-        },
-      },
-    ]);
-  };
-
-  const handleVerify = async (id: number) => {
-    setActionLoading(id);
+  const handleDownload = async () => {
+    setDownloading(true);
     try {
-      await api.admin.verifyScreenshot(id);
-      qc.invalidateQueries({ queryKey: ["/api/admin/required-deposits"] });
-      Alert.alert("✅ Verified", "Screenshot verified. FOS agent notified.");
-    } catch (e: any) {
-      Alert.alert("Error", e.message);
-    } finally {
-      setActionLoading(null);
-    }
+      const base = getApiUrl();
+      const token = Platform.OS !== "web" ? await tokenStore.get() : null;
+      const headers: Record<string, string> = {};
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+
+      if (Platform.OS === "web") {
+        const a = document.createElement("a");
+        a.href = `${base}/api/admin/fos-depositions-export`;
+        a.download = `FOS_Depositions_${new Date().toISOString().slice(0, 10)}.xlsx`;
+        a.click();
+      } else {
+        Alert.alert("Download", "Open Admin Panel on web to download the Excel file.");
+      }
+    } catch (e: any) { Alert.alert("Error", e.message); }
+    finally { setDownloading(false); }
   };
 
-  // ✅ NEW: Cash collected
-  const handleCashCollected = (id: number, agentName: string, amount: string) => {
-    const amtStr = parseFloat(amount).toLocaleString("en-IN");
-    Alert.alert(
-      "💵 Mark Cash Collected",
-      `Confirm ₹${amtStr} cash collected from ${agentName}?\n\nThis will stop all hourly reminders to the agent.`,
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Confirm",
-          onPress: async () => {
-            setActionLoading(id);
-            try {
-              await api.admin.markCashCollected(id);
-              qc.invalidateQueries({ queryKey: ["/api/admin/required-deposits"] });
-              Alert.alert("✅ Done", `Cash collected from ${agentName}. Reminders stopped.`);
-            } catch (e: any) {
-              Alert.alert("Error", e.message);
-            } finally {
-              setActionLoading(null);
-            }
-          },
-        },
-      ]
-    );
-  };
-
-  const showScreenshot = (url: string) => {
-    const fullUrl = url.startsWith("http") ? url : `${getApiUrl()}${url}`;
-    setScreenshotModalUrl(fullUrl);
-  };
-
-  // ─── Deposit Card ────────────────────────────────────────────────────────────
-  const renderDepositCard = ({ item }: { item: any }) => {
-    const hasScreenshot = !!item.screenshot_url;
-    const screenshotSrc = hasScreenshot
-      ? (item.screenshot_url.startsWith("http")
-          ? item.screenshot_url
-          : `${getApiUrl()}${item.screenshot_url}`)
-      : null;
-    const isVerified = item.alarm_scheduled === true;
-    const isCashCollected = item.cash_collected === true;
-    const isLoading = actionLoading === item.id;
-
-    // Border color logic
-    let borderColor = Colors.warning;
-    if (isCashCollected) borderColor = Colors.success;
-    else if (isVerified) borderColor = Colors.info;
-    else if (hasScreenshot) borderColor = Colors.primary;
-
-    return (
-      <View style={[styles.reqCard, { borderLeftColor: borderColor }]}>
-
-        {/* ── Top row: avatar + info + amount + delete ── */}
-        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
-          <View style={styles.reqLeft}>
-            <View style={styles.agentAvatar}>
-              <Ionicons name="person" size={18} color="#fff" />
-            </View>
-            <View style={styles.reqInfo}>
-              <Text style={styles.reqAgent}>{item.agent_name}</Text>
-              {item.description
-                ? <Text style={styles.reqDesc}>{item.description}</Text>
-                : null}
-              <Text style={styles.reqDate}>
-                Added: {item.created_at
-                  ? new Date(item.created_at).toLocaleDateString("en-IN")
-                  : ""}
-              </Text>
-              {hasScreenshot && item.screenshot_uploaded_at && (
-                <Text style={[styles.reqDate, { color: Colors.info }]}>
-                  Screenshot: {new Date(item.screenshot_uploaded_at).toLocaleString("en-IN", {
-                    day: "2-digit", month: "short",
-                    hour: "2-digit", minute: "2-digit",
-                  })}
-                </Text>
-              )}
-              {isCashCollected && item.cash_collected_at && (
-                <Text style={[styles.reqDate, { color: Colors.success }]}>
-                  Collected: {new Date(item.cash_collected_at).toLocaleString("en-IN", {
-                    day: "2-digit", month: "short",
-                    hour: "2-digit", minute: "2-digit",
-                  })}
-                </Text>
-              )}
-            </View>
-          </View>
-          <View style={styles.reqRight}>
-            <Text style={styles.reqAmount}>
-              ₹{parseFloat(item.amount).toLocaleString("en-IN")}
-            </Text>
-            {!isCashCollected && (
-              <Pressable onPress={() => handleDelete(item.id)} style={styles.deleteBtn}>
-                <Ionicons name="trash-outline" size={18} color={Colors.danger} />
-              </Pressable>
-            )}
-          </View>
-        </View>
-
-        {/* ── Status badges ── */}
-        <View style={styles.badgesRow}>
-          {isCashCollected && (
-            <View style={[styles.statusBadge, { backgroundColor: Colors.success + "20" }]}>
-              <Ionicons name="cash" size={12} color={Colors.success} />
-              <Text style={[styles.statusBadgeText, { color: Colors.success }]}>
-                Cash Collected
-              </Text>
-            </View>
-          )}
-          {isVerified && (
-            <View style={[styles.statusBadge, { backgroundColor: Colors.info + "20" }]}>
-              <Ionicons name="shield-checkmark" size={12} color={Colors.info} />
-              <Text style={[styles.statusBadgeText, { color: Colors.info }]}>
-                Screenshot Verified
-              </Text>
-            </View>
-          )}
-          {!hasScreenshot && !isCashCollected && (
-            <View style={[styles.statusBadge, { backgroundColor: Colors.warning + "20" }]}>
-              <Ionicons name="time-outline" size={12} color={Colors.warning} />
-              <Text style={[styles.statusBadgeText, { color: Colors.warning }]}>
-                Awaiting Screenshot
-              </Text>
-            </View>
-          )}
-        </View>
-
-        {/* ── Screenshot thumbnail ── */}
-        {hasScreenshot && screenshotSrc && (
-          <View style={styles.screenshotRow}>
-            <Pressable
-              onPress={() => showScreenshot(item.screenshot_url)}
-              style={styles.thumbWrap}
-            >
-              <Image source={{ uri: screenshotSrc }} style={styles.thumb} resizeMode="cover" />
-              <View style={styles.thumbOverlay}>
-                <Ionicons name="eye-outline" size={16} color="#fff" />
-              </View>
-            </Pressable>
-            <View style={styles.verifyCol}>
-              {!isVerified && !isCashCollected && (
-                <Pressable
-                  style={[styles.verifyBtn, isLoading && { opacity: 0.6 }]}
-                  onPress={() => handleVerify(item.id)}
-                  disabled={isLoading}
-                >
-                  {isLoading
-                    ? <ActivityIndicator color="#fff" size="small" />
-                    : <>
-                        <Ionicons name="shield-checkmark-outline" size={14} color="#fff" />
-                        <Text style={styles.verifyBtnText}>Verify Screenshot</Text>
-                      </>
-                  }
-                </Pressable>
-              )}
-              {isVerified && !isCashCollected && (
-                <View style={styles.verifiedBadge}>
-                  <Ionicons name="checkmark-circle" size={14} color={Colors.success} />
-                  <Text style={styles.verifiedText}>Screenshot Verified</Text>
-                </View>
-              )}
-              {isCashCollected && (
-                <View style={styles.verifiedBadge}>
-                  <Ionicons name="checkmark-circle" size={14} color={Colors.success} />
-                  <Text style={styles.verifiedText}>Cash Collected ✓</Text>
-                </View>
-              )}
-              <Text style={styles.verifyHint}>Check date on screenshot</Text>
-            </View>
-          </View>
-        )}
-
-        {!hasScreenshot && !isCashCollected && (
-          <View style={styles.noScreenshot}>
-            <Ionicons name="camera-outline" size={13} color={Colors.textMuted} />
-            <Text style={styles.noScreenshotText}>Awaiting payment screenshot</Text>
-          </View>
-        )}
-
-        {/* ✅ Cash Collected button — shown when not yet collected */}
-        {!isCashCollected && (
-          <Pressable
-            style={[
-              styles.cashCollectedBtn,
-              isLoading && { opacity: 0.6 },
-            ]}
-            onPress={() => handleCashCollected(item.id, item.agent_name, item.amount)}
-            disabled={isLoading}
-          >
-            {isLoading
-              ? <ActivityIndicator color="#fff" size="small" />
-              : <>
-                  <Ionicons name="cash-outline" size={16} color="#fff" />
-                  <Text style={styles.cashCollectedBtnText}>Mark Cash Collected</Text>
-                </>
-            }
-          </Pressable>
-        )}
-      </View>
-    );
-  };
-
-  // ─── History Card ────────────────────────────────────────────────────────────
-  const renderHistoryCard = ({ item }: { item: any }) => {
-    const screenshotSrc = item.screenshot_url
-      ? (item.screenshot_url.startsWith("http")
-          ? item.screenshot_url
-          : `${getApiUrl()}${item.screenshot_url}`)
-      : null;
-
-    return (
-      <View style={styles.histCard}>
-        <View style={styles.histHeader}>
-          <View style={styles.amountBadge}>
-            <Text style={styles.amountText}>
-              ₹{parseFloat(item.amount).toLocaleString("en-IN")}
-            </Text>
-          </View>
-          <Text style={styles.histDate}>
-            {item.cash_collected_at
-              ? new Date(item.cash_collected_at).toLocaleDateString("en-IN")
-              : item.created_at
-                ? new Date(item.created_at).toLocaleDateString("en-IN")
-                : ""}
-          </Text>
-        </View>
-
-        {item.agent_name && (
-          <View style={styles.agentTag}>
-            <MaterialIcons name="person" size={13} color={Colors.primary} />
-            <Text style={styles.agentTagText}>{item.agent_name}</Text>
-          </View>
-        )}
-
-        {item.description && (
-          <Text style={styles.histNotes}>{item.description}</Text>
-        )}
-
-        {screenshotSrc && (
-          <Pressable
-            onPress={() => showScreenshot(item.screenshot_url)}
-            style={[styles.thumbWrap, { marginTop: 8 }]}
-          >
-            <Image source={{ uri: screenshotSrc }} style={styles.thumb} resizeMode="cover" />
-            <View style={styles.thumbOverlay}>
-              <Ionicons name="eye-outline" size={16} color="#fff" />
-            </View>
-          </Pressable>
-        )}
-
-        <View style={{ flexDirection: "row", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
-          {item.cash_collected && (
-            <View style={[styles.statusBadge, { backgroundColor: Colors.success + "20" }]}>
-              <Ionicons name="cash" size={12} color={Colors.success} />
-              <Text style={[styles.statusBadgeText, { color: Colors.success }]}>
-                Cash Collected
-              </Text>
-            </View>
-          )}
-          {item.alarm_scheduled && (
-            <View style={[styles.statusBadge, { backgroundColor: Colors.info + "20" }]}>
-              <Ionicons name="shield-checkmark" size={12} color={Colors.info} />
-              <Text style={[styles.statusBadgeText, { color: Colors.info }]}>
-                Screenshot Verified
-              </Text>
-            </View>
-          )}
-        </View>
-      </View>
-    );
-  };
-
-  // ─── Render ──────────────────────────────────────────────────────────────────
   return (
     <>
-      <View style={[styles.root, { paddingTop: Platform.OS === "web" ? 67 : 0 }]}>
+      <View style={[scr.root, { paddingTop: Platform.OS === "web" ? 67 : 0 }]}>
 
-        {/* Summary row */}
-        <View style={styles.summaryRow}>
-          <View style={[styles.summaryCard, { borderTopColor: Colors.warning }]}>
-            <Ionicons name="time" size={20} color={Colors.warning} />
-            <Text style={styles.summaryNum}>{pendingDeposits.length}</Text>
-            <Text style={styles.summaryLabel}>Pending</Text>
-          </View>
-          <View style={[styles.summaryCard, { borderTopColor: Colors.info }]}>
-            <Ionicons name="camera" size={20} color={Colors.info} />
-            <Text style={styles.summaryNum}>{screenshotUploaded.length}</Text>
-            <Text style={styles.summaryLabel}>To Verify</Text>
-          </View>
-          <View style={[styles.summaryCard, { borderTopColor: Colors.success }]}>
-            <Ionicons name="checkmark-circle" size={20} color={Colors.success} />
-            <Text style={styles.summaryNum}>
-              ₹{totalCollected.toLocaleString("en-IN")}
-            </Text>
-            <Text style={styles.summaryLabel}>Collected</Text>
-          </View>
-        </View>
-
-        {/* Tabs */}
-        <View style={styles.tabs}>
-          <Pressable
-            style={[styles.tabBtn, tab === "required" && styles.tabBtnActive]}
-            onPress={() => setTab("required")}
-          >
-            <Ionicons
-              name="time" size={16}
-              color={tab === "required" ? "#fff" : Colors.textSecondary}
-            />
-            <Text style={[styles.tabText, tab === "required" && styles.tabTextActive]}>
-              Required
-            </Text>
-            {required.filter((d) => !d.cash_collected).length > 0 && (
-              <View style={[
-                styles.badge,
-                tab === "required" && { backgroundColor: "rgba(255,255,255,0.3)" },
-              ]}>
-                <Text style={[
-                  styles.badgeText,
-                  tab === "required" && { color: "#fff" },
-                ]}>
-                  {required.filter((d) => !d.cash_collected).length}
-                </Text>
-              </View>
-            )}
+        {/* ── Top Action Bar ── */}
+        <View style={scr.actionBar}>
+          <Pressable style={scr.actionBtn} onPress={() => setImportVisible(true)}>
+            <Ionicons name="cloud-upload-outline" size={18} color={Colors.primary} />
+            <Text style={scr.actionBtnText}>Import</Text>
           </Pressable>
-
-          <Pressable
-            style={[styles.tabBtn, tab === "history" && styles.tabBtnActive]}
-            onPress={() => setTab("history")}
-          >
-            <Ionicons
-              name="checkmark-circle" size={16}
-              color={tab === "history" ? "#fff" : Colors.textSecondary}
-            />
-            <Text style={[styles.tabText, tab === "history" && styles.tabTextActive]}>
-              Collected
-            </Text>
-            {historyDeposits.length > 0 && (
-              <View style={[
-                styles.badge,
-                tab === "history" && { backgroundColor: "rgba(255,255,255,0.3)" },
-              ]}>
-                <Text style={[
-                  styles.badgeText,
-                  tab === "history" && { color: "#fff" },
-                ]}>
-                  {historyDeposits.length}
-                </Text>
-              </View>
-            )}
+          <Pressable style={scr.actionBtn} onPress={handleDownload} disabled={downloading}>
+            {downloading
+              ? <ActivityIndicator size="small" color={Colors.success} />
+              : <Ionicons name="download-outline" size={18} color={Colors.success} />}
+            <Text style={[scr.actionBtnText, { color: Colors.success }]}>Export Excel</Text>
+          </Pressable>
+          <Pressable style={[scr.actionBtn, { backgroundColor: Colors.primary }]} onPress={() => setAddVisible(true)}>
+            <Ionicons name="add" size={18} color="#fff" />
+            <Text style={[scr.actionBtnText, { color: "#fff" }]}>Add</Text>
           </Pressable>
         </View>
 
-        {tab === "required" ? (
-          <>
-            <Pressable style={styles.addBtn} onPress={() => setAddVisible(true)}>
-              <Ionicons name="add-circle" size={20} color="#fff" />
-              <Text style={styles.addBtnText}>Add Required Deposit</Text>
-            </Pressable>
+        {/* ── Summary Cards ── */}
+        <View style={scr.summaryRow}>
+          <View style={[scr.sumCard, { borderTopColor: Colors.primary }]}>
+            <Text style={scr.sumNum}>₹{fmt(totalAmount)}</Text>
+            <Text style={scr.sumLabel}>Total</Text>
+          </View>
+          <View style={[scr.sumCard, { borderTopColor: Colors.success }]}>
+            <Ionicons name="cash-outline" size={16} color={Colors.success} />
+            <Text style={[scr.sumNum, { color: Colors.success }]}>₹{fmt(totalCash)}</Text>
+            <Text style={scr.sumLabel}>Cash</Text>
+          </View>
+          <View style={[scr.sumCard, { borderTopColor: "#2563eb" }]}>
+            <Ionicons name="phone-portrait-outline" size={16} color="#2563eb" />
+            <Text style={[scr.sumNum, { color: "#2563eb" }]}>₹{fmt(totalOnline)}</Text>
+            <Text style={scr.sumLabel}>Online</Text>
+          </View>
+        </View>
 
-            {reqLoading ? (
-              <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
-                <ActivityIndicator color={Colors.primary} size="large" />
-              </View>
-            ) : (
-              <FlatList
-                data={required.filter((d) => !d.cash_collected)}
-                keyExtractor={(item) => String(item.id)}
-                contentContainerStyle={[styles.list, { paddingBottom: insets.bottom + 24 }]}
-                renderItem={renderDepositCard}
-                ListEmptyComponent={
-                  <View style={styles.empty}>
-                    <Ionicons name="wallet-outline" size={52} color={Colors.textMuted} />
-                    <Text style={styles.emptyTitle}>No Pending Deposits</Text>
-                    <Text style={styles.emptyText}>
-                      All deposits collected or no deposits assigned yet.
-                    </Text>
-                  </View>
-                }
-              />
-            )}
-          </>
+        {/* ── FOS List ── */}
+        {isLoading ? (
+          <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
+            <ActivityIndicator color={Colors.primary} size="large" />
+          </View>
         ) : (
           <FlatList
-            data={historyDeposits}
-            keyExtractor={(item) => String(item.id)}
-            contentContainerStyle={[styles.list, { paddingBottom: insets.bottom + 24 }]}
-            renderItem={renderHistoryCard}
+            data={grouped}
+            keyExtractor={(item) => String(item.agentId || item.agentName)}
+            contentContainerStyle={[scr.list, { paddingBottom: insets.bottom + 24 }]}
+            renderItem={({ item }) => {
+              const pending = item.depositions.filter((d: any) => d.payment_method === "pending").length;
+              return (
+                <Pressable style={scr.fosCard} onPress={() => setSelectedFos({ id: item.agentId, name: item.agentName })}>
+                  <View style={scr.fosAvatar}>
+                    <Text style={scr.fosInitial}>{(item.agentName || "?").charAt(0).toUpperCase()}</Text>
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={scr.fosName}>{item.agentName}</Text>
+                    <View style={scr.fosMetaRow}>
+                      <Text style={scr.fosMeta}>{item.depositions.length} records</Text>
+                      {pending > 0 && (
+                        <View style={scr.pendingPill}>
+                          <Text style={scr.pendingPillText}>{pending} pending</Text>
+                        </View>
+                      )}
+                    </View>
+                    <View style={scr.amtRow}>
+                      <Text style={scr.fosTotal}>₹{fmt(item.totalAmount)}</Text>
+                      {item.totalCash > 0 && <Text style={scr.cashAmt}>💵 ₹{fmt(item.totalCash)}</Text>}
+                      {item.totalOnline > 0 && <Text style={scr.onlineAmt}>📲 ₹{fmt(item.totalOnline)}</Text>}
+                    </View>
+                  </View>
+                  <Ionicons name="chevron-forward" size={18} color={Colors.textMuted} />
+                </Pressable>
+              );
+            }}
             ListEmptyComponent={
-              reqLoading ? (
-                <View style={{ padding: 60, alignItems: "center" }}>
-                  <ActivityIndicator color={Colors.primary} size="large" />
-                </View>
-              ) : (
-                <View style={styles.empty}>
-                  <Ionicons name="checkmark-circle-outline" size={52} color={Colors.textMuted} />
-                  <Text style={styles.emptyTitle}>No Collected Deposits</Text>
-                  <Text style={styles.emptyText}>
-                    Deposits marked as cash collected will appear here.
-                  </Text>
-                </View>
-              )
+              <View style={scr.empty}>
+                <MaterialIcons name="receipt-long" size={52} color={Colors.textMuted} />
+                <Text style={scr.emptyTitle}>No Depositions Yet</Text>
+                <Text style={scr.emptyText}>Import an Excel or add depositions manually</Text>
+              </View>
             }
           />
         )}
       </View>
 
-      {/* Full-screen screenshot modal */}
-      <Modal
-        visible={!!screenshotModalUrl}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setScreenshotModalUrl(null)}
-      >
-        <Pressable
-          style={{
-            flex: 1, backgroundColor: "rgba(0,0,0,0.92)",
-            justifyContent: "center", alignItems: "center",
-          }}
-          onPress={() => setScreenshotModalUrl(null)}
-        >
-          <Image
-            source={{ uri: screenshotModalUrl! }}
-            style={{ width: "92%", height: "75%", borderRadius: 12 }}
-            resizeMode="contain"
-          />
-          <Pressable
-            onPress={() => setScreenshotModalUrl(null)}
-            style={{
-              marginTop: 20, backgroundColor: "rgba(255,255,255,0.15)",
-              paddingHorizontal: 28, paddingVertical: 10, borderRadius: 20,
-            }}
-          >
-            <Text style={{ color: "#fff", fontWeight: "700", fontSize: 15 }}>Close</Text>
-          </Pressable>
-        </Pressable>
-      </Modal>
+      {/* Modals */}
+      {selectedFos && (
+        <FosDetailModal
+          visible={!!selectedFos}
+          agentId={selectedFos.id}
+          agentName={selectedFos.name}
+          onClose={() => setSelectedFos(null)}
+          onUpdated={() => refetch()}
+        />
+      )}
 
-      <AddDepositModal
+      <AddDepositionModal
         visible={addVisible}
         onClose={() => setAddVisible(false)}
+        onSaved={() => { refetch(); qc.invalidateQueries({ queryKey: ["/api/admin/fos-depositions"] }); }}
         agents={agents}
+        paidCases={paidCases}
+      />
+
+      <ImportModal
+        visible={importVisible}
+        onClose={() => setImportVisible(false)}
+        onImported={() => { refetch(); }}
       />
     </>
   );
 }
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
-const styles = StyleSheet.create({
+const scr = StyleSheet.create({
   root: { flex: 1, backgroundColor: Colors.background },
-  summaryRow: { flexDirection: "row", gap: 10, padding: 16, paddingBottom: 0 },
-  summaryCard: {
+  actionBar: { flexDirection: "row", gap: 8, padding: 16, paddingBottom: 8 },
+  actionBtn: {
+    flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6,
+    backgroundColor: Colors.surface, borderRadius: 12, paddingVertical: 10,
+    shadowColor: "#000", shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 1,
+  },
+  actionBtnText: { fontSize: 13, fontWeight: "700", color: Colors.primary },
+  summaryRow: { flexDirection: "row", gap: 10, paddingHorizontal: 16, paddingBottom: 12 },
+  sumCard: {
     flex: 1, backgroundColor: Colors.surface, borderRadius: 12, padding: 12,
-    borderTopWidth: 3, alignItems: "center", gap: 4,
-    shadowColor: "#000", shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.06, shadowRadius: 8, elevation: 2,
+    borderTopWidth: 3, alignItems: "center", gap: 2,
   },
-  summaryNum: { fontSize: 13, fontWeight: "800", color: Colors.text },
-  summaryLabel: { fontSize: 10, color: Colors.textSecondary, fontWeight: "600" },
-  tabs: { flexDirection: "row", margin: 16, marginBottom: 0, gap: 8 },
-  tabBtn: {
-    flex: 1, paddingVertical: 12, borderRadius: 12,
-    backgroundColor: Colors.surfaceAlt, alignItems: "center",
-    flexDirection: "row", justifyContent: "center", gap: 6,
+  sumNum: { fontSize: 13, fontWeight: "800", color: Colors.text },
+  sumLabel: { fontSize: 10, color: Colors.textSecondary, fontWeight: "600" },
+  list: { padding: 16, paddingTop: 0, gap: 10 },
+  fosCard: {
+    backgroundColor: Colors.surface, borderRadius: 16, padding: 16,
+    flexDirection: "row", alignItems: "center", gap: 12,
+    shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 8, elevation: 2,
   },
-  tabBtnActive: { backgroundColor: Colors.primary },
-  tabText: { fontSize: 13, fontWeight: "700", color: Colors.textSecondary },
-  tabTextActive: { color: "#fff" },
-  badge: {
-    backgroundColor: Colors.border, borderRadius: 10,
-    paddingHorizontal: 6, paddingVertical: 1, minWidth: 20, alignItems: "center",
-  },
-  badgeText: { fontSize: 11, fontWeight: "700", color: Colors.textSecondary },
-  addBtn: {
-    flexDirection: "row", alignItems: "center", gap: 8,
-    margin: 16, marginBottom: 8, backgroundColor: Colors.primary,
-    borderRadius: 12, padding: 14, justifyContent: "center",
-  },
-  addBtnText: { color: "#fff", fontSize: 15, fontWeight: "700" },
-  list: { padding: 16, paddingTop: 8, gap: 10 },
-  reqCard: {
-    backgroundColor: Colors.surface, borderRadius: 14, padding: 14,
-    flexDirection: "column", gap: 0,
-    shadowColor: "#000", shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05, shadowRadius: 6, elevation: 2,
-    borderLeftWidth: 4, borderLeftColor: Colors.warning,
-  },
-  reqLeft: { flexDirection: "row", alignItems: "center", gap: 12, flex: 1 },
-  agentAvatar: {
-    width: 38, height: 38, borderRadius: 19,
+  fosAvatar: {
+    width: 46, height: 46, borderRadius: 23,
     backgroundColor: Colors.primary, alignItems: "center", justifyContent: "center",
   },
-  reqInfo: { flex: 1 },
-  reqAgent: { fontSize: 14, fontWeight: "700", color: Colors.text },
-  reqDesc: { fontSize: 12, color: Colors.textSecondary, marginTop: 2 },
-  reqDate: { fontSize: 11, color: Colors.textMuted, marginTop: 2 },
-  reqRight: { alignItems: "flex-end", gap: 8 },
-  reqAmount: { fontSize: 18, fontWeight: "800", color: Colors.warning },
-  deleteBtn: { padding: 4 },
-  badgesRow: { flexDirection: "row", gap: 6, flexWrap: "wrap", marginTop: 8 },
-  statusBadge: {
-    flexDirection: "row", alignItems: "center", gap: 4,
-    paddingHorizontal: 8, paddingVertical: 4, borderRadius: 20,
+  fosInitial: { fontSize: 18, fontWeight: "800", color: "#fff" },
+  fosName: { fontSize: 15, fontWeight: "700", color: Colors.text },
+  fosMetaRow: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 2 },
+  fosMeta: { fontSize: 12, color: Colors.textSecondary },
+  pendingPill: {
+    backgroundColor: Colors.warning + "20", paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10,
   },
-  statusBadgeText: { fontSize: 11, fontWeight: "700" },
-  screenshotRow: {
-    flexDirection: "row", gap: 12, marginTop: 10, alignItems: "flex-start",
-  },
-  thumbWrap: {
-    position: "relative", width: 72, height: 72,
-    borderRadius: 8, overflow: "hidden",
-  },
-  thumb: { width: 72, height: 72, borderRadius: 8 },
-  thumbOverlay: {
-    position: "absolute", bottom: 0, left: 0, right: 0, height: 24,
-    backgroundColor: "rgba(0,0,0,0.45)", alignItems: "center", justifyContent: "center",
-  },
-  verifyCol: { flex: 1, gap: 6, justifyContent: "center" },
-  verifiedBadge: { flexDirection: "row", alignItems: "center", gap: 6 },
-  verifiedText: { fontSize: 13, fontWeight: "700", color: Colors.success },
-  verifyBtn: {
-    flexDirection: "row", alignItems: "center", gap: 6,
-    backgroundColor: Colors.info, borderRadius: 8,
-    paddingVertical: 8, paddingHorizontal: 12, alignSelf: "flex-start",
-  },
-  verifyBtnText: { fontSize: 12, fontWeight: "700", color: "#fff" },
-  verifyHint: { fontSize: 10, color: Colors.textMuted, lineHeight: 14 },
-  noScreenshot: {
-    flexDirection: "row", alignItems: "center", gap: 6, marginTop: 8,
-  },
-  noScreenshotText: { fontSize: 11, color: Colors.textMuted, fontStyle: "italic" },
-
-  // ✅ NEW: Cash collected button
-  cashCollectedBtn: {
-    flexDirection: "row", alignItems: "center", justifyContent: "center",
-    gap: 8, backgroundColor: Colors.success, borderRadius: 10,
-    paddingVertical: 11, paddingHorizontal: 16, marginTop: 12,
-  },
-  cashCollectedBtnText: { fontSize: 14, fontWeight: "700", color: "#fff" },
-
-  histCard: {
-    backgroundColor: Colors.surface, borderRadius: 14, padding: 14, gap: 6,
-    shadowColor: "#000", shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.04, shadowRadius: 6, elevation: 1,
-    borderLeftWidth: 4, borderLeftColor: Colors.success,
-  },
-  histHeader: {
-    flexDirection: "row", justifyContent: "space-between", alignItems: "center",
-  },
-  amountBadge: {
-    backgroundColor: Colors.success + "15",
-    paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20,
-  },
-  amountText: { fontSize: 16, fontWeight: "800", color: Colors.success },
-  histDate: { fontSize: 12, color: Colors.textSecondary },
-  agentTag: { flexDirection: "row", alignItems: "center", gap: 4 },
-  agentTagText: { fontSize: 12, fontWeight: "600", color: Colors.primary },
-  histNotes: { fontSize: 12, color: Colors.textSecondary, fontStyle: "italic" },
-  empty: {
-    flex: 1, justifyContent: "center", alignItems: "center",
-    gap: 8, paddingVertical: 60, paddingHorizontal: 32,
-  },
-  emptyTitle: { fontSize: 16, color: Colors.textMuted, fontWeight: "700" },
+  pendingPillText: { fontSize: 10, fontWeight: "700", color: Colors.warning },
+  amtRow: { flexDirection: "row", alignItems: "center", gap: 10, marginTop: 4 },
+  fosTotal: { fontSize: 16, fontWeight: "800", color: Colors.text },
+  cashAmt: { fontSize: 12, fontWeight: "600", color: Colors.success },
+  onlineAmt: { fontSize: 12, fontWeight: "600", color: "#2563eb" },
+  empty: { flex: 1, justifyContent: "center", alignItems: "center", gap: 8, paddingVertical: 60 },
+  emptyTitle: { fontSize: 16, fontWeight: "700", color: Colors.textMuted },
   emptyText: { fontSize: 13, color: Colors.textMuted, textAlign: "center" },
 });
 
-const modalStyles = StyleSheet.create({
+const ms = StyleSheet.create({
   overlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" },
   sheet: {
-    backgroundColor: Colors.surface, borderTopLeftRadius: 24,
-    borderTopRightRadius: 24, padding: 24, maxHeight: "90%",
+    backgroundColor: Colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24,
+    padding: 24, gap: 10,
   },
-  handle: {
-    width: 40, height: 4, backgroundColor: Colors.border,
-    borderRadius: 2, alignSelf: "center", marginBottom: 12,
+  handle: { width: 40, height: 4, backgroundColor: Colors.border, borderRadius: 2, alignSelf: "center", marginBottom: 8 },
+  title: { fontSize: 20, fontWeight: "700", color: Colors.text, marginBottom: 4 },
+  label: { fontSize: 11, fontWeight: "700", color: Colors.textSecondary, textTransform: "uppercase", letterSpacing: 0.5 },
+  infoRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", backgroundColor: Colors.surfaceAlt, borderRadius: 10, padding: 12 },
+  infoName: { fontSize: 14, fontWeight: "600", color: Colors.text },
+  infoAmt: { fontSize: 16, fontWeight: "800", color: Colors.warning },
+  segRow: { flexDirection: "row", gap: 8 },
+  seg: {
+    flex: 1, paddingVertical: 10, borderRadius: 10, alignItems: "center",
+    backgroundColor: Colors.surfaceAlt, borderWidth: 1.5, borderColor: Colors.border,
   },
-  title: { fontSize: 20, fontWeight: "700", color: Colors.text },
-  subtitle: { fontSize: 13, color: Colors.textSecondary, marginBottom: 12 },
-  label: {
-    fontSize: 12, fontWeight: "700", color: Colors.textSecondary,
-    textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6, marginTop: 8,
-  },
-  agentItem: {
-    flexDirection: "row", alignItems: "center", gap: 10, padding: 12,
-    borderRadius: 10, borderWidth: 1, borderColor: Colors.border,
-    backgroundColor: Colors.surfaceAlt,
-  },
-  agentItemSelected: { backgroundColor: Colors.primary, borderColor: Colors.primary },
-  agentItemText: { flex: 1, fontSize: 14, fontWeight: "600", color: Colors.text },
+  segActive: { backgroundColor: Colors.primary + "15", borderColor: Colors.primary },
+  segText: { fontSize: 12, fontWeight: "700", color: Colors.textSecondary },
+  segTextActive: { color: Colors.primary },
   input: {
     borderWidth: 1, borderColor: Colors.border, borderRadius: 12, padding: 14,
-    fontSize: 15, color: Colors.text, backgroundColor: Colors.surfaceAlt, marginBottom: 4,
+    fontSize: 15, color: Colors.text, backgroundColor: Colors.surfaceAlt,
   },
   btnRow: { flexDirection: "row", gap: 12, marginTop: 8 },
-  cancelBtn: {
-    flex: 1, paddingVertical: 14, borderRadius: 12,
-    borderWidth: 1, borderColor: Colors.border, alignItems: "center",
+  cancel: { flex: 1, paddingVertical: 14, borderRadius: 12, borderWidth: 1, borderColor: Colors.border, alignItems: "center" },
+  cancelTxt: { fontSize: 15, fontWeight: "600", color: Colors.textSecondary },
+  save: { flex: 2, paddingVertical: 14, borderRadius: 12, backgroundColor: Colors.primary, alignItems: "center", flexDirection: "row", justifyContent: "center", gap: 6 },
+  saveTxt: { fontSize: 15, fontWeight: "700", color: "#fff" },
+});
+
+const add = StyleSheet.create({
+  agentChip: {
+    paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20,
+    backgroundColor: Colors.surfaceAlt, borderWidth: 1.5, borderColor: Colors.border,
   },
-  cancelText: { fontSize: 15, fontWeight: "600", color: Colors.textSecondary },
-  saveBtn: {
-    flex: 2, paddingVertical: 14, borderRadius: 12,
-    backgroundColor: Colors.primary, alignItems: "center",
+  agentChipActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
+  agentChipText: { fontSize: 13, fontWeight: "700", color: Colors.text },
+  caseRow: {
+    flexDirection: "row", alignItems: "center", padding: 12, borderRadius: 10,
+    backgroundColor: Colors.surfaceAlt, marginBottom: 6, borderWidth: 1, borderColor: Colors.border,
   },
-  saveText: { fontSize: 15, fontWeight: "700", color: "#fff" },
+  caseRowActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
+  caseName: { fontSize: 13, fontWeight: "700", color: Colors.text },
+  caseMeta: { fontSize: 11, color: Colors.textSecondary, marginTop: 2 },
+});
+
+const fd = StyleSheet.create({
+  header: {
+    flexDirection: "row", alignItems: "center", gap: 12,
+    padding: 16, paddingTop: Platform.OS === "web" ? 67 : 56,
+    backgroundColor: Colors.surface, borderBottomWidth: 1, borderBottomColor: Colors.border,
+  },
+  backBtn: { padding: 4 },
+  headerTitle: { fontSize: 17, fontWeight: "800", color: Colors.text },
+  headerSub: { fontSize: 12, color: Colors.textSecondary },
+  paidSection: {
+    backgroundColor: Colors.success + "08", borderRadius: 12, padding: 12,
+    borderWidth: 1, borderColor: Colors.success + "30", marginBottom: 12,
+  },
+  paidHeader: { flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 8 },
+  paidHeaderText: { fontSize: 13, fontWeight: "700", color: Colors.success },
+  paidCaseRow: {
+    flexDirection: "row", alignItems: "center", paddingVertical: 8,
+    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: Colors.success + "30",
+  },
+  paidCaseName: { fontSize: 13, fontWeight: "600", color: Colors.text },
+  paidCaseMeta: { fontSize: 11, color: Colors.textSecondary },
+  paidCaseAmt: { fontSize: 13, fontWeight: "800", color: Colors.success },
+  card: {
+    backgroundColor: Colors.surface, borderRadius: 14, padding: 14,
+    shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 6, elevation: 2,
+    borderLeftWidth: 4,
+  },
+  cardTop: { flexDirection: "row", justifyContent: "space-between" },
+  cardName: { fontSize: 14, fontWeight: "700", color: Colors.text },
+  cardMeta: { fontSize: 12, color: Colors.textSecondary, marginTop: 2 },
+  cardDate: { fontSize: 11, color: Colors.textMuted, marginTop: 2 },
+  cardAmt: { fontSize: 18, fontWeight: "800" },
+  payRow: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 8, flexWrap: "wrap" },
+  payBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20 },
+  payBadgeText: { fontSize: 11, fontWeight: "700" },
+  subAmt: { fontSize: 12, fontWeight: "600", color: Colors.success },
+  thumbRow: { flexDirection: "row", alignItems: "center", gap: 10, marginTop: 8 },
+  thumb: { width: 64, height: 64, borderRadius: 8 },
+  thumbHint: { fontSize: 11, color: Colors.textMuted },
+  notes: { fontSize: 12, color: Colors.textSecondary, fontStyle: "italic", marginTop: 6 },
+  updatePayBtn: {
+    flexDirection: "row", alignItems: "center", gap: 6, marginTop: 10,
+    backgroundColor: Colors.primary + "10", borderRadius: 8, paddingVertical: 8, paddingHorizontal: 12,
+    alignSelf: "flex-start",
+  },
+  updatePayText: { fontSize: 12, fontWeight: "700", color: Colors.primary },
+  empty: { alignItems: "center", gap: 8, paddingVertical: 48 },
+  emptyText: { fontSize: 14, color: Colors.textMuted },
+});
+
+const imp = StyleSheet.create({
+  pickBtn: {
+    flexDirection: "row", alignItems: "center", gap: 10,
+    borderWidth: 2, borderColor: Colors.primary, borderStyle: "dashed",
+    borderRadius: 12, padding: 16,
+  },
+  pickText: { flex: 1, fontSize: 14, color: Colors.primary, fontWeight: "500" },
+  result: {
+    backgroundColor: Colors.success + "12", borderRadius: 10, padding: 12, gap: 4,
+    borderWidth: 1, borderColor: Colors.success + "30",
+  },
+  resultTitle: { fontSize: 14, fontWeight: "700", color: Colors.success },
+  resultText: { fontSize: 13, color: Colors.text },
 });
