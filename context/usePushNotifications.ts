@@ -1,5 +1,152 @@
 // context/usePushNotifications.ts
-// ✅ Fixed: robust OneSignal init with proper error handling
+// ✅ Fixed for New Architecture (newArchEnabled: true) + OneSignal
+
+import { useEffect, useRef } from "react";
+import { Platform, InteractionManager } from "react-native";
+import Constants from "expo-constants";
+import { api } from "@/lib/api";
+import { useAuth } from "@/context/AuthContext";
+
+const ONESIGNAL_APP_ID =
+  Constants.expoConfig?.extra?.oneSignalAppId ||
+  "bff2c8e0-de24-4aad-a373-d030c210155f";
+
+// ─── Lazy import to avoid crash if module not linked ─────────────────────────
+function getOneSignal() {
+  try {
+    const OneSignal = require("react-native-onesignal").default;
+    return OneSignal;
+  } catch (e) {
+    console.warn("[OneSignal] Native module not available:", e);
+    return null;
+  }
+}
+
+let initialized = false;
+
+// ✅ KEY FIX: Use InteractionManager.runAfterInteractions to defer init
+// This prevents OneSignal from blocking the JS bridge during app startup
+// which caused the blank screen on New Architecture builds
+function initOneSignal(callback?: () => void) {
+  if (initialized || Platform.OS === "web") {
+    callback?.();
+    return;
+  }
+
+  const OneSignal = getOneSignal();
+  if (!OneSignal) {
+    callback?.();
+    return;
+  }
+
+  // ✅ Defer initialization until after all animations/interactions complete
+  InteractionManager.runAfterInteractions(() => {
+    try {
+      initialized = true;
+      console.log("[OneSignal] Initializing (deferred)...");
+      OneSignal.initialize(ONESIGNAL_APP_ID);
+      console.log("[OneSignal] ✅ Initialized");
+
+      // Request permission after another short delay
+      setTimeout(() => {
+        try {
+          OneSignal.Notifications.requestPermission(true);
+          console.log("[OneSignal] ✅ Permission requested");
+        } catch (e) {
+          console.warn("[OneSignal] Permission request failed:", e);
+        }
+      }, 2000);
+
+      callback?.();
+    } catch (e) {
+      console.error("[OneSignal] Init error:", e);
+      initialized = false;
+      callback?.();
+    }
+  });
+}
+
+export function usePushNotifications() {
+  const { agent } = useAuth();
+  const savedRef = useRef(false);
+
+  useEffect(() => {
+    if (Platform.OS === "web") return;
+
+    // ✅ Init OneSignal only after interactions settle (non-blocking)
+    initOneSignal();
+
+    if (!agent) {
+      savedRef.current = false;
+      return;
+    }
+
+    const OneSignal = getOneSignal();
+    if (!OneSignal) return;
+
+    console.log("[OneSignal] Setting up for agent:", agent.id, agent.name);
+
+    const handleSubscriptionChange = async (event: any) => {
+      const playerId = event?.current?.id ?? event?.to?.id;
+      if (!playerId) return;
+      console.log("[OneSignal] New player ID:", playerId);
+      try {
+        await api.savePushToken(playerId);
+        savedRef.current = true;
+        console.log("[OneSignal] ✅ Player ID saved");
+      } catch (e: any) {
+        console.warn("[OneSignal] Save failed:", e.message);
+      }
+    };
+
+    // Try to save existing ID after a delay (subscription may not be ready)
+    const retryTimer = setTimeout(async () => {
+      try {
+        const currentId = OneSignal.User?.pushSubscription?.id;
+        if (currentId && !savedRef.current) {
+          console.log("[OneSignal] Saving existing player ID:", currentId);
+          await api.savePushToken(currentId);
+          savedRef.current = true;
+          console.log("[OneSignal] ✅ Existing ID saved");
+        }
+      } catch (e: any) {
+        console.warn("[OneSignal] Existing ID save failed:", e.message);
+      }
+    }, 5000); // 5s — give New Architecture bridge time to settle
+
+    try {
+      OneSignal.User?.pushSubscription?.addEventListener("change", handleSubscriptionChange);
+    } catch (e) {
+      console.warn("[OneSignal] Listener add failed:", e);
+    }
+
+    const handleClick = (event: any) => {
+      console.log("[OneSignal] Notification tapped:", event?.notification?.additionalData);
+    };
+
+    const handleForeground = (event: any) => {
+      console.log("[OneSignal] Foreground notification:", event?.notification?.title);
+    };
+
+    try {
+      OneSignal.Notifications?.addEventListener("click", handleClick);
+      OneSignal.Notifications?.addEventListener("foregroundWillDisplay", handleForeground);
+    } catch (e) {
+      console.warn("[OneSignal] Notification listener add failed:", e);
+    }
+
+    return () => {
+      clearTimeout(retryTimer);
+      try {
+        OneSignal.User?.pushSubscription?.removeEventListener("change", handleSubscriptionChange);
+        OneSignal.Notifications?.removeEventListener("click", handleClick);
+        OneSignal.Notifications?.removeEventListener("foregroundWillDisplay", handleForeground);
+      } catch (e) {
+        console.warn("[OneSignal] Cleanup error:", e);
+      }
+    };
+  }, [agent?.id]);
+}
 
 import { useEffect, useRef } from "react";
 import { Platform } from "react-native";
