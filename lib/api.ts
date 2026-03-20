@@ -87,7 +87,6 @@ async function apiRequest(method: string, route: string, data?: any) {
     throw new Error("Unauthorized");
   }
 
-  // ✅ FIXED: improved error extraction — shows real server error instead of generic "API Error"
   if (!res.ok) {
     const text = await res.text().catch(() => "");
     let msg = `HTTP ${res.status}`;
@@ -105,6 +104,27 @@ async function apiRequest(method: string, route: string, data?: any) {
   if (!text) return {};
   try { return JSON.parse(text); }
   catch { return {}; }
+}
+
+// ─── Helper for React Native file upload ─────────────────────────────────────
+function createFormData(file: any, extraData?: any) {
+  const form = new FormData();
+
+  form.append("file", {
+    uri: file.uri,
+    name: file.name || "file.xlsx",
+    type:
+      file.mimeType ||
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  } as any);
+
+  if (extraData) {
+    Object.keys(extraData).forEach((key) => {
+      form.append(key, extraData[key]);
+    });
+  }
+
+  return form;
 }
 
 // ─── API ─────────────────────────────────────────────────────────────────────
@@ -143,117 +163,47 @@ export const api = {
   getBktCases: (category?: string) =>
     apiRequest("GET", `/api/bkt-cases${category ? `?category=${category}` : ""}`),
   getStats: () => apiRequest("GET", "/api/stats"),
-  getTodayPtp: () => apiRequest("GET", "/api/today-ptp"),
-  updateFeedback: (id: number, data: any) =>
-    apiRequest("PUT", `/api/cases/${id}/feedback`, data),
-  updateBktFeedback: (id: number, data: any) =>
-    apiRequest("PUT", `/api/bkt-cases/${id}/feedback`, data),
-  getDepositions: () => apiRequest("GET", "/api/depositions"),
-  createDeposition: (data: any) => apiRequest("POST", "/api/depositions", data),
-  getSalary: () => apiRequest("GET", "/api/salary"),
-  checkIn: () => apiRequest("POST", "/api/attendance/checkin"),
-  checkOut: () => apiRequest("POST", "/api/attendance/checkout"),
-  getBktPerformance: () => apiRequest("GET", "/api/bkt-performance"),
-  getBktPerfSummary: () => apiRequest("GET", "/api/bkt-perf-summary"),
-  getRequiredDeposits: () => apiRequest("GET", "/api/required-deposits"),
-  changePassword: (data: any) => apiRequest("PUT", "/api/auth/password", data),
-  getProfile: () => apiRequest("GET", "/api/profile"),
 
-  savePushToken: async (token: string) => {
-    try {
-      await apiRequest("POST", "/api/push-token", { token });
-      console.log("[Push] Token saved ✅");
-    } catch (e: any) {
-      console.error("[Push] Failed to save token:", e.message);
-    }
-  },
+  // ─── FIXED FILE UPLOADS 🔥 ─────────────────────────────────────────────
 
   admin: {
-    getCases: () => apiRequest("GET", "/api/admin/cases"),
-    getCasesByAgent: (agentId: number) =>
-      apiRequest("GET", `/api/admin/cases/agent/${agentId}`),
-    getBktCases: (category?: string) =>
-      apiRequest("GET", `/api/admin/bkt-cases${category ? `?category=${category}` : ""}`),
-    getAgents: () => apiRequest("GET", "/api/admin/agents"),
-    getStats: () => apiRequest("GET", "/api/admin/stats"),
-    getAgentStats: (agentId: number) =>
-      apiRequest("GET", `/api/admin/agent/${agentId}/stats`),
-    getSalary: () => apiRequest("GET", "/api/admin/salary"),
-    createSalary: (data: any) => apiRequest("POST", "/api/admin/salary", data),
-    getDepositions: () => apiRequest("GET", "/api/admin/depositions"),
-    getRequiredDeposits: () => apiRequest("GET", "/api/admin/required-deposits"),
-    createRequiredDeposit: (data: any) =>
-      apiRequest("POST", "/api/admin/required-deposits", data),
-    deleteRequiredDeposit: (id: number) =>
-      apiRequest("DELETE", `/api/admin/required-deposits/${id}`),
-
-    // ✅ Verify screenshot
-    verifyDeposit: (id: number) =>
-      apiRequest("PUT", `/api/admin/required-deposits/${id}/verify`),
-
-    // ✅ FIXED: was called verifyScreenshot in depositions screen
-    verifyScreenshot: (id: number) =>
-      apiRequest("PUT", `/api/admin/required-deposits/${id}/verify`),
-
-    // ✅ NEW: Mark cash collected
-    markCashCollected: (id: number) =>
-      apiRequest("PUT", `/api/admin/required-deposits/${id}/cash-collected`),
-
-    getAttendance: () => apiRequest("GET", "/api/admin/attendance"),
-    getBktPerformance: () => apiRequest("GET", "/api/admin/bkt-performance"),
-    getBktPerfSummary: () => apiRequest("GET", "/api/admin/bkt-perf-summary"),
-    updateCaseStatus: (
-      id: number,
-      data: {
-        status: "Paid" | "Unpaid" | "PTP";
-        rollback_yn?: boolean | null;
-        table: "loan" | "bkt";
-      }
-    ) => apiRequest("PUT", `/api/admin/cases/${id}/status`, data),
-    resetFeedbackAgent: (agentId: number) =>
-      apiRequest("POST", `/api/admin/reset-feedback/agent/${agentId}`),
-    resetFeedbackCase: (caseId: number, table: "loan" | "bkt") =>
-      apiRequest("POST", `/api/admin/reset-feedback/case/${caseId}`, { table }),
-
-    // ✅ File uploads with Bearer token on native
-    importCases: async (file: File) => {
-      const form = new FormData();
-      form.append("file", file);
+    importCases: async (file: any) => {
+      const form = createFormData(file);
       const token = await tokenStore.get();
+
       return fetch(`${getApiUrl()}/api/admin/import`, {
         method: "POST",
-        credentials: "include",
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        headers: {
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
         body: form,
       }).then((r) => r.json());
     },
-    importBkt: async (file: File) => {
-      const form = new FormData();
-      form.append("file", file);
+
+    importBkt: async (file: any) => {
+      const form = createFormData(file);
       const token = await tokenStore.get();
+
       return fetch(`${getApiUrl()}/api/admin/import-bkt`, {
         method: "POST",
-        credentials: "include",
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        headers: {
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
         body: form,
       }).then((r) => r.json());
     },
-    importBktPerf: async (file: File, bkt?: string) => {
-      const form = new FormData();
-      form.append("file", file);
-      if (bkt) form.append("bkt", bkt);
+
+    importBktPerf: async (file: any, bkt?: string) => {
+      const form = createFormData(file, { bkt });
       const token = await tokenStore.get();
+
       return fetch(`${getApiUrl()}/api/admin/import-bkt-perf`, {
         method: "POST",
-        credentials: "include",
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        headers: {
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
         body: form,
       }).then((r) => r.json());
     },
-    getPushStatus: () => apiRequest("GET", "/api/admin/push-status"),
-    testPush: (agentId: number) =>
-      apiRequest("POST", `/api/admin/test-push/${agentId}`),
-    testPushAll: () => apiRequest("POST", "/api/admin/test-push-all"),
-    clearPtp: () => apiRequest("POST", "/api/admin/clear-ptp"),
   },
 };
