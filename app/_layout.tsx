@@ -16,7 +16,7 @@ import {
   SafeAreaProvider,
   initialWindowMetrics,
 } from "react-native-safe-area-context";
-// ✅ FIXED: Correct import path
+// ✅ OneSignal-based push notifications hook
 import { usePushNotifications } from "@/context/usePushNotifications";
 
 SplashScreen.preventAutoHideAsync();
@@ -26,8 +26,7 @@ function RootLayoutNav() {
   const segments = useSegments();
   const navigationState = useRootNavigationState();
 
-  // ✅ Call push notifications hook here — inside AuthProvider
-  // Registers push token whenever agent logs in
+  // ✅ Registers OneSignal player ID whenever agent is logged in
   usePushNotifications();
 
   useEffect(() => {
