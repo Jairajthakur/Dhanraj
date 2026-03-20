@@ -76,7 +76,10 @@ function getISTHour(): { hour: number; todayKey: string } {
   return { hour: ist.getUTCHours(), todayKey: ist.toISOString().slice(0, 10) };
 }
 
-// ─── ✅ FIXED: OneSignal push — removed android_channel_id ───────────────────
+// ─── ✅ FIXED: OneSignal push using include_aliases for v5 onesignal_id ───────
+// The app saves getOnesignalId() which is a USER identity ID (not a player ID)
+// include_player_ids only works with subscription/player IDs (v4 SDK)
+// include_aliases with onesignal_id is the correct way to target v5 users
 async function sendPush(
   playerId: string,
   title: string,
@@ -103,12 +106,15 @@ async function sendPush(
       },
       body: JSON.stringify({
         app_id: appId,
-        include_player_ids: [playerId],
+        // ✅ FIX: Use include_aliases instead of include_player_ids
+        // The onesignalId from getOnesignalId() is a user alias, not a player ID
+        target_channel: "push",
+        include_aliases: {
+          onesignal_id: [playerId],
+        },
         headings: { en: title },
         contents: { en: body },
         data,
-        // ✅ FIXED: Removed android_channel_id — "default" didn't exist in dashboard
-        // OneSignal uses its built-in default channel automatically
         priority: 10,
         ttl: 259200,
         android_visibility: 1,
@@ -121,8 +127,8 @@ async function sendPush(
       console.error("[push] OneSignal error:", err);
       return { ok: false, error: err };
     }
-    if (json.invalid_player_ids?.length > 0) {
-      console.warn("[push] Stale player IDs:", json.invalid_player_ids);
+    if (json.invalid_aliases) {
+      console.warn("[push] Invalid aliases:", json.invalid_aliases);
     }
     console.log("[push] ✅ Sent to:", playerId.slice(0, 20), "recipients:", json.recipients);
     return { ok: true };
@@ -151,11 +157,14 @@ async function sendPushToMany(
       },
       body: JSON.stringify({
         app_id: appId,
-        include_player_ids: playerIds,
+        // ✅ FIX: Same fix for bulk sends
+        target_channel: "push",
+        include_aliases: {
+          onesignal_id: playerIds,
+        },
         headings: { en: title },
         contents: { en: body },
         data,
-        // ✅ FIXED: Removed android_channel_id
         priority: 10,
         ttl: 259200,
         android_visibility: 1,
@@ -163,8 +172,8 @@ async function sendPushToMany(
     });
     const json: any = await res.json().catch(() => ({}));
     console.log("[push] sendPushToMany response:", JSON.stringify(json));
-    if (json.invalid_player_ids?.length > 0) {
-      console.warn("[push] Stale player IDs:", json.invalid_player_ids);
+    if (json.invalid_aliases) {
+      console.warn("[push] Invalid aliases:", json.invalid_aliases);
     }
     return { sent: json.recipients ?? playerIds.length, total: playerIds.length };
   } catch (e: any) {
@@ -500,37 +509,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/admin/cases", requireAdmin, async (req, res) => {
     try {
       const result = await storage.query(`
-        SELECT
-          lc.id, lc.agent_id,
-          lc.fos_name            AS agent_name,
-          lc.company_name,       lc.customer_name,
-          lc.loan_no,            lc.app_id,
-          lc.bkt,                lc.status,
-          lc.registration_no,    lc.engine_no,
-          lc.chassis_no,         lc.asset_name,
-          lc.asset_make,         lc.mobile_no,
-          lc.address,            lc.reference_address,
-          lc.ref1_name,          lc.ref1_mobile,
-          lc.ref2_name,          lc.ref2_mobile,
-          lc.ref_number,         lc.pos,
-          lc.emi_amount,         lc.emi_due,
-          lc.cbc,                lc.lpp,
-          lc.cbc_lpp,            lc.rollback,
-          lc.clearance,          lc.tenor,
-          lc.pro,                lc.first_emi_due_date,
-          lc.loan_maturity_date,
-          lc.feedback_code,      lc.latest_feedback,
-          lc.feedback_comments,  lc.feedback_date,
-          lc.customer_available, lc.vehicle_available,
-          lc.third_party,        lc.third_party_name,
-          lc.third_party_number,
-          lc.projection,         lc.non_starter,
-          lc.kyc_purchase,       lc.workable,
-          lc.ptp_date,           lc.telecaller_ptp_date,
-          lc.rollback_yn,        lc.created_at,
-          lc.updated_at
-        FROM loan_cases lc
-        ORDER BY lc.customer_name ASC
+        SELECT lc.id, lc.agent_id, lc.fos_name AS agent_name, lc.company_name, lc.customer_name,
+          lc.loan_no, lc.app_id, lc.bkt, lc.status, lc.registration_no, lc.engine_no,
+          lc.chassis_no, lc.asset_name, lc.asset_make, lc.mobile_no, lc.address, lc.reference_address,
+          lc.ref1_name, lc.ref1_mobile, lc.ref2_name, lc.ref2_mobile, lc.ref_number, lc.pos,
+          lc.emi_amount, lc.emi_due, lc.cbc, lc.lpp, lc.cbc_lpp, lc.rollback, lc.clearance, lc.tenor,
+          lc.pro, lc.first_emi_due_date, lc.loan_maturity_date, lc.feedback_code, lc.latest_feedback,
+          lc.feedback_comments, lc.feedback_date, lc.customer_available, lc.vehicle_available,
+          lc.third_party, lc.third_party_name, lc.third_party_number, lc.projection, lc.non_starter,
+          lc.kyc_purchase, lc.workable, lc.ptp_date, lc.telecaller_ptp_date, lc.rollback_yn,
+          lc.created_at, lc.updated_at
+        FROM loan_cases lc ORDER BY lc.customer_name ASC
       `);
       res.json({ cases: result.rows });
     } catch (e: any) { res.status(500).json({ message: e.message }); }
@@ -742,35 +731,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const category = req.query.category as string | undefined;
       const result = await storage.query(`
-        SELECT
-          bc.id, bc.agent_id,
-          bc.fos_name            AS agent_name,
-          bc.company_name,       bc.customer_name,
-          bc.loan_no,            bc.app_id,
-          bc.bkt,                bc.case_category,
-          bc.status,             bc.registration_no,
-          bc.engine_no,          bc.chassis_no,
-          bc.asset_name,         bc.asset_make,
-          bc.mobile_no,          bc.address,
-          bc.reference_address,  bc.ref1_name,
-          bc.ref1_mobile,        bc.ref2_name,
-          bc.ref2_mobile,        bc.ref_number,
-          bc.pos,                bc.emi_amount,
-          bc.emi_due,            bc.cbc,
-          bc.lpp,                bc.cbc_lpp,
-          bc.rollback,           bc.clearance,
-          bc.tenor,              bc.pro,
-          bc.first_emi_due_date, bc.loan_maturity_date,
-          bc.feedback_code,      bc.latest_feedback,
-          bc.feedback_comments,  bc.feedback_date,
-          bc.customer_available, bc.vehicle_available,
-          bc.third_party,        bc.third_party_name,
-          bc.third_party_number,
-          bc.projection,         bc.non_starter,
-          bc.kyc_purchase,       bc.workable,
-          bc.ptp_date,           bc.telecaller_ptp_date,
-          bc.rollback_yn,        bc.created_at,
-          bc.updated_at
+        SELECT bc.id, bc.agent_id, bc.fos_name AS agent_name, bc.company_name, bc.customer_name,
+          bc.loan_no, bc.app_id, bc.bkt, bc.case_category, bc.status, bc.registration_no,
+          bc.engine_no, bc.chassis_no, bc.asset_name, bc.asset_make, bc.mobile_no, bc.address,
+          bc.reference_address, bc.ref1_name, bc.ref1_mobile, bc.ref2_name, bc.ref2_mobile,
+          bc.ref_number, bc.pos, bc.emi_amount, bc.emi_due, bc.cbc, bc.lpp, bc.cbc_lpp,
+          bc.rollback, bc.clearance, bc.tenor, bc.pro, bc.first_emi_due_date, bc.loan_maturity_date,
+          bc.feedback_code, bc.latest_feedback, bc.feedback_comments, bc.feedback_date,
+          bc.customer_available, bc.vehicle_available, bc.third_party, bc.third_party_name,
+          bc.third_party_number, bc.projection, bc.non_starter, bc.kyc_purchase, bc.workable,
+          bc.ptp_date, bc.telecaller_ptp_date, bc.rollback_yn, bc.created_at, bc.updated_at
         FROM bkt_cases bc
         ${category ? "WHERE bc.case_category = $1" : ""}
         ORDER BY bc.customer_name ASC
