@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import {
   View, Text, Pressable, StyleSheet, Modal,
   Animated, ScrollView, Platform, Alert,
@@ -10,64 +10,8 @@ import Colors from "@/constants/colors";
 import { useAuth } from "@/context/AuthContext";
 import { api } from "@/lib/api";
 
-// ─── Notifications setup (native only) ──────────────────────────────────────
-if (Platform.OS !== "web") {
-  const Notifications = require("expo-notifications");
-  Notifications.setNotificationHandler({
-    handleNotification: async () => ({
-      shouldShowAlert: true,
-      shouldPlaySound: true,
-      shouldSetBadge: true,
-    }),
-  });
-  if (Platform.OS === "android") {
-    Notifications.setNotificationChannelAsync("default", {
-      name: "FOS Alerts",
-      importance: Notifications.AndroidImportance.MAX,
-      vibrationPattern: [0, 250, 250, 250],
-      lightColor: "#111111",
-      sound: "default",
-      enableVibrate: true,
-      showBadge: true,
-    });
-  }
-}
-
-// ─── Register push token — only called when agent is logged in ───────────────
-async function registerPushToken() {
-  if (Platform.OS === "web") return;
-  try {
-    const Notifications = require("expo-notifications");
-    const Constants = require("expo-constants").default;
-
-    // Check/request permission
-    const { status: existing } = await Notifications.getPermissionsAsync();
-    let finalStatus = existing;
-    if (existing !== "granted") {
-      const { status } = await Notifications.requestPermissionsAsync();
-      finalStatus = status;
-    }
-    if (finalStatus !== "granted") {
-      console.warn("[Push] Permission denied:", finalStatus);
-      return;
-    }
-
-    // Get Expo push token
-    const projectId =
-      Constants.expoConfig?.extra?.eas?.projectId ??
-      "1b09251a-4423-4759-a22b-fc2f0a44fd8e";
-
-    const tokenData = await Notifications.getExpoPushTokenAsync({ projectId });
-    console.log("[Push] Token obtained:", tokenData?.data?.slice(0, 40));
-
-    if (tokenData?.data) {
-      // api.savePushToken already has try/catch and logging inside
-      await api.savePushToken(tokenData.data);
-    }
-  } catch (e: any) {
-    console.error("[Push] registerPushToken error:", e.message);
-  }
-}
+// ✅ expo-notifications and registerPushToken completely removed
+// OneSignal handles everything via usePushNotifications() in root _layout.tsx
 
 // ─── Menu items ──────────────────────────────────────────────────────────────
 const MENU_ITEMS = [
@@ -243,12 +187,8 @@ export default function AppLayout() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const { agent } = useAuth();
 
-  // ✅ KEY FIX: Register push token only AFTER agent is confirmed logged in
-  useEffect(() => {
-    if (agent?.id) {
-      registerPushToken();
-    }
-  }, [agent?.id]); // re-runs if agent changes (e.g. after re-login)
+  // ✅ Push token registration is handled by OneSignal in root _layout.tsx
+  // via usePushNotifications() hook — no need to do anything here
 
   return (
     <>
