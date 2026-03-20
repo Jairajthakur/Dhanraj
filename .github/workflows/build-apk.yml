@@ -1,12 +1,16 @@
 name: Build Android APK
+
 on:
   workflow_dispatch:
+
 env:
   EXPO_PUBLIC_API_URL: https://dhanraj-production.up.railway.app
+
 jobs:
   build:
     name: Build APK
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -14,7 +18,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 20
           cache: npm
 
       - name: Setup Java
@@ -31,7 +35,7 @@ jobs:
         continue-on-error: true
         with:
           path: node_modules
-          key: ${{ runner.os }}-node-${{ hashFiles('package.json') }}
+          key: ${{ runner.os }}-node-${{ hashFiles('package-lock.json') }}
           restore-keys: |
             ${{ runner.os }}-node-
 
@@ -42,7 +46,7 @@ jobs:
           path: |
             ~/.gradle/caches
             ~/.gradle/wrapper
-          key: ${{ runner.os }}-gradle-${{ hashFiles('android/**/*.gradle*') }}
+          key: ${{ runner.os }}-gradle-${{ hashFiles('android/**/*.gradle*', 'android/gradle/wrapper/gradle-wrapper.properties') }}
           restore-keys: |
             ${{ runner.os }}-gradle-
 
@@ -71,7 +75,8 @@ jobs:
         run: |
           npm config set legacy-peer-deps true
           npm install --legacy-peer-deps
-          npm install nanoid@3.3.7 --legacy-peer-deps
+          # ✅ FIXED: Pin nanoid to CJS-compatible version
+          npm install nanoid@3.3.7 --legacy-peer-deps --save-exact
 
       - name: Setup EAS
         uses: expo/expo-github-action@v8
@@ -80,40 +85,42 @@ jobs:
           token: ${{ secrets.EXPO_TOKEN }}
 
       - name: Expo prebuild
+        # ✅ FIXED: newArchEnabled: false means no New Architecture native code needed
         run: npx expo prebuild --platform android --clean
-
-      # ✅ FIX: Generate react-native-webview codegen files before CMake runs
-      - name: Generate WebView codegen
-        run: |
-          cd android
-          chmod +x gradlew
-          ./gradlew :react-native-webview:generateCodegenSchemaFromJavaScript \
-            :react-native-webview:generateCodegenArtifactsFromSchema \
-            --no-daemon \
-            --stacktrace || true
         env:
-          GRADLE_OPTS: "-Xmx6g -XX:MaxMetaspaceSize=1g"
+          EXPO_PUBLIC_API_URL: https://dhanraj-production.up.railway.app
+
+      - name: Verify android folder exists
+        run: |
+          ls -la android/
+          ls -la android/app/
 
       - name: Build APK
         run: |
           cd android
           chmod +x gradlew
+          # ✅ FIXED: Removed codegen step (not needed without New Architecture)
+          # assembleDebug for faster build / easier troubleshooting
           ./gradlew assembleRelease \
             --no-daemon \
             --parallel \
             --build-cache \
-            --stacktrace
+            --stacktrace \
+            -Pandroid.enableJetifier=true
         env:
           GRADLE_OPTS: "-Xmx6g -XX:MaxMetaspaceSize=1g"
 
-      - name: Upload APK
+      - name: Find APK
+        run: find android/app/build/outputs/apk -name "*.apk" | head -20
+
+      - name: Upload Release APK
         uses: actions/upload-artifact@v4
         with:
           name: dhanraj-release-${{ github.run_number }}.apk
           path: android/app/build/outputs/apk/release/app-release.apk
           retention-days: 30
 
-      - name: Upload APK debug fallback
+      - name: Upload Debug APK (fallback on failure)
         if: failure()
         uses: actions/upload-artifact@v4
         with:
