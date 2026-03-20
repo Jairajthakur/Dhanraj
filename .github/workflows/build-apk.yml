@@ -82,6 +82,18 @@ jobs:
       - name: Expo prebuild
         run: npx expo prebuild --platform android --clean
 
+      # ✅ FIX: Generate react-native-webview codegen files before CMake runs
+      - name: Generate WebView codegen
+        run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew :react-native-webview:generateCodegenSchemaFromJavaScript \
+            :react-native-webview:generateCodegenArtifactsFromSchema \
+            --no-daemon \
+            --stacktrace || true
+        env:
+          GRADLE_OPTS: "-Xmx6g -XX:MaxMetaspaceSize=1g"
+
       - name: Build APK
         run: |
           cd android
