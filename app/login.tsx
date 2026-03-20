@@ -1,16 +1,7 @@
 import React, { useState } from "react";
 import {
-  View,
-  Text,
-  TextInput,
-  Pressable,
-  StyleSheet,
-  Alert,
-  KeyboardAvoidingView,
-  Platform,
-  ScrollView,
-  ActivityIndicator,
-  Image,
+  View, Text, TextInput, Pressable, StyleSheet, Alert,
+  KeyboardAvoidingView, Platform, ScrollView, ActivityIndicator, Image,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "@/context/AuthContext";
@@ -20,7 +11,6 @@ import { api } from "@/lib/api";
 export default function LoginScreen() {
   const { login } = useAuth();
   const logo = require("@/assets/images/dhanraj-logo.png");
-
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [showPass, setShowPass] = useState(false);
@@ -42,76 +32,77 @@ export default function LoginScreen() {
     }
   };
 
-  // ✅ TEMPORARY: Force opt-in and save token directly
   const debugOneSignal = async () => {
     setDebugLoading(true);
+    const steps: string[] = [];
     try {
       const mod = require("react-native-onesignal");
       const OneSignal = mod?.OneSignal ?? mod?.default ?? mod;
+      if (!OneSignal) { Alert.alert("Error", "OneSignal undefined"); return; }
 
-      if (!OneSignal) {
-        Alert.alert("Error", "OneSignal module is undefined");
-        return;
-      }
-
-      const steps: string[] = [];
-
-      // Step 1: Initialize if not already
+      // 1. Initialize
       try {
         OneSignal.initialize("bff2c8e0-de24-4aad-a373-d030c210155f");
-        steps.push("✅ initialize() called");
-      } catch (e: any) {
-        steps.push("⚠️ initialize: " + e.message);
-      }
+        steps.push("✅ initialize()");
+      } catch (e: any) { steps.push("⚠️ init: " + e.message); }
+      await new Promise((r) => setTimeout(r, 500));
 
-      await new Promise((r) => setTimeout(r, 1000));
-
-      // Step 2: Request notification permission
+      // 2. Check permission status
       try {
-        await OneSignal.Notifications.requestPermission(true);
-        steps.push("✅ requestPermission() called");
-      } catch (e: any) {
-        steps.push("⚠️ requestPermission: " + e.message);
-      }
+        const perm = OneSignal.Notifications.permission;
+        steps.push("📋 permission: " + JSON.stringify(perm));
+      } catch (e: any) { steps.push("⚠️ permission: " + e.message); }
 
+      // 3. Request permission
+      try {
+        const result = await OneSignal.Notifications.requestPermission(true);
+        steps.push("✅ requestPermission: " + JSON.stringify(result));
+      } catch (e: any) { steps.push("⚠️ requestPermission: " + e.message); }
       await new Promise((r) => setTimeout(r, 1000));
 
-      // Step 3: Force opt in
+      // 4. Check permission after
+      try {
+        const perm2 = OneSignal.Notifications.permission;
+        steps.push("📋 permission after: " + JSON.stringify(perm2));
+      } catch (e: any) { steps.push("⚠️ permission2: " + e.message); }
+
+      // 5. OptIn
       try {
         await OneSignal.User.pushSubscription.optIn();
-        steps.push("✅ optIn() called");
-      } catch (e: any) {
-        steps.push("❌ optIn: " + e.message);
-      }
+        steps.push("✅ optIn()");
+      } catch (e: any) { steps.push("❌ optIn: " + e.message); }
+      await new Promise((r) => setTimeout(r, 3000));
 
-      await new Promise((r) => setTimeout(r, 2000));
+      // 6. Check optedIn after
+      const optedIn = OneSignal?.User?.pushSubscription?.optedIn;
+      steps.push("📋 optedIn after: " + optedIn);
 
-      // Step 4: Get onesignal ID
+      // 7. Get onesignalId
       let onesignalId: string | null = null;
       try {
         onesignalId = await OneSignal.User.getOnesignalId();
-        steps.push("✅ onesignalId: " + (onesignalId?.slice(0, 20) ?? "null"));
-      } catch (e: any) {
-        steps.push("❌ getOnesignalId: " + e.message);
-      }
+        steps.push("📋 onesignalId: " + (onesignalId?.slice(0, 24) ?? "null"));
+      } catch (e: any) { steps.push("❌ getOnesignalId: " + e.message); }
 
-      // Step 5: Check optedIn after calling optIn
-      const optedInAfter = OneSignal?.User?.pushSubscription?.optedIn;
-      steps.push("optedIn after: " + optedInAfter);
+      // 8. Get push token
+      let pushToken: string | null = null;
+      try {
+        pushToken = OneSignal?.User?.pushSubscription?.token ?? null;
+        steps.push("📋 pushToken: " + (pushToken?.slice(0, 20) ?? "null"));
+      } catch (e: any) { steps.push("⚠️ pushToken: " + e.message); }
 
-      // Step 6: Try to save token to server
-      if (onesignalId) {
+      // 9. Save best available ID
+      const tokenToSave = pushToken || onesignalId;
+      if (tokenToSave) {
         try {
-          await api.savePushToken(onesignalId);
-          steps.push("✅ TOKEN SAVED TO SERVER!");
-        } catch (e: any) {
-          steps.push("❌ savePushToken: " + e.message);
-        }
+          await api.savePushToken(tokenToSave);
+          steps.push("✅ SAVED TO SERVER!");
+        } catch (e: any) { steps.push("❌ save: " + e.message); }
       } else {
-        steps.push("❌ No onesignalId to save");
+        steps.push("❌ No token/ID to save");
       }
 
-      Alert.alert("OneSignal Steps", steps.join("\n"));
+      Alert.alert("Result", steps.join("\n"), [{ text: "OK" }]);
     } catch (e: any) {
       Alert.alert("Error", e.message);
     } finally {
@@ -125,10 +116,7 @@ export default function LoginScreen() {
       behavior={Platform.OS === "ios" ? "padding" : undefined}
       enabled={Platform.OS !== "web"}
     >
-      <ScrollView
-        contentContainerStyle={styles.container}
-        keyboardShouldPersistTaps="handled"
-      >
+      <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
         <View style={styles.logoSection}>
           <View style={styles.logoGlow}>
             <Image source={logo} style={styles.logo} resizeMode="contain" />
@@ -148,68 +136,43 @@ export default function LoginScreen() {
                 <Ionicons name="person" size={18} color={Colors.primary} />
               </View>
               <TextInput
-                style={styles.input}
-                placeholder="Username"
-                placeholderTextColor={Colors.textMuted}
-                value={username}
-                onChangeText={setUsername}
-                autoCapitalize="none"
-                autoCorrect={false}
+                style={styles.input} placeholder="Username"
+                placeholderTextColor={Colors.textMuted} value={username}
+                onChangeText={setUsername} autoCapitalize="none" autoCorrect={false}
               />
             </View>
-
             <View style={styles.inputWrapper}>
               <View style={styles.inputIconWrap}>
                 <Ionicons name="lock-closed" size={18} color={Colors.primary} />
               </View>
               <TextInput
-                style={[styles.input, { flex: 1 }]}
-                placeholder="Password"
-                placeholderTextColor={Colors.textMuted}
-                value={password}
-                onChangeText={setPassword}
-                secureTextEntry={!showPass}
-                autoCapitalize="none"
+                style={[styles.input, { flex: 1 }]} placeholder="Password"
+                placeholderTextColor={Colors.textMuted} value={password}
+                onChangeText={setPassword} secureTextEntry={!showPass} autoCapitalize="none"
               />
               <Pressable onPress={() => setShowPass(!showPass)} style={styles.eyeBtn}>
-                <Ionicons
-                  name={showPass ? "eye-off" : "eye"}
-                  size={18}
-                  color={Colors.textSecondary}
-                />
+                <Ionicons name={showPass ? "eye-off" : "eye"} size={18} color={Colors.textSecondary} />
               </Pressable>
             </View>
           </View>
 
           <Pressable
             style={({ pressed }) => [styles.loginBtn, pressed && { opacity: 0.8 }]}
-            onPress={handleLogin}
-            disabled={loading}
+            onPress={handleLogin} disabled={loading}
           >
-            {loading ? (
-              <ActivityIndicator color="#fff" />
-            ) : (
-              <>
-                <Text style={styles.loginBtnText}>Sign In</Text>
-                <Ionicons name="arrow-forward" size={18} color="#fff" />
-              </>
+            {loading ? <ActivityIndicator color="#fff" /> : (
+              <><Text style={styles.loginBtnText}>Sign In</Text><Ionicons name="arrow-forward" size={18} color="#fff" /></>
             )}
           </Pressable>
 
-          {/* ✅ TEMPORARY — Force opt-in and save token */}
           <Pressable
             style={[styles.debugBtn, debugLoading && { opacity: 0.6 }]}
-            onPress={debugOneSignal}
-            disabled={debugLoading}
+            onPress={debugOneSignal} disabled={debugLoading}
           >
-            {debugLoading ? (
-              <ActivityIndicator size="small" color={Colors.textMuted} />
-            ) : (
-              <>
-                <Ionicons name="notifications-outline" size={14} color={Colors.textMuted} />
-                <Text style={styles.debugBtnText}>Force Register Notifications</Text>
-              </>
-            )}
+            {debugLoading
+              ? <ActivityIndicator size="small" color={Colors.textMuted} />
+              : <><Ionicons name="notifications-outline" size={14} color={Colors.textMuted} /><Text style={styles.debugBtnText}>Force Register Notifications</Text></>
+            }
           </Pressable>
         </View>
 
@@ -220,62 +183,24 @@ export default function LoginScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flexGrow: 1, alignItems: "center", justifyContent: "center",
-    paddingHorizontal: 24, paddingVertical: 40, gap: 32,
-  },
+  container: { flexGrow: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 24, paddingVertical: 40, gap: 32 },
   logoSection: { alignItems: "center", gap: 10 },
-  logoGlow: {
-    width: 110, height: 110, borderRadius: 28, borderWidth: 2,
-    borderColor: Colors.primary + "60", shadowColor: Colors.primary,
-    shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.6,
-    shadowRadius: 20, elevation: 12, marginBottom: 4, overflow: "hidden",
-  },
+  logoGlow: { width: 110, height: 110, borderRadius: 28, borderWidth: 2, borderColor: Colors.primary + "60", shadowColor: Colors.primary, shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.6, shadowRadius: 20, elevation: 12, marginBottom: 4, overflow: "hidden" },
   logo: { width: 110, height: 110 },
-  appTitle: {
-    fontSize: 26, fontWeight: "800", color: Colors.text,
-    letterSpacing: -0.5, textAlign: "center",
-  },
-  appSubtitle: {
-    fontSize: 12, color: Colors.primary, letterSpacing: 2.5,
-    textTransform: "uppercase", fontWeight: "600",
-  },
-  divider: {
-    width: 40, height: 3, borderRadius: 2,
-    backgroundColor: Colors.primary, marginTop: 6, opacity: 0.6,
-  },
-  card: {
-    width: "100%", backgroundColor: Colors.surface, borderRadius: 24,
-    padding: 28, gap: 18, borderWidth: 1, borderColor: Colors.borderLight,
-    shadowColor: Colors.primary, shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.12, shadowRadius: 20, elevation: 8,
-  },
+  appTitle: { fontSize: 26, fontWeight: "800", color: Colors.text, letterSpacing: -0.5, textAlign: "center" },
+  appSubtitle: { fontSize: 12, color: Colors.primary, letterSpacing: 2.5, textTransform: "uppercase", fontWeight: "600" },
+  divider: { width: 40, height: 3, borderRadius: 2, backgroundColor: Colors.primary, marginTop: 6, opacity: 0.6 },
+  card: { width: "100%", backgroundColor: Colors.surface, borderRadius: 24, padding: 28, gap: 18, borderWidth: 1, borderColor: Colors.borderLight, shadowColor: Colors.primary, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.12, shadowRadius: 20, elevation: 8 },
   cardTitle: { fontSize: 22, fontWeight: "800", color: Colors.text },
   cardSubtitle: { fontSize: 14, color: Colors.textSecondary, marginTop: -10 },
   inputGroup: { gap: 12 },
-  inputWrapper: {
-    flexDirection: "row", alignItems: "center", backgroundColor: Colors.surfaceAlt,
-    borderRadius: 14, borderWidth: 1, borderColor: Colors.border,
-    paddingHorizontal: 12, gap: 10,
-  },
-  inputIconWrap: {
-    width: 30, height: 30, borderRadius: 8, backgroundColor: Colors.primary + "18",
-    alignItems: "center", justifyContent: "center",
-  },
+  inputWrapper: { flexDirection: "row", alignItems: "center", backgroundColor: Colors.surfaceAlt, borderRadius: 14, borderWidth: 1, borderColor: Colors.border, paddingHorizontal: 12, gap: 10 },
+  inputIconWrap: { width: 30, height: 30, borderRadius: 8, backgroundColor: Colors.primary + "18", alignItems: "center", justifyContent: "center" },
   input: { flex: 1, paddingVertical: 16, fontSize: 15, color: Colors.text },
   eyeBtn: { padding: 6 },
-  loginBtn: {
-    backgroundColor: Colors.primary, borderRadius: 14, paddingVertical: 16,
-    alignItems: "center", justifyContent: "center",
-    flexDirection: "row", gap: 8, marginTop: 4,
-  },
+  loginBtn: { backgroundColor: Colors.primary, borderRadius: 14, paddingVertical: 16, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 8, marginTop: 4 },
   loginBtnText: { color: "#fff", fontSize: 17, fontWeight: "800" },
-  debugBtn: {
-    flexDirection: "row", alignItems: "center", justifyContent: "center",
-    gap: 6, paddingVertical: 10, borderRadius: 10,
-    backgroundColor: Colors.surfaceAlt, borderWidth: 1,
-    borderColor: Colors.border, borderStyle: "dashed",
-  },
+  debugBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 10, borderRadius: 10, backgroundColor: Colors.surfaceAlt, borderWidth: 1, borderColor: Colors.border, borderStyle: "dashed" },
   debugBtnText: { fontSize: 12, color: Colors.textMuted, fontWeight: "600" },
   footer: { fontSize: 12, color: Colors.textMuted, textAlign: "center" },
 });
