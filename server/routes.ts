@@ -748,6 +748,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
+  // ✅ FIXED: replaced storage.getAllAgentsWithAdmin() with direct query
   app.post("/api/admin/import-depositions", requireAdmin, upload.single("file"), async (req, res) => {
     try {
       if (!req.file) return res.status(400).json({ message: "No file uploaded" });
@@ -775,7 +776,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (matched >= 2) { headerIdx = r; colMap = tempMap; break; }
       }
       if (headerIdx === -1) return res.status(400).json({ message: "Could not find header row. Expected: Date, FOS Name, Customer Name, Loan No, Cash Amount, Online Amount, Total Amount" });
-      const existingAgents = await storage.getAllAgentsWithAdmin();
+      // ✅ FIX 1: replaced storage.getAllAgentsWithAdmin()
+      const { rows: existingAgents } = await storage.query(`SELECT id, name FROM fos_agents WHERE name IS NOT NULL`);
       const agentByName: Record<string, number> = {};
       for (const a of existingAgents) { if (a.name) agentByName[a.name.toLowerCase().trim()] = a.id; }
       let imported = 0, skipped = 0;
@@ -986,6 +988,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // ─── Excel imports ─────────────────────────────────────────────────────────
+  // ✅ FIXED: replaced storage.getAllAgentsWithAdmin() with direct query
   app.post("/api/admin/import", requireAdmin, upload.single("file"), async (req, res) => {
     try {
       if (!req.file) return res.status(400).json({ message: "No file uploaded" });
@@ -1032,7 +1035,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           } catch (delErr: any) { console.error(`[import] Could not remove agent:`, delErr.message); }
         }
       }
-      const existingAgents = await storage.getAllAgentsWithAdmin();
+      // ✅ FIX 2: replaced storage.getAllAgentsWithAdmin()
+      const { rows: existingAgents } = await storage.query(`SELECT id, name FROM fos_agents WHERE name IS NOT NULL`);
       const agentByName: Record<string, number> = {};
       for (const a of existingAgents) { if (a.name) agentByName[a.name.toLowerCase().trim()] = a.id; }
       let imported = 0, skipped = 0, agentsCreated = 0;
@@ -1082,6 +1086,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
+  // ✅ FIXED: replaced storage.getAllAgentsWithAdmin() with direct query
   app.post("/api/admin/import-bkt", requireAdmin, upload.single("file"), async (req, res) => {
     try {
       if (!req.file) return res.status(400).json({ message: "No file uploaded" });
@@ -1124,7 +1129,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           } catch (delErr: any) { console.error(`[import-bkt] Could not remove agent:`, delErr.message); }
         }
       }
-      const existingAgents = await storage.getAllAgentsWithAdmin();
+      // ✅ FIX 3: replaced storage.getAllAgentsWithAdmin()
+      const { rows: existingAgents } = await storage.query(`SELECT id, name FROM fos_agents WHERE name IS NOT NULL`);
       const agentByName: Record<string, number> = {};
       for (const a of existingAgents) { if (a.name) agentByName[a.name.toLowerCase().trim()] = a.id; }
       let imported = 0, skipped = 0, agentsCreated = 0;
@@ -1327,6 +1333,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
+  // ✅ FIXED: replaced storage.getAllAgentsWithAdmin() with direct query
   app.post("/api/admin/import-bkt-perf", requireAdmin, upload.single("file"), async (req, res) => {
     try {
       if (!req.file) return res.status(400).json({ message: "No file uploaded" });
@@ -1385,7 +1392,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
           d.countTotal = cGt >= 0 ? Math.round(cn(row[cGt])) : d.countTotal;
         }
       }
-      const existingAgents = await storage.getAllAgentsWithAdmin(); const agentByName: Record<string, number> = {};
+      // ✅ FIX 4: replaced storage.getAllAgentsWithAdmin()
+      const { rows: existingAgents } = await storage.query(`SELECT id, name FROM fos_agents WHERE name IS NOT NULL`);
+      const agentByName: Record<string, number> = {};
       for (const a of existingAgents) { if (a.name) agentByName[a.name.toLowerCase().trim()] = a.id; }
       let imported = 0, skipped = 0; const errors: string[] = [];
       for (const fosName of Object.keys(fosData)) {
