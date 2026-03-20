@@ -40,6 +40,44 @@ export default function LoginScreen() {
     }
   };
 
+  // ✅ TEMPORARY: Debug OneSignal — remove after confirming token works
+  const debugOneSignal = async () => {
+    try {
+      const OneSignal = require("react-native-onesignal").default;
+
+      let onesignalId = "not available";
+      let pushToken = "not available";
+
+      try {
+        onesignalId = await OneSignal.User?.getOnesignalId?.() ?? "null";
+      } catch (e: any) {
+        onesignalId = "ERROR: " + e.message;
+      }
+
+      try {
+        pushToken = await OneSignal.User?.pushSubscription?.getToken?.() ?? "null";
+      } catch (e: any) {
+        pushToken = "ERROR: " + e.message;
+      }
+
+      const info = {
+        onesignalId,
+        pushToken,
+        syncId: OneSignal.User?.pushSubscription?.id ?? "undefined",
+        syncToken: OneSignal.User?.pushSubscription?.token ?? "undefined",
+        optedIn: OneSignal.User?.pushSubscription?.optedIn ?? "undefined",
+        hasGetOnesignalId: typeof OneSignal.User?.getOnesignalId === "function",
+        hasGetToken: typeof OneSignal.User?.pushSubscription?.getToken === "function",
+        hasOptIn: typeof OneSignal.User?.pushSubscription?.optIn === "function",
+      };
+
+      console.log("[OneSignal Debug]", JSON.stringify(info, null, 2));
+      Alert.alert("OneSignal Debug", JSON.stringify(info, null, 2));
+    } catch (e: any) {
+      Alert.alert("OneSignal Error", e.message);
+    }
+  };
+
   return (
     <KeyboardAvoidingView
       style={{ flex: 1, backgroundColor: Colors.background }}
@@ -81,11 +119,7 @@ export default function LoginScreen() {
 
             <View style={styles.inputWrapper}>
               <View style={styles.inputIconWrap}>
-                <Ionicons
-                  name="lock-closed"
-                  size={18}
-                  color={Colors.primary}
-                />
+                <Ionicons name="lock-closed" size={18} color={Colors.primary} />
               </View>
               <TextInput
                 style={[styles.input, { flex: 1 }]}
@@ -125,6 +159,15 @@ export default function LoginScreen() {
                 <Ionicons name="arrow-forward" size={18} color="#fff" />
               </>
             )}
+          </Pressable>
+
+          {/* ✅ TEMPORARY DEBUG BUTTON — remove after token is confirmed working */}
+          <Pressable
+            style={styles.debugBtn}
+            onPress={debugOneSignal}
+          >
+            <Ionicons name="bug-outline" size={14} color={Colors.textMuted} />
+            <Text style={styles.debugBtnText}>Debug OneSignal</Text>
           </Pressable>
         </View>
 
@@ -257,6 +300,24 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontSize: 17,
     fontWeight: "800",
+  },
+  // ✅ Debug button style — subtle so it doesn't look like part of the UI
+  debugBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    paddingVertical: 10,
+    borderRadius: 10,
+    backgroundColor: Colors.surfaceAlt,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    borderStyle: "dashed",
+  },
+  debugBtnText: {
+    fontSize: 12,
+    color: Colors.textMuted,
+    fontWeight: "600",
   },
   footer: {
     fontSize: 12,
