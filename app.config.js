@@ -20,11 +20,11 @@ module.exports = ({ config }) => {
 
     ios: {
       supportsTablet: false,
-      bundleIdentifier: "com.dhanrajenterprises.app",
+      bundleIdentifier: "com.dhanraj.app",
     },
 
     android: {
-      package: "com.dhanrajenterprises.app",
+      package: "com.dhanraj.app",
 
       // 🔥 REQUIRED for Firebase notifications
       googleServicesFile: "./google-services.json",
