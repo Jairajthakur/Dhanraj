@@ -15,6 +15,7 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "@/context/AuthContext";
 import Colors from "@/constants/colors";
+import { api } from "@/lib/api";
 
 export default function LoginScreen() {
   const { login } = useAuth();
@@ -24,6 +25,7 @@ export default function LoginScreen() {
   const [password, setPassword] = useState("");
   const [showPass, setShowPass] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [debugLoading, setDebugLoading] = useState(false);
 
   const handleLogin = async () => {
     if (!username.trim() || !password.trim()) {
@@ -40,54 +42,80 @@ export default function LoginScreen() {
     }
   };
 
-  // ✅ TEMPORARY debug — remove after token confirmed working
+  // ✅ TEMPORARY: Force opt-in and save token directly
   const debugOneSignal = async () => {
+    setDebugLoading(true);
     try {
-      // ✅ FIXED: v5 uses named export { OneSignal }, not .default
       const mod = require("react-native-onesignal");
       const OneSignal = mod?.OneSignal ?? mod?.default ?? mod;
 
       if (!OneSignal) {
-        Alert.alert("OneSignal Error", "Module is undefined. Keys: " + Object.keys(mod || {}).join(", "));
+        Alert.alert("Error", "OneSignal module is undefined");
         return;
       }
 
-      let onesignalId = "not called";
-      let pushToken = "not called";
+      const steps: string[] = [];
 
+      // Step 1: Initialize if not already
       try {
-        onesignalId = await OneSignal.User?.getOnesignalId?.() ?? "null";
+        OneSignal.initialize("bff2c8e0-de24-4aad-a373-d030c210155f");
+        steps.push("✅ initialize() called");
       } catch (e: any) {
-        onesignalId = "ERROR: " + e.message;
+        steps.push("⚠️ initialize: " + e.message);
       }
 
+      await new Promise((r) => setTimeout(r, 1000));
+
+      // Step 2: Request notification permission
       try {
-        pushToken = await OneSignal.User?.pushSubscription?.getToken?.() ?? "null";
+        await OneSignal.Notifications.requestPermission(true);
+        steps.push("✅ requestPermission() called");
       } catch (e: any) {
-        pushToken = "ERROR: " + e.message;
+        steps.push("⚠️ requestPermission: " + e.message);
       }
 
-      const info = {
-        // Module shape
-        moduleKeys: Object.keys(mod || {}).join(", "),
-        oneSignalKeys: Object.keys(OneSignal || {}).join(", "),
-        // IDs
-        onesignalId,
-        pushToken,
-        syncId: OneSignal?.User?.pushSubscription?.id ?? "undefined",
-        syncToken: OneSignal?.User?.pushSubscription?.token ?? "undefined",
-        optedIn: OneSignal?.User?.pushSubscription?.optedIn ?? "undefined",
-        // Method availability
-        hasInitialize: typeof OneSignal?.initialize === "function",
-        hasGetOnesignalId: typeof OneSignal?.User?.getOnesignalId === "function",
-        hasGetToken: typeof OneSignal?.User?.pushSubscription?.getToken === "function",
-        hasOptIn: typeof OneSignal?.User?.pushSubscription?.optIn === "function",
-      };
+      await new Promise((r) => setTimeout(r, 1000));
 
-      console.log("[OneSignal Debug]", JSON.stringify(info, null, 2));
-      Alert.alert("OneSignal Debug", JSON.stringify(info, null, 2));
+      // Step 3: Force opt in
+      try {
+        await OneSignal.User.pushSubscription.optIn();
+        steps.push("✅ optIn() called");
+      } catch (e: any) {
+        steps.push("❌ optIn: " + e.message);
+      }
+
+      await new Promise((r) => setTimeout(r, 2000));
+
+      // Step 4: Get onesignal ID
+      let onesignalId: string | null = null;
+      try {
+        onesignalId = await OneSignal.User.getOnesignalId();
+        steps.push("✅ onesignalId: " + (onesignalId?.slice(0, 20) ?? "null"));
+      } catch (e: any) {
+        steps.push("❌ getOnesignalId: " + e.message);
+      }
+
+      // Step 5: Check optedIn after calling optIn
+      const optedInAfter = OneSignal?.User?.pushSubscription?.optedIn;
+      steps.push("optedIn after: " + optedInAfter);
+
+      // Step 6: Try to save token to server
+      if (onesignalId) {
+        try {
+          await api.savePushToken(onesignalId);
+          steps.push("✅ TOKEN SAVED TO SERVER!");
+        } catch (e: any) {
+          steps.push("❌ savePushToken: " + e.message);
+        }
+      } else {
+        steps.push("❌ No onesignalId to save");
+      }
+
+      Alert.alert("OneSignal Steps", steps.join("\n"));
     } catch (e: any) {
-      Alert.alert("OneSignal Error", e.message);
+      Alert.alert("Error", e.message);
+    } finally {
+      setDebugLoading(false);
     }
   };
 
@@ -168,10 +196,20 @@ export default function LoginScreen() {
             )}
           </Pressable>
 
-          {/* ✅ TEMPORARY — remove after token confirmed */}
-          <Pressable style={styles.debugBtn} onPress={debugOneSignal}>
-            <Ionicons name="bug-outline" size={14} color={Colors.textMuted} />
-            <Text style={styles.debugBtnText}>Debug OneSignal</Text>
+          {/* ✅ TEMPORARY — Force opt-in and save token */}
+          <Pressable
+            style={[styles.debugBtn, debugLoading && { opacity: 0.6 }]}
+            onPress={debugOneSignal}
+            disabled={debugLoading}
+          >
+            {debugLoading ? (
+              <ActivityIndicator size="small" color={Colors.textMuted} />
+            ) : (
+              <>
+                <Ionicons name="notifications-outline" size={14} color={Colors.textMuted} />
+                <Text style={styles.debugBtnText}>Force Register Notifications</Text>
+              </>
+            )}
           </Pressable>
         </View>
 
@@ -183,20 +221,15 @@ export default function LoginScreen() {
 
 const styles = StyleSheet.create({
   container: {
-    flexGrow: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 24,
-    paddingVertical: 40,
-    gap: 32,
+    flexGrow: 1, alignItems: "center", justifyContent: "center",
+    paddingHorizontal: 24, paddingVertical: 40, gap: 32,
   },
   logoSection: { alignItems: "center", gap: 10 },
   logoGlow: {
-    width: 110, height: 110, borderRadius: 28,
-    borderWidth: 2, borderColor: Colors.primary + "60",
-    shadowColor: Colors.primary, shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.6, shadowRadius: 20, elevation: 12,
-    marginBottom: 4, overflow: "hidden",
+    width: 110, height: 110, borderRadius: 28, borderWidth: 2,
+    borderColor: Colors.primary + "60", shadowColor: Colors.primary,
+    shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.6,
+    shadowRadius: 20, elevation: 12, marginBottom: 4, overflow: "hidden",
   },
   logo: { width: 110, height: 110 },
   appTitle: {
@@ -204,8 +237,8 @@ const styles = StyleSheet.create({
     letterSpacing: -0.5, textAlign: "center",
   },
   appSubtitle: {
-    fontSize: 12, color: Colors.primary,
-    letterSpacing: 2.5, textTransform: "uppercase", fontWeight: "600",
+    fontSize: 12, color: Colors.primary, letterSpacing: 2.5,
+    textTransform: "uppercase", fontWeight: "600",
   },
   divider: {
     width: 40, height: 3, borderRadius: 2,
@@ -221,22 +254,20 @@ const styles = StyleSheet.create({
   cardSubtitle: { fontSize: 14, color: Colors.textSecondary, marginTop: -10 },
   inputGroup: { gap: 12 },
   inputWrapper: {
-    flexDirection: "row", alignItems: "center",
-    backgroundColor: Colors.surfaceAlt, borderRadius: 14,
-    borderWidth: 1, borderColor: Colors.border,
+    flexDirection: "row", alignItems: "center", backgroundColor: Colors.surfaceAlt,
+    borderRadius: 14, borderWidth: 1, borderColor: Colors.border,
     paddingHorizontal: 12, gap: 10,
   },
   inputIconWrap: {
-    width: 30, height: 30, borderRadius: 8,
-    backgroundColor: Colors.primary + "18",
+    width: 30, height: 30, borderRadius: 8, backgroundColor: Colors.primary + "18",
     alignItems: "center", justifyContent: "center",
   },
   input: { flex: 1, paddingVertical: 16, fontSize: 15, color: Colors.text },
   eyeBtn: { padding: 6 },
   loginBtn: {
-    backgroundColor: Colors.primary, borderRadius: 14,
-    paddingVertical: 16, alignItems: "center",
-    justifyContent: "center", flexDirection: "row", gap: 8, marginTop: 4,
+    backgroundColor: Colors.primary, borderRadius: 14, paddingVertical: 16,
+    alignItems: "center", justifyContent: "center",
+    flexDirection: "row", gap: 8, marginTop: 4,
   },
   loginBtnText: { color: "#fff", fontSize: 17, fontWeight: "800" },
   debugBtn: {
