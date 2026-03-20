@@ -816,8 +816,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       const ptpLoanSave = await storage.query(`SELECT loan_no, ptp_date, telecaller_ptp_date FROM loan_cases WHERE status = 'PTP'`);
       const ptpLoanMap = new Map(ptpLoanSave.rows.map((r: any) => [r.loan_no, { ptpDate: r.ptp_date, telecallerPtpDate: r.telecaller_ptp_date }]));
+      // ✅ FIX: Nullify depositions FK before deleting loan_cases
+      await storage.query(`UPDATE depositions SET loan_case_id = NULL WHERE loan_case_id IS NOT NULL`);
       await storage.deleteAllLoanCases();
-      const existingFosAgents = await storage.query(`SELECT id, name FROM fos_agents WHERE role = 'fos'`);
       let agentsRemoved = 0;
       for (const agent of existingFosAgents.rows) {
         if (!fosNamesInExcel.has((agent.name || "").toLowerCase().trim())) {
