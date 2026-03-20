@@ -1307,7 +1307,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (e: any) { console.error("[ptp-job]", e.message); }
   }
   runPtpPushJob();
-  setInterval(runPtpPushJob, 30 * 60 * 1000);
+  // ✅ Run every 10 minutes so we don't miss the 9AM or 1PM window
+  setInterval(runPtpPushJob, 10 * 60 * 1000);
 
   async function runReminderJob() {
     try {
@@ -1341,9 +1342,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
   async function runBatchReminderJob() {
     try {
       const { hour, todayKey } = getISTHour();
-      if (hour !== 19) return;
+      // ✅ FIX: Use a wider window (19-20 IST) instead of exact hour
+      // The 30-min interval could miss hour===19 if it fires at 18:50 or 19:31
+      if (hour < 19 || hour > 20) return;
       if (batchReminderSentDates.has(todayKey)) return;
+
+      console.log(`[batch-reminder] Triggering 7PM summary (IST hour: ${hour})`);
+
       const agents = await storage.query(`SELECT id, name, push_token FROM fos_agents WHERE role = 'fos' AND push_token IS NOT NULL AND push_token <> ''`);
+
+      if (agents.rows.length === 0) {
+        console.log("[batch-reminder] No agents with push tokens");
+        // Still mark as sent so we don't retry endlessly
+        batchReminderSentDates.add(todayKey);
+        return;
+      }
+
+      let sent = 0;
       for (const agent of agents.rows) {
         const statsResult = await storage.query(
           `SELECT COUNT(*) FILTER (WHERE status = 'Paid')::int AS paid_count,
@@ -1357,20 +1372,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const s = statsResult.rows[0];
         const total = parseInt(s?.total || "0", 10);
         if (total === 0) continue;
-        await sendPush(
+        const result = await sendPush(
           agent.push_token,
           "📊 End of Day Summary",
-          `Today: ✅ ${s.paid_count} Paid | 🔄 ${s.ptp_count} PTP | ❌ ${s.unpaid_count} Unpaid out of ${total} total cases. Keep it up!`,
+          `Today: ✅ ${s.paid_count} Paid | 🔄 ${s.ptp_count} PTP | ❌ ${s.unpaid_count} Unpaid out of ${total} cases. Keep it up!`,
           { screen: "dashboard", type: "daily_summary" }
         );
+        if (result.ok) sent++;
+        else console.warn(`[batch-reminder] Failed for agent ${agent.name}:`, result.error);
       }
+
+      // ✅ Mark sent AFTER attempting — so if server restarts mid-job it retries
       batchReminderSentDates.add(todayKey);
       if (batchReminderSentDates.size > 7) batchReminderSentDates.delete(batchReminderSentDates.values().next().value);
-      console.log(`[batch-reminder] Sent 7PM IST summary to ${agents.rows.length} agents`);
+      console.log(`[batch-reminder] ✅ Sent to ${sent}/${agents.rows.length} agents`);
     } catch (e: any) { console.error("[batch-reminder]", e.message); }
   }
   runBatchReminderJob();
-  setInterval(runBatchReminderJob, 30 * 60 * 1000);
+  // ✅ FIX: Run every 10 minutes instead of 30 — ensures we don't miss the 19-20 window
+  setInterval(runBatchReminderJob, 10 * 60 * 1000);
 
   const httpServer = createServer(app);
   return httpServer;
