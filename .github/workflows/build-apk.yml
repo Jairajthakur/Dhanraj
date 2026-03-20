@@ -79,18 +79,6 @@ jobs:
           eas-version: latest
           token: ${{ secrets.EXPO_TOKEN }}
 
-      - name: Create google-services.json
-        run: echo '${{ secrets.GOOGLE_SERVICES_JSON }}' > ./google-services.json
-
-      - name: ✅ Upload FCM Service Account to Expo
-        run: |
-          echo '${{ secrets.GOOGLE_SERVICES_JSON }}' > /tmp/google-services.json
-          echo '${{ secrets.FCM_SERVICE_ACCOUNT_JSON }}' > /tmp/fcm-service-account.json
-          npx eas-cli credentials:manager --platform android --non-interactive || true
-        env:
-          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
-        continue-on-error: true
-
       - name: Expo prebuild
         run: npx expo prebuild --platform android --clean
 
