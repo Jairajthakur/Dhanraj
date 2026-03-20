@@ -819,6 +819,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // ✅ FIX: Nullify depositions FK before deleting loan_cases
       await storage.query(`UPDATE depositions SET loan_case_id = NULL WHERE loan_case_id IS NOT NULL`);
       await storage.deleteAllLoanCases();
+      const existingFosAgents = await storage.query(`SELECT id, name FROM fos_agents WHERE role = 'fos'`);
       let agentsRemoved = 0;
       for (const agent of existingFosAgents.rows) {
         if (!fosNamesInExcel.has((agent.name || "").toLowerCase().trim())) {
@@ -1328,7 +1329,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           row.push_token,
           hoursElapsed === 0 ? "💰 Deposit Assigned" : `⏰ Deposit Reminder — ${hoursElapsed}h Pending`,
           hoursElapsed === 0
-            ? `Admin assigned you a deposit of ₹${amtStr}. Upload screenshot within 2 hours.`
+            ? `Admin assigned you a deposit of ₹${amtStr}. Upload screenshot.`
             : `Upload payment screenshot of ₹${amtStr} now! ${hoursElapsed}h elapsed.`,
           { screen: "deposition" }
         );
