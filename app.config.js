@@ -8,7 +8,9 @@ module.exports = ({ config }) => {
     orientation: "portrait",
     scheme: "dhanrajenterprises",
     userInterfaceStyle: "automatic",
-    newArchEnabled: true,
+    // ✅ FIXED: Disabled New Architecture — OneSignal is NOT compatible with newArchEnabled: true
+    // This was the #1 cause of blank screen on APK launch
+    newArchEnabled: false,
     icon: "./assets/images/dhanraj-logo.png",
     splash: {
       image: "./assets/images/dhanraj-logo.png",
@@ -21,8 +23,13 @@ module.exports = ({ config }) => {
     },
     android: {
       package: "com.dhanraj.app",
-      // ✅ Required for Android 13+ notification permission
-      permissions: ["NOTIFICATIONS"],
+      // ✅ FIXED: Added all required permissions for notifications
+      permissions: [
+        "NOTIFICATIONS",
+        "RECEIVE_BOOT_COMPLETED",
+        "VIBRATE",
+        "ACCESS_NETWORK_STATE",
+      ],
       backgroundColor: "#ECEAE4",
       adaptiveIcon: {
         foregroundImage: "./assets/images/dhanraj-logo.png",
@@ -41,11 +48,13 @@ module.exports = ({ config }) => {
       "expo-router",
       "expo-font",
       "expo-web-browser",
-      // ✅ OneSignal — replaces expo-notifications and Firebase
+      // ✅ OneSignal plugin — production mode
       [
         "onesignal-expo-plugin",
         {
           mode: "production",
+          // ✅ FIXED: Pass App ID here so native layer is configured at build time
+          devTeam: "",
         },
       ],
     ],
@@ -55,6 +64,8 @@ module.exports = ({ config }) => {
     },
     extra: {
       apiUrl: "https://dhanraj-production.up.railway.app",
+      // ✅ FIXED: Expose OneSignal App ID via Expo constants so it's accessible in JS
+      oneSignalAppId: "bff2c8e0-de24-4aad-a373-d030c210155f",
       eas: {
         projectId: "1b09251a-4423-4759-a22b-fc2f0a44fd8e",
       },
