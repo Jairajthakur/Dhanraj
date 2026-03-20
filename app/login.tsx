@@ -40,13 +40,20 @@ export default function LoginScreen() {
     }
   };
 
-  // ✅ TEMPORARY: Debug OneSignal — remove after confirming token works
+  // ✅ TEMPORARY debug — remove after token confirmed working
   const debugOneSignal = async () => {
     try {
-      const OneSignal = require("react-native-onesignal").default;
+      // ✅ FIXED: v5 uses named export { OneSignal }, not .default
+      const mod = require("react-native-onesignal");
+      const OneSignal = mod?.OneSignal ?? mod?.default ?? mod;
 
-      let onesignalId = "not available";
-      let pushToken = "not available";
+      if (!OneSignal) {
+        Alert.alert("OneSignal Error", "Module is undefined. Keys: " + Object.keys(mod || {}).join(", "));
+        return;
+      }
+
+      let onesignalId = "not called";
+      let pushToken = "not called";
 
       try {
         onesignalId = await OneSignal.User?.getOnesignalId?.() ?? "null";
@@ -61,14 +68,20 @@ export default function LoginScreen() {
       }
 
       const info = {
+        // Module shape
+        moduleKeys: Object.keys(mod || {}).join(", "),
+        oneSignalKeys: Object.keys(OneSignal || {}).join(", "),
+        // IDs
         onesignalId,
         pushToken,
-        syncId: OneSignal.User?.pushSubscription?.id ?? "undefined",
-        syncToken: OneSignal.User?.pushSubscription?.token ?? "undefined",
-        optedIn: OneSignal.User?.pushSubscription?.optedIn ?? "undefined",
-        hasGetOnesignalId: typeof OneSignal.User?.getOnesignalId === "function",
-        hasGetToken: typeof OneSignal.User?.pushSubscription?.getToken === "function",
-        hasOptIn: typeof OneSignal.User?.pushSubscription?.optIn === "function",
+        syncId: OneSignal?.User?.pushSubscription?.id ?? "undefined",
+        syncToken: OneSignal?.User?.pushSubscription?.token ?? "undefined",
+        optedIn: OneSignal?.User?.pushSubscription?.optedIn ?? "undefined",
+        // Method availability
+        hasInitialize: typeof OneSignal?.initialize === "function",
+        hasGetOnesignalId: typeof OneSignal?.User?.getOnesignalId === "function",
+        hasGetToken: typeof OneSignal?.User?.pushSubscription?.getToken === "function",
+        hasOptIn: typeof OneSignal?.User?.pushSubscription?.optIn === "function",
       };
 
       console.log("[OneSignal Debug]", JSON.stringify(info, null, 2));
@@ -130,10 +143,7 @@ export default function LoginScreen() {
                 secureTextEntry={!showPass}
                 autoCapitalize="none"
               />
-              <Pressable
-                onPress={() => setShowPass(!showPass)}
-                style={styles.eyeBtn}
-              >
+              <Pressable onPress={() => setShowPass(!showPass)} style={styles.eyeBtn}>
                 <Ionicons
                   name={showPass ? "eye-off" : "eye"}
                   size={18}
@@ -144,10 +154,7 @@ export default function LoginScreen() {
           </View>
 
           <Pressable
-            style={({ pressed }) => [
-              styles.loginBtn,
-              pressed && { opacity: 0.8 },
-            ]}
+            style={({ pressed }) => [styles.loginBtn, pressed && { opacity: 0.8 }]}
             onPress={handleLogin}
             disabled={loading}
           >
@@ -161,19 +168,14 @@ export default function LoginScreen() {
             )}
           </Pressable>
 
-          {/* ✅ TEMPORARY DEBUG BUTTON — remove after token is confirmed working */}
-          <Pressable
-            style={styles.debugBtn}
-            onPress={debugOneSignal}
-          >
+          {/* ✅ TEMPORARY — remove after token confirmed */}
+          <Pressable style={styles.debugBtn} onPress={debugOneSignal}>
             <Ionicons name="bug-outline" size={14} color={Colors.textMuted} />
             <Text style={styles.debugBtnText}>Debug OneSignal</Text>
           </Pressable>
         </View>
 
-        <Text style={styles.footer}>
-          Hero FinCorp · FOS Collection System
-        </Text>
+        <Text style={styles.footer}>Hero FinCorp · FOS Collection System</Text>
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -188,140 +190,61 @@ const styles = StyleSheet.create({
     paddingVertical: 40,
     gap: 32,
   },
-  logoSection: {
-    alignItems: "center",
-    gap: 10,
-  },
+  logoSection: { alignItems: "center", gap: 10 },
   logoGlow: {
-    width: 110,
-    height: 110,
-    borderRadius: 28,
-    borderWidth: 2,
-    borderColor: Colors.primary + "60",
-    shadowColor: Colors.primary,
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.6,
-    shadowRadius: 20,
-    elevation: 12,
-    marginBottom: 4,
-    overflow: "hidden",
+    width: 110, height: 110, borderRadius: 28,
+    borderWidth: 2, borderColor: Colors.primary + "60",
+    shadowColor: Colors.primary, shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.6, shadowRadius: 20, elevation: 12,
+    marginBottom: 4, overflow: "hidden",
   },
-  logo: {
-    width: 110,
-    height: 110,
-  },
+  logo: { width: 110, height: 110 },
   appTitle: {
-    fontSize: 26,
-    fontWeight: "800",
-    color: Colors.text,
-    letterSpacing: -0.5,
-    textAlign: "center",
+    fontSize: 26, fontWeight: "800", color: Colors.text,
+    letterSpacing: -0.5, textAlign: "center",
   },
   appSubtitle: {
-    fontSize: 12,
-    color: Colors.primary,
-    letterSpacing: 2.5,
-    textTransform: "uppercase",
-    fontWeight: "600",
+    fontSize: 12, color: Colors.primary,
+    letterSpacing: 2.5, textTransform: "uppercase", fontWeight: "600",
   },
   divider: {
-    width: 40,
-    height: 3,
-    borderRadius: 2,
-    backgroundColor: Colors.primary,
-    marginTop: 6,
-    opacity: 0.6,
+    width: 40, height: 3, borderRadius: 2,
+    backgroundColor: Colors.primary, marginTop: 6, opacity: 0.6,
   },
   card: {
-    width: "100%",
-    backgroundColor: Colors.surface,
-    borderRadius: 24,
-    padding: 28,
-    gap: 18,
-    borderWidth: 1,
-    borderColor: Colors.borderLight,
-    shadowColor: Colors.primary,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.12,
-    shadowRadius: 20,
-    elevation: 8,
+    width: "100%", backgroundColor: Colors.surface, borderRadius: 24,
+    padding: 28, gap: 18, borderWidth: 1, borderColor: Colors.borderLight,
+    shadowColor: Colors.primary, shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.12, shadowRadius: 20, elevation: 8,
   },
-  cardTitle: {
-    fontSize: 22,
-    fontWeight: "800",
-    color: Colors.text,
-  },
-  cardSubtitle: {
-    fontSize: 14,
-    color: Colors.textSecondary,
-    marginTop: -10,
-  },
-  inputGroup: {
-    gap: 12,
-  },
+  cardTitle: { fontSize: 22, fontWeight: "800", color: Colors.text },
+  cardSubtitle: { fontSize: 14, color: Colors.textSecondary, marginTop: -10 },
+  inputGroup: { gap: 12 },
   inputWrapper: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: Colors.surfaceAlt,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    paddingHorizontal: 12,
-    gap: 10,
+    flexDirection: "row", alignItems: "center",
+    backgroundColor: Colors.surfaceAlt, borderRadius: 14,
+    borderWidth: 1, borderColor: Colors.border,
+    paddingHorizontal: 12, gap: 10,
   },
   inputIconWrap: {
-    width: 30,
-    height: 30,
-    borderRadius: 8,
+    width: 30, height: 30, borderRadius: 8,
     backgroundColor: Colors.primary + "18",
-    alignItems: "center",
-    justifyContent: "center",
+    alignItems: "center", justifyContent: "center",
   },
-  input: {
-    flex: 1,
-    paddingVertical: 16,
-    fontSize: 15,
-    color: Colors.text,
-  },
-  eyeBtn: {
-    padding: 6,
-  },
+  input: { flex: 1, paddingVertical: 16, fontSize: 15, color: Colors.text },
+  eyeBtn: { padding: 6 },
   loginBtn: {
-    backgroundColor: Colors.primary,
-    borderRadius: 14,
-    paddingVertical: 16,
-    alignItems: "center",
-    justifyContent: "center",
-    flexDirection: "row",
-    gap: 8,
-    marginTop: 4,
+    backgroundColor: Colors.primary, borderRadius: 14,
+    paddingVertical: 16, alignItems: "center",
+    justifyContent: "center", flexDirection: "row", gap: 8, marginTop: 4,
   },
-  loginBtnText: {
-    color: "#fff",
-    fontSize: 17,
-    fontWeight: "800",
-  },
-  // ✅ Debug button style — subtle so it doesn't look like part of the UI
+  loginBtnText: { color: "#fff", fontSize: 17, fontWeight: "800" },
   debugBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 6,
-    paddingVertical: 10,
-    borderRadius: 10,
-    backgroundColor: Colors.surfaceAlt,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    borderStyle: "dashed",
+    flexDirection: "row", alignItems: "center", justifyContent: "center",
+    gap: 6, paddingVertical: 10, borderRadius: 10,
+    backgroundColor: Colors.surfaceAlt, borderWidth: 1,
+    borderColor: Colors.border, borderStyle: "dashed",
   },
-  debugBtnText: {
-    fontSize: 12,
-    color: Colors.textMuted,
-    fontWeight: "600",
-  },
-  footer: {
-    fontSize: 12,
-    color: Colors.textMuted,
-    textAlign: "center",
-  },
+  debugBtnText: { fontSize: 12, color: Colors.textMuted, fontWeight: "600" },
+  footer: { fontSize: 12, color: Colors.textMuted, textAlign: "center" },
 });
