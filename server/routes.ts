@@ -76,7 +76,7 @@ function getISTHour(): { hour: number; todayKey: string } {
   return { hour: ist.getUTCHours(), todayKey: ist.toISOString().slice(0, 10) };
 }
 
-// ─── ✅ FIXED: sendExpoPush with EXPO_ACCESS_TOKEN ────────────────────────────
+// ─── sendExpoPush ─────────────────────────────────────────────────────────────
 async function sendExpoPush(
   pushToken: string,
   title: string,
@@ -87,7 +87,6 @@ async function sendExpoPush(
     return { ok: false, error: "invalid_token" };
   }
   try {
-    // ✅ KEY FIX: Add Authorization header with EXPO_ACCESS_TOKEN
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
       "Accept": "application/json",
@@ -98,7 +97,6 @@ async function sendExpoPush(
     } else {
       console.warn("[push] ⚠️ No EXPO_ACCESS_TOKEN — unauthenticated");
     }
-
     const resp = await fetch("https://exp.host/--/api/v2/push/send", {
       method: "POST",
       headers,
@@ -440,18 +438,83 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try { res.json({ agents: await storage.getAllAgents() }); }
     catch (e: any) { res.status(500).json({ message: e.message }); }
   });
+
   app.get("/api/admin/stats", requireAdmin, async (req, res) => {
     try { res.json({ stats: await storage.getAllAgentStats() }); }
     catch (e: any) { res.status(500).json({ message: e.message }); }
   });
+
+  // ✅ FIXED: Full column SELECT with fos_name AS agent_name
   app.get("/api/admin/cases", requireAdmin, async (req, res) => {
-    try { res.json({ cases: await storage.getAllLoanCases() }); }
-    catch (e: any) { res.status(500).json({ message: e.message }); }
+    try {
+      const result = await storage.query(`
+        SELECT
+          lc.id,
+          lc.agent_id,
+          lc.fos_name                AS agent_name,
+          lc.company_name,
+          lc.customer_name,
+          lc.loan_no,
+          lc.app_id,
+          lc.bkt,
+          lc.status,
+          lc.registration_no,
+          lc.engine_no,
+          lc.chassis_no,
+          lc.asset_name,
+          lc.asset_make,
+          lc.mobile_no,
+          lc.address,
+          lc.reference_address,
+          lc.ref1_name,
+          lc.ref1_mobile,
+          lc.ref2_name,
+          lc.ref2_mobile,
+          lc.ref_number,
+          lc.pos,
+          lc.emi_amount,
+          lc.emi_due,
+          lc.cbc,
+          lc.lpp,
+          lc.cbc_lpp,
+          lc.rollback,
+          lc.clearance,
+          lc.tenor,
+          lc.pro,
+          lc.first_emi_due_date,
+          lc.loan_maturity_date,
+          lc.feedback_code,
+          lc.latest_feedback,
+          lc.feedback_comments,
+          lc.feedback_date,
+          lc.customer_available,
+          lc.vehicle_available,
+          lc.third_party,
+          lc.third_party_name,
+          lc.third_party_number,
+          lc.projection,
+          lc.non_starter,
+          lc.kyc_purchase,
+          lc.workable,
+          lc.ptp_date,
+          lc.telecaller_ptp_date,
+          lc.rollback_yn,
+          lc.created_at,
+          lc.updated_at
+        FROM loan_cases lc
+        ORDER BY lc.customer_name ASC
+      `);
+      res.json({ cases: result.rows });
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
   });
+
   app.get("/api/admin/cases/agent/:agentId", requireAdmin, async (req, res) => {
     try { res.json({ cases: await storage.getLoanCasesByAgent(Number(req.params.agentId)) }); }
     catch (e: any) { res.status(500).json({ message: e.message }); }
   });
+
   app.get("/api/admin/salary", requireAdmin, async (req, res) => {
     try { res.json({ salary: await storage.getAllSalaryDetails() }); }
     catch (e: any) { res.status(500).json({ message: e.message }); }
@@ -491,7 +554,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
-  // ✅ NEW: Cash collected endpoint
   app.put("/api/admin/required-deposits/:id/cash-collected", requireAdmin, async (req, res) => {
     try {
       const depositId = Number(req.params.id);
@@ -587,8 +649,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const baseUrl = process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : process.env.APP_URL || "";
       const screenshotUrl = `${baseUrl}/uploads/screenshots/${req.file.filename}`;
       await storage.query("UPDATE required_deposits SET screenshot_url = $1, screenshot_uploaded_at = NOW() WHERE id = $2 AND agent_id = $3", [screenshotUrl, depositId, req.session.agentId!]);
-
-      // Get deposit info + agent name
       const depositRow = await storage.query(
         `SELECT rd.amount, fa.name AS agent_name FROM required_deposits rd JOIN fos_agents fa ON fa.id = rd.agent_id WHERE rd.id = $1`,
         [depositId]
@@ -596,8 +656,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const deposit = depositRow.rows[0];
       const amtStr = deposit ? parseFloat(deposit.amount).toLocaleString("en-IN") : "";
       const agentName = deposit?.agent_name || "A FOS agent";
-
-      // ✅ Notify ALL admins
       const adminRows = await storage.query(`SELECT push_token FROM fos_agents WHERE role = 'admin' AND push_token IS NOT NULL AND push_token <> ''`);
       for (const admin of adminRows.rows) {
         await sendExpoPush(admin.push_token, "📸 Screenshot Uploaded", `${agentName} uploaded payment screenshot of ₹${amtStr}. Please verify.`, { type: "screenshot_uploaded", depositId });
@@ -658,9 +716,73 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
+  // ✅ FIXED: Full column SELECT with fos_name AS agent_name
   app.get("/api/admin/bkt-cases", requireAdmin, async (req, res) => {
-    try { res.json({ cases: await storage.getAllBktCases(req.query.category as string | undefined) }); }
-    catch (e: any) { res.status(500).json({ message: e.message }); }
+    try {
+      const category = req.query.category as string | undefined;
+      const result = await storage.query(`
+        SELECT
+          bc.id,
+          bc.agent_id,
+          bc.fos_name                AS agent_name,
+          bc.company_name,
+          bc.customer_name,
+          bc.loan_no,
+          bc.app_id,
+          bc.bkt,
+          bc.case_category,
+          bc.status,
+          bc.registration_no,
+          bc.engine_no,
+          bc.chassis_no,
+          bc.asset_name,
+          bc.asset_make,
+          bc.mobile_no,
+          bc.address,
+          bc.reference_address,
+          bc.ref1_name,
+          bc.ref1_mobile,
+          bc.ref2_name,
+          bc.ref2_mobile,
+          bc.ref_number,
+          bc.pos,
+          bc.emi_amount,
+          bc.emi_due,
+          bc.cbc,
+          bc.lpp,
+          bc.cbc_lpp,
+          bc.rollback,
+          bc.clearance,
+          bc.tenor,
+          bc.pro,
+          bc.first_emi_due_date,
+          bc.loan_maturity_date,
+          bc.feedback_code,
+          bc.latest_feedback,
+          bc.feedback_comments,
+          bc.feedback_date,
+          bc.customer_available,
+          bc.vehicle_available,
+          bc.third_party,
+          bc.third_party_name,
+          bc.third_party_number,
+          bc.projection,
+          bc.non_starter,
+          bc.kyc_purchase,
+          bc.workable,
+          bc.ptp_date,
+          bc.telecaller_ptp_date,
+          bc.rollback_yn,
+          bc.created_at,
+          bc.updated_at
+        FROM bkt_cases bc
+        ${category ? "WHERE bc.case_category = $1" : ""}
+        ORDER BY bc.customer_name ASC
+      `, category ? [category] : []);
+      res.json({ cases: result.rows });
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
   });
 
   app.get("/api/bkt-cases", requireAuth, async (req, res) => {
@@ -1183,12 +1305,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // ─── Background Jobs ───────────────────────────────────────────────────────
-
-  // 1. PTP push — 9 AM and 1 PM IST
   const ptpReminderSentDates = new Set<string>();
   async function runPtpPushJob() {
     try {
-      const { hour, todayKey } = getISTHour(); // ✅ IST timezone
+      const { hour, todayKey } = getISTHour();
       const isMorning = hour === 9; const isAfternoon = hour === 13;
       if (!isMorning && !isAfternoon) return;
       const slotKey = `${todayKey}-${hour}`;
@@ -1211,7 +1331,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
   runPtpPushJob();
   setInterval(runPtpPushJob, 30 * 60 * 1000);
 
-  // 2. Hourly deposit reminder — stops when screenshot OR cash collected
   async function runReminderJob() {
     try {
       const result = await storage.query(`
@@ -1237,11 +1356,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   runReminderJob();
   setInterval(runReminderJob, 60 * 60 * 1000);
 
-  // 3. Daily 7 PM IST batch summary
   const batchReminderSentDates = new Set<string>();
   async function runBatchReminderJob() {
     try {
-      const { hour, todayKey } = getISTHour(); // ✅ IST timezone
+      const { hour, todayKey } = getISTHour();
       if (hour !== 19) return;
       if (batchReminderSentDates.has(todayKey)) return;
       const agents = await storage.query(`SELECT id, name, push_token FROM fos_agents WHERE role = 'fos' AND push_token IS NOT NULL AND push_token <> ''`);
