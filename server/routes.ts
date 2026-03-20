@@ -76,10 +76,7 @@ function getISTHour(): { hour: number; todayKey: string } {
   return { hour: ist.getUTCHours(), todayKey: ist.toISOString().slice(0, 10) };
 }
 
-// ─── ✅ FIXED: OneSignal push using include_aliases for v5 onesignal_id ───────
-// The app saves getOnesignalId() which is a USER identity ID (not a player ID)
-// include_player_ids only works with subscription/player IDs (v4 SDK)
-// include_aliases with onesignal_id is the correct way to target v5 users
+// ─── Push (OneSignal) ─────────────────────────────────────────────────────────
 async function sendPush(
   playerId: string,
   title: string,
@@ -88,98 +85,49 @@ async function sendPush(
 ): Promise<{ ok: boolean; error?: string }> {
   const appId  = process.env.ONESIGNAL_APP_ID;
   const apiKey = process.env.ONESIGNAL_API_KEY;
-
-  if (!appId || !apiKey) {
-    console.warn("[push] ⚠️ ONESIGNAL_APP_ID or ONESIGNAL_API_KEY not set");
-    return { ok: false, error: "onesignal_not_configured" };
-  }
-  if (!playerId || playerId.trim() === "") {
-    return { ok: false, error: "no_player_id" };
-  }
-
+  if (!appId || !apiKey) { console.warn("[push] ⚠️ ONESIGNAL not configured"); return { ok: false, error: "not_configured" }; }
+  if (!playerId?.trim()) return { ok: false, error: "no_player_id" };
   try {
     const res = await fetch("https://onesignal.com/api/v1/notifications", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Basic ${apiKey}`,
-      },
+      headers: { "Content-Type": "application/json", "Authorization": `Basic ${apiKey}` },
       body: JSON.stringify({
-        app_id: appId,
-        // ✅ FIX: Use include_aliases instead of include_player_ids
-        // The onesignalId from getOnesignalId() is a user alias, not a player ID
-        target_channel: "push",
-        include_aliases: {
-          onesignal_id: [playerId],
-        },
-        headings: { en: title },
-        contents: { en: body },
-        data,
-        priority: 10,
-        ttl: 259200,
-        android_visibility: 1,
+        app_id: appId, target_channel: "push",
+        include_aliases: { onesignal_id: [playerId] },
+        headings: { en: title }, contents: { en: body },
+        data, priority: 10, ttl: 259200, android_visibility: 1,
       }),
     });
     const json: any = await res.json().catch(() => ({}));
-    console.log("[push] OneSignal response:", JSON.stringify(json));
     if (!res.ok || json.errors) {
       const err = Array.isArray(json.errors) ? json.errors[0] : JSON.stringify(json.errors);
-      console.error("[push] OneSignal error:", err);
       return { ok: false, error: err };
     }
-    if (json.invalid_aliases) {
-      console.warn("[push] Invalid aliases:", json.invalid_aliases);
-    }
-    console.log("[push] ✅ Sent to:", playerId.slice(0, 20), "recipients:", json.recipients);
+    console.log("[push] ✅ Sent to:", playerId.slice(0, 20));
     return { ok: true };
-  } catch (e: any) {
-    console.error("[push] Exception:", e.message);
-    return { ok: false, error: e.message };
-  }
+  } catch (e: any) { return { ok: false, error: e.message }; }
 }
 
 async function sendPushToMany(
-  playerIds: string[],
-  title: string,
-  body: string,
-  data: Record<string, any> = {}
+  playerIds: string[], title: string, body: string, data: Record<string, any> = {}
 ): Promise<{ sent: number; total: number }> {
   const appId  = process.env.ONESIGNAL_APP_ID;
   const apiKey = process.env.ONESIGNAL_API_KEY;
   if (!appId || !apiKey || playerIds.length === 0) return { sent: 0, total: 0 };
-
   try {
     const res = await fetch("https://onesignal.com/api/v1/notifications", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Basic ${apiKey}`,
-      },
+      headers: { "Content-Type": "application/json", "Authorization": `Basic ${apiKey}` },
       body: JSON.stringify({
-        app_id: appId,
-        // ✅ FIX: Same fix for bulk sends
-        target_channel: "push",
-        include_aliases: {
-          onesignal_id: playerIds,
-        },
-        headings: { en: title },
-        contents: { en: body },
-        data,
-        priority: 10,
-        ttl: 259200,
-        android_visibility: 1,
+        app_id: appId, target_channel: "push",
+        include_aliases: { onesignal_id: playerIds },
+        headings: { en: title }, contents: { en: body },
+        data, priority: 10, ttl: 259200, android_visibility: 1,
       }),
     });
     const json: any = await res.json().catch(() => ({}));
-    console.log("[push] sendPushToMany response:", JSON.stringify(json));
-    if (json.invalid_aliases) {
-      console.warn("[push] Invalid aliases:", json.invalid_aliases);
-    }
     return { sent: json.recipients ?? playerIds.length, total: playerIds.length };
-  } catch (e: any) {
-    console.error("[push] sendPushToMany error:", e.message);
-    return { sent: 0, total: playerIds.length };
-  }
+  } catch (e: any) { return { sent: 0, total: playerIds.length }; }
 }
 
 function normalizeHeader(h: string): string {
@@ -298,6 +246,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   await storage.initBktPerfSummaryTable();
 
+  // ─── Migrations ────────────────────────────────────────────────────────────
   try {
     await storage.query(`
       ALTER TABLE required_deposits
@@ -305,9 +254,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ADD COLUMN IF NOT EXISTS cash_collected_at TIMESTAMP
     `);
     console.log("[DB] cash_collected columns ready ✅");
-  } catch (e: any) {
-    console.error("[DB] Migration error:", e.message);
-  }
+  } catch (e: any) { console.error("[DB] Migration error:", e.message); }
+
+  // ✅ fos_depositions table
+  try {
+    await storage.query(`
+      CREATE TABLE IF NOT EXISTS fos_depositions (
+        id               SERIAL PRIMARY KEY,
+        agent_id         INTEGER REFERENCES fos_agents(id),
+        loan_no          TEXT,
+        customer_name    TEXT,
+        bkt              TEXT,
+        source           TEXT DEFAULT 'loan',
+        amount           NUMERIC(12,2) NOT NULL DEFAULT 0,
+        cash_amount      NUMERIC(12,2) DEFAULT 0,
+        online_amount    NUMERIC(12,2) DEFAULT 0,
+        payment_method   TEXT DEFAULT 'pending',
+        screenshot_url   TEXT,
+        notes            TEXT,
+        deposition_date  DATE DEFAULT CURRENT_DATE,
+        created_at       TIMESTAMP DEFAULT NOW(),
+        updated_at       TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    console.log("[DB] fos_depositions table ready ✅");
+  } catch (e: any) { console.error("[DB] fos_depositions error:", e.message); }
 
   app.use("/uploads/screenshots", express.static(path.join(process.cwd(), "server/uploads/screenshots")));
 
@@ -471,7 +442,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
-  // ─── Salary / Depositions ──────────────────────────────────────────────────
+  // ─── Salary / Depositions (legacy) ────────────────────────────────────────
   app.get("/api/salary", requireAuth, async (req, res) => {
     try { res.json({ salary: await storage.getSalaryDetails(req.session.agentId!) }); }
     catch (e: any) { res.status(500).json({ message: e.message }); }
@@ -500,36 +471,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try { res.json({ agents: await storage.getAllAgents() }); }
     catch (e: any) { res.status(500).json({ message: e.message }); }
   });
-
   app.get("/api/admin/stats", requireAdmin, async (req, res) => {
     try { res.json({ stats: await storage.getAllAgentStats() }); }
     catch (e: any) { res.status(500).json({ message: e.message }); }
   });
-
   app.get("/api/admin/cases", requireAdmin, async (req, res) => {
-    try {
-      const result = await storage.query(`
-        SELECT lc.id, lc.agent_id, lc.fos_name AS agent_name, lc.company_name, lc.customer_name,
-          lc.loan_no, lc.app_id, lc.bkt, lc.status, lc.registration_no, lc.engine_no,
-          lc.chassis_no, lc.asset_name, lc.asset_make, lc.mobile_no, lc.address, lc.reference_address,
-          lc.ref1_name, lc.ref1_mobile, lc.ref2_name, lc.ref2_mobile, lc.ref_number, lc.pos,
-          lc.emi_amount, lc.emi_due, lc.cbc, lc.lpp, lc.cbc_lpp, lc.rollback, lc.clearance, lc.tenor,
-          lc.pro, lc.first_emi_due_date, lc.loan_maturity_date, lc.feedback_code, lc.latest_feedback,
-          lc.feedback_comments, lc.feedback_date, lc.customer_available, lc.vehicle_available,
-          lc.third_party, lc.third_party_name, lc.third_party_number, lc.projection, lc.non_starter,
-          lc.kyc_purchase, lc.workable, lc.ptp_date, lc.telecaller_ptp_date, lc.rollback_yn,
-          lc.created_at, lc.updated_at
-        FROM loan_cases lc ORDER BY lc.customer_name ASC
-      `);
-      res.json({ cases: result.rows });
-    } catch (e: any) { res.status(500).json({ message: e.message }); }
+    try { res.json({ cases: await storage.getAllLoanCases() }); }
+    catch (e: any) { res.status(500).json({ message: e.message }); }
   });
-
   app.get("/api/admin/cases/agent/:agentId", requireAdmin, async (req, res) => {
     try { res.json({ cases: await storage.getLoanCasesByAgent(Number(req.params.agentId)) }); }
     catch (e: any) { res.status(500).json({ message: e.message }); }
   });
-
   app.get("/api/admin/salary", requireAdmin, async (req, res) => {
     try { res.json({ salary: await storage.getAllSalaryDetails() }); }
     catch (e: any) { res.status(500).json({ message: e.message }); }
@@ -574,8 +527,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const depositId = Number(req.params.id);
       await storage.query(`UPDATE required_deposits SET cash_collected = TRUE, cash_collected_at = NOW() WHERE id = $1`, [depositId]);
       const depositRow = await storage.query(
-        `SELECT rd.agent_id, rd.amount, fa.push_token, fa.name FROM required_deposits rd JOIN fos_agents fa ON fa.id = rd.agent_id WHERE rd.id = $1`,
-        [depositId]
+        `SELECT rd.agent_id, rd.amount, fa.push_token, fa.name FROM required_deposits rd JOIN fos_agents fa ON fa.id = rd.agent_id WHERE rd.id = $1`, [depositId]
       );
       const deposit = depositRow.rows[0];
       if (deposit?.push_token) {
@@ -589,6 +541,274 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/required-deposits", requireAuth, async (req, res) => {
     try { res.json({ deposits: await storage.getRequiredDeposits(req.session.agentId!) }); }
     catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  // ─── FOS Depositions (new feature) ────────────────────────────────────────
+
+  app.get("/api/admin/fos-depositions", requireAdmin, async (req, res) => {
+    try {
+      const result = await storage.query(`
+        SELECT fd.*, fa.name AS agent_name, fa.id AS fos_id
+        FROM fos_depositions fd
+        LEFT JOIN fos_agents fa ON fa.id = fd.agent_id
+        ORDER BY fd.deposition_date DESC, fa.name, fd.created_at DESC
+      `);
+      const grouped: Record<string, any> = {};
+      for (const row of result.rows) {
+        const key = String(row.fos_id || row.agent_name || "unknown");
+        if (!grouped[key]) {
+          grouped[key] = { agentId: row.fos_id, agentName: row.agent_name, depositions: [], totalCash: 0, totalOnline: 0, totalAmount: 0 };
+        }
+        grouped[key].depositions.push(row);
+        grouped[key].totalCash += parseFloat(row.cash_amount || 0);
+        grouped[key].totalOnline += parseFloat(row.online_amount || 0);
+        grouped[key].totalAmount += parseFloat(row.amount || 0);
+      }
+      res.json({ depositions: result.rows, grouped: Object.values(grouped) });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  app.get("/api/admin/fos-depositions/:agentId", requireAdmin, async (req, res) => {
+    try {
+      const agentId = Number(req.params.agentId);
+      const result = await storage.query(`
+        SELECT fd.*, fa.name AS agent_name
+        FROM fos_depositions fd
+        LEFT JOIN fos_agents fa ON fa.id = fd.agent_id
+        WHERE fd.agent_id = $1
+        ORDER BY fd.deposition_date DESC, fd.created_at DESC
+      `, [agentId]);
+      const paidCases = await storage.query(`
+        SELECT 'loan' AS source, id, customer_name, loan_no, bkt::text AS bkt, pos, updated_at, agent_id
+        FROM loan_cases WHERE agent_id = $1 AND status = 'Paid' AND updated_at >= NOW() - INTERVAL '24 hours'
+        UNION ALL
+        SELECT 'bkt' AS source, id, customer_name, loan_no, case_category AS bkt, pos, updated_at, agent_id
+        FROM bkt_cases WHERE agent_id = $1 AND status = 'Paid' AND updated_at >= NOW() - INTERVAL '24 hours'
+        ORDER BY updated_at DESC
+      `, [agentId]);
+      res.json({ depositions: result.rows, paidCases: paidCases.rows });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  app.post("/api/admin/fos-depositions", requireAdmin, async (req, res) => {
+    try {
+      const { agentId, loanNo, customerName, bkt, source, amount, cashAmount, onlineAmount, paymentMethod, notes, depositionDate } = req.body;
+      if (!agentId || !amount) return res.status(400).json({ message: "agentId and amount required" });
+      const cashAmt = parseFloat(cashAmount || 0);
+      const onlineAmt = parseFloat(onlineAmount || 0);
+      const totalAmt = parseFloat(amount);
+      let method = paymentMethod || "pending";
+      if (!paymentMethod) {
+        if (cashAmt > 0 && onlineAmt > 0) method = "both";
+        else if (cashAmt > 0) method = "cash";
+        else if (onlineAmt > 0) method = "online";
+      }
+      const result = await storage.query(`
+        INSERT INTO fos_depositions (agent_id, loan_no, customer_name, bkt, source, amount, cash_amount, online_amount, payment_method, notes, deposition_date)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *
+      `, [agentId, loanNo || null, customerName || null, bkt || null, source || "loan", totalAmt, cashAmt, onlineAmt, method, notes || null, depositionDate || new Date().toISOString().slice(0, 10)]);
+      res.json({ deposition: result.rows[0] });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  app.put("/api/admin/fos-depositions/:id/payment", requireAdmin, async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const { paymentMethod, cashAmount, onlineAmount, screenshotUrl } = req.body;
+      const cashAmt = parseFloat(cashAmount || 0);
+      const onlineAmt = parseFloat(onlineAmount || 0);
+      const totalAmt = cashAmt + onlineAmt;
+      await storage.query(`
+        UPDATE fos_depositions SET payment_method=$1, cash_amount=$2, online_amount=$3,
+          amount=CASE WHEN $4 > 0 THEN $4 ELSE amount END,
+          screenshot_url=COALESCE($5, screenshot_url), updated_at=NOW() WHERE id=$6
+      `, [paymentMethod, cashAmt, onlineAmt, totalAmt, screenshotUrl || null, id]);
+      res.json({ success: true });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  app.delete("/api/admin/fos-depositions/:id", requireAdmin, async (req, res) => {
+    try {
+      await storage.query(`DELETE FROM fos_depositions WHERE id = $1`, [Number(req.params.id)]);
+      res.json({ success: true });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  app.get("/api/fos-depositions", requireAuth, async (req, res) => {
+    try {
+      const result = await storage.query(`SELECT * FROM fos_depositions WHERE agent_id = $1 ORDER BY deposition_date DESC, created_at DESC`, [req.session.agentId!]);
+      res.json({ depositions: result.rows });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  app.post("/api/fos-depositions/:id/pay-cash", requireAuth, async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const agentId = req.session.agentId!;
+      const { cashAmount } = req.body;
+      if (!cashAmount || isNaN(parseFloat(cashAmount))) return res.status(400).json({ message: "Valid cash amount required" });
+      const cashAmt = parseFloat(cashAmount);
+      await storage.query(`
+        UPDATE fos_depositions SET payment_method='cash', cash_amount=$1, amount=GREATEST(amount,$1), updated_at=NOW()
+        WHERE id=$2 AND agent_id=$3
+      `, [cashAmt, id, agentId]);
+      res.json({ success: true });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  app.post("/api/fos-depositions/:id/pay-online", requireAuth, screenshotUpload.single("screenshot"), async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const agentId = req.session.agentId!;
+      if (!req.file) return res.status(400).json({ message: "No screenshot uploaded" });
+      const baseUrl = process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : process.env.APP_URL || "";
+      const screenshotUrl = `${baseUrl}/uploads/screenshots/${req.file.filename}`;
+      const depRow = await storage.query(`SELECT amount FROM fos_depositions WHERE id=$1`, [id]);
+      const onlineAmt = parseFloat(depRow.rows[0]?.amount || 0);
+      await storage.query(`
+        UPDATE fos_depositions SET payment_method='online', online_amount=$1, screenshot_url=$2, updated_at=NOW()
+        WHERE id=$3 AND agent_id=$4
+      `, [onlineAmt, screenshotUrl, id, agentId]);
+      const adminRows = await storage.query(`SELECT push_token FROM fos_agents WHERE role='admin' AND push_token IS NOT NULL AND push_token <> ''`);
+      const agentRow = await storage.query(`SELECT name FROM fos_agents WHERE id=$1`, [agentId]);
+      const agentName = agentRow.rows[0]?.name || "A FOS agent";
+      for (const admin of adminRows.rows) {
+        await sendPush(admin.push_token, "📸 Payment Screenshot Uploaded", `${agentName} uploaded online payment screenshot of ₹${onlineAmt.toLocaleString("en-IN")}.`, { type: "fos_dep_screenshot" });
+      }
+      res.json({ success: true, screenshotUrl });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  app.get("/api/admin/fos-depositions-export", requireAdmin, async (req, res) => {
+    try {
+      const result = await storage.query(`
+        SELECT
+          TO_CHAR(fd.deposition_date, 'DD-Mon-YYYY') AS "Date",
+          COALESCE(fa.name, 'Unknown')               AS "FOS Name",
+          COALESCE(fd.customer_name, '')             AS "Customer Name",
+          COALESCE(fd.loan_no, '')                   AS "Loan No",
+          ROUND(fd.cash_amount::numeric, 2)          AS "Cash Amount",
+          ROUND(fd.online_amount::numeric, 2)        AS "Online Amount",
+          ROUND(fd.amount::numeric, 2)               AS "Total Amount",
+          fd.payment_method                          AS "Payment Method",
+          COALESCE(fd.notes, '')                     AS "Notes"
+        FROM fos_depositions fd
+        LEFT JOIN fos_agents fa ON fa.id = fd.agent_id
+        ORDER BY fd.deposition_date DESC, fa.name, fd.created_at DESC
+      `);
+      const wb = new ExcelJS.Workbook();
+      const ws = wb.addWorksheet("FOS Depositions");
+      ws.columns = [
+        { header: "Date",           key: "Date",           width: 16 },
+        { header: "FOS Name",       key: "FOS Name",       width: 22 },
+        { header: "Customer Name",  key: "Customer Name",  width: 28 },
+        { header: "Loan No",        key: "Loan No",        width: 18 },
+        { header: "Cash Amount",    key: "Cash Amount",    width: 16 },
+        { header: "Online Amount",  key: "Online Amount",  width: 16 },
+        { header: "Total Amount",   key: "Total Amount",   width: 16 },
+        { header: "Payment Method", key: "Payment Method", width: 16 },
+        { header: "Notes",          key: "Notes",          width: 24 },
+      ];
+      ws.getRow(1).eachCell((cell) => {
+        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF0F172A" } };
+        cell.font = { bold: true, color: { argb: "FFFFFFFF" }, size: 11 };
+        cell.alignment = { vertical: "middle", horizontal: "center", wrapText: true };
+        cell.border = { top: { style: "thin" }, bottom: { style: "thin" }, left: { style: "thin" }, right: { style: "thin" } };
+      });
+      ws.getRow(1).height = 36;
+      let totalCash = 0, totalOnline = 0, totalAmt = 0;
+      result.rows.forEach((row: any, idx: number) => {
+        const c = parseFloat(row["Cash Amount"] || 0);
+        const o = parseFloat(row["Online Amount"] || 0);
+        const t = parseFloat(row["Total Amount"] || 0);
+        totalCash += c; totalOnline += o; totalAmt += t;
+        const dr = ws.addRow({ "Date": row["Date"] || "", "FOS Name": row["FOS Name"] || "", "Customer Name": row["Customer Name"] || "", "Loan No": row["Loan No"] || "", "Cash Amount": c, "Online Amount": o, "Total Amount": t, "Payment Method": (row["Payment Method"] || "pending").toUpperCase(), "Notes": row["Notes"] || "" });
+        const bg = idx % 2 === 0 ? "FFF8FAFF" : "FFFFFFFF";
+        dr.eachCell((cell) => { cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: bg } }; cell.alignment = { vertical: "middle" }; cell.border = { bottom: { style: "hair", color: { argb: "FFE2E8F0" } } }; });
+        dr.getCell("Cash Amount").font = { color: { argb: "FF16a34a" }, bold: true };
+        dr.getCell("Online Amount").font = { color: { argb: "FF2563eb" }, bold: true };
+        dr.getCell("Total Amount").font = { color: { argb: "FF7c3aed" }, bold: true };
+        dr.height = 22;
+      });
+      if (result.rows.length > 0) {
+        const tr = ws.addRow({ "Date": "TOTAL", "FOS Name": "", "Customer Name": "", "Loan No": `${result.rows.length} records`, "Cash Amount": totalCash, "Online Amount": totalOnline, "Total Amount": totalAmt, "Payment Method": "", "Notes": "" });
+        tr.eachCell((cell) => { cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFF9C4" } }; cell.font = { bold: true, size: 11 }; cell.border = { top: { style: "medium", color: { argb: "FFFBBF24" } } }; });
+        tr.getCell("Cash Amount").font = { bold: true, color: { argb: "FF16a34a" }, size: 12 };
+        tr.getCell("Online Amount").font = { bold: true, color: { argb: "FF2563eb" }, size: 12 };
+        tr.getCell("Total Amount").font = { bold: true, color: { argb: "FF7c3aed" }, size: 12 };
+        tr.height = 28;
+      }
+      ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: 9 } };
+      ws.views = [{ state: "frozen", ySplit: 1 }];
+      const buf = await wb.xlsx.writeBuffer();
+      const date = new Date().toISOString().slice(0, 10);
+      res.setHeader("Content-Disposition", `attachment; filename="FOS_Depositions_${date}.xlsx"`);
+      res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+      res.send(Buffer.from(buf));
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  app.post("/api/admin/import-depositions", requireAdmin, upload.single("file"), async (req, res) => {
+    try {
+      if (!req.file) return res.status(400).json({ message: "No file uploaded" });
+      const wb = new ExcelJS.Workbook();
+      await wb.xlsx.load(req.file.buffer);
+      const ws = wb.worksheets[0];
+      const rawRows = worksheetToRows(ws, true);
+      if (rawRows.length === 0) return res.json({ imported: 0, skipped: 0, errors: [] });
+      const COL_MAP: Record<string, string> = {
+        date: "deposition_date", depositiondate: "deposition_date",
+        fosname: "fos_name", fos: "fos_name", agent: "fos_name", fosagent: "fos_name",
+        customername: "customer_name", customer: "customer_name",
+        loanno: "loan_no", loan: "loan_no", loannumber: "loan_no",
+        cashamount: "cash_amount", amountpaidincash: "cash_amount", paidincash: "cash_amount", cash: "cash_amount",
+        onlineamount: "online_amount", amountpaidonline: "online_amount", paidonline: "online_amount", online: "online_amount",
+        totalamount: "amount", total: "amount", amount: "amount",
+      };
+      let headerIdx = -1; let colMap: Record<number, string> = {};
+      for (let r = 0; r < Math.min(rawRows.length, 10); r++) {
+        const row = rawRows[r]; const tempMap: Record<number, string> = {}; let matched = 0;
+        for (let c = 0; c < row.length; c++) {
+          const norm = normalizeHeader(String(row[c] || ""));
+          if (COL_MAP[norm]) { tempMap[c] = COL_MAP[norm]; matched++; }
+        }
+        if (matched >= 2) { headerIdx = r; colMap = tempMap; break; }
+      }
+      if (headerIdx === -1) return res.status(400).json({ message: "Could not find header row. Expected: Date, FOS Name, Customer Name, Loan No, Cash Amount, Online Amount, Total Amount" });
+      const existingAgents = await storage.getAllAgentsWithAdmin();
+      const agentByName: Record<string, number> = {};
+      for (const a of existingAgents) { if (a.name) agentByName[a.name.toLowerCase().trim()] = a.id; }
+      let imported = 0, skipped = 0;
+      const errors: string[] = [];
+      const today = new Date().toISOString().slice(0, 10);
+      const dataRows = rawRows.slice(headerIdx + 1);
+      for (let i = 0; i < dataRows.length; i++) {
+        const row = dataRows[i]; const mapped: Record<string, any> = {};
+        for (const [ci, field] of Object.entries(colMap)) {
+          const val = row[Number(ci)];
+          mapped[field] = (val !== undefined && val !== "") ? String(val).trim() : null;
+        }
+        if (!mapped.fos_name && !mapped.customer_name && !mapped.loan_no) { skipped++; continue; }
+        const fosLower = (mapped.fos_name || "").toLowerCase().trim();
+        const agentId = agentByName[fosLower] || null;
+        const cashAmt = parseFloat(mapped.cash_amount || "0") || 0;
+        const onlineAmt = parseFloat(mapped.online_amount || "0") || 0;
+        const totalAmt = parseFloat(mapped.amount || "0") || (cashAmt + onlineAmt);
+        let method = "pending";
+        if (cashAmt > 0 && onlineAmt > 0) method = "both";
+        else if (cashAmt > 0) method = "cash";
+        else if (onlineAmt > 0) method = "online";
+        const depDate = parseDate(mapped.deposition_date) || today;
+        try {
+          await storage.query(`
+            INSERT INTO fos_depositions (agent_id, loan_no, customer_name, amount, cash_amount, online_amount, payment_method, deposition_date)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+          `, [agentId, mapped.loan_no || null, mapped.customer_name || null, totalAmt, cashAmt, onlineAmt, method, depDate]);
+          imported++;
+        } catch (e: any) { errors.push(`Row ${i + headerIdx + 2}: ${e.message}`); skipped++; }
+      }
+      res.json({ imported, skipped, total: dataRows.length, errors: errors.slice(0, 20) });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
   // ─── Push token ────────────────────────────────────────────────────────────
@@ -621,7 +841,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!agent) return res.status(404).json({ message: "Agent not found" });
       if (!agent.push_token) return res.status(400).json({ message: "Agent has no push token registered." });
       const result = await sendPush(agent.push_token, "🔔 Test Notification", `Hello ${agent.name}! Test from admin panel.`, { type: "test" });
-      res.json({ success: result.ok, error: result.error ?? null, agentName: agent.name, tokenPreview: agent.push_token.slice(0, 20) + "..." });
+      res.json({ success: result.ok, error: result.error ?? null, agentName: agent.name });
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
@@ -651,7 +871,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
-  // ─── Screenshot upload ─────────────────────────────────────────────────────
+  // ─── Screenshot upload (required deposits) ────────────────────────────────
   app.post("/api/required-deposits/:id/screenshot", requireAuth, screenshotUpload.single("screenshot"), async (req, res) => {
     try {
       const depositId = Number(req.params.id);
@@ -659,12 +879,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const baseUrl = process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : process.env.APP_URL || "";
       const screenshotUrl = `${baseUrl}/uploads/screenshots/${req.file.filename}`;
       await storage.query("UPDATE required_deposits SET screenshot_url = $1, screenshot_uploaded_at = NOW() WHERE id = $2 AND agent_id = $3", [screenshotUrl, depositId, req.session.agentId!]);
-      const depositRow = await storage.query(
-        `SELECT rd.amount, fa.name AS agent_name FROM required_deposits rd JOIN fos_agents fa ON fa.id = rd.agent_id WHERE rd.id = $1`,
-        [depositId]
-      );
+      const depositRow = await storage.query(`SELECT rd.amount, fa.name AS agent_name FROM required_deposits rd JOIN fos_agents fa ON fa.id = rd.agent_id WHERE rd.id = $1`, [depositId]);
       const deposit = depositRow.rows[0];
-      const amtStr    = deposit ? parseFloat(deposit.amount).toLocaleString("en-IN") : "";
+      const amtStr = deposit ? parseFloat(deposit.amount).toLocaleString("en-IN") : "";
       const agentName = deposit?.agent_name || "A FOS agent";
       const adminRows = await storage.query(`SELECT push_token FROM fos_agents WHERE role = 'admin' AND push_token IS NOT NULL AND push_token <> ''`);
       const adminPlayerIds = adminRows.rows.map((r: any) => r.push_token);
@@ -678,10 +895,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.put("/api/admin/required-deposits/:id/verify", requireAdmin, async (req, res) => {
     try {
       await storage.query("UPDATE required_deposits SET alarm_scheduled = TRUE WHERE id = $1", [Number(req.params.id)]);
-      const depositRow = await storage.query(
-        `SELECT rd.agent_id, rd.amount, fa.push_token FROM required_deposits rd JOIN fos_agents fa ON fa.id = rd.agent_id WHERE rd.id = $1`,
-        [Number(req.params.id)]
-      );
+      const depositRow = await storage.query(`SELECT rd.agent_id, rd.amount, fa.push_token FROM required_deposits rd JOIN fos_agents fa ON fa.id = rd.agent_id WHERE rd.id = $1`, [Number(req.params.id)]);
       const deposit = depositRow.rows[0];
       if (deposit?.push_token) {
         const amtStr = parseFloat(deposit.amount).toLocaleString("en-IN");
@@ -714,8 +928,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/bkt-performance", requireAuth, async (req, res) => {
     try {
       const result = await storage.query(
-        `SELECT
-           COUNT(bc.id) FILTER (WHERE bc.case_category = 'bkt1')::int AS bkt1_count,
+        `SELECT COUNT(bc.id) FILTER (WHERE bc.case_category = 'bkt1')::int AS bkt1_count,
            COUNT(bc.id) FILTER (WHERE bc.case_category = 'bkt1' AND bc.status = 'Paid')::int AS bkt1_paid_count,
            COALESCE(SUM(bc.pos::numeric) FILTER (WHERE bc.case_category = 'bkt1'), 0) AS bkt1_pos_total,
            COALESCE(SUM(bc.pos::numeric) FILTER (WHERE bc.case_category = 'bkt1' AND bc.status = 'Paid'), 0) AS bkt1_pos_paid,
@@ -728,25 +941,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   app.get("/api/admin/bkt-cases", requireAdmin, async (req, res) => {
-    try {
-      const category = req.query.category as string | undefined;
-      const result = await storage.query(`
-        SELECT bc.id, bc.agent_id, bc.fos_name AS agent_name, bc.company_name, bc.customer_name,
-          bc.loan_no, bc.app_id, bc.bkt, bc.case_category, bc.status, bc.registration_no,
-          bc.engine_no, bc.chassis_no, bc.asset_name, bc.asset_make, bc.mobile_no, bc.address,
-          bc.reference_address, bc.ref1_name, bc.ref1_mobile, bc.ref2_name, bc.ref2_mobile,
-          bc.ref_number, bc.pos, bc.emi_amount, bc.emi_due, bc.cbc, bc.lpp, bc.cbc_lpp,
-          bc.rollback, bc.clearance, bc.tenor, bc.pro, bc.first_emi_due_date, bc.loan_maturity_date,
-          bc.feedback_code, bc.latest_feedback, bc.feedback_comments, bc.feedback_date,
-          bc.customer_available, bc.vehicle_available, bc.third_party, bc.third_party_name,
-          bc.third_party_number, bc.projection, bc.non_starter, bc.kyc_purchase, bc.workable,
-          bc.ptp_date, bc.telecaller_ptp_date, bc.rollback_yn, bc.created_at, bc.updated_at
-        FROM bkt_cases bc
-        ${category ? "WHERE bc.case_category = $1" : ""}
-        ORDER BY bc.customer_name ASC
-      `, category ? [category] : []);
-      res.json({ cases: result.rows });
-    } catch (e: any) { res.status(500).json({ message: e.message }); }
+    try { res.json({ cases: await storage.getAllBktCases(req.query.category as string | undefined) }); }
+    catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
   app.get("/api/bkt-cases", requireAuth, async (req, res) => {
@@ -816,7 +1012,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       const ptpLoanSave = await storage.query(`SELECT loan_no, ptp_date, telecaller_ptp_date FROM loan_cases WHERE status = 'PTP'`);
       const ptpLoanMap = new Map(ptpLoanSave.rows.map((r: any) => [r.loan_no, { ptpDate: r.ptp_date, telecallerPtpDate: r.telecaller_ptp_date }]));
-      // ✅ FIX: Nullify depositions FK before deleting loan_cases
       await storage.query(`UPDATE depositions SET loan_case_id = NULL WHERE loan_case_id IS NOT NULL`);
       await storage.deleteAllLoanCases();
       const existingFosAgents = await storage.query(`SELECT id, name FROM fos_agents WHERE role = 'fos'`);
@@ -1263,14 +1458,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (playerId) {
           const caseRow = await storage.query(`SELECT customer_name, loan_no FROM ${tbl} WHERE id = $1`, [caseId]);
           const c = caseRow.rows[0];
-          if (c) {
-            await sendPush(
-              playerId,
-              status === "Paid" ? "✅ Case Marked Paid" : status === "Unpaid" ? "❌ Case Marked Unpaid" : "🔄 Case Status Updated",
-              `${c.customer_name} (${c.loan_no}) marked ${status} by admin.`,
-              { type: "status_update", caseId, status }
-            );
-          }
+          if (c) await sendPush(playerId, status === "Paid" ? "✅ Case Marked Paid" : status === "Unpaid" ? "❌ Case Marked Unpaid" : "🔄 Case Status Updated", `${c.customer_name} (${c.loan_no}) marked ${status} by admin.`, { type: "status_update", caseId, status });
         }
       }
       res.json({ success: true });
@@ -1295,21 +1483,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
           ) t`, [agent.id]
         );
         const cnt = parseInt(result.rows[0]?.cnt || "0", 10);
-        if (cnt > 0) {
-          await sendPush(
-            agent.push_token,
-            isMorning ? "📅 Good Morning — PTP Due Today" : "📅 Afternoon Reminder — PTP Cases",
-            `You have ${cnt} PTP case${cnt !== 1 ? "s" : ""} due today. Please follow up now!`,
-            { screen: "dashboard" }
-          );
-        }
+        if (cnt > 0) await sendPush(agent.push_token, isMorning ? "📅 Good Morning — PTP Due Today" : "📅 Afternoon Reminder — PTP Cases", `You have ${cnt} PTP case${cnt !== 1 ? "s" : ""} due today. Please follow up now!`, { screen: "dashboard" });
       }
       ptpReminderSentDates.add(slotKey);
       if (ptpReminderSentDates.size > 14) ptpReminderSentDates.delete(ptpReminderSentDates.values().next().value);
     } catch (e: any) { console.error("[ptp-job]", e.message); }
   }
   runPtpPushJob();
-  // ✅ Run every 10 minutes so we don't miss the 9AM or 1PM window
   setInterval(runPtpPushJob, 10 * 60 * 1000);
 
   async function runReminderJob() {
@@ -1325,12 +1505,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       for (const row of result.rows) {
         const hoursElapsed = Math.floor((Date.now() - new Date(row.created_at).getTime()) / 3600000);
         const amtStr = parseFloat(row.amount).toLocaleString("en-IN");
-        await sendPush(
-          row.push_token,
+        await sendPush(row.push_token,
           hoursElapsed === 0 ? "💰 Deposit Assigned" : `⏰ Deposit Reminder — ${hoursElapsed}h Pending`,
-          hoursElapsed === 0
-            ? `Admin assigned you a deposit of ₹${amtStr}. Upload screenshot.`
-            : `Upload payment screenshot of ₹${amtStr} now! ${hoursElapsed}h elapsed.`,
+          hoursElapsed === 0 ? `Admin assigned you a deposit of ₹${amtStr}. Upload screenshot.` : `Upload payment screenshot of ₹${amtStr} now! ${hoursElapsed}h elapsed.`,
           { screen: "deposition" }
         );
         await storage.query(`UPDATE required_deposits SET last_reminder_at = NOW() WHERE id = $1`, [row.id]);
@@ -1344,22 +1521,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   async function runBatchReminderJob() {
     try {
       const { hour, todayKey } = getISTHour();
-      // ✅ FIX: Use a wider window (19-20 IST) instead of exact hour
-      // The 30-min interval could miss hour===19 if it fires at 18:50 or 19:31
       if (hour < 19 || hour > 20) return;
       if (batchReminderSentDates.has(todayKey)) return;
-
-      console.log(`[batch-reminder] Triggering 7PM summary (IST hour: ${hour})`);
-
       const agents = await storage.query(`SELECT id, name, push_token FROM fos_agents WHERE role = 'fos' AND push_token IS NOT NULL AND push_token <> ''`);
-
-      if (agents.rows.length === 0) {
-        console.log("[batch-reminder] No agents with push tokens");
-        // Still mark as sent so we don't retry endlessly
-        batchReminderSentDates.add(todayKey);
-        return;
-      }
-
       let sent = 0;
       for (const agent of agents.rows) {
         const statsResult = await storage.query(
@@ -1368,30 +1532,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
                   COUNT(*) FILTER (WHERE status = 'PTP')::int AS ptp_count,
                   COUNT(*)::int AS total
            FROM (SELECT status FROM loan_cases WHERE agent_id = $1
-                 UNION ALL SELECT status FROM bkt_cases WHERE agent_id = $1) t`,
-          [agent.id]
+                 UNION ALL SELECT status FROM bkt_cases WHERE agent_id = $1) t`, [agent.id]
         );
         const s = statsResult.rows[0];
         const total = parseInt(s?.total || "0", 10);
         if (total === 0) continue;
-        const result = await sendPush(
-          agent.push_token,
-          "📊 End of Day Summary",
-          `Today: ✅ ${s.paid_count} Paid | 🔄 ${s.ptp_count} PTP | ❌ ${s.unpaid_count} Unpaid out of ${total} cases. Keep it up!`,
-          { screen: "dashboard", type: "daily_summary" }
-        );
-        if (result.ok) sent++;
-        else console.warn(`[batch-reminder] Failed for agent ${agent.name}:`, result.error);
+        const r = await sendPush(agent.push_token, "📊 End of Day Summary", `Today: ✅ ${s.paid_count} Paid | 🔄 ${s.ptp_count} PTP | ❌ ${s.unpaid_count} Unpaid out of ${total} cases. Keep it up!`, { screen: "dashboard", type: "daily_summary" });
+        if (r.ok) sent++;
       }
-
-      // ✅ Mark sent AFTER attempting — so if server restarts mid-job it retries
       batchReminderSentDates.add(todayKey);
       if (batchReminderSentDates.size > 7) batchReminderSentDates.delete(batchReminderSentDates.values().next().value);
       console.log(`[batch-reminder] ✅ Sent to ${sent}/${agents.rows.length} agents`);
     } catch (e: any) { console.error("[batch-reminder]", e.message); }
   }
   runBatchReminderJob();
-  // ✅ FIX: Run every 10 minutes instead of 30 — ensures we don't miss the 19-20 window
   setInterval(runBatchReminderJob, 10 * 60 * 1000);
 
   const httpServer = createServer(app);
