@@ -20,11 +20,16 @@ import { StatusBar } from "expo-status-bar";
 import { useFonts, Outfit_400Regular } from "@expo-google-fonts/outfit";
 import { queryClient } from "../lib/query-client";
 import { AuthProvider, useAuth } from "../context/AuthContext";
+import { setQueryClientRef } from "../lib/api"; // ✅ FIX: allows api.ts to invalidate queries after imports
 import {
   SafeAreaProvider,
   initialWindowMetrics,
 } from "react-native-safe-area-context";
 import { usePushNotifications } from "@/context/usePushNotifications";
+
+// ✅ FIX: Register queryClient so api.ts can invalidate queries after
+//         allocation/bkt/deposition imports — fixes blank screen after upload
+setQueryClientRef(queryClient);
 
 // ─── Branded Splash Loader ────────────────────────────────────────────────────
 function SplashLoader() {
