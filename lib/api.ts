@@ -115,6 +115,7 @@ function createFormData(file: any, extraData?: any) {
     name: file.name || "file.xlsx",
     type:
       file.mimeType ||
+      file.type ||
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   } as any);
 
@@ -125,6 +126,26 @@ function createFormData(file: any, extraData?: any) {
   }
 
   return form;
+}
+
+// ─── Query client helpers (for cache invalidation after imports) ──────────────
+// These are called from admin screens after successful imports so the
+// case list / agent list refreshes without needing a manual pull-to-refresh.
+let _queryClient: any = null;
+export function setQueryClientRef(qc: any) {
+  _queryClient = qc;
+}
+function invalidateAfterImport() {
+  if (!_queryClient) return;
+  _queryClient.invalidateQueries({ queryKey: ["/api/admin/cases"] });
+  _queryClient.invalidateQueries({ queryKey: ["/api/admin/agents"] });
+  _queryClient.invalidateQueries({ queryKey: ["/api/admin/stats"] });
+  _queryClient.invalidateQueries({ queryKey: ["/api/cases"] });
+  _queryClient.invalidateQueries({ queryKey: ["/api/stats"] });
+  _queryClient.invalidateQueries({ queryKey: ["/api/admin/fos-depositions"] });
+  _queryClient.invalidateQueries({ queryKey: ["/api/fos-depositions"] });
+  _queryClient.invalidateQueries({ queryKey: ["/api/admin/bkt-cases"] });
+  _queryClient.invalidateQueries({ queryKey: ["/api/bkt-cases"] });
 }
 
 // ─── API ─────────────────────────────────────────────────────────────────────
@@ -164,9 +185,25 @@ export const api = {
     apiRequest("GET", `/api/bkt-cases${category ? `?category=${category}` : ""}`),
   getStats: () => apiRequest("GET", "/api/stats"),
 
-  // ─── FILE UPLOADS ──────────────────────────────────────────────────────────
+  updateFeedback: (id: number, data: any) =>
+    apiRequest("PUT", `/api/cases/${id}/feedback`, data),
 
+  updateBktFeedback: (id: number, data: any) =>
+    apiRequest("PUT", `/api/bkt-cases/${id}/feedback`, data),
+
+  // ─── ADMIN ────────────────────────────────────────────────────────────────
   admin: {
+    // ✅ FIX: getAgents was missing — caused "undefined is not a function"
+    getAgents: () => apiRequest("GET", "/api/admin/agents"),
+    getStats: () => apiRequest("GET", "/api/admin/stats"),
+    getCases: () => apiRequest("GET", "/api/admin/cases"),
+    getAllDepositions: () => apiRequest("GET", "/api/admin/depositions"),
+    getFosDepositions: () => apiRequest("GET", "/api/admin/fos-depositions"),
+
+    // ─── FILE UPLOADS ────────────────────────────────────────────────────────
+
+    // ✅ FIX: invalidateAfterImport() called after every import so admin
+    //         case list refreshes automatically without manual pull-to-refresh
     importCases: async (file: any) => {
       const form = createFormData(file);
       const token = await tokenStore.get();
@@ -178,6 +215,9 @@ export const api = {
       });
       const json = await r.json();
       if (!r.ok) throw new Error(json.message || `HTTP ${r.status}`);
+
+      // ✅ Invalidate all relevant queries so UI refreshes immediately
+      invalidateAfterImport();
       return json;
     },
 
@@ -192,6 +232,9 @@ export const api = {
       });
       const json = await r.json();
       if (!r.ok) throw new Error(json.message || `HTTP ${r.status}`);
+
+      // ✅ Invalidate all relevant queries so UI refreshes immediately
+      invalidateAfterImport();
       return json;
     },
 
@@ -209,7 +252,6 @@ export const api = {
       return json;
     },
 
-    // ✅ NEW: importDepositions
     importDepositions: async (file: any) => {
       const form = createFormData(file);
       const token = await tokenStore.get();
@@ -221,6 +263,9 @@ export const api = {
       });
       const json = await r.json();
       if (!r.ok) throw new Error(json.message || `HTTP ${r.status}`);
+
+      // ✅ Invalidate deposition queries so UI refreshes immediately
+      invalidateAfterImport();
       return json;
     },
   },
