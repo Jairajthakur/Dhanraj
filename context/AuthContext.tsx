@@ -7,6 +7,7 @@ import React, {
 } from "react";
 import { AppState, AppStateStatus, Platform } from "react-native";
 import { api, agentCache, tokenStore } from "../lib/api";
+// ✅ FIXED: import from the correct path — matches your file location
 import { registerPushToken } from "./usePushNotifications";
 
 interface Agent {
@@ -42,9 +43,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const bootstrap = async () => {
       try {
+        // Show cached agent immediately so UI doesn't wait for network
         const cached = await agentCache.get();
         if (cached && !cancelled) setAgent(cached);
 
+        // Verify with server
         const res = await api.me();
         if (!cancelled && res?.agent) {
           setAgent(res.agent);
@@ -52,9 +55,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           if (res?.token && Platform.OS !== "web") {
             await tokenStore.set(res.token);
           }
-          // Re-register push token on app launch
+          // Re-register push token on app launch (fire and forget)
           if (Platform.OS !== "web") {
-            registerPushToken().catch(() => {});
+            registerPushToken().catch((e) =>
+              console.warn("[Push] Launch registration failed:", e?.message)
+            );
           }
         }
       } catch (e: any) {
@@ -66,6 +71,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             await tokenStore.clear();
             setAgent(null);
           } else {
+            // Network error but we have a cached agent — stay logged in
             setAgent(cached);
           }
         }
@@ -74,6 +80,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     };
 
+    // ✅ Safety timeout — never block UI for more than 6s
     const timeout = setTimeout(() => {
       if (!cancelled) {
         agentCache.get().then((cached) => {
@@ -86,12 +93,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }, 6000);
 
     bootstrap().finally(() => clearTimeout(timeout));
-    return () => { cancelled = true; clearTimeout(timeout); };
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timeout);
+    };
   }, []);
 
-  // ─── Re-validate on foreground ──────────────────────────────────────────
+  // ─── Re-validate session when app comes to foreground ──────────────────
   useEffect(() => {
     if (Platform.OS === "web") return;
+
     const handleAppStateChange = async (nextState: AppStateStatus) => {
       if (nextState !== "active") return;
       try {
@@ -108,8 +120,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           await tokenStore.clear();
           setAgent(null);
         }
+        // Other errors (network) — silently ignore, keep current session
       }
     };
+
     const subscription = AppState.addEventListener("change", handleAppStateChange);
     return () => subscription.remove();
   }, []);
@@ -126,10 +140,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
       setAgent(res.agent);
 
-      // ✅ Register push token after login
+      // ✅ Register push token after successful login (fire and forget)
       if (Platform.OS !== "web") {
         registerPushToken().catch((e) =>
-          console.warn("[Push] Token registration failed:", e.message)
+          console.warn("[Push] Post-login registration failed:", e?.message)
         );
       }
     } finally {
@@ -139,7 +153,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // ─── Logout ─────────────────────────────────────────────────────────────
   const logout = async () => {
-    try { await api.logout(); } catch (_) {}
+    try {
+      await api.logout();
+    } catch (_) {
+      // Ignore logout API errors
+    }
     await agentCache.clear();
     await tokenStore.clear();
     setAgent(null);
