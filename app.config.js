@@ -8,9 +8,9 @@ module.exports = ({ config }) => {
     orientation: "portrait",
     scheme: "dhanrajenterprises",
     userInterfaceStyle: "automatic",
-    // ✅ FIXED: Disabled New Architecture — OneSignal is NOT compatible with newArchEnabled: true
-    // This was the #1 cause of blank screen on APK launch
-    newArchEnabled: false,
+    // ✅ MUST stay true — react-native-reanimated v3+ REQUIRES New Architecture
+    // OneSignal blank screen is fixed via proper initialization timing instead
+    newArchEnabled: true,
     icon: "./assets/images/dhanraj-logo.png",
     splash: {
       image: "./assets/images/dhanraj-logo.png",
