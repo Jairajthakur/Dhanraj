@@ -1,3 +1,7 @@
+// context/AuthContext.tsx
+// ✅ Fixed: token registration is now fully handled by usePushNotifications hook
+// The hook watches agent?.id and re-registers whenever a different user logs in
+
 import React, {
   createContext,
   useContext,
@@ -7,8 +11,6 @@ import React, {
 } from "react";
 import { AppState, AppStateStatus, Platform } from "react-native";
 import { api, agentCache, tokenStore } from "../lib/api";
-// ✅ FIXED: import from the correct path — matches your file location
-import { registerPushToken } from "./usePushNotifications";
 
 interface Agent {
   id: number;
@@ -55,12 +57,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           if (res?.token && Platform.OS !== "web") {
             await tokenStore.set(res.token);
           }
-          // Re-register push token on app launch (fire and forget)
-          if (Platform.OS !== "web") {
-            registerPushToken().catch((e) =>
-              console.warn("[Push] Launch registration failed:", e?.message)
-            );
-          }
+          // ✅ Token registration is handled by usePushNotifications hook
+          // which watches agent?.id — no need to call it here
         }
       } catch (e: any) {
         if (!cancelled) {
@@ -71,7 +69,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             await tokenStore.clear();
             setAgent(null);
           } else {
-            // Network error but we have a cached agent — stay logged in
+            // Network error but cached session exists — stay logged in
             setAgent(cached);
           }
         }
@@ -80,7 +78,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     };
 
-    // ✅ Safety timeout — never block UI for more than 6s
+    // Safety timeout — never block UI for more than 6s
     const timeout = setTimeout(() => {
       if (!cancelled) {
         agentCache.get().then((cached) => {
@@ -120,11 +118,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           await tokenStore.clear();
           setAgent(null);
         }
-        // Other errors (network) — silently ignore, keep current session
       }
     };
 
-    const subscription = AppState.addEventListener("change", handleAppStateChange);
+    const subscription = AppState.addEventListener(
+      "change",
+      handleAppStateChange
+    );
     return () => subscription.remove();
   }, []);
 
@@ -134,18 +134,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       const res = await api.login(username, password);
       if (!res?.agent) throw new Error("Invalid response from server");
+
       await agentCache.set(res.agent);
       if (res?.token && Platform.OS !== "web") {
         await tokenStore.set(res.token);
       }
-      setAgent(res.agent);
 
-      // ✅ Register push token after successful login (fire and forget)
-      if (Platform.OS !== "web") {
-        registerPushToken().catch((e) =>
-          console.warn("[Push] Post-login registration failed:", e?.message)
-        );
-      }
+      // ✅ Setting agent here triggers usePushNotifications hook (agent?.id changes)
+      // The hook will call registerPushToken() which waits for OneSignal init
+      // and polls until the subscription ID is available
+      setAgent(res.agent);
     } finally {
       setIsLoading(false);
     }
@@ -155,9 +153,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = async () => {
     try {
       await api.logout();
-    } catch (_) {
-      // Ignore logout API errors
-    }
+    } catch (_) {}
     await agentCache.clear();
     await tokenStore.clear();
     setAgent(null);
