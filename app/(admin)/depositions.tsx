@@ -3,7 +3,7 @@ function ImportModal({ visible, onClose, onImported }: any) {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<any>(null);
 
-  // ✅ PICK FILE (FIXED)
+  // ✅ PICK FILE
   const pickFile = async () => {
     try {
       const res = await DocumentPicker.getDocumentAsync({
@@ -26,16 +26,16 @@ function ImportModal({ visible, onClose, onImported }: any) {
           "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       };
 
-      console.log("Picked File:", fileData); // debug
+      console.log("Picked File:", fileData);
 
       setFile(fileData);
     } catch (e) {
-      console.error("Picker error:", e);
+      console.error("Picker Error:", e);
       Alert.alert("Error", "Failed to pick file");
     }
   };
 
-  // ✅ IMPORT FILE (FIXED)
+  // ✅ IMPORT FILE (FINAL FIX)
   const doImport = async () => {
     if (!file) {
       Alert.alert("Error", "Please select file first");
@@ -56,7 +56,9 @@ function ImportModal({ visible, onClose, onImported }: any) {
       const base = getApiUrl();
       const token = Platform.OS !== "web" ? await tokenStore.get() : null;
 
-      const res = await fetch(`${base}/api/admin/import-depositions`, {
+      console.log("Uploading file:", file);
+
+      const response = await fetch(`${base}/api/admin/import-depositions`, {
         method: "POST",
         headers: {
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -64,9 +66,17 @@ function ImportModal({ visible, onClose, onImported }: any) {
         body: form,
       });
 
-      const json = await res.json();
+      const text = await response.text();
+      console.log("Server raw response:", text);
 
-      if (!res.ok) {
+      let json;
+      try {
+        json = JSON.parse(text);
+      } catch {
+        throw new Error("Invalid server response");
+      }
+
+      if (!response.ok) {
         throw new Error(json.message || "Import failed");
       }
 
@@ -74,9 +84,10 @@ function ImportModal({ visible, onClose, onImported }: any) {
       onImported();
 
       Alert.alert("Success", "Excel imported successfully ✅");
-    } catch (e: any) {
-      console.error("Import error:", e);
-      Alert.alert("Import Failed", e.message || "Something went wrong");
+
+    } catch (err: any) {
+      console.error("IMPORT ERROR:", err);
+      Alert.alert("Import Failed", err.message || "Something went wrong");
     } finally {
       setLoading(false);
     }
