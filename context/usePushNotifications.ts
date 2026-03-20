@@ -1,7 +1,7 @@
 // context/usePushNotifications.ts
-// ✅ Complete rewrite — fixes token never registering on New Architecture
-// Root cause: OneSignal.User?.pushSubscription?.id doesn't work the same way
-// on react-native-onesignal v5+ with New Architecture
+// ✅ Written specifically for react-native-onesignal v5.2.5
+// In v5, you must use OneSignal.User.getOnesignalId() — async method
+// OneSignal.User.pushSubscription.id does NOT work synchronously in v5
 
 import { useEffect, useRef } from "react";
 import { Platform, InteractionManager, PermissionsAndroid } from "react-native";
@@ -13,7 +13,7 @@ const ONESIGNAL_APP_ID =
   Constants.expoConfig?.extra?.oneSignalAppId ||
   "bff2c8e0-de24-4aad-a373-d030c210155f";
 
-// ─── Get OneSignal safely ─────────────────────────────────────────────────────
+// ─── Lazy import ──────────────────────────────────────────────────────────────
 function getOneSignal() {
   try {
     return require("react-native-onesignal").default;
@@ -27,12 +27,13 @@ function getOneSignal() {
 async function requestAndroid13Permission(): Promise<boolean> {
   if (Platform.OS !== "android") return true;
   try {
-    // @ts-ignore
+    // @ts-ignore — POST_NOTIFICATIONS added in RN 0.71+
     const granted = await PermissionsAndroid.request(
       PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS,
       {
         title: "Notification Permission",
-        message: "Dhanraj Enterprises needs permission to send you case updates and reminders.",
+        message:
+          "Dhanraj Enterprises needs permission to send you case updates and reminders.",
         buttonPositive: "Allow",
         buttonNegative: "Deny",
       }
@@ -43,6 +44,49 @@ async function requestAndroid13Permission(): Promise<boolean> {
   } catch (e) {
     console.warn("[Push] Permission error:", e);
     return false;
+  }
+}
+
+// ─── OneSignal v5 — get player/onesignal ID ──────────────────────────────────
+// In v5, use OneSignal.User.getOnesignalId() — this is the correct async method
+async function getPlayerIdV5(OneSignal: any): Promise<string | null> {
+  try {
+    // ✅ v5 primary method — async
+    if (typeof OneSignal.User?.getOnesignalId === "function") {
+      const id = await OneSignal.User.getOnesignalId();
+      if (id && id.length > 5) {
+        console.log("[OneSignal] Got ID via getOnesignalId():", id.slice(0, 20));
+        return id;
+      }
+    }
+
+    // ✅ v5 push subscription token (available after opt-in)
+    if (typeof OneSignal.User?.pushSubscription?.getToken === "function") {
+      const token = await OneSignal.User.pushSubscription.getToken();
+      if (token && token.length > 5) {
+        console.log("[OneSignal] Got ID via pushSubscription.getToken():", token.slice(0, 20));
+        return token;
+      }
+    }
+
+    // ✅ v5 sync fallback (sometimes works)
+    const syncId = OneSignal.User?.pushSubscription?.token;
+    if (syncId && typeof syncId === "string" && syncId.length > 5) {
+      console.log("[OneSignal] Got ID via pushSubscription.token (sync):", syncId.slice(0, 20));
+      return syncId;
+    }
+
+    const syncId2 = OneSignal.User?.pushSubscription?.id;
+    if (syncId2 && typeof syncId2 === "string" && syncId2.length > 5) {
+      console.log("[OneSignal] Got ID via pushSubscription.id (sync):", syncId2.slice(0, 20));
+      return syncId2;
+    }
+
+    console.log("[OneSignal] No ID found. optedIn:", OneSignal.User?.pushSubscription?.optedIn);
+    return null;
+  } catch (e: any) {
+    console.warn("[OneSignal] getPlayerId error:", e.message);
+    return null;
   }
 }
 
@@ -61,25 +105,33 @@ function ensureInit(): Promise<void> {
 
     InteractionManager.runAfterInteractions(async () => {
       try {
-        console.log("[OneSignal] Initializing with App ID:", ONESIGNAL_APP_ID);
+        console.log("[OneSignal] Initializing v5...");
         OneSignal.initialize(ONESIGNAL_APP_ID);
         initialized = true;
         console.log("[OneSignal] ✅ Initialized");
 
-        // Android 13+ system permission
-        const granted = await requestAndroid13Permission();
-        console.log("[OneSignal] System permission granted:", granted);
+        // Step 1: Android 13 system permission
+        await requestAndroid13Permission();
 
-        // OneSignal permission (handles iOS too)
-        await new Promise(r => setTimeout(r, 1000));
+        // Step 2: Wait a moment then request OneSignal permission
+        await new Promise((r) => setTimeout(r, 1000));
         try {
           await OneSignal.Notifications.requestPermission(true);
-          console.log("[OneSignal] ✅ Notification permission requested");
+          console.log("[OneSignal] ✅ Permission requested");
         } catch (e) {
           console.warn("[OneSignal] requestPermission error:", e);
         }
+
+        // Step 3: Opt in to push (v5 requires explicit opt-in)
+        await new Promise((r) => setTimeout(r, 500));
+        try {
+          await OneSignal.User.pushSubscription.optIn();
+          console.log("[OneSignal] ✅ Opted in to push subscription");
+        } catch (e) {
+          console.warn("[OneSignal] optIn error:", e);
+        }
       } catch (e) {
-        console.error("[OneSignal] Init failed:", e);
+        console.error("[OneSignal] Init error:", e);
         initialized = false;
         initPromise = null;
       } finally {
@@ -91,68 +143,24 @@ function ensureInit(): Promise<void> {
   return initPromise;
 }
 
-// ─── Get player ID using ALL possible API paths ───────────────────────────────
-// Different versions of react-native-onesignal expose the ID differently
-function getPlayerId(OneSignal: any): string | null {
-  try {
-    // v5+ New Architecture path
-    const id1 = OneSignal?.User?.pushSubscription?.id;
-    if (id1 && typeof id1 === "string" && id1.length > 10) {
-      console.log("[OneSignal] Got ID via User.pushSubscription.id:", id1.slice(0, 20));
-      return id1;
-    }
-
-    // v5+ alternative path
-    const id2 = OneSignal?.User?.pushSubscription?.token;
-    if (id2 && typeof id2 === "string" && id2.length > 10) {
-      console.log("[OneSignal] Got ID via User.pushSubscription.token:", id2.slice(0, 20));
-      return id2;
-    }
-
-    // v4 legacy path
-    const id3 = OneSignal?.getDeviceState?.()?.userId;
-    if (id3 && typeof id3 === "string" && id3.length > 10) {
-      console.log("[OneSignal] Got ID via getDeviceState().userId:", id3.slice(0, 20));
-      return id3;
-    }
-
-    // v5 async path — returns promise, handled separately
-    console.log("[OneSignal] pushSubscription object:", JSON.stringify({
-      id: OneSignal?.User?.pushSubscription?.id,
-      token: OneSignal?.User?.pushSubscription?.token,
-      optedIn: OneSignal?.User?.pushSubscription?.optedIn,
-    }));
-
-    return null;
-  } catch (e) {
-    console.warn("[OneSignal] getPlayerId error:", e);
-    return null;
-  }
-}
-
-// ─── Exported: save token to your server ─────────────────────────────────────
+// ─── Exported: save OneSignal player ID to your server ───────────────────────
 export async function registerPushToken(): Promise<void> {
   if (Platform.OS === "web") return;
 
-  console.log("[OneSignal] registerPushToken() called");
-
-  // Wait for init first
+  console.log("[OneSignal] registerPushToken() starting...");
   await ensureInit();
 
   const OneSignal = getOneSignal();
-  if (!OneSignal) {
-    console.warn("[OneSignal] No OneSignal module");
-    return;
-  }
+  if (!OneSignal) return;
 
-  // Poll for player ID — try every 3 seconds for up to 60 seconds
+  // Poll every 3s for up to 60s total (20 attempts)
+  // v5 needs time to register with OneSignal servers after opt-in
   const maxAttempts = 20;
-  const delayMs = 3000;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    console.log(`[OneSignal] Token attempt ${attempt}/${maxAttempts}`);
+    console.log(`[OneSignal] ID attempt ${attempt}/${maxAttempts}...`);
 
-    const playerId = getPlayerId(OneSignal);
+    const playerId = await getPlayerIdV5(OneSignal);
 
     if (playerId) {
       try {
@@ -160,31 +168,32 @@ export async function registerPushToken(): Promise<void> {
         console.log(`[OneSignal] ✅ Token saved on attempt ${attempt}:`, playerId.slice(0, 20) + "...");
         return;
       } catch (e: any) {
-        console.warn(`[OneSignal] API save failed on attempt ${attempt}:`, e.message);
+        console.warn(`[OneSignal] Server save failed:`, e.message);
+        // Still got the ID — retry save on next attempt
       }
     }
 
     if (attempt < maxAttempts) {
-      await new Promise((r) => setTimeout(r, delayMs));
+      await new Promise((r) => setTimeout(r, 3000));
     }
   }
 
-  console.warn("[OneSignal] ❌ Failed to get player ID after", maxAttempts, "attempts");
+  console.warn("[OneSignal] ❌ Could not register token after", maxAttempts, "attempts");
 }
 
-// ─── Hook ─────────────────────────────────────────────────────────────────────
+// ─── Hook — used in root _layout.tsx ─────────────────────────────────────────
 export function usePushNotifications() {
   const { agent } = useAuth();
   const savedRef = useRef(false);
   const agentIdRef = useRef<number | null>(null);
 
-  // Init OneSignal on mount
+  // Init on mount
   useEffect(() => {
     if (Platform.OS === "web") return;
     ensureInit();
   }, []);
 
-  // Register token whenever agent changes
+  // Re-register whenever agent changes (login / account switch)
   useEffect(() => {
     if (Platform.OS === "web") return;
     if (!agent) {
@@ -193,44 +202,51 @@ export function usePushNotifications() {
       return;
     }
 
-    // Skip if same agent already saved
+    // Skip if same agent already registered
     if (agentIdRef.current === agent.id && savedRef.current) {
-      console.log("[OneSignal] Same agent, token already saved");
+      console.log("[OneSignal] Same agent already registered, skipping");
       return;
     }
 
     agentIdRef.current = agent.id;
     savedRef.current = false;
-
-    console.log("[OneSignal] Agent changed to:", agent.id, agent.name, "— registering token");
+    console.log("[OneSignal] New agent:", agent.id, agent.name, "— registering token");
 
     const OneSignal = getOneSignal();
     if (!OneSignal) return;
 
-    // ── Subscription change listener ──────────────────────────────────────
+    // ── v5 subscription change listener ──────────────────────────────────
     const handleSubscriptionChange = async (event: any) => {
-      console.log("[OneSignal] Subscription changed:", JSON.stringify(event));
-      // Try all possible paths in the event
+      console.log("[OneSignal] Subscription changed event:", JSON.stringify(event));
+
+      // In v5 the event has { current: { id, token, optedIn } }
       const playerId =
         event?.current?.id ||
         event?.current?.token ||
         event?.to?.id ||
-        event?.to?.token ||
-        event?.id ||
-        event?.token;
+        event?.to?.token;
 
-      if (!playerId) {
-        console.warn("[OneSignal] No player ID in subscription change event");
+      if (playerId && playerId.length > 5) {
+        try {
+          await api.savePushToken(playerId);
+          savedRef.current = true;
+          console.log("[OneSignal] ✅ Token saved via subscription change:", playerId.slice(0, 20));
+        } catch (e: any) {
+          console.warn("[OneSignal] Save via event failed:", e.message);
+        }
         return;
       }
 
-      console.log("[OneSignal] New player ID from event:", playerId.slice(0, 20));
-      try {
-        await api.savePushToken(playerId);
-        savedRef.current = true;
-        console.log("[OneSignal] ✅ Token saved via subscription change");
-      } catch (e: any) {
-        console.warn("[OneSignal] Token save failed:", e.message);
+      // If event didn't have the ID, try fetching it
+      const id = await getPlayerIdV5(OneSignal);
+      if (id) {
+        try {
+          await api.savePushToken(id);
+          savedRef.current = true;
+          console.log("[OneSignal] ✅ Token saved after subscription change:", id.slice(0, 20));
+        } catch (e: any) {
+          console.warn("[OneSignal] Save after event failed:", e.message);
+        }
       }
     };
 
@@ -240,21 +256,17 @@ export function usePushNotifications() {
       console.warn("[OneSignal] Could not add subscription listener:", e);
     }
 
-    // ── Also actively poll for the token ─────────────────────────────────
-    // Don't wait — start polling immediately in background
-    registerPushToken().then(() => {
-      savedRef.current = true;
-    }).catch((e) => {
-      console.warn("[OneSignal] registerPushToken failed:", e?.message);
-    });
+    // ── Actively poll for token ───────────────────────────────────────────
+    registerPushToken()
+      .then(() => { savedRef.current = true; })
+      .catch((e) => console.warn("[OneSignal] registerPushToken error:", e?.message));
 
     // ── Notification listeners ────────────────────────────────────────────
     const handleClick = (event: any) => {
       console.log("[OneSignal] Notification tapped:", event?.notification?.additionalData);
     };
-
     const handleForeground = (event: any) => {
-      console.log("[OneSignal] Foreground notification:", event?.notification?.title);
+      console.log("[OneSignal] Foreground:", event?.notification?.title);
     };
 
     try {
