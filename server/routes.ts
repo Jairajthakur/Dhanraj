@@ -76,7 +76,7 @@ function getISTHour(): { hour: number; todayKey: string } {
   return { hour: ist.getUTCHours(), todayKey: ist.toISOString().slice(0, 10) };
 }
 
-// ─── ✅ OneSignal push notification ───────────────────────────────────────────
+// ─── ✅ FIXED: OneSignal push — removed android_channel_id ───────────────────
 async function sendPush(
   playerId: string,
   title: string,
@@ -107,17 +107,24 @@ async function sendPush(
         headings: { en: title },
         contents: { en: body },
         data,
-        android_channel_id: "default",
+        // ✅ FIXED: Removed android_channel_id — "default" didn't exist in dashboard
+        // OneSignal uses its built-in default channel automatically
         priority: 10,
+        ttl: 259200,
+        android_visibility: 1,
       }),
     });
     const json: any = await res.json().catch(() => ({}));
+    console.log("[push] OneSignal response:", JSON.stringify(json));
     if (!res.ok || json.errors) {
       const err = Array.isArray(json.errors) ? json.errors[0] : JSON.stringify(json.errors);
       console.error("[push] OneSignal error:", err);
       return { ok: false, error: err };
     }
-    console.log("[push] ✅ Sent to:", playerId.slice(0, 20));
+    if (json.invalid_player_ids?.length > 0) {
+      console.warn("[push] Stale player IDs:", json.invalid_player_ids);
+    }
+    console.log("[push] ✅ Sent to:", playerId.slice(0, 20), "recipients:", json.recipients);
     return { ok: true };
   } catch (e: any) {
     console.error("[push] Exception:", e.message);
@@ -148,11 +155,17 @@ async function sendPushToMany(
         headings: { en: title },
         contents: { en: body },
         data,
-        android_channel_id: "default",
+        // ✅ FIXED: Removed android_channel_id
         priority: 10,
+        ttl: 259200,
+        android_visibility: 1,
       }),
     });
     const json: any = await res.json().catch(() => ({}));
+    console.log("[push] sendPushToMany response:", JSON.stringify(json));
+    if (json.invalid_player_ids?.length > 0) {
+      console.warn("[push] Stale player IDs:", json.invalid_player_ids);
+    }
     return { sent: json.recipients ?? playerIds.length, total: playerIds.length };
   } catch (e: any) {
     console.error("[push] sendPushToMany error:", e.message);
@@ -484,7 +497,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
-  // ✅ Full SELECT with fos_name AS agent_name
   app.get("/api/admin/cases", requireAdmin, async (req, res) => {
     try {
       const result = await storage.query(`
@@ -590,12 +602,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
     catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
-  // ─── Push token (stores OneSignal Player ID) ──────────────────────────────
+  // ─── Push token ────────────────────────────────────────────────────────────
   app.post("/api/push-token", requireAuth, async (req, res) => {
     try {
       const { token } = req.body;
       if (!token) return res.status(400).json({ message: "token required" });
       await storage.query("UPDATE fos_agents SET push_token = $1 WHERE id = $2", [token, req.session.agentId!]);
+      console.log("[push-token] Saved token for agent:", req.session.agentId);
       res.json({ success: true });
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
@@ -619,7 +632,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!agent) return res.status(404).json({ message: "Agent not found" });
       if (!agent.push_token) return res.status(400).json({ message: "Agent has no push token registered." });
       const result = await sendPush(agent.push_token, "🔔 Test Notification", `Hello ${agent.name}! Test from admin panel.`, { type: "test" });
-      res.json({ success: result.ok, ...result, agentName: agent.name });
+      res.json({ success: result.ok, error: result.error ?? null, agentName: agent.name, tokenPreview: agent.push_token.slice(0, 20) + "..." });
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
@@ -725,7 +738,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
-  // ✅ Full SELECT with fos_name AS agent_name
   app.get("/api/admin/bkt-cases", requireAdmin, async (req, res) => {
     try {
       const category = req.query.category as string | undefined;
