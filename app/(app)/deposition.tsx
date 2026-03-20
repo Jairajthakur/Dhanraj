@@ -261,18 +261,38 @@ export default function FosDepositionScreen() {
   const qc = useQueryClient();
   const [payItem, setPayItem] = useState<any>(null);
 
-  const { data: depData, isLoading } = useQuery({
+  // ✅ FIX: Added error state + retry button + debug logging
+  const { data: depData, isLoading, error, refetch } = useQuery({
     queryKey: ["/api/fos-depositions"],
     queryFn: async () => {
       const base = getApiUrl();
       const token = Platform.OS !== "web" ? await tokenStore.get() : null;
       const headers: Record<string, string> = {};
       if (token) headers["Authorization"] = `Bearer ${token}`;
-      const res = await fetch(`${base}/api/fos-depositions`, { headers, credentials: "include" });
-      if (!res.ok) throw new Error("Failed to load depositions");
-      return res.json();
+
+      const res = await fetch(`${base}/api/fos-depositions`, {
+        headers,
+        credentials: "include",
+      });
+
+      const text = await res.text();
+      console.log("[fos-dep] status:", res.status, "body:", text.slice(0, 200));
+
+      if (!res.ok) {
+        let msg = `HTTP ${res.status}`;
+        try { msg = JSON.parse(text).message || msg; } catch {}
+        throw new Error(msg);
+      }
+
+      let json: any;
+      try { json = JSON.parse(text); } catch { throw new Error("Invalid server response"); }
+
+      // ✅ Handle both { depositions: [] } and plain [] response shapes
+      if (Array.isArray(json)) return { depositions: json };
+      return json;
     },
     staleTime: 0,
+    retry: 2,
   });
 
   const depositions: any[] = depData?.depositions || [];
@@ -286,10 +306,33 @@ export default function FosDepositionScreen() {
     qc.invalidateQueries({ queryKey: ["/api/fos-depositions"] });
   }, [qc]);
 
+  // ✅ Loading state
   if (isLoading) {
     return (
       <View style={{ flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: Colors.background }}>
         <ActivityIndicator color={Colors.primary} size="large" />
+        <Text style={{ marginTop: 12, color: Colors.textSecondary, fontSize: 14 }}>Loading depositions...</Text>
+      </View>
+    );
+  }
+
+  // ✅ Error state with retry button
+  if (error) {
+    return (
+      <View style={{ flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: Colors.background, padding: 24 }}>
+        <Ionicons name="cloud-offline-outline" size={48} color={Colors.textMuted} />
+        <Text style={{ fontSize: 16, fontWeight: "700", color: Colors.text, marginTop: 12, textAlign: "center" }}>
+          Could not load depositions
+        </Text>
+        <Text style={{ fontSize: 13, color: Colors.textMuted, marginTop: 6, textAlign: "center" }}>
+          {(error as Error).message}
+        </Text>
+        <Pressable
+          style={{ marginTop: 20, backgroundColor: Colors.primary, paddingHorizontal: 24, paddingVertical: 12, borderRadius: 12 }}
+          onPress={() => refetch()}
+        >
+          <Text style={{ color: "#fff", fontWeight: "700", fontSize: 14 }}>Retry</Text>
+        </Pressable>
       </View>
     );
   }
@@ -348,6 +391,9 @@ export default function FosDepositionScreen() {
           <DepositionCard item={item} onPayPressed={setPayItem} />
         )}
         ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
+        // ✅ Pull-to-refresh
+        onRefresh={() => refetch()}
+        refreshing={isLoading}
         ListEmptyComponent={
           <View style={main.empty}>
             <View style={main.emptyIcon}>
@@ -355,6 +401,12 @@ export default function FosDepositionScreen() {
             </View>
             <Text style={main.emptyTitle}>No Deposits Assigned</Text>
             <Text style={main.emptyText}>Admin hasn't assigned any deposits to you yet.</Text>
+            <Pressable
+              style={{ marginTop: 16, paddingHorizontal: 20, paddingVertical: 10, borderRadius: 10, borderWidth: 1, borderColor: Colors.border }}
+              onPress={() => refetch()}
+            >
+              <Text style={{ color: Colors.textSecondary, fontWeight: "600", fontSize: 13 }}>Refresh</Text>
+            </Pressable>
           </View>
         }
       />
