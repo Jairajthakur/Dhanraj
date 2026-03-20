@@ -164,46 +164,64 @@ export const api = {
     apiRequest("GET", `/api/bkt-cases${category ? `?category=${category}` : ""}`),
   getStats: () => apiRequest("GET", "/api/stats"),
 
-  // ─── FIXED FILE UPLOADS 🔥 ─────────────────────────────────────────────
+  // ─── FILE UPLOADS ──────────────────────────────────────────────────────────
 
   admin: {
     importCases: async (file: any) => {
       const form = createFormData(file);
       const token = await tokenStore.get();
 
-      return fetch(`${getApiUrl()}/api/admin/import`, {
+      const r = await fetch(`${getApiUrl()}/api/admin/import`, {
         method: "POST",
-        headers: {
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
+        headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
         body: form,
-      }).then((r) => r.json());
+      });
+      const json = await r.json();
+      if (!r.ok) throw new Error(json.message || `HTTP ${r.status}`);
+      return json;
     },
 
     importBkt: async (file: any) => {
       const form = createFormData(file);
       const token = await tokenStore.get();
 
-      return fetch(`${getApiUrl()}/api/admin/import-bkt`, {
+      const r = await fetch(`${getApiUrl()}/api/admin/import-bkt`, {
         method: "POST",
-        headers: {
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
+        headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
         body: form,
-      }).then((r) => r.json());
+      });
+      const json = await r.json();
+      if (!r.ok) throw new Error(json.message || `HTTP ${r.status}`);
+      return json;
     },
 
     importBktPerf: async (file: any, bkt?: string) => {
       const form = createFormData(file, { bkt });
       const token = await tokenStore.get();
 
-      return fetch(`${getApiUrl()}/api/admin/import-bkt-perf`, {
+      const r = await fetch(`${getApiUrl()}/api/admin/import-bkt-perf`, {
         method: "POST",
-        headers: {
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
+        headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
         body: form,
-      }).then((r) => r.json());
+      });
+      const json = await r.json();
+      if (!r.ok) throw new Error(json.message || `HTTP ${r.status}`);
+      return json;
+    },
+
+    // ✅ NEW: importDepositions
+    importDepositions: async (file: any) => {
+      const form = createFormData(file);
+      const token = await tokenStore.get();
+
+      const r = await fetch(`${getApiUrl()}/api/admin/import-depositions`, {
+        method: "POST",
+        headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: form,
+      });
+      const json = await r.json();
+      if (!r.ok) throw new Error(json.message || `HTTP ${r.status}`);
+      return json;
     },
   },
 };
