@@ -9,7 +9,9 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Ionicons, MaterialIcons } from "@expo/vector-icons";
 import * as DocumentPicker from "expo-document-picker";
 import Colors from "@/constants/colors";
-import { getApiUrl, tokenStore } from "@/lib/api";
+// ✅ FIX: getApiUrl lives in query-client, NOT in api — this was causing "undefined is not a function"
+import { getApiUrl } from "@/lib/query-client";
+import { tokenStore } from "@/lib/api";
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 const fmt = (n: any) => parseFloat(n || 0).toLocaleString("en-IN");
@@ -577,7 +579,7 @@ export default function AdminDepositionsScreen() {
     },
   });
 
-  // ✅ FIX: fully safe paidCases query — handles array OR {cases:[]} response, never throws
+  // ✅ FIX: handles both array and {cases:[]} response shapes, never throws
   const { data: paidCasesData } = useQuery({
     queryKey: ["/api/admin/paid-cases-24h"],
     queryFn: async () => {
@@ -597,7 +599,7 @@ export default function AdminDepositionsScreen() {
     },
   });
 
-  // ✅ FIX: safe defaults for all derived data — nothing can be undefined
+  // ✅ FIX: safe defaults for all derived data
   const grouped: any[] = Array.isArray(data?.grouped) ? data.grouped : [];
   const agents = Array.isArray(agentsData) ? agentsData : (agentsData?.agents || []);
   const paidCases = Array.isArray(paidCasesData?.cases) ? paidCasesData.cases : [];
