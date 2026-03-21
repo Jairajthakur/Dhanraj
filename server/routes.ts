@@ -130,76 +130,86 @@ async function sendPushToMany(
   } catch (e: any) { return { sent: 0, total: playerIds.length }; }
 }
 
-// ─── Screenshot OCR — extract transfer amount using Claude Vision ─────────────
-// Returns the numeric amount found in the screenshot, or null if not found.
+// ─── Screenshot OCR — extract payment amount using Tesseract.js (free, local) ─
+// Works on all Indian UPI apps: PhonePe, GPay, Paytm, BHIM, NEFT, IMPS etc.
+// No API key needed — runs entirely on your Railway server.
 async function extractAmountFromScreenshot(imagePath: string): Promise<number | null> {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) {
-    console.warn("[ocr] ANTHROPIC_API_KEY not set — skipping screenshot validation");
-    return null;
-  }
   try {
-    const imageBuffer = fs.readFileSync(imagePath);
-    const base64 = imageBuffer.toString("base64");
-    const ext = path.extname(imagePath).toLowerCase();
-    const mediaType = ext === ".png" ? "image/png" : ext === ".gif" ? "image/gif" : ext === ".webp" ? "image/webp" : "image/jpeg";
-
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify({
-        model: "claude-haiku-4-5-20251001",
-        max_tokens: 256,
-        messages: [{
-          role: "user",
-          content: [
-            {
-              type: "image",
-              source: { type: "base64", media_type: mediaType, data: base64 },
-            },
-            {
-              type: "text",
-              text: `This is a payment/transfer screenshot. Extract ONLY the total transfer amount that was paid/sent/debited. 
-Reply with ONLY the numeric value, no currency symbol, no commas, no text. 
-For example if the amount is ₹1,23,456 reply with: 123456
-If the amount is ₹3,568 reply with: 3568
-If you cannot find a clear payment amount, reply with: null`,
-            },
-          ],
-        }],
-      }),
-    });
-
-    if (!res.ok) {
-      console.warn("[ocr] API error:", res.status);
+    // Dynamically require tesseract.js — graceful fail if not installed
+    let Tesseract: any;
+    try {
+      Tesseract = require("tesseract.js");
+    } catch {
+      console.warn("[ocr] tesseract.js not installed — run: npm install tesseract.js");
       return null;
     }
 
-    const data: any = await res.json();
-    const text = (data?.content?.[0]?.text || "").trim();
-    if (text === "null" || text === "") return null;
+    console.log("[ocr] Running OCR on screenshot:", path.basename(imagePath));
+    const { data: { text } } = await Tesseract.recognize(imagePath, "eng", {
+      logger: () => {}, // suppress progress logs
+    });
 
-    // Strip any accidental commas/spaces/symbols
-    const clean = text.replace(/[^0-9.]/g, "");
-    const num = parseFloat(clean);
-    if (isNaN(num) || num <= 0) return null;
+    console.log("[ocr] Raw OCR text:", text.slice(0, 300));
 
-    console.log(`[ocr] ✅ Extracted amount from screenshot: ₹${num}`);
-    return num;
+    // ── Amount extraction patterns for Indian payment apps ──────────────────
+    // Handles: ₹3,568 | Rs. 3568 | INR 3,568.00 | ₹ 3,568.00 | 3568.00
+    // Also handles Indian number format: 1,23,456
+    const patterns = [
+      // Explicitly labelled amounts: "Amount ₹3,568" / "Paid ₹3,568" / "Debited ₹3,568"
+      /(?:amount|paid|debited|transferred|sent|credited|total)[^\d₹Rs]{0,10}[₹Rs\.]{0,3}\s*([0-9,]+(?:\.[0-9]{1,2})?)/gi,
+      // ₹ symbol directly before number
+      /₹\s*([0-9,]+(?:\.[0-9]{1,2})?)/g,
+      // "Rs." or "Rs " before number
+      /Rs\.?\s+([0-9,]+(?:\.[0-9]{1,2})?)/gi,
+      // INR prefix
+      /INR\s*([0-9,]+(?:\.[0-9]{1,2})?)/gi,
+      // Standalone large numbers (fallback) — at least 3 digits
+      /\b([0-9]{1,3}(?:,[0-9]{2,3})+(?:\.[0-9]{1,2})?)\b/g,
+    ];
+
+    const candidates: number[] = [];
+
+    for (const pattern of patterns) {
+      let match: RegExpExecArray | null;
+      const regex = new RegExp(pattern.source, pattern.flags);
+      while ((match = regex.exec(text)) !== null) {
+        // Remove Indian-format commas then parse
+        const clean = match[1].replace(/,/g, "");
+        const num = parseFloat(clean);
+        if (!isNaN(num) && num > 0 && num < 10_000_000) { // sanity: under 1 crore
+          candidates.push(num);
+        }
+      }
+    }
+
+    if (candidates.length === 0) {
+      console.warn("[ocr] ⚠️ No amount found in screenshot");
+      return null;
+    }
+
+    // Pick the most likely amount:
+    // - Prefer amounts that appear multiple times (confirmation screens show it twice)
+    // - Otherwise take the largest candidate (usually the main transfer amount)
+    const freq: Record<string, number> = {};
+    for (const c of candidates) {
+      const key = c.toFixed(2);
+      freq[key] = (freq[key] || 0) + 1;
+    }
+    const sorted = Object.entries(freq).sort((a, b) => b[1] - a[1] || parseFloat(b[0]) - parseFloat(a[0]));
+    const best = parseFloat(sorted[0][0]);
+
+    console.log(`[ocr] ✅ Detected amount: ₹${best} (candidates: ${candidates.join(", ")})`);
+    return best;
   } catch (e: any) {
-    console.warn("[ocr] Failed:", e.message);
+    console.warn("[ocr] OCR failed:", e.message);
     return null;
   }
 }
 
-// Tolerance: 1% or ₹5 difference is acceptable to handle rounding in screenshots
+// Tolerance: 1% or ₹10 — handles minor rounding differences in screenshots
 function amountMatches(expected: number, actual: number): boolean {
   const diff = Math.abs(expected - actual);
-  const tolerance = Math.max(5, expected * 0.01); // 1% or ₹5, whichever is larger
+  const tolerance = Math.max(10, expected * 0.01);
   return diff <= tolerance;
 }
 
