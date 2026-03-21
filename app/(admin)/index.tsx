@@ -3,8 +3,6 @@ import {
   View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator,
   Platform, Alert
 } from "react-native";
-import * as FileSystem from "expo-file-system";
-import * as Sharing from "expo-sharing";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Ionicons } from "@expo/vector-icons";
@@ -15,7 +13,6 @@ import { getApiUrl } from "@/lib/query-client";
 import { fetch as expoFetch } from "expo/fetch";
 import { ImportModal, BktPerfImportModal } from "@/components/ImportModals";
 
-// ─── Agent Card ───────────────────────────────────────────────────────────────
 function AgentCard({ agent }: { agent: any }) {
   const rate = agent.total > 0 ? ((agent.paid / agent.total) * 100).toFixed(0) : "0";
   return (
@@ -52,7 +49,6 @@ function AgentCard({ agent }: { agent: any }) {
   );
 }
 
-// ─── Admin Dashboard ──────────────────────────────────────────────────────────
 export default function AdminDashboard() {
   const insets = useSafeAreaInsets();
   const qc = useQueryClient();
@@ -79,12 +75,12 @@ export default function AdminDashboard() {
     const agents = pushStatusData?.agents || [];
     const withToken = agents.filter(a => a.has_token);
     if (withToken.length === 0) {
-      Alert.alert("No Tokens", "No FOS agents have registered push tokens yet. They must log in on the APK device first.");
+      Alert.alert("No Tokens", "No FOS agents have registered push tokens yet.");
       return;
     }
     Alert.alert(
       "Send Test Notification",
-      `Send a test push notification to ${withToken.length} agent${withToken.length !== 1 ? "s" : ""} with registered tokens?`,
+      `Send test to ${withToken.length} agent${withToken.length !== 1 ? "s" : ""}?`,
       [
         { text: "Cancel", style: "cancel" },
         {
@@ -95,12 +91,10 @@ export default function AdminDashboard() {
               const res = await expoFetch(url, { method: "POST", credentials: "include" });
               const json: any = await res.json();
               if (!res.ok) throw new Error(json.message || "Failed");
-              Alert.alert("Sent!", `Delivered to ${json.sent}/${json.total} agent${json.total !== 1 ? "s" : ""} successfully.`);
+              Alert.alert("Sent!", `Delivered to ${json.sent}/${json.total} agents.`);
             } catch (e: any) {
-              Alert.alert("Error", e.message || "Could not send test notifications");
-            } finally {
-              setPushTesting(false);
-            }
+              Alert.alert("Error", e.message || "Could not send");
+            } finally { setPushTesting(false); }
           },
         },
       ]
@@ -114,14 +108,13 @@ export default function AdminDashboard() {
       const res = await expoFetch(url, { method: "POST", credentials: "include" });
       const json: any = await res.json();
       if (!res.ok) throw new Error(json.message || "Failed");
-      Alert.alert("Sent!", `Test notification delivered to ${agentName} successfully.`);
-    } catch (e: any) {
-      Alert.alert("Error", e.message);
-    } finally {
-      setPushTesting(false);
-    }
+      Alert.alert("Sent!", `Delivered to ${agentName}.`);
+    } catch (e: any) { Alert.alert("Error", e.message); }
+    finally { setPushTesting(false); }
   };
 
+  // ✅ FIX: replaced deprecated FileSystem.writeAsStringAsync
+  // Now uses expo-file-system/legacy to avoid Expo SDK 54 deprecation error
   const downloadExcel = async (
     apiPath: string,
     fileName: string,
@@ -132,29 +125,20 @@ export default function AdminDashboard() {
     try {
       if (Platform.OS === "web") {
         const res = await fetch(url, { credentials: "include" });
-        if (!res.ok) {
-          const text = await res.text();
-          let msg = text;
-          try { msg = JSON.parse(text).message; } catch {}
-          throw new Error(msg || "Export failed");
-        }
+        if (!res.ok) throw new Error("Export failed");
         const blob = await res.blob();
         const blobUrl = URL.createObjectURL(blob);
         const a = document.createElement("a");
-        a.href = blobUrl;
-        a.download = fileName;
-        document.body.appendChild(a);
-        a.click();
+        a.href = blobUrl; a.download = fileName;
+        document.body.appendChild(a); a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(blobUrl);
       } else {
+        // ✅ Use legacy import to avoid writeAsStringAsync deprecation
+        const FileSystem = require("expo-file-system/legacy");
+        const Sharing = require("expo-sharing");
         const res = await expoFetch(url, { credentials: "include" });
-        if (!res.ok) {
-          const text = await res.text();
-          let msg = text;
-          try { msg = JSON.parse(text).message; } catch {}
-          throw new Error(msg || "Export failed");
-        }
+        if (!res.ok) throw new Error("Export failed");
         const ab = await res.arrayBuffer();
         const uint8 = new Uint8Array(ab);
         const CHUNK = 0x8000;
@@ -173,63 +157,41 @@ export default function AdminDashboard() {
             UTI: "com.microsoft.excel.xlsx",
           });
         } else {
-          Alert.alert("Saved", `Report saved.\n\nFile: ${fileName}`);
+          Alert.alert("Saved", `File: ${fileName}`);
         }
       }
     } catch (e: any) {
       Alert.alert("Download Failed", e.message || "Could not download report");
-    } finally {
-      setLoading(false);
-    }
+    } finally { setLoading(false); }
   };
 
   const handleDownloadPTP = () =>
-    downloadExcel(
-      "/api/admin/ptp-export",
-      `PTP_Report_${new Date().toISOString().slice(0, 10)}.xlsx`,
-      setPtpDownloading
-    );
+    downloadExcel("/api/admin/ptp-export", `PTP_Report_${new Date().toISOString().slice(0, 10)}.xlsx`, setPtpDownloading);
 
   const handleDownloadFeedback = () =>
-    downloadExcel(
-      "/api/admin/feedback-export",
-      `Feedback_Report_${new Date().toISOString().slice(0, 10)}.xlsx`,
-      setFeedbackDownloading
-    );
+    downloadExcel("/api/admin/feedback-export", `Feedback_Report_${new Date().toISOString().slice(0, 10)}.xlsx`, setFeedbackDownloading);
 
   const handleClearPTP = () => {
-    Alert.alert(
-      "Clear All PTP Dates",
-      "This will remove all PTP dates and reset all PTP cases to Pending. This cannot be undone. Continue?",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Clear", style: "destructive",
-          onPress: async () => {
-            setPtpClearing(true);
-            try {
-              const url = new URL("/api/admin/clear-ptp", getApiUrl()).toString();
-              const res = await expoFetch(url, { method: "POST", credentials: "include" });
-              if (!res.ok) {
-                const text = await res.text();
-                let msg = text;
-                try { msg = JSON.parse(text).message; } catch {}
-                throw new Error(msg || "Clear failed");
-              }
-              qc.invalidateQueries({ queryKey: ["/api/admin/stats"] });
-              Alert.alert("Done", "All PTP dates have been cleared.");
-            } catch (e: any) {
-              Alert.alert("Error", e.message || "Could not clear PTP dates");
-            } finally {
-              setPtpClearing(false);
-            }
-          },
+    Alert.alert("Clear All PTP Dates", "This will remove all PTP dates and reset all PTP cases to Pending. Continue?", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Clear", style: "destructive",
+        onPress: async () => {
+          setPtpClearing(true);
+          try {
+            const url = new URL("/api/admin/clear-ptp", getApiUrl()).toString();
+            const res = await expoFetch(url, { method: "POST", credentials: "include" });
+            if (!res.ok) throw new Error("Clear failed");
+            qc.invalidateQueries({ queryKey: ["/api/admin/stats"] });
+            Alert.alert("Done", "All PTP dates have been cleared.");
+          } catch (e: any) { Alert.alert("Error", e.message || "Could not clear PTP dates"); }
+          finally { setPtpClearing(false); }
         },
-      ]
-    );
+      },
+    ]);
   };
 
-  // ✅ FIX: staleTime:0 + refetchOnMount so stats always refresh when screen opens
+  // ✅ FIX: staleTime:0 + refetchOnMount so stats always fresh
   const { data, isLoading, refetch } = useQuery({
     queryKey: ["/api/admin/stats"],
     queryFn: () => api.admin.getStats(),
@@ -237,9 +199,8 @@ export default function AdminDashboard() {
     refetchOnMount: true,
   });
 
-  // ✅ FIX: handle both { stats: [...] } and plain [...] response shapes
+  // ✅ FIX: handle both { stats: [] } and plain [] shapes
   const stats = Array.isArray(data) ? data : (data?.stats || []);
-
   const totalAgents = stats.length;
   const totalCases  = stats.reduce((s: number, a: any) => s + (a.total      || 0), 0);
   const totalPaid   = stats.reduce((s: number, a: any) => s + (a.paid       || 0), 0);
@@ -256,12 +217,8 @@ export default function AdminDashboard() {
     <>
       <ScrollView
         style={{ flex: 1, backgroundColor: Colors.background }}
-        contentContainerStyle={[
-          styles.container,
-          { paddingBottom: insets.bottom + 24, paddingTop: Platform.OS === "web" ? 67 : 0 },
-        ]}
+        contentContainerStyle={[styles.container, { paddingBottom: insets.bottom + 24, paddingTop: Platform.OS === "web" ? 67 : 0 }]}
       >
-        {/* Import Allocation */}
         <Pressable style={styles.importBanner} onPress={() => setImportVisible(true)}>
           <View style={styles.importBannerLeft}>
             <Ionicons name="cloud-upload" size={28} color="#fff" />
@@ -273,7 +230,6 @@ export default function AdminDashboard() {
           <Ionicons name="chevron-forward" size={22} color="rgba(255,255,255,0.7)" />
         </Pressable>
 
-        {/* Import BKT Performance Summary */}
         <Pressable style={[styles.importBanner, { backgroundColor: Colors.primary }]} onPress={() => setBktPerfImportVisible(true)}>
           <View style={styles.importBannerLeft}>
             <Ionicons name="bar-chart-outline" size={28} color="#fff" />
@@ -285,16 +241,9 @@ export default function AdminDashboard() {
           <Ionicons name="chevron-forward" size={22} color="rgba(255,255,255,0.7)" />
         </Pressable>
 
-        {/* Download PTP Report */}
-        <Pressable
-          style={[styles.importBanner, { backgroundColor: Colors.success }, ptpDownloading && { opacity: 0.7 }]}
-          onPress={handleDownloadPTP}
-          disabled={ptpDownloading}
-        >
+        <Pressable style={[styles.importBanner, { backgroundColor: Colors.success }, ptpDownloading && { opacity: 0.7 }]} onPress={handleDownloadPTP} disabled={ptpDownloading}>
           <View style={styles.importBannerLeft}>
-            {ptpDownloading
-              ? <ActivityIndicator color="#fff" size="small" style={{ marginRight: 4 }} />
-              : <Ionicons name="download-outline" size={28} color="#fff" />}
+            {ptpDownloading ? <ActivityIndicator color="#fff" size="small" style={{ marginRight: 4 }} /> : <Ionicons name="download-outline" size={28} color="#fff" />}
             <View>
               <Text style={styles.importBannerTitle}>Download PTP Report</Text>
               <Text style={styles.importBannerSub}>{ptpDownloading ? "Preparing file…" : "Export all PTP cases with customer details as Excel"}</Text>
@@ -303,16 +252,9 @@ export default function AdminDashboard() {
           {!ptpDownloading && <Ionicons name="chevron-forward" size={22} color="rgba(255,255,255,0.7)" />}
         </Pressable>
 
-        {/* Download Feedback Report */}
-        <Pressable
-          style={[styles.importBanner, { backgroundColor: Colors.info }, feedbackDownloading && { opacity: 0.7 }]}
-          onPress={handleDownloadFeedback}
-          disabled={feedbackDownloading}
-        >
+        <Pressable style={[styles.importBanner, { backgroundColor: Colors.info }, feedbackDownloading && { opacity: 0.7 }]} onPress={handleDownloadFeedback} disabled={feedbackDownloading}>
           <View style={styles.importBannerLeft}>
-            {feedbackDownloading
-              ? <ActivityIndicator color="#fff" size="small" style={{ marginRight: 4 }} />
-              : <Ionicons name="chatbox-outline" size={28} color="#fff" />}
+            {feedbackDownloading ? <ActivityIndicator color="#fff" size="small" style={{ marginRight: 4 }} /> : <Ionicons name="chatbox-outline" size={28} color="#fff" />}
             <View>
               <Text style={styles.importBannerTitle}>Download Feedback Report</Text>
               <Text style={styles.importBannerSub}>{feedbackDownloading ? "Preparing file…" : "Export all FOS feedback with full details as Excel"}</Text>
@@ -321,16 +263,9 @@ export default function AdminDashboard() {
           {!feedbackDownloading && <Ionicons name="chevron-forward" size={22} color="rgba(255,255,255,0.7)" />}
         </Pressable>
 
-        {/* Clear PTP Dates */}
-        <Pressable
-          style={[styles.importBanner, { backgroundColor: Colors.danger }, ptpClearing && { opacity: 0.7 }]}
-          onPress={handleClearPTP}
-          disabled={ptpClearing}
-        >
+        <Pressable style={[styles.importBanner, { backgroundColor: Colors.danger }, ptpClearing && { opacity: 0.7 }]} onPress={handleClearPTP} disabled={ptpClearing}>
           <View style={styles.importBannerLeft}>
-            {ptpClearing
-              ? <ActivityIndicator color="#fff" size="small" style={{ marginRight: 4 }} />
-              : <Ionicons name="trash-outline" size={28} color="#fff" />}
+            {ptpClearing ? <ActivityIndicator color="#fff" size="small" style={{ marginRight: 4 }} /> : <Ionicons name="trash-outline" size={28} color="#fff" />}
             <View>
               <Text style={styles.importBannerTitle}>Clear All PTP Dates</Text>
               <Text style={styles.importBannerSub}>{ptpClearing ? "Clearing…" : "Reset all PTP statuses and dates from the database"}</Text>
@@ -339,7 +274,7 @@ export default function AdminDashboard() {
           {!ptpClearing && <Ionicons name="chevron-forward" size={22} color="rgba(255,255,255,0.7)" />}
         </Pressable>
 
-        {/* Push Notification Test Panel */}
+        {/* Push Panel */}
         {(() => {
           const allAgents = pushStatusData?.agents || [];
           const tokenCount = allAgents.filter(a => a.has_token).length;
@@ -351,41 +286,27 @@ export default function AdminDashboard() {
                   <View>
                     <Text style={styles.pushPanelTitle}>Push Notifications</Text>
                     <Text style={styles.pushPanelSub}>
-                      {allAgents.length === 0
-                        ? "Loading agent status…"
-                        : `${tokenCount}/${allAgents.length} agents registered`}
+                      {allAgents.length === 0 ? "Loading agent status…" : `${tokenCount}/${allAgents.length} agents registered`}
                     </Text>
                   </View>
                 </View>
                 <View style={styles.pushPanelRight}>
-                  <Pressable
-                    style={[styles.testAllBtn, pushTesting && { opacity: 0.6 }]}
-                    onPress={handleTestPushAll}
-                    disabled={pushTesting}
-                  >
-                    {pushTesting
-                      ? <ActivityIndicator size="small" color="#fff" />
-                      : <Text style={styles.testAllBtnText}>Test All</Text>}
+                  <Pressable style={[styles.testAllBtn, pushTesting && { opacity: 0.6 }]} onPress={handleTestPushAll} disabled={pushTesting}>
+                    {pushTesting ? <ActivityIndicator size="small" color="#fff" /> : <Text style={styles.testAllBtnText}>Test All</Text>}
                   </Pressable>
                   <Ionicons name={pushExpanded ? "chevron-up" : "chevron-down"} size={16} color={Colors.textMuted} />
                 </View>
               </Pressable>
               {pushExpanded && (
                 <View style={styles.pushAgentList}>
-                  {allAgents.length === 0 && (
-                    <Text style={styles.pushAgentEmpty}>No FOS agents found.</Text>
-                  )}
+                  {allAgents.length === 0 && <Text style={styles.pushAgentEmpty}>No FOS agents found.</Text>}
                   {allAgents.map(agent => (
                     <View key={agent.id} style={styles.pushAgentRow}>
                       <View style={[styles.pushDot, { backgroundColor: agent.has_token ? Colors.success : Colors.danger }]} />
                       <Text style={styles.pushAgentName} numberOfLines={1}>{agent.name}</Text>
                       <Text style={styles.pushAgentStatus}>{agent.has_token ? "Registered" : "No token"}</Text>
                       {agent.has_token && (
-                        <Pressable
-                          style={styles.testOneBtn}
-                          onPress={() => handleTestPushOne(agent.id, agent.name)}
-                          disabled={pushTesting}
-                        >
+                        <Pressable style={styles.testOneBtn} onPress={() => handleTestPushOne(agent.id, agent.name)} disabled={pushTesting}>
                           <Ionicons name="send" size={14} color={Colors.primary} />
                         </Pressable>
                       )}
@@ -423,11 +344,7 @@ export default function AdminDashboard() {
             { label: "Depositions", icon: "cash"             as const, screen: "/(admin)/depositions" },
             { label: "Attendance",  icon: "checkmark-circle" as const, screen: "/(admin)/attendance"  },
           ].map((item) => (
-            <Pressable
-              key={item.label}
-              style={({ pressed }) => [styles.quickLink, pressed && { opacity: 0.8 }]}
-              onPress={() => router.push(item.screen as any)}
-            >
+            <Pressable key={item.label} style={({ pressed }) => [styles.quickLink, pressed && { opacity: 0.8 }]} onPress={() => router.push(item.screen as any)}>
               <Ionicons name={item.icon} size={22} color={Colors.primary} />
               <Text style={styles.quickLinkText}>{item.label}</Text>
             </Pressable>
@@ -436,7 +353,6 @@ export default function AdminDashboard() {
 
         <Text style={styles.sectionTitle}>FOS Agents Performance</Text>
         {stats.map((agent: any) => <AgentCard key={agent.id} agent={agent} />)}
-
         {stats.length === 0 && (
           <View style={styles.empty}>
             <Ionicons name="people-outline" size={48} color={Colors.textMuted} />
@@ -445,7 +361,6 @@ export default function AdminDashboard() {
         )}
       </ScrollView>
 
-      {/* ─── Modals ─── */}
       <ImportModal
         visible={importVisible}
         onClose={() => setImportVisible(false)}
@@ -453,8 +368,6 @@ export default function AdminDashboard() {
         title="Import Allocation Excel"
         infoText="Excel columns: LOAN NO, APP ID, CUSTOMER NAME, EMI, EMI_DUE, CBC, LPP, CBC+LPP, POS, BKT, ROLLBACK, CLEARANCE, ADDRESS, FIRST_EMI_DUE_DATE, LOAN_MATURITY_DATE, ASSET_MAKE, REGISTRATION_NO, ENGINE_NO, CHASSIS_NO, REFERENCE_ADDRESS, TEN, NUMBER, PRO, FOS_NAME, STATUS, DETAIL FB"
         onDone={() => {
-          // ✅ FIX: invalidate ALL relevant queries so dashboard refreshes
-          // immediately after allocation upload — no manual refresh needed
           qc.invalidateQueries({ queryKey: ["/api/admin/stats"] });
           qc.invalidateQueries({ queryKey: ["/api/admin/cases"] });
           qc.invalidateQueries({ queryKey: ["/api/admin/agents"] });
@@ -462,7 +375,6 @@ export default function AdminDashboard() {
           qc.invalidateQueries({ queryKey: ["/api/stats"] });
           qc.invalidateQueries({ queryKey: ["/api/admin/bkt-cases"] });
           qc.invalidateQueries({ queryKey: ["/api/bkt-cases"] });
-          // ✅ Also directly refetch the stats query used by this screen
           refetch();
         }}
       />
@@ -478,37 +390,21 @@ export default function AdminDashboard() {
   );
 }
 
-// ─── Styles ───────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
   container: { padding: 16, gap: 16 },
-  importBanner: {
-    backgroundColor: Colors.primary, borderRadius: 16, padding: 18,
-    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
-  },
+  importBanner: { backgroundColor: Colors.primary, borderRadius: 16, padding: 18, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   importBannerLeft: { flexDirection: "row", alignItems: "center", gap: 14, flex: 1 },
   importBannerTitle: { color: "#fff", fontSize: 16, fontWeight: "700" },
   importBannerSub: { color: "rgba(255,255,255,0.8)", fontSize: 12, marginTop: 2, flexShrink: 1 },
   summaryGrid: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
-  summaryCard: {
-    flex: 1, minWidth: "28%", backgroundColor: Colors.surface, borderRadius: 14,
-    padding: 14, alignItems: "center", gap: 6, borderTopWidth: 3,
-    borderWidth: 1, borderColor: Colors.border,
-    shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 4,
-  },
+  summaryCard: { flex: 1, minWidth: "28%", backgroundColor: Colors.surface, borderRadius: 14, padding: 14, alignItems: "center", gap: 6, borderTopWidth: 3, borderWidth: 1, borderColor: Colors.border, shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 4 },
   summaryNum: { fontSize: 26, fontWeight: "800", color: Colors.text },
   summaryLabel: { fontSize: 11, color: Colors.textSecondary, fontWeight: "600", textAlign: "center" },
   quickLinks: { flexDirection: "row", gap: 10 },
-  quickLink: {
-    flex: 1, backgroundColor: Colors.surface, borderRadius: 14, padding: 14,
-    alignItems: "center", gap: 6, borderWidth: 1, borderColor: Colors.border,
-  },
+  quickLink: { flex: 1, backgroundColor: Colors.surface, borderRadius: 14, padding: 14, alignItems: "center", gap: 6, borderWidth: 1, borderColor: Colors.border },
   quickLinkText: { fontSize: 11, fontWeight: "600", color: Colors.textSecondary, textAlign: "center" },
   sectionTitle: { fontSize: 18, fontWeight: "700", color: Colors.text },
-  agentCard: {
-    backgroundColor: Colors.surface, borderRadius: 16, padding: 16, gap: 12,
-    borderWidth: 1, borderColor: Colors.border,
-    shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 4,
-  },
+  agentCard: { backgroundColor: Colors.surface, borderRadius: 16, padding: 16, gap: 12, borderWidth: 1, borderColor: Colors.border, shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 4 },
   agentCardTop: { flexDirection: "row", alignItems: "center", gap: 12 },
   agentAvatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: Colors.primary, alignItems: "center", justifyContent: "center" },
   agentInfo: { flex: 1 },
@@ -522,34 +418,19 @@ const styles = StyleSheet.create({
   statPillLabel: { fontSize: 9, fontWeight: "600", color: Colors.textSecondary },
   empty: { flex: 1, justifyContent: "center", alignItems: "center", gap: 12, paddingVertical: 60 },
   emptyText: { fontSize: 14, color: Colors.textMuted, textAlign: "center" },
-  pushPanel: {
-    backgroundColor: Colors.surface, borderRadius: 16, borderWidth: 1, borderColor: Colors.border,
-    overflow: "hidden",
-    shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.15, shadowRadius: 4, elevation: 2,
-  },
-  pushPanelHeader: {
-    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
-    paddingHorizontal: 16, paddingVertical: 14, gap: 10,
-  },
+  pushPanel: { backgroundColor: Colors.surface, borderRadius: 16, borderWidth: 1, borderColor: Colors.border, overflow: "hidden", shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.15, shadowRadius: 4, elevation: 2 },
+  pushPanelHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 16, paddingVertical: 14, gap: 10 },
   pushPanelLeft: { flexDirection: "row", alignItems: "center", gap: 10, flex: 1 },
   pushPanelRight: { flexDirection: "row", alignItems: "center", gap: 10 },
   pushPanelTitle: { fontSize: 14, fontWeight: "700", color: Colors.text },
   pushPanelSub: { fontSize: 11, color: Colors.textSecondary, marginTop: 1 },
-  testAllBtn: {
-    backgroundColor: Colors.primary, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 6, minWidth: 70, alignItems: "center",
-  },
+  testAllBtn: { backgroundColor: Colors.primary, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 6, minWidth: 70, alignItems: "center" },
   testAllBtnText: { color: "#fff", fontSize: 12, fontWeight: "700" },
   pushAgentList: { borderTopWidth: 1, borderTopColor: Colors.border },
-  pushAgentRow: {
-    flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingVertical: 10,
-    gap: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: Colors.border,
-  },
+  pushAgentRow: { flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingVertical: 10, gap: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: Colors.border },
   pushDot: { width: 8, height: 8, borderRadius: 4 },
   pushAgentName: { flex: 1, fontSize: 13, color: Colors.text, fontWeight: "600" },
   pushAgentStatus: { fontSize: 11, color: Colors.textSecondary, fontWeight: "600" },
   pushAgentEmpty: { padding: 16, color: Colors.textMuted, fontSize: 13, textAlign: "center" },
-  testOneBtn: {
-    width: 30, height: 30, borderRadius: 8, backgroundColor: Colors.primary + "18",
-    alignItems: "center", justifyContent: "center",
-  },
+  testOneBtn: { width: 30, height: 30, borderRadius: 8, backgroundColor: Colors.primary + "18", alignItems: "center", justifyContent: "center" },
 });
