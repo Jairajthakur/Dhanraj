@@ -840,10 +840,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         date: "deposition_date", depositiondate: "deposition_date",
         fosname: "fos_name", fos: "fos_name", agent: "fos_name", fosagent: "fos_name",
         customername: "customer_name", customer: "customer_name",
-        loanno: "loan_no", loan: "loan_no", loannumber: "loan_no",
-        cashamount: "cash_amount", amountpaidincash: "cash_amount", paidincash: "cash_amount", cash: "cash_amount",
-        onlineamount: "online_amount", amountpaidonline: "online_amount", paidonline: "online_amount", online: "online_amount",
+        loanno: "loan_no", loan: "loan_no", loannumber: "loan_no", loann: "loan_no",
+        // ✅ matches "Cash Paid" and "Cash Paid " (with trailing space)
+        cashpaid: "cash_amount", cashamount: "cash_amount",
+        amountpaidincash: "cash_amount", paidincash: "cash_amount", cash: "cash_amount",
+        // ✅ matches "Online Paid"
+        onlinepaid: "online_amount", onlineamount: "online_amount",
+        amountpaidonline: "online_amount", paidonline: "online_amount", online: "online_amount",
         totalamount: "amount", total: "amount", amount: "amount",
+        bkt: "bkt", bucket: "bkt",
       };
       let headerIdx = -1; let colMap: Record<number, string> = {};
       for (let r = 0; r < Math.min(rawRows.length, 10); r++) {
@@ -854,7 +859,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
         if (matched >= 2) { headerIdx = r; colMap = tempMap; break; }
       }
-      if (headerIdx === -1) return res.status(400).json({ message: "Could not find header row. Expected: Date, FOS Name, Customer Name, Loan No, Cash Amount, Online Amount, Total Amount" });
+      if (headerIdx === -1) return res.status(400).json({ message: "Could not find header row. Expected: Date, FOS Name, Customer Name, Loan No, Cash Paid, Online Paid" });
       const { rows: existingAgents } = await storage.query(`SELECT id, name FROM fos_agents WHERE name IS NOT NULL`);
       const agentByName: Record<string, number> = {};
       for (const a of existingAgents) { if (a.name) agentByName[a.name.toLowerCase().trim()] = a.id; }
