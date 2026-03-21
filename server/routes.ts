@@ -206,11 +206,9 @@ async function extractAmountFromScreenshot(imagePath: string): Promise<number | 
   }
 }
 
-// Tolerance: 1% or ₹10 — handles minor rounding differences in screenshots
+// Exact match — screenshot amount must equal the deposit amount exactly
 function amountMatches(expected: number, actual: number): boolean {
-  const diff = Math.abs(expected - actual);
-  const tolerance = Math.max(10, expected * 0.01);
-  return diff <= tolerance;
+  return Math.round(expected) === Math.round(actual);
 }
 
 function normalizeHeader(h: string): string {
