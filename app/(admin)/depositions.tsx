@@ -9,7 +9,6 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Ionicons, MaterialIcons } from "@expo/vector-icons";
 import * as DocumentPicker from "expo-document-picker";
 import Colors from "@/constants/colors";
-import { api } from "@/lib/api";
 import { getApiUrl, tokenStore } from "@/lib/api";
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
@@ -17,6 +16,7 @@ const fmt = (n: any) => parseFloat(n || 0).toLocaleString("en-IN");
 const fmtDate = (d: any) => d ? new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "";
 const fmtDateTime = (d: any) => d ? new Date(d).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : "";
 
+// ✅ FIX: all API calls use this local apiReq — no dependency on api.admin.*
 async function apiReq(method: string, route: string, data?: any) {
   const base = getApiUrl();
   const token = Platform.OS !== "web" ? await tokenStore.get() : null;
@@ -33,6 +33,7 @@ async function apiReq(method: string, route: string, data?: any) {
   return res.json();
 }
 
+// ✅ FIX: uploadFile also uses local token — no dependency on api.admin.*
 async function uploadFile(uri: string, name: string, type: string, route: string): Promise<any> {
   const base = getApiUrl();
   const token = Platform.OS !== "web" ? await tokenStore.get() : null;
@@ -51,7 +52,7 @@ async function uploadFile(uri: string, name: string, type: string, route: string
   return res.json();
 }
 
-// ─── Payment Modal (admin updates payment on a deposition) ───────────────────
+// ─── Payment Modal ────────────────────────────────────────────────────────────
 function PaymentModal({ visible, item, onClose, onSaved }: any) {
   const [method, setMethod] = useState<"cash" | "online" | "both">("cash");
   const [cashAmt, setCashAmt] = useState("");
@@ -107,7 +108,6 @@ function PaymentModal({ visible, item, onClose, onSaved }: any) {
                 value={cashAmt} onChangeText={setCashAmt} keyboardType="numeric" />
             </>
           )}
-
           {(method === "online" || method === "both") && (
             <>
               <Text style={ms.label}>Online Amount (₹)</Text>
@@ -317,7 +317,6 @@ function FosDetailModal({ visible, agentId, agentName, onClose, onUpdated }: any
     <>
       <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
         <View style={{ flex: 1, backgroundColor: Colors.background }}>
-          {/* Header */}
           <View style={fd.header}>
             <Pressable onPress={onClose} style={fd.backBtn}>
               <Ionicons name="arrow-back" size={22} color={Colors.text} />
@@ -423,7 +422,6 @@ function FosDetailModal({ visible, agentId, agentName, onClose, onUpdated }: any
         onSaved={() => { refetch(); onUpdated(); setPayItem(null); }}
       />
 
-      {/* Screenshot viewer */}
       <Modal visible={!!screenshotUrl} transparent animationType="fade" onRequestClose={() => setScreenshotUrl(null)}>
         <Pressable
           style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.92)", justifyContent: "center", alignItems: "center" }}
@@ -462,19 +460,18 @@ function ImportModal({ visible, onClose, onImported }: any) {
           name: r.assets[0].name,
           type: r.assets[0].mimeType || "application/octet-stream",
         });
-        setResult(null); // clear previous result
+        setResult(null);
       }
     } catch { Alert.alert("Error", "Could not open file picker"); }
   };
 
-  // ✅ FIX: doImport now shows alert with import counts and calls onImported
   const doImport = async () => {
     if (!file) { Alert.alert("Error", "Select a file first"); return; }
     setLoading(true);
     try {
       const res = await uploadFile(file.uri, file.name, file.type, "/api/admin/import-depositions");
       setResult(res);
-      onImported(res); // ✅ pass result to parent so it can refetch + invalidate
+      onImported();
       Alert.alert(
         "Import Successful ✅",
         `Imported: ${res.imported}\nSkipped: ${res.skipped}${res.errors?.length ? `\n\nWarnings:\n${res.errors.slice(0, 3).join("\n")}` : ""}`,
@@ -560,7 +557,6 @@ export default function AdminDepositionsScreen() {
   const [selectedFos, setSelectedFos] = useState<{ id: number; name: string } | null>(null);
   const [downloading, setDownloading] = useState(false);
 
-  // ✅ FIX: added staleTime: 0 and refetchOnMount: true so data is always fresh
   const { data, isLoading, refetch } = useQuery({
     queryKey: ["/api/admin/fos-depositions"],
     queryFn: () => apiReq("GET", "/api/admin/fos-depositions"),
@@ -568,9 +564,10 @@ export default function AdminDepositionsScreen() {
     refetchOnMount: true,
   });
 
+  // ✅ FIX: replaced api.admin.getAgents() with apiReq — no more "undefined is not a function"
   const { data: agentsData } = useQuery({
     queryKey: ["/api/admin/agents"],
-    queryFn: () => api.admin.getAgents(),
+    queryFn: () => apiReq("GET", "/api/admin/agents"),
   });
 
   const { data: paidCasesData } = useQuery({
@@ -585,7 +582,8 @@ export default function AdminDepositionsScreen() {
   });
 
   const grouped: any[] = data?.grouped || [];
-  const agents = agentsData?.agents || [];
+  // ✅ FIX: handle both { agents: [] } and plain [] response shapes
+  const agents = Array.isArray(agentsData) ? agentsData : (agentsData?.agents || []);
   const paidCases = paidCasesData?.cases || [];
 
   const totalAmount = grouped.reduce((s, g) => s + (g.totalAmount || 0), 0);
@@ -616,7 +614,6 @@ export default function AdminDepositionsScreen() {
     <>
       <View style={[scr.root, { paddingTop: Platform.OS === "web" ? 67 : 0 }]}>
 
-        {/* ── Top Action Bar ── */}
         <View style={scr.actionBar}>
           <Pressable style={scr.actionBtn} onPress={() => setImportVisible(true)}>
             <Ionicons name="cloud-upload-outline" size={18} color={Colors.primary} />
@@ -634,7 +631,6 @@ export default function AdminDepositionsScreen() {
           </Pressable>
         </View>
 
-        {/* ── Summary Cards ── */}
         <View style={scr.summaryRow}>
           <View style={[scr.sumCard, { borderTopColor: Colors.primary }]}>
             <Text style={scr.sumNum}>₹{fmt(totalAmount)}</Text>
@@ -652,7 +648,6 @@ export default function AdminDepositionsScreen() {
           </View>
         </View>
 
-        {/* ── FOS List ── */}
         {isLoading ? (
           <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
             <ActivityIndicator color={Colors.primary} size="large" />
@@ -662,7 +657,6 @@ export default function AdminDepositionsScreen() {
             data={grouped}
             keyExtractor={(item) => String(item.agentId || item.agentName)}
             contentContainerStyle={[scr.list, { paddingBottom: insets.bottom + 24 }]}
-            // ✅ Pull-to-refresh
             onRefresh={() => refetch()}
             refreshing={isLoading}
             renderItem={({ item }) => {
@@ -706,7 +700,6 @@ export default function AdminDepositionsScreen() {
         )}
       </View>
 
-      {/* Modals */}
       {selectedFos && (
         <FosDetailModal
           visible={!!selectedFos}
@@ -732,7 +725,6 @@ export default function AdminDepositionsScreen() {
         paidCases={paidCases}
       />
 
-      {/* ✅ FIX: onImported now invalidates all relevant queries so list refreshes */}
       <ImportModal
         visible={importVisible}
         onClose={() => setImportVisible(false)}
