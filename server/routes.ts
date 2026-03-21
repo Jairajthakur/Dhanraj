@@ -241,9 +241,6 @@ const BKT_PERF_SQL = `
   ORDER BY fa.name
 `;
 
-// ─── Safe agent deletion helper ────────────────────────────────────────────────
-// ✅ FIX: Wraps each DELETE in its own try/catch so a missing table
-//         (e.g. "salary") never aborts the rest of the deletion cascade.
 async function safeDeleteAgent(agentId: number, context: string): Promise<void> {
   const tables = [
     { sql: `DELETE FROM loan_cases WHERE agent_id = $1`, name: "loan_cases" },
@@ -252,13 +249,11 @@ async function safeDeleteAgent(agentId: number, context: string): Promise<void> 
     { sql: `DELETE FROM attendance WHERE agent_id = $1`, name: "attendance" },
     { sql: `DELETE FROM required_deposits WHERE agent_id = $1`, name: "required_deposits" },
     { sql: `DELETE FROM fos_depositions WHERE agent_id = $1`, name: "fos_depositions" },
-    // ✅ salary table may not exist — wrapped safely below
     { sql: `DELETE FROM salary WHERE agent_id = $1`, name: "salary" },
     { sql: `DELETE FROM depositions WHERE agent_id = $1`, name: "depositions" },
     { sql: `DELETE FROM user_sessions WHERE sess::text LIKE $1`, name: "user_sessions", param: `%"agentId":${agentId}%` },
     { sql: `DELETE FROM fos_agents WHERE id = $1`, name: "fos_agents" },
   ];
-
   for (const t of tables) {
     try {
       if (t.name === "user_sessions") {
@@ -267,7 +262,6 @@ async function safeDeleteAgent(agentId: number, context: string): Promise<void> 
         await storage.query(t.sql, [agentId]);
       }
     } catch (e: any) {
-      // Log but do NOT throw — missing tables should not block other deletes
       console.warn(`[${context}] Skipping delete from ${t.name} for agent ${agentId}: ${e.message}`);
     }
   }
@@ -288,7 +282,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     console.log("[DB] cash_collected columns ready ✅");
   } catch (e: any) { console.error("[DB] Migration error:", e.message); }
 
-  // ✅ fos_depositions table
   try {
     await storage.query(`
       CREATE TABLE IF NOT EXISTS fos_depositions (
@@ -312,7 +305,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     console.log("[DB] fos_depositions table ready ✅");
   } catch (e: any) { console.error("[DB] fos_depositions error:", e.message); }
 
-  // ✅ Ensure salary table exists to prevent import crashes
   try {
     await storage.query(`
       CREATE TABLE IF NOT EXISTS salary (
@@ -589,7 +581,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
-  // ─── FOS Depositions (new feature) ────────────────────────────────────────
+  // ─── FOS Depositions ───────────────────────────────────────────────────────
 
   app.get("/api/admin/fos-depositions", requireAdmin, async (req, res) => {
     try {
@@ -614,6 +606,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
+  // ✅ Admin view for a specific FOS agent — NO paid cases shown
   app.get("/api/admin/fos-depositions/:agentId", requireAdmin, async (req, res) => {
     try {
       const agentId = Number(req.params.agentId);
@@ -624,15 +617,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         WHERE fd.agent_id = $1
         ORDER BY fd.deposition_date DESC, fd.created_at DESC
       `, [agentId]);
-      const paidCases = await storage.query(`
-        SELECT 'loan' AS source, id, customer_name, loan_no, bkt::text AS bkt, pos, updated_at, agent_id
-        FROM loan_cases WHERE agent_id = $1 AND status = 'Paid' AND updated_at >= NOW() - INTERVAL '24 hours'
-        UNION ALL
-        SELECT 'bkt' AS source, id, customer_name, loan_no, case_category AS bkt, pos, updated_at, agent_id
-        FROM bkt_cases WHERE agent_id = $1 AND status = 'Paid' AND updated_at >= NOW() - INTERVAL '24 hours'
-        ORDER BY updated_at DESC
-      `, [agentId]);
-      res.json({ depositions: result.rows, paidCases: paidCases.rows });
+      // ✅ paid cases intentionally removed — admin no longer sees them here
+      res.json({ depositions: result.rows });
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
@@ -654,17 +640,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *
       `, [agentId, loanNo || null, customerName || null, bkt || null, source || "loan", totalAmt, cashAmt, onlineAmt, method, notes || null, depositionDate || new Date().toISOString().slice(0, 10)]);
 
-      // ✅ Send push notification to FOS agent when admin assigns a deposition
+      // ✅ Notify the assigned FOS agent
       try {
         const agentRow = await storage.query("SELECT push_token, name FROM fos_agents WHERE id = $1", [agentId]);
         const playerId = agentRow.rows[0]?.push_token;
         if (playerId) {
           const amtStr = totalAmt.toLocaleString("en-IN");
-          await sendPush(playerId, "💰 New Deposition Assigned", `Admin has assigned you a deposition of ₹${amtStr}${customerName ? ` for ${customerName}` : ""}. Please mark it as paid.`, { screen: "fos-depositions" });
+          await sendPush(playerId, "💰 New Deposition Assigned", `Admin assigned you a deposition of ₹${amtStr}${customerName ? ` for ${customerName}` : ""}. Please mark it as paid.`, { screen: "fos-depositions" });
         }
-      } catch (pushErr: any) {
-        console.warn("[fos-dep] Push notification failed:", pushErr.message);
-      }
+      } catch (pushErr: any) { console.warn("[fos-dep] Push failed:", pushErr.message); }
 
       res.json({ deposition: result.rows[0] });
     } catch (e: any) { res.status(500).json({ message: e.message }); }
@@ -693,7 +677,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
-  // ✅ FOS agent fetches their own depositions
+  // ✅ FOS: get own depositions
   app.get("/api/fos-depositions", requireAuth, async (req, res) => {
     try {
       const agentId = req.session.agentId!;
@@ -710,6 +694,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ✅ FOS: mark as cash paid
   app.post("/api/fos-depositions/:id/pay-cash", requireAuth, async (req, res) => {
     try {
       const id = Number(req.params.id);
@@ -718,11 +703,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!cashAmount || isNaN(parseFloat(cashAmount))) return res.status(400).json({ message: "Valid cash amount required" });
       const cashAmt = parseFloat(cashAmount);
       await storage.query(`
-        UPDATE fos_depositions SET payment_method='cash', cash_amount=$1, amount=GREATEST(amount,$1), updated_at=NOW()
+        UPDATE fos_depositions
+        SET payment_method='cash', cash_amount=$1, amount=GREATEST(amount,$1), updated_at=NOW()
         WHERE id=$2 AND agent_id=$3
       `, [cashAmt, id, agentId]);
 
-      // Notify admin
+      // Notify admins
       try {
         const depRow = await storage.query(`SELECT fd.amount, fa.name FROM fos_depositions fd JOIN fos_agents fa ON fa.id = fd.agent_id WHERE fd.id = $1`, [id]);
         const dep = depRow.rows[0];
@@ -736,6 +722,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
+  // ✅ FOS: mark as online paid with screenshot
   app.post("/api/fos-depositions/:id/pay-online", requireAuth, screenshotUpload.single("screenshot"), async (req, res) => {
     try {
       const id = Number(req.params.id);
@@ -746,7 +733,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const depRow = await storage.query(`SELECT amount FROM fos_depositions WHERE id=$1`, [id]);
       const onlineAmt = parseFloat(depRow.rows[0]?.amount || 0);
       await storage.query(`
-        UPDATE fos_depositions SET payment_method='online', online_amount=$1, screenshot_url=$2, updated_at=NOW()
+        UPDATE fos_depositions
+        SET payment_method='online', online_amount=$1, screenshot_url=$2, updated_at=NOW()
         WHERE id=$3 AND agent_id=$4
       `, [onlineAmt, screenshotUrl, id, agentId]);
       const adminRows = await storage.query(`SELECT push_token FROM fos_agents WHERE role='admin' AND push_token IS NOT NULL AND push_token <> ''`);
@@ -759,6 +747,55 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
+  // ✅ NEW: FOS mark as split payment — cash amount + online amount + screenshot in one call
+  app.put("/api/fos-depositions/:id/pay-both", requireAuth, screenshotUpload.single("screenshot"), async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const agentId = req.session.agentId!;
+      const cashAmt = parseFloat(req.body?.cashAmount || "0") || 0;
+      const onlineAmt = parseFloat(req.body?.onlineAmount || "0") || 0;
+
+      if (cashAmt <= 0) return res.status(400).json({ message: "Cash amount must be greater than 0" });
+      if (onlineAmt <= 0) return res.status(400).json({ message: "Online amount must be greater than 0" });
+
+      let screenshotUrl: string | null = null;
+      if (req.file) {
+        const baseUrl = process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : process.env.APP_URL || "";
+        screenshotUrl = `${baseUrl}/uploads/screenshots/${req.file.filename}`;
+      }
+
+      const totalAmt = cashAmt + onlineAmt;
+      await storage.query(`
+        UPDATE fos_depositions
+        SET payment_method = 'both',
+            cash_amount    = $1,
+            online_amount  = $2,
+            amount         = GREATEST(amount, $3),
+            screenshot_url = COALESCE($4, screenshot_url),
+            updated_at     = NOW()
+        WHERE id = $5 AND agent_id = $6
+      `, [cashAmt, onlineAmt, totalAmt, screenshotUrl, id, agentId]);
+
+      // Notify admins
+      try {
+        const agentRow = await storage.query(`SELECT name FROM fos_agents WHERE id=$1`, [agentId]);
+        const agentName = agentRow.rows[0]?.name || "A FOS agent";
+        const adminRows = await storage.query(`SELECT push_token FROM fos_agents WHERE role='admin' AND push_token IS NOT NULL AND push_token <> ''`);
+        for (const admin of adminRows.rows) {
+          await sendPush(
+            admin.push_token,
+            "🔀 Split Payment Marked",
+            `${agentName} paid ₹${cashAmt.toLocaleString("en-IN")} cash + ₹${onlineAmt.toLocaleString("en-IN")} online.`,
+            { type: "fos_dep_both" }
+          );
+        }
+      } catch (pushErr: any) { console.warn("[pay-both] Push failed:", pushErr.message); }
+
+      res.json({ success: true, screenshotUrl });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  // ─── FOS Depositions Excel Export ──────────────────────────────────────────
   app.get("/api/admin/fos-depositions-export", requireAdmin, async (req, res) => {
     try {
       const result = await storage.query(`
@@ -828,6 +865,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
+  // ─── FOS Depositions Excel Import ──────────────────────────────────────────
+  // ✅ Agent ID is resolved by matching FOS Name from Excel against fos_agents.name
+  // ✅ Notifies ALL FOS agents after successful bulk import
   app.post("/api/admin/import-depositions", requireAdmin, upload.single("file"), async (req, res) => {
     try {
       if (!req.file) return res.status(400).json({ message: "No file uploaded" });
@@ -836,20 +876,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const ws = wb.worksheets[0];
       const rawRows = worksheetToRows(ws, true);
       if (rawRows.length === 0) return res.json({ imported: 0, skipped: 0, errors: [] });
+
       const COL_MAP: Record<string, string> = {
         date: "deposition_date", depositiondate: "deposition_date",
         fosname: "fos_name", fos: "fos_name", agent: "fos_name", fosagent: "fos_name",
         customername: "customer_name", customer: "customer_name",
         loanno: "loan_no", loan: "loan_no", loannumber: "loan_no", loann: "loan_no",
-        // ✅ matches "Cash Paid" and "Cash Paid " (with trailing space)
         cashpaid: "cash_amount", cashamount: "cash_amount",
         amountpaidincash: "cash_amount", paidincash: "cash_amount", cash: "cash_amount",
-        // ✅ matches "Online Paid"
         onlinepaid: "online_amount", onlineamount: "online_amount",
         amountpaidonline: "online_amount", paidonline: "online_amount", online: "online_amount",
         totalamount: "amount", total: "amount", amount: "amount",
         bkt: "bkt", bucket: "bkt",
       };
+
+      // Detect header row
       let headerIdx = -1; let colMap: Record<number, string> = {};
       for (let r = 0; r < Math.min(rawRows.length, 10); r++) {
         const row = rawRows[r]; const tempMap: Record<number, string> = {}; let matched = 0;
@@ -859,14 +900,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
         if (matched >= 2) { headerIdx = r; colMap = tempMap; break; }
       }
-      if (headerIdx === -1) return res.status(400).json({ message: "Could not find header row. Expected: Date, FOS Name, Customer Name, Loan No, Cash Paid, Online Paid" });
+      if (headerIdx === -1) return res.status(400).json({ message: "Could not find header row. Expected columns: Date, FOS Name, Customer Name, Loan No, Cash Paid, Online Paid" });
+
+      // ✅ Load all FOS agents and build a name→id cache
+      // Supports: exact, case-insensitive, and partial LIKE matches
       const { rows: existingAgents } = await storage.query(`SELECT id, name FROM fos_agents WHERE name IS NOT NULL`);
       const agentByName: Record<string, number> = {};
-      for (const a of existingAgents) { if (a.name) agentByName[a.name.toLowerCase().trim()] = a.id; }
+      for (const a of existingAgents) {
+        if (a.name) agentByName[a.name.toLowerCase().trim()] = a.id;
+      }
+
+      // Helper: fuzzy match agent name (exact → ci → partial)
+      function resolveAgentId(fosName: string): number | null {
+        if (!fosName) return null;
+        const lower = fosName.toLowerCase().trim();
+        // 1. Exact case-insensitive
+        if (agentByName[lower]) return agentByName[lower];
+        // 2. Partial: Excel name contains DB name or vice versa
+        for (const [dbName, id] of Object.entries(agentByName)) {
+          if (lower.includes(dbName) || dbName.includes(lower)) return id;
+        }
+        return null;
+      }
+
       let imported = 0, skipped = 0;
       const errors: string[] = [];
       const today = new Date().toISOString().slice(0, 10);
       const dataRows = rawRows.slice(headerIdx + 1);
+
       for (let i = 0; i < dataRows.length; i++) {
         const row = dataRows[i]; const mapped: Record<string, any> = {};
         for (const [ci, field] of Object.entries(colMap)) {
@@ -874,8 +935,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
           mapped[field] = (val !== undefined && val !== "") ? String(val).trim() : null;
         }
         if (!mapped.fos_name && !mapped.customer_name && !mapped.loan_no) { skipped++; continue; }
-        const fosLower = (mapped.fos_name || "").toLowerCase().trim();
-        const agentId = agentByName[fosLower] || null;
+
+        // ✅ Resolve agentId by FOS name — no manual agentId needed
+        const agentId = mapped.fos_name ? resolveAgentId(mapped.fos_name) : null;
+        if (mapped.fos_name && !agentId) {
+          errors.push(`Row ${i + headerIdx + 2}: FOS agent "${mapped.fos_name}" not found in system`);
+          skipped++;
+          continue;
+        }
+
         const cashAmt = parseFloat(mapped.cash_amount || "0") || 0;
         const onlineAmt = parseFloat(mapped.online_amount || "0") || 0;
         const totalAmt = parseFloat(mapped.amount || "0") || (cashAmt + onlineAmt);
@@ -884,6 +952,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         else if (cashAmt > 0) method = "cash";
         else if (onlineAmt > 0) method = "online";
         const depDate = parseDate(mapped.deposition_date) || today;
+
         try {
           await storage.query(`
             INSERT INTO fos_depositions (agent_id, loan_no, customer_name, amount, cash_amount, online_amount, payment_method, deposition_date)
@@ -892,6 +961,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
           imported++;
         } catch (e: any) { errors.push(`Row ${i + headerIdx + 2}: ${e.message}`); skipped++; }
       }
+
+      // ✅ Notify ALL FOS agents after bulk import
+      if (imported > 0) {
+        try {
+          const fosAgents = await storage.query(`SELECT push_token FROM fos_agents WHERE role='fos' AND push_token IS NOT NULL AND push_token <> ''`);
+          const playerIds = fosAgents.rows.map((r: any) => r.push_token).filter(Boolean);
+          if (playerIds.length > 0) {
+            await sendPushToMany(
+              playerIds,
+              "📋 New Depositions Uploaded",
+              `Admin uploaded ${imported} new deposition record${imported > 1 ? "s" : ""}. Check your pending list and mark payments.`,
+              { screen: "fos-depositions", type: "bulk_import" }
+            );
+          }
+        } catch (pushErr: any) { console.warn("[import-dep] Push failed:", pushErr.message); }
+      }
+
       res.json({ imported, skipped, total: dataRows.length, errors: errors.slice(0, 20) });
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
@@ -1103,7 +1189,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       let agentsRemoved = 0;
       for (const agent of existingFosAgents.rows) {
         if (!fosNamesInExcel.has((agent.name || "").toLowerCase().trim())) {
-          // ✅ FIX: Use safeDeleteAgent so missing tables never crash the import
           await safeDeleteAgent(agent.id, "import");
           agentsRemoved++;
         }
@@ -1186,7 +1271,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       let agentsRemoved = 0;
       for (const agent of existingFosBktAgents.rows) {
         if (!fosNamesInBktExcel.has((agent.name || "").toLowerCase().trim())) {
-          // ✅ FIX: Use safeDeleteAgent so missing tables never crash the import
           await safeDeleteAgent(agent.id, "import-bkt");
           agentsRemoved++;
         }
@@ -1534,6 +1618,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // ─── Background Jobs ───────────────────────────────────────────────────────
+
+  // Job 1: PTP reminder at 9am and 1pm IST
   const ptpReminderSentDates = new Set<string>();
   async function runPtpPushJob() {
     try {
@@ -1560,6 +1646,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   runPtpPushJob();
   setInterval(runPtpPushJob, 10 * 60 * 1000);
 
+  // Job 2: Required deposits — hourly reminder until screenshot uploaded
   async function runReminderJob() {
     try {
       const result = await storage.query(`
@@ -1585,6 +1672,44 @@ export async function registerRoutes(app: Express): Promise<Server> {
   runReminderJob();
   setInterval(runReminderJob, 60 * 60 * 1000);
 
+  // ✅ Job 3: FOS Depositions — hourly reminder for pending payment_method items
+  // Fires every hour for any FOS agent who still has fos_depositions with payment_method='pending'
+  async function runFosDepositionReminderJob() {
+    try {
+      const result = await storage.query(`
+        SELECT
+          fa.id          AS agent_id,
+          fa.name        AS agent_name,
+          fa.push_token,
+          COUNT(fd.id)::int           AS pending_count,
+          SUM(fd.amount)::numeric     AS pending_total,
+          MIN(fd.created_at)          AS oldest_at
+        FROM fos_agents fa
+        JOIN fos_depositions fd ON fd.agent_id = fa.id AND fd.payment_method = 'pending'
+        WHERE fa.push_token IS NOT NULL AND fa.push_token <> ''
+        GROUP BY fa.id, fa.name, fa.push_token
+        HAVING COUNT(fd.id) > 0
+      `);
+
+      for (const row of result.rows) {
+        const count = parseInt(row.pending_count || 0);
+        const total = parseFloat(row.pending_total || 0).toLocaleString("en-IN");
+        const hoursOld = Math.floor((Date.now() - new Date(row.oldest_at).getTime()) / 3600000);
+
+        await sendPush(
+          row.push_token,
+          `⏳ Pending Payment Reminder`,
+          `You have ${count} pending deposit${count > 1 ? "s" : ""} totalling ₹${total} (${hoursOld}h old). Please mark as Cash or Online now.`,
+          { screen: "fos-depositions", type: "fos_dep_reminder" }
+        );
+        console.log(`[fos-dep-reminder] Notified ${row.agent_name} — ${count} pending deposits`);
+      }
+    } catch (e: any) { console.error("[fos-dep-reminder]", e.message); }
+  }
+  runFosDepositionReminderJob();
+  setInterval(runFosDepositionReminderJob, 60 * 60 * 1000); // every hour
+
+  // Job 4: End-of-day batch summary at 7pm IST
   const batchReminderSentDates = new Set<string>();
   async function runBatchReminderJob() {
     try {
