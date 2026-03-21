@@ -47,7 +47,12 @@ async function payOnline(depositId: number, uri: string): Promise<void> {
     method: "POST", body: form, credentials: "include",
     headers: Object.keys(headers).length > 0 ? headers : undefined,
   });
-  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).message || "Upload failed");
+  if (!res.ok) {
+    const json = await res.json().catch(() => ({})) as any;
+    // Surface OCR mismatch as a clear error
+    const msg = json.message || "Upload failed";
+    throw new Error(msg);
+  }
 }
 
 /**
