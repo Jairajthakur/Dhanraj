@@ -17,7 +17,8 @@ import { tokenStore } from "@/lib/api";
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 const fmt = (n: any) => parseFloat(n || 0).toLocaleString("en-IN");
-const fmtDateTime = (d: any) => d ? new Date(d).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : "";
+const fmtDateTime = (d: any) =>
+  d ? new Date(d).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : "";
 
 async function apiReq(method: string, route: string, data?: any) {
   const base = getApiUrl();
@@ -120,17 +121,21 @@ function PaymentModal({ visible, item, onClose, onSaved }: any) {
 }
 
 // ─── Add Deposition Modal ─────────────────────────────────────────────────────
-function AddDepositionModal({ visible, onClose, onSaved, agents, paidCases }: any) {
+function AddDepositionModal({ visible, onClose, onSaved, agents }: any) {
   const [selectedAgent, setSelectedAgent] = useState<any>(null);
-  const [selectedCase, setSelectedCase] = useState<any>(null);
   const [amount, setAmount] = useState("");
   const [cashAmt, setCashAmt] = useState("");
   const [onlineAmt, setOnlineAmt] = useState("");
   const [method, setMethod] = useState<"pending" | "cash" | "online" | "both">("pending");
+  const [customerName, setCustomerName] = useState("");
+  const [loanNo, setLoanNo] = useState("");
   const [notes, setNotes] = useState("");
   const [loading, setLoading] = useState(false);
 
-  const reset = () => { setSelectedAgent(null); setSelectedCase(null); setAmount(""); setCashAmt(""); setOnlineAmt(""); setNotes(""); setMethod("pending"); };
+  const reset = () => {
+    setSelectedAgent(null); setAmount(""); setCashAmt(""); setOnlineAmt("");
+    setNotes(""); setMethod("pending"); setCustomerName(""); setLoanNo("");
+  };
 
   const save = async () => {
     if (!selectedAgent) { Alert.alert("Error", "Select a FOS agent"); return; }
@@ -139,18 +144,19 @@ function AddDepositionModal({ visible, onClose, onSaved, agents, paidCases }: an
     setLoading(true);
     try {
       await apiReq("POST", "/api/admin/fos-depositions", {
-        agentId: selectedAgent.id, loanNo: selectedCase?.loan_no || null,
-        customerName: selectedCase?.customer_name || null, bkt: selectedCase?.bkt || null,
-        source: selectedCase?.source || "loan", amount: totalAmt,
-        cashAmount: parseFloat(cashAmt || "0"), onlineAmount: parseFloat(onlineAmt || "0"),
-        paymentMethod: method, notes,
+        agentId: selectedAgent.id,
+        loanNo: loanNo || null,
+        customerName: customerName || null,
+        amount: totalAmt,
+        cashAmount: parseFloat(cashAmt || "0"),
+        onlineAmount: parseFloat(onlineAmt || "0"),
+        paymentMethod: method,
+        notes,
       });
       reset(); onSaved(); onClose();
     } catch (e: any) { Alert.alert("Error", e.message); }
     finally { setLoading(false); }
   };
-
-  const agentCases = (paidCases || []).filter((c: any) => c.agent_id === selectedAgent?.id);
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={() => { reset(); onClose(); }}>
@@ -164,34 +170,24 @@ function AddDepositionModal({ visible, onClose, onSaved, agents, paidCases }: an
             <View style={{ flexDirection: "row", gap: 8 }}>
               {(agents || []).filter((a: any) => a.role === "fos").map((a: any) => (
                 <Pressable key={a.id} style={[add.agentChip, selectedAgent?.id === a.id && add.agentChipActive]}
-                  onPress={() => { setSelectedAgent(a); setSelectedCase(null); }}>
+                  onPress={() => setSelectedAgent(a)}>
                   <Text style={[add.agentChipText, selectedAgent?.id === a.id && { color: "#fff" }]}>{a.name}</Text>
                 </Pressable>
               ))}
             </View>
           </ScrollView>
 
-          {selectedAgent && agentCases.length > 0 && (
-            <>
-              <Text style={ms.label}>Case (Paid in last 24hr) — Optional</Text>
-              <ScrollView style={{ maxHeight: 140 }} showsVerticalScrollIndicator={false}>
-                {agentCases.map((c: any) => (
-                  <Pressable key={`${c.source}-${c.id}`}
-                    style={[add.caseRow, selectedCase?.id === c.id && selectedCase?.source === c.source && add.caseRowActive]}
-                    onPress={() => { setSelectedCase(selectedCase?.id === c.id ? null : c); setAmount(parseFloat(c.pos || 0).toString()); }}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={[add.caseName, selectedCase?.id === c.id && { color: "#fff" }]} numberOfLines={1}>{c.customer_name}</Text>
-                      <Text style={[add.caseMeta, selectedCase?.id === c.id && { color: "rgba(255,255,255,0.75)" }]}>{c.loan_no} · BKT {c.bkt} · ₹{fmt(c.pos)}</Text>
-                    </View>
-                    {selectedCase?.id === c.id && <Ionicons name="checkmark-circle" size={18} color="#fff" />}
-                  </Pressable>
-                ))}
-              </ScrollView>
-            </>
-          )}
+          <Text style={ms.label}>Customer Name</Text>
+          <TextInput style={ms.input} placeholder="Customer name" placeholderTextColor={Colors.textMuted}
+            value={customerName} onChangeText={setCustomerName} />
+
+          <Text style={ms.label}>Loan No (optional)</Text>
+          <TextInput style={ms.input} placeholder="Loan number" placeholderTextColor={Colors.textMuted}
+            value={loanNo} onChangeText={setLoanNo} />
 
           <Text style={ms.label}>Total Amount (₹)</Text>
-          <TextInput style={ms.input} placeholder="0" placeholderTextColor={Colors.textMuted} value={amount} onChangeText={setAmount} keyboardType="numeric" />
+          <TextInput style={ms.input} placeholder="0" placeholderTextColor={Colors.textMuted}
+            value={amount} onChangeText={setAmount} keyboardType="numeric" />
 
           <Text style={ms.label}>Payment Method</Text>
           <View style={ms.segRow}>
@@ -206,15 +202,19 @@ function AddDepositionModal({ visible, onClose, onSaved, agents, paidCases }: an
 
           {(method === "cash" || method === "both") && (
             <><Text style={ms.label}>Cash Amount (₹)</Text>
-            <TextInput style={ms.input} placeholder="0" placeholderTextColor={Colors.textMuted} value={cashAmt} onChangeText={setCashAmt} keyboardType="numeric" /></>
+            <TextInput style={ms.input} placeholder="0" placeholderTextColor={Colors.textMuted}
+              value={cashAmt} onChangeText={setCashAmt} keyboardType="numeric" /></>
           )}
           {(method === "online" || method === "both") && (
             <><Text style={ms.label}>Online Amount (₹)</Text>
-            <TextInput style={ms.input} placeholder="0" placeholderTextColor={Colors.textMuted} value={onlineAmt} onChangeText={setOnlineAmt} keyboardType="numeric" /></>
+            <TextInput style={ms.input} placeholder="0" placeholderTextColor={Colors.textMuted}
+              value={onlineAmt} onChangeText={setOnlineAmt} keyboardType="numeric" /></>
           )}
 
           <Text style={ms.label}>Notes (optional)</Text>
-          <TextInput style={[ms.input, { minHeight: 56, textAlignVertical: "top" }]} placeholder="Notes..." placeholderTextColor={Colors.textMuted} value={notes} onChangeText={setNotes} multiline />
+          <TextInput style={[ms.input, { minHeight: 56, textAlignVertical: "top" }]}
+            placeholder="Notes..." placeholderTextColor={Colors.textMuted}
+            value={notes} onChangeText={setNotes} multiline />
 
           <View style={[ms.btnRow, { marginBottom: 32 }]}>
             <Pressable style={ms.cancel} onPress={() => { reset(); onClose(); }}><Text style={ms.cancelTxt}>Cancel</Text></Pressable>
@@ -229,6 +229,7 @@ function AddDepositionModal({ visible, onClose, onSaved, agents, paidCases }: an
 }
 
 // ─── FOS Detail Modal ─────────────────────────────────────────────────────────
+// ✅ CHANGE: Removed "Paid Cases (Last 24hr)" section — admin no longer sees it here
 function FosDetailModal({ visible, agentId, agentName, onClose, onUpdated }: any) {
   const [payItem, setPayItem] = useState<any>(null);
   const [screenshotUrl, setScreenshotUrl] = useState<string | null>(null);
@@ -239,16 +240,18 @@ function FosDetailModal({ visible, agentId, agentName, onClose, onUpdated }: any
     enabled: visible && !!agentId,
   });
 
+  // Only use depositions — paid cases are intentionally not rendered
   const depositions = data?.depositions || [];
-  const paidCases = data?.paidCases || [];
 
   const handleDelete = (id: number) => {
     Alert.alert("Delete", "Remove this deposition record?", [
       { text: "Cancel", style: "cancel" },
-      { text: "Delete", style: "destructive", onPress: async () => {
-        try { await apiReq("DELETE", `/api/admin/fos-depositions/${id}`); refetch(); onUpdated(); }
-        catch (e: any) { Alert.alert("Error", e.message); }
-      }},
+      {
+        text: "Delete", style: "destructive", onPress: async () => {
+          try { await apiReq("DELETE", `/api/admin/fos-depositions/${id}`); refetch(); onUpdated(); }
+          catch (e: any) { Alert.alert("Error", e.message); }
+        }
+      },
     ]);
   };
 
@@ -266,12 +269,21 @@ function FosDetailModal({ visible, agentId, agentName, onClose, onUpdated }: any
     return "⏳ Pending";
   };
 
+  // Summary totals
+  const totalAmount = depositions.reduce((s: number, d: any) => s + parseFloat(d.amount || 0), 0);
+  const totalCash = depositions.reduce((s: number, d: any) => s + parseFloat(d.cash_amount || 0), 0);
+  const totalOnline = depositions.reduce((s: number, d: any) => s + parseFloat(d.online_amount || 0), 0);
+  const pendingCount = depositions.filter((d: any) => d.payment_method === "pending").length;
+
   return (
     <>
       <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
         <View style={{ flex: 1, backgroundColor: Colors.background }}>
+          {/* Header */}
           <View style={fd.header}>
-            <Pressable onPress={onClose} style={fd.backBtn}><Ionicons name="arrow-back" size={22} color={Colors.text} /></Pressable>
+            <Pressable onPress={onClose} style={fd.backBtn}>
+              <Ionicons name="arrow-back" size={22} color={Colors.text} />
+            </Pressable>
             <View style={{ flex: 1 }}>
               <Text style={fd.headerTitle}>{agentName}</Text>
               <Text style={fd.headerSub}>{depositions.length} depositions</Text>
@@ -288,21 +300,30 @@ function FosDetailModal({ visible, agentId, agentName, onClose, onUpdated }: any
               keyExtractor={(item) => String(item.id)}
               contentContainerStyle={{ padding: 16, gap: 10, paddingBottom: 40 }}
               ListHeaderComponent={
-                paidCases.length > 0 ? (
-                  <View style={fd.paidSection}>
-                    <View style={fd.paidHeader}>
-                      <Ionicons name="checkmark-circle" size={16} color={Colors.success} />
-                      <Text style={fd.paidHeaderText}>Paid Cases (Last 24hr) — {paidCases.length}</Text>
+                depositions.length > 0 ? (
+                  // Summary cards — totals only, no paid cases list
+                  <View style={fd.summaryRow}>
+                    <View style={[fd.sumCard, { borderTopColor: Colors.primary }]}>
+                      <Text style={fd.sumNum}>₹{fmt(totalAmount)}</Text>
+                      <Text style={fd.sumLabel}>Total</Text>
                     </View>
-                    {paidCases.map((c: any) => (
-                      <View key={`${c.source}-${c.id}`} style={fd.paidCaseRow}>
-                        <View style={{ flex: 1 }}>
-                          <Text style={fd.paidCaseName}>{c.customer_name}</Text>
-                          <Text style={fd.paidCaseMeta}>{c.loan_no} · BKT {c.bkt}</Text>
-                        </View>
-                        <Text style={fd.paidCaseAmt}>₹{fmt(c.pos)}</Text>
+                    <View style={[fd.sumCard, { borderTopColor: Colors.success }]}>
+                      <Ionicons name="cash-outline" size={14} color={Colors.success} />
+                      <Text style={[fd.sumNum, { color: Colors.success }]}>₹{fmt(totalCash)}</Text>
+                      <Text style={fd.sumLabel}>Cash</Text>
+                    </View>
+                    <View style={[fd.sumCard, { borderTopColor: "#2563eb" }]}>
+                      <Ionicons name="phone-portrait-outline" size={14} color="#2563eb" />
+                      <Text style={[fd.sumNum, { color: "#2563eb" }]}>₹{fmt(totalOnline)}</Text>
+                      <Text style={fd.sumLabel}>Online</Text>
+                    </View>
+                    {pendingCount > 0 && (
+                      <View style={[fd.sumCard, { borderTopColor: Colors.warning }]}>
+                        <Ionicons name="time-outline" size={14} color={Colors.warning} />
+                        <Text style={[fd.sumNum, { color: Colors.warning }]}>{pendingCount}</Text>
+                        <Text style={fd.sumLabel}>Pending</Text>
                       </View>
-                    ))}
+                    )}
                   </View>
                 ) : null
               }
@@ -330,8 +351,12 @@ function FosDetailModal({ visible, agentId, agentName, onClose, onUpdated }: any
                       <View style={[fd.payBadge, { backgroundColor: color + "20" }]}>
                         <Text style={[fd.payBadgeText, { color }]}>{payMethodLabel(item.payment_method)}</Text>
                       </View>
-                      {parseFloat(item.cash_amount) > 0 && <Text style={fd.subAmt}>Cash: ₹{fmt(item.cash_amount)}</Text>}
-                      {parseFloat(item.online_amount) > 0 && <Text style={[fd.subAmt, { color: "#2563eb" }]}>Online: ₹{fmt(item.online_amount)}</Text>}
+                      {parseFloat(item.cash_amount) > 0 && (
+                        <Text style={fd.subAmt}>Cash: ₹{fmt(item.cash_amount)}</Text>
+                      )}
+                      {parseFloat(item.online_amount) > 0 && (
+                        <Text style={[fd.subAmt, { color: "#2563eb" }]}>Online: ₹{fmt(item.online_amount)}</Text>
+                      )}
                     </View>
                     {screenshotSrc && (
                       <Pressable onPress={() => setScreenshotUrl(screenshotSrc)} style={fd.thumbRow}>
@@ -358,15 +383,24 @@ function FosDetailModal({ visible, agentId, agentName, onClose, onUpdated }: any
         </View>
       </Modal>
 
-      <PaymentModal visible={!!payItem} item={payItem} onClose={() => setPayItem(null)}
-        onSaved={() => { refetch(); onUpdated(); setPayItem(null); }} />
+      <PaymentModal
+        visible={!!payItem}
+        item={payItem}
+        onClose={() => setPayItem(null)}
+        onSaved={() => { refetch(); onUpdated(); setPayItem(null); }}
+      />
 
+      {/* Screenshot lightbox */}
       <Modal visible={!!screenshotUrl} transparent animationType="fade" onRequestClose={() => setScreenshotUrl(null)}>
-        <Pressable style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.92)", justifyContent: "center", alignItems: "center" }}
-          onPress={() => setScreenshotUrl(null)}>
+        <Pressable
+          style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.92)", justifyContent: "center", alignItems: "center" }}
+          onPress={() => setScreenshotUrl(null)}
+        >
           <Image source={{ uri: screenshotUrl! }} style={{ width: "92%", height: "72%", borderRadius: 12 }} resizeMode="contain" />
-          <Pressable style={{ marginTop: 20, backgroundColor: "rgba(255,255,255,0.15)", paddingHorizontal: 28, paddingVertical: 10, borderRadius: 20 }}
-            onPress={() => setScreenshotUrl(null)}>
+          <Pressable
+            style={{ marginTop: 20, backgroundColor: "rgba(255,255,255,0.15)", paddingHorizontal: 28, paddingVertical: 10, borderRadius: 20 }}
+            onPress={() => setScreenshotUrl(null)}
+          >
             <Text style={{ color: "#fff", fontWeight: "700", fontSize: 15 }}>Close</Text>
           </Pressable>
         </Pressable>
@@ -413,19 +447,27 @@ function ImportModal({ visible, onClose, onImported }: any) {
           <Pressable style={imp.pickBtn} onPress={pickFile}>
             <Ionicons name="folder-open" size={20} color={Colors.primary} />
             <Text style={imp.pickText}>{file?.name ?? "Choose Excel File (.xlsx)"}</Text>
-            {file && <Pressable onPress={() => setFile(null)} hitSlop={8}><Ionicons name="close-circle" size={18} color={Colors.textMuted} /></Pressable>}
+            {file && (
+              <Pressable onPress={() => setFile(null)} hitSlop={8}>
+                <Ionicons name="close-circle" size={18} color={Colors.textMuted} />
+              </Pressable>
+            )}
           </Pressable>
 
           {result && (
             <View style={imp.result}>
               <Text style={imp.resultTitle}>✅ Import Complete</Text>
               <Text style={imp.resultText}>Imported: {result.imported} · Skipped: {result.skipped}</Text>
-              {result.errors?.length > 0 && <Text style={{ fontSize: 11, color: Colors.danger }}>{result.errors[0]}</Text>}
+              {result.errors?.length > 0 && (
+                <Text style={{ fontSize: 11, color: Colors.danger }}>{result.errors[0]}</Text>
+              )}
             </View>
           )}
 
           <View style={ms.btnRow}>
-            <Pressable style={ms.cancel} onPress={() => { setFile(null); setResult(null); onClose(); }}><Text style={ms.cancelTxt}>Close</Text></Pressable>
+            <Pressable style={ms.cancel} onPress={() => { setFile(null); setResult(null); onClose(); }}>
+              <Text style={ms.cancelTxt}>Close</Text>
+            </Pressable>
             <Pressable style={[ms.save, (!file || loading) && { opacity: 0.5 }]} onPress={doImport} disabled={!file || loading}>
               {loading ? <ActivityIndicator color="#fff" size="small" /> : (
                 <><Ionicons name="cloud-upload" size={16} color="#fff" /><Text style={ms.saveTxt}> Import</Text></>
@@ -457,26 +499,13 @@ export default function AdminDepositionsScreen() {
     queryFn: () => api.admin.getAgents(),
   });
 
-  const { data: paidCasesData } = useQuery({
-    queryKey: ["/api/admin/paid-cases-24h"],
-    queryFn: () => apiReq("GET", "/api/admin/cases").then((r: any) => ({
-      cases: (r.cases || []).filter((c: any) => {
-        if (c.status !== "Paid") return false;
-        const updated = new Date(c.updated_at || c.created_at || 0);
-        return Date.now() - updated.getTime() < 24 * 3600 * 1000;
-      })
-    })),
-  });
-
   const grouped: any[] = data?.grouped || [];
   const agents = agentsData?.agents || [];
-  const paidCases = paidCasesData?.cases || [];
 
   const totalAmount = grouped.reduce((s, g) => s + (g.totalAmount || 0), 0);
   const totalCash = grouped.reduce((s, g) => s + (g.totalCash || 0), 0);
   const totalOnline = grouped.reduce((s, g) => s + (g.totalOnline || 0), 0);
 
-  // ✅ FIXED: Download works on both web and Android
   const handleDownload = async () => {
     setDownloading(true);
     try {
@@ -491,7 +520,6 @@ export default function AdminDepositionsScreen() {
         a.download = `FOS_Depositions_${new Date().toISOString().slice(0, 10)}.xlsx`;
         a.click();
       } else {
-        // Android/iOS — download then share/save
         const fileName = `FOS_Depositions_${new Date().toISOString().slice(0, 10)}.xlsx`;
         const fileUri = `${FileSystem.documentDirectory}${fileName}`;
 
@@ -530,7 +558,9 @@ export default function AdminDepositionsScreen() {
             <Text style={scr.actionBtnText}>Import</Text>
           </Pressable>
           <Pressable style={scr.actionBtn} onPress={handleDownload} disabled={downloading}>
-            {downloading ? <ActivityIndicator size="small" color={Colors.success} /> : <Ionicons name="download-outline" size={18} color={Colors.success} />}
+            {downloading
+              ? <ActivityIndicator size="small" color={Colors.success} />
+              : <Ionicons name="download-outline" size={18} color={Colors.success} />}
             <Text style={[scr.actionBtnText, { color: Colors.success }]}>Export Excel</Text>
           </Pressable>
           <Pressable style={[scr.actionBtn, { backgroundColor: Colors.primary }]} onPress={() => setAddVisible(true)}>
@@ -569,10 +599,12 @@ export default function AdminDepositionsScreen() {
             contentContainerStyle={[scr.list, { paddingBottom: insets.bottom + 24 }]}
             renderItem={({ item }) => {
               const pending = item.depositions.filter((d: any) => d.payment_method === "pending").length;
-              // ✅ FIX: Show agent name properly — fallback to first deposition's agent_name
               const displayName = item.agentName || item.depositions[0]?.agent_name || "Unknown";
               return (
-                <Pressable style={scr.fosCard} onPress={() => setSelectedFos({ id: item.agentId, name: displayName })}>
+                <Pressable
+                  style={scr.fosCard}
+                  onPress={() => setSelectedFos({ id: item.agentId, name: displayName })}
+                >
                   <View style={scr.fosAvatar}>
                     <Text style={scr.fosInitial}>{(displayName || "?").charAt(0).toUpperCase()}</Text>
                   </View>
@@ -608,16 +640,27 @@ export default function AdminDepositionsScreen() {
       </View>
 
       {selectedFos && (
-        <FosDetailModal visible={!!selectedFos} agentId={selectedFos.id} agentName={selectedFos.name}
-          onClose={() => setSelectedFos(null)} onUpdated={() => refetch()} />
+        <FosDetailModal
+          visible={!!selectedFos}
+          agentId={selectedFos.id}
+          agentName={selectedFos.name}
+          onClose={() => setSelectedFos(null)}
+          onUpdated={() => refetch()}
+        />
       )}
 
-      <AddDepositionModal visible={addVisible} onClose={() => setAddVisible(false)}
+      <AddDepositionModal
+        visible={addVisible}
+        onClose={() => setAddVisible(false)}
         onSaved={() => { refetch(); qc.invalidateQueries({ queryKey: ["/api/admin/fos-depositions"] }); }}
-        agents={agents} paidCases={paidCases} />
+        agents={agents}
+      />
 
-      <ImportModal visible={importVisible} onClose={() => setImportVisible(false)}
-        onImported={() => refetch()} />
+      <ImportModal
+        visible={importVisible}
+        onClose={() => setImportVisible(false)}
+        onImported={() => refetch()}
+      />
     </>
   );
 }
@@ -684,25 +727,25 @@ const add = StyleSheet.create({
   agentChip: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, backgroundColor: Colors.surfaceAlt, borderWidth: 1.5, borderColor: Colors.border },
   agentChipActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
   agentChipText: { fontSize: 13, fontWeight: "700", color: Colors.text },
-  caseRow: { flexDirection: "row", alignItems: "center", padding: 12, borderRadius: 10, backgroundColor: Colors.surfaceAlt, marginBottom: 6, borderWidth: 1, borderColor: Colors.border },
-  caseRowActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
-  caseName: { fontSize: 13, fontWeight: "700", color: Colors.text },
-  caseMeta: { fontSize: 11, color: Colors.textSecondary, marginTop: 2 },
 });
 
 const fd = StyleSheet.create({
-  header: { flexDirection: "row", alignItems: "center", gap: 12, padding: 16, paddingTop: Platform.OS === "web" ? 67 : 56, backgroundColor: Colors.surface, borderBottomWidth: 1, borderBottomColor: Colors.border },
+  header: {
+    flexDirection: "row", alignItems: "center", gap: 12,
+    padding: 16, paddingTop: Platform.OS === "web" ? 67 : 56,
+    backgroundColor: Colors.surface, borderBottomWidth: 1, borderBottomColor: Colors.border,
+  },
   backBtn: { padding: 4 },
   headerTitle: { fontSize: 17, fontWeight: "800", color: Colors.text },
   headerSub: { fontSize: 12, color: Colors.textSecondary },
-  paidSection: { backgroundColor: Colors.success + "08", borderRadius: 12, padding: 12, borderWidth: 1, borderColor: Colors.success + "30", marginBottom: 12 },
-  paidHeader: { flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 8 },
-  paidHeaderText: { fontSize: 13, fontWeight: "700", color: Colors.success },
-  paidCaseRow: { flexDirection: "row", alignItems: "center", paddingVertical: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: Colors.success + "30" },
-  paidCaseName: { fontSize: 13, fontWeight: "600", color: Colors.text },
-  paidCaseMeta: { fontSize: 11, color: Colors.textSecondary },
-  paidCaseAmt: { fontSize: 13, fontWeight: "800", color: Colors.success },
-  card: { backgroundColor: Colors.surface, borderRadius: 14, padding: 14, shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 6, elevation: 2, borderLeftWidth: 4 },
+  summaryRow: { flexDirection: "row", gap: 8, marginBottom: 12 },
+  sumCard: { flex: 1, backgroundColor: Colors.surface, borderRadius: 10, padding: 10, borderTopWidth: 3, alignItems: "center", gap: 2 },
+  sumNum: { fontSize: 12, fontWeight: "800", color: Colors.text },
+  sumLabel: { fontSize: 9, color: Colors.textSecondary, fontWeight: "600" },
+  card: {
+    backgroundColor: Colors.surface, borderRadius: 14, padding: 14,
+    shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 6, elevation: 2, borderLeftWidth: 4,
+  },
   cardTop: { flexDirection: "row", justifyContent: "space-between" },
   cardName: { fontSize: 14, fontWeight: "700", color: Colors.text },
   cardMeta: { fontSize: 12, color: Colors.textSecondary, marginTop: 2 },
@@ -716,7 +759,11 @@ const fd = StyleSheet.create({
   thumb: { width: 64, height: 64, borderRadius: 8 },
   thumbHint: { fontSize: 11, color: Colors.textMuted },
   notes: { fontSize: 12, color: Colors.textSecondary, fontStyle: "italic", marginTop: 6 },
-  updatePayBtn: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 10, backgroundColor: Colors.primary + "10", borderRadius: 8, paddingVertical: 8, paddingHorizontal: 12, alignSelf: "flex-start" },
+  updatePayBtn: {
+    flexDirection: "row", alignItems: "center", gap: 6, marginTop: 10,
+    backgroundColor: Colors.primary + "10", borderRadius: 8,
+    paddingVertical: 8, paddingHorizontal: 12, alignSelf: "flex-start",
+  },
   updatePayText: { fontSize: 12, fontWeight: "700", color: Colors.primary },
   empty: { alignItems: "center", gap: 8, paddingVertical: 48 },
   emptyText: { fontSize: 14, color: Colors.textMuted },
