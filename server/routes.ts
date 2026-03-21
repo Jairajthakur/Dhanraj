@@ -130,6 +130,79 @@ async function sendPushToMany(
   } catch (e: any) { return { sent: 0, total: playerIds.length }; }
 }
 
+// ─── Screenshot OCR — extract transfer amount using Claude Vision ─────────────
+// Returns the numeric amount found in the screenshot, or null if not found.
+async function extractAmountFromScreenshot(imagePath: string): Promise<number | null> {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) {
+    console.warn("[ocr] ANTHROPIC_API_KEY not set — skipping screenshot validation");
+    return null;
+  }
+  try {
+    const imageBuffer = fs.readFileSync(imagePath);
+    const base64 = imageBuffer.toString("base64");
+    const ext = path.extname(imagePath).toLowerCase();
+    const mediaType = ext === ".png" ? "image/png" : ext === ".gif" ? "image/gif" : ext === ".webp" ? "image/webp" : "image/jpeg";
+
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 256,
+        messages: [{
+          role: "user",
+          content: [
+            {
+              type: "image",
+              source: { type: "base64", media_type: mediaType, data: base64 },
+            },
+            {
+              type: "text",
+              text: `This is a payment/transfer screenshot. Extract ONLY the total transfer amount that was paid/sent/debited. 
+Reply with ONLY the numeric value, no currency symbol, no commas, no text. 
+For example if the amount is ₹1,23,456 reply with: 123456
+If the amount is ₹3,568 reply with: 3568
+If you cannot find a clear payment amount, reply with: null`,
+            },
+          ],
+        }],
+      }),
+    });
+
+    if (!res.ok) {
+      console.warn("[ocr] API error:", res.status);
+      return null;
+    }
+
+    const data: any = await res.json();
+    const text = (data?.content?.[0]?.text || "").trim();
+    if (text === "null" || text === "") return null;
+
+    // Strip any accidental commas/spaces/symbols
+    const clean = text.replace(/[^0-9.]/g, "");
+    const num = parseFloat(clean);
+    if (isNaN(num) || num <= 0) return null;
+
+    console.log(`[ocr] ✅ Extracted amount from screenshot: ₹${num}`);
+    return num;
+  } catch (e: any) {
+    console.warn("[ocr] Failed:", e.message);
+    return null;
+  }
+}
+
+// Tolerance: 1% or ₹5 difference is acceptable to handle rounding in screenshots
+function amountMatches(expected: number, actual: number): boolean {
+  const diff = Math.abs(expected - actual);
+  const tolerance = Math.max(5, expected * 0.01); // 1% or ₹5, whichever is larger
+  return diff <= tolerance;
+}
+
 function normalizeHeader(h: string): string {
   return h.toString().toLowerCase().replace(/[\s_\-\.\/\\+]/g, "");
 }
@@ -736,32 +809,59 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
-  // ✅ FOS: mark as online paid with screenshot
+  // ✅ FOS: mark as online paid with screenshot — validates amount matches via OCR
   app.post("/api/fos-depositions/:id/pay-online", requireAuth, screenshotUpload.single("screenshot"), async (req, res) => {
     try {
       const id = Number(req.params.id);
       const agentId = req.session.agentId!;
       if (!req.file) return res.status(400).json({ message: "No screenshot uploaded" });
+
+      // Fetch expected amount first
+      const depRow = await storage.query(`SELECT amount FROM fos_depositions WHERE id=$1 AND agent_id=$2`, [id, agentId]);
+      if (!depRow.rows[0]) {
+        fs.unlinkSync(req.file.path);
+        return res.status(404).json({ message: "Deposition not found" });
+      }
+      const expectedAmt = parseFloat(depRow.rows[0].amount || 0);
+
+      // ✅ OCR: extract amount from screenshot and validate
+      const screenshotAmt = await extractAmountFromScreenshot(req.file.path);
+      if (screenshotAmt !== null) {
+        if (!amountMatches(expectedAmt, screenshotAmt)) {
+          // Delete the uploaded file — reject the screenshot
+          try { fs.unlinkSync(req.file.path); } catch {}
+          return res.status(400).json({
+            message: `Screenshot amount ₹${screenshotAmt.toLocaleString("en-IN")} does not match the required amount ₹${expectedAmt.toLocaleString("en-IN")}. Please upload the correct payment screenshot.`,
+            screenshotAmount: screenshotAmt,
+            expectedAmount: expectedAmt,
+          });
+        }
+        console.log(`[pay-online] ✅ Amount validated: screenshot=₹${screenshotAmt} expected=₹${expectedAmt}`);
+      } else {
+        console.warn(`[pay-online] ⚠️ Could not extract amount from screenshot — allowing upload (OCR unavailable)`);
+      }
+
       const baseUrl = process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : process.env.APP_URL || "";
       const screenshotUrl = `${baseUrl}/uploads/screenshots/${req.file.filename}`;
-      const depRow = await storage.query(`SELECT amount FROM fos_depositions WHERE id=$1`, [id]);
-      const onlineAmt = parseFloat(depRow.rows[0]?.amount || 0);
+
       await storage.query(`
         UPDATE fos_depositions
         SET payment_method='online', online_amount=$1, screenshot_url=$2, updated_at=NOW()
         WHERE id=$3 AND agent_id=$4
-      `, [onlineAmt, screenshotUrl, id, agentId]);
+      `, [expectedAmt, screenshotUrl, id, agentId]);
+
       const adminRows = await storage.query(`SELECT push_token FROM fos_agents WHERE role='admin' AND push_token IS NOT NULL AND push_token <> ''`);
       const agentRow = await storage.query(`SELECT name FROM fos_agents WHERE id=$1`, [agentId]);
       const agentName = agentRow.rows[0]?.name || "A FOS agent";
       for (const admin of adminRows.rows) {
-        await sendPush(admin.push_token, "📸 Payment Screenshot Uploaded", `${agentName} uploaded online payment screenshot of ₹${onlineAmt.toLocaleString("en-IN")}.`, { type: "fos_dep_screenshot" });
+        await sendPush(admin.push_token, "📸 Payment Screenshot Uploaded", `${agentName} uploaded online payment screenshot of ₹${expectedAmt.toLocaleString("en-IN")}.`, { type: "fos_dep_screenshot" });
       }
       res.json({ success: true, screenshotUrl });
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
   // ✅ NEW: FOS mark as split payment — cash amount + online amount + screenshot in one call
+  // Validates screenshot amount matches the online portion
   app.put("/api/fos-depositions/:id/pay-both", requireAuth, screenshotUpload.single("screenshot"), async (req, res) => {
     try {
       const id = Number(req.params.id);
@@ -771,6 +871,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       if (cashAmt <= 0) return res.status(400).json({ message: "Cash amount must be greater than 0" });
       if (onlineAmt <= 0) return res.status(400).json({ message: "Online amount must be greater than 0" });
+
+      // ✅ OCR: validate screenshot shows the online portion amount
+      if (req.file) {
+        const screenshotAmt = await extractAmountFromScreenshot(req.file.path);
+        if (screenshotAmt !== null) {
+          if (!amountMatches(onlineAmt, screenshotAmt)) {
+            try { fs.unlinkSync(req.file.path); } catch {}
+            return res.status(400).json({
+              message: `Screenshot amount ₹${screenshotAmt.toLocaleString("en-IN")} does not match the online portion ₹${onlineAmt.toLocaleString("en-IN")}. Please upload the correct payment screenshot.`,
+              screenshotAmount: screenshotAmt,
+              expectedAmount: onlineAmt,
+            });
+          }
+          console.log(`[pay-both] ✅ Screenshot validated: screenshot=₹${screenshotAmt} online portion=₹${onlineAmt}`);
+        }
+      }
 
       let screenshotUrl: string | null = null;
       if (req.file) {
@@ -1775,6 +1891,69 @@ export async function registerRoutes(app: Express): Promise<Server> {
   }
   runBatchReminderJob();
   setInterval(runBatchReminderJob, 10 * 60 * 1000);
+
+  // ✅ Job 5: Monthly cleanup — on 1st of every month, wipe all fos_depositions from previous month
+  // Runs every hour but only executes on the 1st day of the month (IST)
+  const monthlyCleanupDone = new Set<string>(); // tracks "YYYY-MM" keys already cleaned
+  async function runMonthlyCleanupJob() {
+    try {
+      const now = new Date();
+      const ist = new Date(now.getTime() + 5.5 * 60 * 60 * 1000); // Convert to IST
+      const day = ist.getUTCDate();
+      const month = ist.getUTCMonth() + 1; // 1-based
+      const year = ist.getUTCFullYear();
+
+      // Only run on 1st of the month
+      if (day !== 1) return;
+
+      // Build a key for this month so we only clean once per month
+      const monthKey = `${year}-${String(month).padStart(2, "0")}`;
+      if (monthlyCleanupDone.has(monthKey)) return;
+
+      // Previous month for logging
+      const prevMonth = month === 1 ? 12 : month - 1;
+      const prevYear = month === 1 ? year - 1 : year;
+      const prevMonthLabel = `${prevYear}-${String(prevMonth).padStart(2, "0")}`;
+
+      console.log(`[monthly-cleanup] 🗑️ Running cleanup for ${prevMonthLabel}...`);
+
+      // Delete ALL fos_depositions from previous month (both pending and completed)
+      const deleteResult = await storage.query(`
+        DELETE FROM fos_depositions
+        WHERE DATE_TRUNC('month', deposition_date) < DATE_TRUNC('month', CURRENT_DATE)
+      `);
+      console.log(`[monthly-cleanup] ✅ Deleted ${deleteResult.rowCount ?? 0} records from ${prevMonthLabel}`);
+
+      // Also clean up old screenshots from disk to save space
+      try {
+        const uploadsDir = path.join(process.cwd(), "server/uploads/screenshots");
+        const cutoff = new Date(prevYear, prevMonth - 1, 1); // Start of previous month
+        const files = fs.readdirSync(uploadsDir);
+        let deletedFiles = 0;
+        for (const file of files) {
+          const filePath = path.join(uploadsDir, file);
+          try {
+            const stat = fs.statSync(filePath);
+            if (stat.mtime < cutoff) {
+              fs.unlinkSync(filePath);
+              deletedFiles++;
+            }
+          } catch {}
+        }
+        console.log(`[monthly-cleanup] 🖼️ Deleted ${deletedFiles} old screenshot files`);
+      } catch (fsErr: any) {
+        console.warn("[monthly-cleanup] Screenshot cleanup error:", fsErr.message);
+      }
+
+      monthlyCleanupDone.add(monthKey);
+      // Keep only last 3 months in memory
+      if (monthlyCleanupDone.size > 3) {
+        monthlyCleanupDone.delete(monthlyCleanupDone.values().next().value);
+      }
+    } catch (e: any) { console.error("[monthly-cleanup]", e.message); }
+  }
+  runMonthlyCleanupJob(); // Check on startup in case server restarted on the 1st
+  setInterval(runMonthlyCleanupJob, 60 * 60 * 1000); // Check every hour
 
   const httpServer = createServer(app);
   return httpServer;
