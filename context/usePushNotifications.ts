@@ -5,14 +5,30 @@
 import { useEffect, useRef } from "react";
 import { Platform, InteractionManager, PermissionsAndroid } from "react-native";
 import Constants from "expo-constants";
-import { api } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 
 const ONESIGNAL_APP_ID =
   Constants.expoConfig?.extra?.oneSignalAppId ||
   "bff2c8e0-de24-4aad-a373-d030c210155f";
 
-// ─── Get OneSignal ────────────────────────────────────────────────────────────
+// ─── Save token directly to server (bypass api wrapper) ──────────────────────
+async function savePushTokenToServer(playerId: string): Promise<void> {
+  const { getApiUrl } = require("@/lib/query-client");
+  const { tokenStore } = require("@/lib/api");
+  const base = getApiUrl();
+  const authToken = Platform.OS !== "web" ? await tokenStore.get() : null;
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (authToken) headers["Authorization"] = `Bearer ${authToken}`;
+  const res = await fetch(`${base}/api/push-token`, {
+    method: "POST",
+    headers,
+    credentials: "include",
+    body: JSON.stringify({ token: playerId }),
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(json.message || `HTTP ${res.status}`);
+  console.log("[OneSignal] ✅ Server confirmed token saved:", json);
+}
 function getOneSignal() {
   try {
     const mod = require("react-native-onesignal");
@@ -142,7 +158,7 @@ export async function registerPushToken(): Promise<void> {
 
     if (playerId) {
       try {
-        await api.savePushToken(playerId);
+        await savePushTokenToServer(playerId);
         console.log(`[OneSignal] ✅ Token saved on attempt ${attempt}:`, playerId.slice(0, 20) + "...");
         return;
       } catch (e: any) {
@@ -190,7 +206,7 @@ export function usePushNotifications() {
       const id = await getOnesignalPlayerId(OneSignal);
       if (id) {
         try {
-          await api.savePushToken(id);
+          await savePushTokenToServer(id);
           console.log("[OneSignal] ✅ Token re-saved via subscription change");
         } catch (e: any) {
           console.warn("[OneSignal] Event save failed:", e.message);
