@@ -16,7 +16,6 @@ const fmt = (n: any) => parseFloat(n || 0).toLocaleString("en-IN");
 const fmtDate = (d: any) => d ? new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "";
 const fmtDateTime = (d: any) => d ? new Date(d).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : "";
 
-// ✅ FIX: all API calls use this local apiReq — no dependency on api.admin.*
 async function apiReq(method: string, route: string, data?: any) {
   const base = getApiUrl();
   const token = Platform.OS !== "web" ? await tokenStore.get() : null;
@@ -33,7 +32,6 @@ async function apiReq(method: string, route: string, data?: any) {
   return res.json();
 }
 
-// ✅ FIX: uploadFile also uses local token — no dependency on api.admin.*
 async function uploadFile(uri: string, name: string, type: string, route: string): Promise<any> {
   const base = getApiUrl();
   const token = Platform.OS !== "web" ? await tokenStore.get() : null;
@@ -169,7 +167,10 @@ function AddDepositionModal({ visible, onClose, onSaved, agents, paidCases }: an
     finally { setLoading(false); }
   };
 
-  const agentCases = (paidCases || []).filter((c: any) => c.agent_id === selectedAgent?.id);
+  // ✅ FIX: safe guard — agents and paidCases might be undefined on first render
+  const safeAgents = Array.isArray(agents) ? agents : [];
+  const safePaidCases = Array.isArray(paidCases) ? paidCases : [];
+  const agentCases = safePaidCases.filter((c: any) => c.agent_id === selectedAgent?.id);
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={() => { reset(); onClose(); }}>
@@ -181,7 +182,7 @@ function AddDepositionModal({ visible, onClose, onSaved, agents, paidCases }: an
           <Text style={ms.label}>FOS Agent</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 4 }}>
             <View style={{ flexDirection: "row", gap: 8 }}>
-              {(agents || []).filter((a: any) => a.role === "fos").map((a: any) => (
+              {safeAgents.filter((a: any) => a.role === "fos").map((a: any) => (
                 <Pressable key={a.id}
                   style={[add.agentChip, selectedAgent?.id === a.id && add.agentChipActive]}
                   onPress={() => { setSelectedAgent(a); setSelectedCase(null); }}>
@@ -280,8 +281,9 @@ function FosDetailModal({ visible, agentId, agentName, onClose, onUpdated }: any
     staleTime: 0,
   });
 
-  const depositions = data?.depositions || [];
-  const paidCases = data?.paidCases || [];
+  // ✅ FIX: safe defaults
+  const depositions = Array.isArray(data?.depositions) ? data.depositions : [];
+  const paidCases = Array.isArray(data?.paidCases) ? data.paidCases : [];
 
   const handleDelete = (id: number) => {
     Alert.alert("Delete", "Remove this deposition record?", [
@@ -564,31 +566,45 @@ export default function AdminDepositionsScreen() {
     refetchOnMount: true,
   });
 
-  // ✅ FIX: replaced api.admin.getAgents() with apiReq — no more "undefined is not a function"
   const { data: agentsData } = useQuery({
     queryKey: ["/api/admin/agents"],
-    queryFn: () => apiReq("GET", "/api/admin/agents"),
+    queryFn: async () => {
+      try {
+        return await apiReq("GET", "/api/admin/agents");
+      } catch {
+        return { agents: [] };
+      }
+    },
   });
 
+  // ✅ FIX: fully safe paidCases query — handles array OR {cases:[]} response, never throws
   const { data: paidCasesData } = useQuery({
     queryKey: ["/api/admin/paid-cases-24h"],
-    queryFn: () => apiReq("GET", "/api/admin/cases").then((r: any) => ({
-      cases: (r.cases || []).filter((c: any) => {
-        if (c.status !== "Paid") return false;
-        const updated = new Date(c.updated_at || c.created_at || 0);
-        return Date.now() - updated.getTime() < 24 * 3600 * 1000;
-      })
-    })),
+    queryFn: async () => {
+      try {
+        const r = await apiReq("GET", "/api/admin/cases");
+        const allCases = Array.isArray(r) ? r : (r?.cases || []);
+        return {
+          cases: allCases.filter((c: any) => {
+            if (c.status !== "Paid") return false;
+            const updated = new Date(c.updated_at || c.created_at || 0);
+            return Date.now() - updated.getTime() < 24 * 3600 * 1000;
+          })
+        };
+      } catch {
+        return { cases: [] };
+      }
+    },
   });
 
-  const grouped: any[] = data?.grouped || [];
-  // ✅ FIX: handle both { agents: [] } and plain [] response shapes
+  // ✅ FIX: safe defaults for all derived data — nothing can be undefined
+  const grouped: any[] = Array.isArray(data?.grouped) ? data.grouped : [];
   const agents = Array.isArray(agentsData) ? agentsData : (agentsData?.agents || []);
-  const paidCases = paidCasesData?.cases || [];
+  const paidCases = Array.isArray(paidCasesData?.cases) ? paidCasesData.cases : [];
 
-  const totalAmount = grouped.reduce((s, g) => s + (g.totalAmount || 0), 0);
-  const totalCash = grouped.reduce((s, g) => s + (g.totalCash || 0), 0);
-  const totalOnline = grouped.reduce((s, g) => s + (g.totalOnline || 0), 0);
+  const totalAmount = grouped.reduce((s, g) => s + (parseFloat(g.totalAmount) || 0), 0);
+  const totalCash = grouped.reduce((s, g) => s + (parseFloat(g.totalCash) || 0), 0);
+  const totalOnline = grouped.reduce((s, g) => s + (parseFloat(g.totalOnline) || 0), 0);
 
   const handleDownload = async () => {
     setDownloading(true);
@@ -660,7 +676,8 @@ export default function AdminDepositionsScreen() {
             onRefresh={() => refetch()}
             refreshing={isLoading}
             renderItem={({ item }) => {
-              const pending = item.depositions.filter((d: any) => d.payment_method === "pending").length;
+              const depositions = Array.isArray(item.depositions) ? item.depositions : [];
+              const pending = depositions.filter((d: any) => d.payment_method === "pending").length;
               return (
                 <Pressable
                   style={scr.fosCard}
@@ -672,7 +689,7 @@ export default function AdminDepositionsScreen() {
                   <View style={{ flex: 1 }}>
                     <Text style={scr.fosName}>{item.agentName}</Text>
                     <View style={scr.fosMetaRow}>
-                      <Text style={scr.fosMeta}>{item.depositions.length} records</Text>
+                      <Text style={scr.fosMeta}>{depositions.length} records</Text>
                       {pending > 0 && (
                         <View style={scr.pendingPill}>
                           <Text style={scr.pendingPillText}>{pending} pending</Text>
@@ -681,8 +698,8 @@ export default function AdminDepositionsScreen() {
                     </View>
                     <View style={scr.amtRow}>
                       <Text style={scr.fosTotal}>₹{fmt(item.totalAmount)}</Text>
-                      {item.totalCash > 0 && <Text style={scr.cashAmt}>💵 ₹{fmt(item.totalCash)}</Text>}
-                      {item.totalOnline > 0 && <Text style={scr.onlineAmt}>📲 ₹{fmt(item.totalOnline)}</Text>}
+                      {parseFloat(item.totalCash) > 0 && <Text style={scr.cashAmt}>💵 ₹{fmt(item.totalCash)}</Text>}
+                      {parseFloat(item.totalOnline) > 0 && <Text style={scr.onlineAmt}>📲 ₹{fmt(item.totalOnline)}</Text>}
                     </View>
                   </View>
                   <Ionicons name="chevron-forward" size={18} color={Colors.textMuted} />
