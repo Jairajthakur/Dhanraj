@@ -128,9 +128,7 @@ function createFormData(file: any, extraData?: any) {
   return form;
 }
 
-// ─── Query client helpers (for cache invalidation after imports) ──────────────
-// These are called from admin screens after successful imports so the
-// case list / agent list refreshes without needing a manual pull-to-refresh.
+// ─── Query client helpers ────────────────────────────────────────────────────
 let _queryClient: any = null;
 export function setQueryClientRef(qc: any) {
   _queryClient = qc;
@@ -191,23 +189,35 @@ export const api = {
   updateBktFeedback: (id: number, data: any) =>
     apiRequest("PUT", `/api/bkt-cases/${id}/feedback`, data),
 
+  checkIn: () => apiRequest("POST", "/api/attendance/checkin"),
+  checkOut: () => apiRequest("POST", "/api/attendance/checkout"),
+
   // ─── ADMIN ────────────────────────────────────────────────────────────────
   admin: {
-    // ✅ FIX: getAgents was missing — caused "undefined is not a function"
+    // ✅ All admin methods — no more "undefined is not a function"
     getAgents: () => apiRequest("GET", "/api/admin/agents"),
     getStats: () => apiRequest("GET", "/api/admin/stats"),
     getCases: () => apiRequest("GET", "/api/admin/cases"),
+
+    // ✅ FIX: getBktCases was missing — caused crash in all-cases.tsx
+    getBktCases: (category?: string) =>
+      apiRequest("GET", `/api/admin/bkt-cases${category ? `?category=${category}` : ""}`),
+
     getAllDepositions: () => apiRequest("GET", "/api/admin/depositions"),
     getFosDepositions: () => apiRequest("GET", "/api/admin/fos-depositions"),
 
-    // ─── FILE UPLOADS ────────────────────────────────────────────────────────
+    // ✅ FIX: updateCaseStatus was missing — caused "undefined is not a function"
+    // when tapping Mark Paid / Rollback in all-cases.tsx
+    updateCaseStatus: (id: number, data: {
+      status: string;
+      rollback_yn?: boolean | null;
+      table: "loan" | "bkt";
+    }) => apiRequest("PUT", `/api/admin/cases/${id}/status`, data),
 
-    // ✅ FIX: invalidateAfterImport() called after every import so admin
-    //         case list refreshes automatically without manual pull-to-refresh
+    // ─── FILE UPLOADS ────────────────────────────────────────────────────────
     importCases: async (file: any) => {
       const form = createFormData(file);
       const token = await tokenStore.get();
-
       const r = await fetch(`${getApiUrl()}/api/admin/import`, {
         method: "POST",
         headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
@@ -215,8 +225,6 @@ export const api = {
       });
       const json = await r.json();
       if (!r.ok) throw new Error(json.message || `HTTP ${r.status}`);
-
-      // ✅ Invalidate all relevant queries so UI refreshes immediately
       invalidateAfterImport();
       return json;
     },
@@ -224,7 +232,6 @@ export const api = {
     importBkt: async (file: any) => {
       const form = createFormData(file);
       const token = await tokenStore.get();
-
       const r = await fetch(`${getApiUrl()}/api/admin/import-bkt`, {
         method: "POST",
         headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
@@ -232,8 +239,6 @@ export const api = {
       });
       const json = await r.json();
       if (!r.ok) throw new Error(json.message || `HTTP ${r.status}`);
-
-      // ✅ Invalidate all relevant queries so UI refreshes immediately
       invalidateAfterImport();
       return json;
     },
@@ -241,7 +246,6 @@ export const api = {
     importBktPerf: async (file: any, bkt?: string) => {
       const form = createFormData(file, { bkt });
       const token = await tokenStore.get();
-
       const r = await fetch(`${getApiUrl()}/api/admin/import-bkt-perf`, {
         method: "POST",
         headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
@@ -255,7 +259,6 @@ export const api = {
     importDepositions: async (file: any) => {
       const form = createFormData(file);
       const token = await tokenStore.get();
-
       const r = await fetch(`${getApiUrl()}/api/admin/import-depositions`, {
         method: "POST",
         headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
@@ -263,8 +266,6 @@ export const api = {
       });
       const json = await r.json();
       if (!r.ok) throw new Error(json.message || `HTTP ${r.status}`);
-
-      // ✅ Invalidate deposition queries so UI refreshes immediately
       invalidateAfterImport();
       return json;
     },
