@@ -589,6 +589,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         SELECT fd.*, fa.name AS agent_name, fa.id AS fos_id
         FROM fos_depositions fd
         LEFT JOIN fos_agents fa ON fa.id = fd.agent_id
+        WHERE fd.payment_method = 'pending'
+           OR fd.deposition_date = CURRENT_DATE
         ORDER BY fd.deposition_date DESC, fa.name, fd.created_at DESC
       `);
       const grouped: Record<string, any> = {};
@@ -606,7 +608,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
-  // ✅ Admin view for a specific FOS agent — NO paid cases shown
+  // ✅ Admin view for a specific FOS agent — NO paid cases shown, same filter as FOS view
   app.get("/api/admin/fos-depositions/:agentId", requireAdmin, async (req, res) => {
     try {
       const agentId = Number(req.params.agentId);
@@ -615,6 +617,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         FROM fos_depositions fd
         LEFT JOIN fos_agents fa ON fa.id = fd.agent_id
         WHERE fd.agent_id = $1
+          AND (
+            fd.payment_method = 'pending'
+            OR fd.deposition_date = CURRENT_DATE
+          )
         ORDER BY fd.deposition_date DESC, fd.created_at DESC
       `, [agentId]);
       // ✅ paid cases intentionally removed — admin no longer sees them here
@@ -678,12 +684,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // ✅ FOS: get own depositions
+  // Shows: pending from any date + ALL records from today (including paid ones)
+  // After new excel upload, completed old ones are purged so only pending + today show
   app.get("/api/fos-depositions", requireAuth, async (req, res) => {
     try {
       const agentId = req.session.agentId!;
       console.log("[fos-dep] Fetching depositions for agentId:", agentId);
       const result = await storage.query(
-        `SELECT * FROM fos_depositions WHERE agent_id = $1 ORDER BY deposition_date DESC, created_at DESC`,
+        `SELECT * FROM fos_depositions
+         WHERE agent_id = $1
+           AND (
+             payment_method = 'pending'
+             OR deposition_date = CURRENT_DATE
+           )
+         ORDER BY deposition_date DESC, created_at DESC`,
         [agentId]
       );
       console.log("[fos-dep] Found", result.rows.length, "depositions");
@@ -866,8 +880,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // ─── FOS Depositions Excel Import ──────────────────────────────────────────
-  // ✅ Agent ID is resolved by matching FOS Name from Excel against fos_agents.name
-  // ✅ Notifies ALL FOS agents after successful bulk import
+  // ✅ New Excel format: Agreement No | CUST NAME | Amount | FOS
+  // ✅ On import: purge all completed (non-pending) depositions from previous days
+  // ✅ Notifies ALL FOS agents immediately after import
   app.post("/api/admin/import-depositions", requireAdmin, upload.single("file"), async (req, res) => {
     try {
       if (!req.file) return res.status(400).json({ message: "No file uploaded" });
@@ -877,17 +892,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const rawRows = worksheetToRows(ws, true);
       if (rawRows.length === 0) return res.json({ imported: 0, skipped: 0, errors: [] });
 
+      // ✅ NEW column mapping — only 4 fields
       const COL_MAP: Record<string, string> = {
-        date: "deposition_date", depositiondate: "deposition_date",
-        fosname: "fos_name", fos: "fos_name", agent: "fos_name", fosagent: "fos_name",
-        customername: "customer_name", customer: "customer_name",
-        loanno: "loan_no", loan: "loan_no", loannumber: "loan_no", loann: "loan_no",
-        cashpaid: "cash_amount", cashamount: "cash_amount",
-        amountpaidincash: "cash_amount", paidincash: "cash_amount", cash: "cash_amount",
-        onlinepaid: "online_amount", onlineamount: "online_amount",
-        amountpaidonline: "online_amount", paidonline: "online_amount", online: "online_amount",
-        totalamount: "amount", total: "amount", amount: "amount",
-        bkt: "bkt", bucket: "bkt",
+        // Agreement No
+        agreementno: "loan_no", agreementnumber: "loan_no", agreement: "loan_no",
+        agrmtno: "loan_no", agrno: "loan_no", loanno: "loan_no", loannumber: "loan_no", loan: "loan_no",
+        // CUST NAME
+        custname: "customer_name", customername: "customer_name", cust: "customer_name",
+        customer: "customer_name", name: "customer_name", clientname: "customer_name",
+        // Amount
+        amount: "amount", totalamount: "amount", total: "amount", amountdue: "amount", dueamount: "amount",
+        // FOS
+        fos: "fos_name", fosname: "fos_name", fosagent: "fos_name", agent: "fos_name",
+        agentname: "agent_name", collectorname: "fos_name", collector: "fos_name",
       };
 
       // Detect header row
@@ -900,27 +917,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
         if (matched >= 2) { headerIdx = r; colMap = tempMap; break; }
       }
-      if (headerIdx === -1) return res.status(400).json({ message: "Could not find header row. Expected columns: Date, FOS Name, Customer Name, Loan No, Cash Paid, Online Paid" });
+      if (headerIdx === -1) return res.status(400).json({ message: "Could not find header row. Expected columns: Agreement No, CUST NAME, Amount, FOS" });
 
-      // ✅ Load all FOS agents and build a name→id cache
-      // Supports: exact, case-insensitive, and partial LIKE matches
+      // ✅ Load all FOS agents — name → id cache with fuzzy match
       const { rows: existingAgents } = await storage.query(`SELECT id, name FROM fos_agents WHERE name IS NOT NULL`);
       const agentByName: Record<string, number> = {};
       for (const a of existingAgents) {
         if (a.name) agentByName[a.name.toLowerCase().trim()] = a.id;
       }
 
-      // Helper: fuzzy match agent name (exact → ci → partial)
       function resolveAgentId(fosName: string): number | null {
         if (!fosName) return null;
         const lower = fosName.toLowerCase().trim();
-        // 1. Exact case-insensitive
         if (agentByName[lower]) return agentByName[lower];
-        // 2. Partial: Excel name contains DB name or vice versa
         for (const [dbName, id] of Object.entries(agentByName)) {
           if (lower.includes(dbName) || dbName.includes(lower)) return id;
         }
         return null;
+      }
+
+      // ✅ PURGE: delete all completed depositions from previous days before inserting new batch
+      // This means after upload FOS only sees: pending (any date) + today's new ones
+      try {
+        await storage.query(`
+          DELETE FROM fos_depositions
+          WHERE payment_method != 'pending'
+            AND deposition_date < CURRENT_DATE
+        `);
+        console.log("[import-dep] Purged old completed depositions");
+      } catch (purgeErr: any) {
+        console.warn("[import-dep] Purge warning:", purgeErr.message);
       }
 
       let imported = 0, skipped = 0;
@@ -934,46 +960,48 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const val = row[Number(ci)];
           mapped[field] = (val !== undefined && val !== "") ? String(val).trim() : null;
         }
-        if (!mapped.fos_name && !mapped.customer_name && !mapped.loan_no) { skipped++; continue; }
 
-        // ✅ Resolve agentId by FOS name — no manual agentId needed
+        // Skip empty rows
+        if (!mapped.fos_name && !mapped.customer_name && !mapped.loan_no && !mapped.amount) { skipped++; continue; }
+        if (!mapped.amount || parseFloat(mapped.amount) <= 0) { skipped++; continue; }
+
+        // ✅ Resolve agentId by FOS name
         const agentId = mapped.fos_name ? resolveAgentId(mapped.fos_name) : null;
         if (mapped.fos_name && !agentId) {
-          errors.push(`Row ${i + headerIdx + 2}: FOS agent "${mapped.fos_name}" not found in system`);
+          errors.push(`Row ${i + headerIdx + 2}: FOS agent "${mapped.fos_name}" not found`);
           skipped++;
           continue;
         }
 
-        const cashAmt = parseFloat(mapped.cash_amount || "0") || 0;
-        const onlineAmt = parseFloat(mapped.online_amount || "0") || 0;
-        const totalAmt = parseFloat(mapped.amount || "0") || (cashAmt + onlineAmt);
-        let method = "pending";
-        if (cashAmt > 0 && onlineAmt > 0) method = "both";
-        else if (cashAmt > 0) method = "cash";
-        else if (onlineAmt > 0) method = "online";
-        const depDate = parseDate(mapped.deposition_date) || today;
+        const totalAmt = parseFloat(mapped.amount || "0") || 0;
 
         try {
           await storage.query(`
-            INSERT INTO fos_depositions (agent_id, loan_no, customer_name, amount, cash_amount, online_amount, payment_method, deposition_date)
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-          `, [agentId, mapped.loan_no || null, mapped.customer_name || null, totalAmt, cashAmt, onlineAmt, method, depDate]);
+            INSERT INTO fos_depositions
+              (agent_id, loan_no, customer_name, amount, cash_amount, online_amount, payment_method, deposition_date)
+            VALUES ($1, $2, $3, $4, 0, 0, 'pending', $5)
+          `, [agentId, mapped.loan_no || null, mapped.customer_name || null, totalAmt, today]);
           imported++;
         } catch (e: any) { errors.push(`Row ${i + headerIdx + 2}: ${e.message}`); skipped++; }
       }
 
-      // ✅ Notify ALL FOS agents after bulk import
+      // ✅ Notify ALL FOS agents immediately after bulk import
       if (imported > 0) {
         try {
-          const fosAgents = await storage.query(`SELECT push_token FROM fos_agents WHERE role='fos' AND push_token IS NOT NULL AND push_token <> ''`);
+          const fosAgents = await storage.query(
+            `SELECT push_token, name FROM fos_agents WHERE role='fos' AND push_token IS NOT NULL AND push_token != ''`
+          );
           const playerIds = fosAgents.rows.map((r: any) => r.push_token).filter(Boolean);
           if (playerIds.length > 0) {
             await sendPushToMany(
               playerIds,
-              "📋 New Depositions Uploaded",
-              `Admin uploaded ${imported} new deposition record${imported > 1 ? "s" : ""}. Check your pending list and mark payments.`,
+              "📋 New Deposits Assigned",
+              `Admin uploaded ${imported} new deposit record${imported > 1 ? "s" : ""}. Open the app to mark your payments.`,
               { screen: "fos-depositions", type: "bulk_import" }
             );
+            console.log(`[import-dep] ✅ Push sent to ${playerIds.length} FOS agents`);
+          } else {
+            console.warn("[import-dep] ⚠️ No FOS agents have push tokens registered");
           }
         } catch (pushErr: any) { console.warn("[import-dep] Push failed:", pushErr.message); }
       }
@@ -983,12 +1011,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // ─── Push token ────────────────────────────────────────────────────────────
+  // ✅ FOS saves their OneSignal player ID here on every app launch / login
   app.post("/api/push-token", requireAuth, async (req, res) => {
     try {
       const { token } = req.body;
-      if (!token) return res.status(400).json({ message: "token required" });
-      await storage.query("UPDATE fos_agents SET push_token = $1 WHERE id = $2", [token, req.session.agentId!]);
-      console.log("[push-token] Saved token for agent:", req.session.agentId);
+      if (!token || typeof token !== "string" || token.trim() === "") {
+        return res.status(400).json({ message: "token required" });
+      }
+      const cleanToken = token.trim();
+      await storage.query(
+        "UPDATE fos_agents SET push_token = $1 WHERE id = $2",
+        [cleanToken, req.session.agentId!]
+      );
+      console.log(`[push-token] ✅ Saved for agent ${req.session.agentId}: ${cleanToken.slice(0, 20)}...`);
       res.json({ success: true });
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
