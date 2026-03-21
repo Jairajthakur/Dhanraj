@@ -7,43 +7,11 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
-import * as Notifications from "expo-notifications";
 import * as Haptics from "expo-haptics";
 import Colors from "@/constants/colors";
 import { getApiUrl } from "@/lib/query-client";
 import { tokenStore } from "@/lib/api";
-
-// ─── Push token registration ──────────────────────────────────────────────────
-async function registerPushToken() {
-  try {
-    const { status: existing } = await Notifications.getPermissionsAsync();
-    let finalStatus = existing;
-    if (existing !== "granted") {
-      const { status } = await Notifications.requestPermissionsAsync();
-      finalStatus = status;
-    }
-    if (finalStatus !== "granted") return;
-    const token = (await Notifications.getExpoPushTokenAsync()).data;
-    const base = getApiUrl();
-    const authToken = Platform.OS !== "web" ? await tokenStore.get() : null;
-    const headers: Record<string, string> = { "Content-Type": "application/json" };
-    if (authToken) headers["Authorization"] = `Bearer ${authToken}`;
-    await fetch(`${base}/api/users/push-token`, {
-      method: "POST", headers, credentials: "include",
-      body: JSON.stringify({ pushToken: token }),
-    });
-  } catch (err) {
-    console.warn("[push] token registration failed:", err);
-  }
-}
-
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: true,
-    shouldSetBadge: true,
-  }),
-});
+import { usePushNotifications } from "@/context/usePushNotifications"; // ✅ existing hook
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 const fmt = (n: any) => parseFloat(n || 0).toLocaleString("en-IN");
@@ -58,6 +26,7 @@ async function authFetch(url: string, options: RequestInit = {}) {
   return fetch(`${base}${url}`, { ...options, headers, credentials: "include" });
 }
 
+// ─── API helpers ──────────────────────────────────────────────────────────────
 async function payCash(depositId: number, cashAmount: number): Promise<void> {
   const res = await authFetch(`/api/fos-depositions/${depositId}/pay-cash`, {
     method: "POST",
@@ -67,7 +36,7 @@ async function payCash(depositId: number, cashAmount: number): Promise<void> {
   if (!res.ok) throw new Error((await res.json().catch(() => ({}))).message || "Failed");
 }
 
-async function payOnline(depositId: number, uri: string): Promise<string> {
+async function payOnline(depositId: number, uri: string): Promise<void> {
   const form = new FormData();
   form.append("screenshot", { uri, name: `dep_${depositId}.jpg`, type: "image/jpeg" } as any);
   const base = getApiUrl();
@@ -79,10 +48,12 @@ async function payOnline(depositId: number, uri: string): Promise<string> {
     headers: Object.keys(headers).length > 0 ? headers : undefined,
   });
   if (!res.ok) throw new Error((await res.json().catch(() => ({}))).message || "Upload failed");
-  const data = await res.json();
-  return data.screenshotUrl || "";
 }
 
+/**
+ * Split payment — PUT /api/fos-depositions/:id/pay-both
+ * Sends cashAmount + onlineAmount + screenshot in one multipart call.
+ */
 async function payBoth(depositId: number, cashAmount: number, onlineAmount: number, screenshotUri: string): Promise<void> {
   const form = new FormData();
   form.append("cashAmount", String(cashAmount));
@@ -122,6 +93,7 @@ function BulkPaymentSheet({
     if (!result.canceled && result.assets?.[0]) setScreenshotUri(result.assets[0].uri);
   };
 
+  // ── Cash only ──────────────────────────────────────────────────────────────
   const handleCash = async () => {
     const amt = parseFloat(cashAmt);
     if (!amt || amt <= 0) { Alert.alert("Error", "Enter a valid cash amount"); return; }
@@ -137,32 +109,43 @@ function BulkPaymentSheet({
     finally { setLoading(false); }
   };
 
+  // ── Online only ────────────────────────────────────────────────────────────
   const handleOnline = async () => {
     setLoading(true);
     try {
       const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], quality: 0.85 });
       if (result.canceled || !result.assets?.[0]) { setLoading(false); return; }
-      for (const item of selectedItems) await payOnline(item.id, result.assets[0].uri);
+      for (const item of selectedItems) {
+        await payOnline(item.id, result.assets[0].uri);
+      }
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       onPaid(); reset(); onClose();
     } catch (e: any) { Alert.alert("Error", e.message); }
     finally { setLoading(false); }
   };
 
+  // ── Both (split: cash + online + screenshot) ───────────────────────────────
   const handleBoth = async () => {
     const cash = parseFloat(cashAmt) || 0;
     const online = parseFloat(onlineAmt) || 0;
     if (cash <= 0) { Alert.alert("Error", "Enter cash amount"); return; }
     if (online <= 0) { Alert.alert("Error", "Enter online amount"); return; }
-    if (!screenshotUri) { Alert.alert("Error", "Please attach payment screenshot for online portion"); return; }
-
-    const total = cash + online;
+    if (!screenshotUri) {
+      Alert.alert("Screenshot Required", "Please attach the online payment screenshot before confirming.");
+      return;
+    }
     const proceed = async () => {
       setLoading(true);
       try {
+        const splitTotal = cash + online;
         for (const item of selectedItems) {
-          const prop = parseFloat(item.amount || 0) / total;
-          await payBoth(item.id, Math.round(cash * prop * 100) / 100, Math.round(online * prop * 100) / 100, screenshotUri!);
+          const prop = parseFloat(item.amount || 0) / splitTotal;
+          await payBoth(
+            item.id,
+            Math.round(cash * prop * 100) / 100,
+            Math.round(online * prop * 100) / 100,
+            screenshotUri!
+          );
         }
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         onPaid(); reset(); onClose();
@@ -170,11 +153,11 @@ function BulkPaymentSheet({
       finally { setLoading(false); }
     };
 
-    const diff = Math.abs(total - totalAmount);
+    const diff = Math.abs((cash + online) - totalAmount);
     if (diff > 1) {
       Alert.alert(
         "Amount Mismatch",
-        `Cash ₹${fmt(cash)} + Online ₹${fmt(online)} = ₹${fmt(total)}\nExpected: ₹${fmt(totalAmount)}\n\nProceed anyway?`,
+        `Cash ₹${fmt(cash)} + Online ₹${fmt(online)} = ₹${fmt(cash + online)}\nExpected: ₹${fmt(totalAmount)}\n\nProceed anyway?`,
         [{ text: "Cancel", style: "cancel" }, { text: "Proceed", onPress: proceed }]
       );
     } else {
@@ -188,42 +171,51 @@ function BulkPaymentSheet({
         <View style={pay.sheet}>
           <View style={pay.handle} />
 
-          {/* Summary */}
+          {/* Selected deposits summary */}
           <View style={pay.infoCard}>
             <View style={{ flex: 1 }}>
-              <Text style={pay.infoName}>{selectedItems.length} customer{selectedItems.length > 1 ? "s" : ""} selected</Text>
-              <Text style={pay.infoMeta} numberOfLines={2}>{selectedItems.map((i) => i.customer_name || "—").join(", ")}</Text>
+              <Text style={pay.infoName}>
+                {selectedItems.length} customer{selectedItems.length > 1 ? "s" : ""} selected
+              </Text>
+              <Text style={pay.infoMeta} numberOfLines={2}>
+                {selectedItems.map((i) => i.customer_name || "—").join(", ")}
+              </Text>
             </View>
             <Text style={pay.infoAmt}>₹{fmt(totalAmount)}</Text>
           </View>
 
-          {/* ── Select mode ── */}
+          {/* ── Select payment type ── */}
           {mode === "select" && (
             <>
               <Text style={pay.title}>How was payment made?</Text>
               <View style={pay.optRow}>
                 <Pressable style={[pay.opt, { borderColor: Colors.success }]} onPress={() => setMode("cash")}>
-                  <View style={[pay.optIcon, { backgroundColor: Colors.success + "15" }]}>
+                  <View style={[pay.optIcon, { backgroundColor: Colors.success + "18" }]}>
                     <Ionicons name="cash-outline" size={26} color={Colors.success} />
                   </View>
                   <Text style={[pay.optLabel, { color: Colors.success }]}>Cash</Text>
                   <Text style={pay.optHint}>Full amount</Text>
                 </Pressable>
+
                 <Pressable style={[pay.opt, { borderColor: "#2563eb" }]} onPress={handleOnline} disabled={loading}>
-                  <View style={[pay.optIcon, { backgroundColor: "#2563eb15" }]}>
-                    {loading ? <ActivityIndicator color="#2563eb" /> : <Ionicons name="phone-portrait-outline" size={26} color="#2563eb" />}
+                  <View style={[pay.optIcon, { backgroundColor: "#2563eb18" }]}>
+                    {loading
+                      ? <ActivityIndicator color="#2563eb" />
+                      : <Ionicons name="phone-portrait-outline" size={26} color="#2563eb" />}
                   </View>
                   <Text style={[pay.optLabel, { color: "#2563eb" }]}>Online</Text>
                   <Text style={pay.optHint}>Upload screenshot</Text>
                 </Pressable>
+
                 <Pressable style={[pay.opt, { borderColor: Colors.primary }]} onPress={() => setMode("both")}>
-                  <View style={[pay.optIcon, { backgroundColor: Colors.primary + "15" }]}>
+                  <View style={[pay.optIcon, { backgroundColor: Colors.primary + "18" }]}>
                     <Ionicons name="swap-horizontal-outline" size={26} color={Colors.primary} />
                   </View>
                   <Text style={[pay.optLabel, { color: Colors.primary }]}>Split</Text>
                   <Text style={pay.optHint}>Cash + Online</Text>
                 </Pressable>
               </View>
+
               <Pressable style={pay.cancelBtn} onPress={() => { reset(); onClose(); }}>
                 <Text style={pay.cancelText}>Cancel</Text>
               </Pressable>
@@ -234,10 +226,17 @@ function BulkPaymentSheet({
           {mode === "cash" && (
             <>
               <Text style={pay.title}>Enter Cash Amount</Text>
-              <View style={pay.amtRow}>
-                <Text style={pay.rupee}>₹</Text>
-                <TextInput style={pay.amtInput} placeholder="0" placeholderTextColor={Colors.textMuted}
-                  value={cashAmt} onChangeText={setCashAmt} keyboardType="numeric" autoFocus />
+              <View style={[pay.amtRow, { borderColor: Colors.success }]}>
+                <Text style={[pay.rupee, { color: Colors.success }]}>₹</Text>
+                <TextInput
+                  style={pay.amtInput}
+                  placeholder="0"
+                  placeholderTextColor={Colors.textMuted}
+                  value={cashAmt}
+                  onChangeText={setCashAmt}
+                  keyboardType="numeric"
+                  autoFocus
+                />
               </View>
               <Text style={pay.hint}>Total assigned: ₹{fmt(totalAmount)}</Text>
               <View style={pay.btnRow}>
@@ -245,16 +244,20 @@ function BulkPaymentSheet({
                   <Ionicons name="arrow-back" size={18} color={Colors.textSecondary} />
                   <Text style={pay.backText}>Back</Text>
                 </Pressable>
-                <Pressable style={[pay.confirmBtn, { backgroundColor: Colors.success }, loading && { opacity: 0.6 }]}
-                  onPress={handleCash} disabled={loading}>
-                  {loading ? <ActivityIndicator color="#fff" size="small" />
+                <Pressable
+                  style={[pay.confirmBtn, { backgroundColor: Colors.success }, loading && { opacity: 0.6 }]}
+                  onPress={handleCash}
+                  disabled={loading}
+                >
+                  {loading
+                    ? <ActivityIndicator color="#fff" size="small" />
                     : <><Ionicons name="checkmark" size={18} color="#fff" /><Text style={pay.confirmText}>Confirm Cash</Text></>}
                 </Pressable>
               </View>
             </>
           )}
 
-          {/* ── Split (Both) mode ── */}
+          {/* ── Split (cash + online) mode ── */}
           {mode === "both" && (
             <>
               <Text style={pay.title}>Split Payment</Text>
@@ -262,24 +265,39 @@ function BulkPaymentSheet({
               <Text style={pay.fieldLabel}>💵 Cash Amount</Text>
               <View style={[pay.amtRow, { borderColor: Colors.success }]}>
                 <Text style={[pay.rupee, { color: Colors.success }]}>₹</Text>
-                <TextInput style={pay.amtInput} placeholder="0" placeholderTextColor={Colors.textMuted}
-                  value={cashAmt} onChangeText={setCashAmt} keyboardType="numeric" autoFocus />
+                <TextInput
+                  style={pay.amtInput}
+                  placeholder="0"
+                  placeholderTextColor={Colors.textMuted}
+                  value={cashAmt}
+                  onChangeText={setCashAmt}
+                  keyboardType="numeric"
+                  autoFocus
+                />
               </View>
 
-              <Text style={pay.fieldLabel}>📲 Online Amount</Text>
+              <Text style={[pay.fieldLabel, { marginTop: 2 }]}>📲 Online Amount</Text>
               <View style={[pay.amtRow, { borderColor: "#2563eb" }]}>
                 <Text style={[pay.rupee, { color: "#2563eb" }]}>₹</Text>
-                <TextInput style={pay.amtInput} placeholder="0" placeholderTextColor={Colors.textMuted}
-                  value={onlineAmt} onChangeText={setOnlineAmt} keyboardType="numeric" />
+                <TextInput
+                  style={pay.amtInput}
+                  placeholder="0"
+                  placeholderTextColor={Colors.textMuted}
+                  value={onlineAmt}
+                  onChangeText={setOnlineAmt}
+                  keyboardType="numeric"
+                />
               </View>
 
               <Text style={pay.hint}>
                 Total: ₹{fmt((parseFloat(cashAmt) || 0) + (parseFloat(onlineAmt) || 0))} / ₹{fmt(totalAmount)}
               </Text>
 
-              {/* Screenshot for online portion */}
-              <Pressable style={[pay.screenshotPicker, screenshotUri && { borderStyle: "solid", borderColor: "#2563eb" }]}
-                onPress={pickScreenshot}>
+              {/* Screenshot for the online portion */}
+              <Pressable
+                style={[pay.screenshotPicker, screenshotUri && { borderStyle: "solid", borderColor: "#2563eb" }]}
+                onPress={pickScreenshot}
+              >
                 {screenshotUri ? (
                   <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
                     <Image source={{ uri: screenshotUri }} style={pay.screenshotThumb} />
@@ -287,10 +305,11 @@ function BulkPaymentSheet({
                       <Text style={{ fontSize: 13, fontWeight: "700", color: "#2563eb" }}>Screenshot attached ✓</Text>
                       <Text style={{ fontSize: 11, color: Colors.textMuted }}>Tap to change</Text>
                     </View>
+                    <Ionicons name="checkmark-circle" size={20} color="#2563eb" />
                   </View>
                 ) : (
                   <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-                    <View style={[pay.optIcon, { width: 42, height: 42, borderRadius: 21, backgroundColor: "#2563eb15" }]}>
+                    <View style={[pay.optIcon, { width: 44, height: 44, borderRadius: 22, backgroundColor: "#2563eb18" }]}>
                       <Ionicons name="camera-outline" size={20} color="#2563eb" />
                     </View>
                     <View>
@@ -306,8 +325,13 @@ function BulkPaymentSheet({
                   <Ionicons name="arrow-back" size={18} color={Colors.textSecondary} />
                   <Text style={pay.backText}>Back</Text>
                 </Pressable>
-                <Pressable style={[pay.confirmBtn, loading && { opacity: 0.6 }]} onPress={handleBoth} disabled={loading}>
-                  {loading ? <ActivityIndicator color="#fff" size="small" />
+                <Pressable
+                  style={[pay.confirmBtn, loading && { opacity: 0.6 }]}
+                  onPress={handleBoth}
+                  disabled={loading}
+                >
+                  {loading
+                    ? <ActivityIndicator color="#fff" size="small" />
                     : <><Ionicons name="checkmark" size={18} color="#fff" /><Text style={pay.confirmText}>Confirm Split</Text></>}
                 </Pressable>
               </View>
@@ -320,7 +344,9 @@ function BulkPaymentSheet({
 }
 
 // ─── Deposition Card ──────────────────────────────────────────────────────────
-function DepositionCard({ item, isSelected, onSelect }: {
+function DepositionCard({
+  item, isSelected, onSelect,
+}: {
   item: any; isSelected: boolean; onSelect: (item: any) => void;
 }) {
   const isPending = item.payment_method === "pending";
@@ -329,40 +355,57 @@ function DepositionCard({ item, isSelected, onSelect }: {
 
   const borderColor = isPending
     ? isSelected ? Colors.primary : Colors.warning
-    : isCash ? Colors.success : isBoth ? Colors.primary : "#2563eb";
+    : isCash ? Colors.success
+    : isBoth ? Colors.primary
+    : "#2563eb"; // online
 
   const screenshotSrc = item.screenshot_url
-    ? (item.screenshot_url.startsWith("http") ? item.screenshot_url : `${getApiUrl()}${item.screenshot_url}`)
+    ? (item.screenshot_url.startsWith("http")
+        ? item.screenshot_url
+        : `${getApiUrl()}${item.screenshot_url}`)
     : null;
 
   return (
     <Pressable
-      style={[card.root, { borderLeftColor: borderColor }, isPending && isSelected && card.selectedRoot]}
+      style={[
+        card.root,
+        { borderLeftColor: borderColor },
+        isPending && isSelected && card.selectedRoot,
+      ]}
       onPress={isPending ? () => onSelect(item) : undefined}
       disabled={!isPending}
+      activeOpacity={isPending ? 0.7 : 1}
     >
       <View style={card.header}>
+        {/* Checkbox for pending items */}
         {isPending && (
           <View style={[card.checkbox, isSelected && card.checkboxActive]}>
             {isSelected && <Ionicons name="checkmark" size={13} color="#fff" />}
           </View>
         )}
+
         <View style={{ flex: 1 }}>
           <Text style={card.name} numberOfLines={1}>{item.customer_name || "Assigned Deposit"}</Text>
-          {item.loan_no && <Text style={card.meta}>{item.loan_no}{item.bkt ? ` · BKT ${item.bkt}` : ""}</Text>}
+          {item.loan_no && (
+            <Text style={card.meta}>{item.loan_no}{item.bkt ? ` · BKT ${item.bkt}` : ""}</Text>
+          )}
           <Text style={card.date}>Assigned: {fmtDate(item.created_at)}</Text>
         </View>
+
         <View style={{ alignItems: "flex-end", gap: 4 }}>
           <Text style={[card.amount, { color: borderColor }]}>₹{fmt(item.amount)}</Text>
           <View style={[card.badge, { backgroundColor: borderColor + "20" }]}>
             <Text style={[card.badgeText, { color: borderColor }]}>
-              {isPending ? "⏳ Pending" : isCash ? "💵 Cash" : isBoth ? "🔀 Split" : "📲 Online"}
+              {isPending ? "⏳ Pending"
+                : isCash ? "💵 Cash"
+                : isBoth ? "🔀 Split"
+                : "📲 Online"}
             </Text>
           </View>
         </View>
       </View>
 
-      {/* Split amounts */}
+      {/* Sub amounts for split payments */}
       {(parseFloat(item.cash_amount) > 0 || parseFloat(item.online_amount) > 0) && (
         <View style={card.subRow}>
           {parseFloat(item.cash_amount) > 0 && (
@@ -372,7 +415,7 @@ function DepositionCard({ item, isSelected, onSelect }: {
             </View>
           )}
           {parseFloat(item.online_amount) > 0 && (
-            <View style={[card.subChip, { backgroundColor: "#2563eb10" }]}>
+            <View style={[card.subChip, { backgroundColor: "#2563eb12" }]}>
               <Ionicons name="phone-portrait-outline" size={12} color="#2563eb" />
               <Text style={[card.subAmt, { color: "#2563eb" }]}>₹{fmt(item.online_amount)}</Text>
             </View>
@@ -380,6 +423,7 @@ function DepositionCard({ item, isSelected, onSelect }: {
         </View>
       )}
 
+      {/* Screenshot thumbnail */}
       {screenshotSrc && (
         <View style={card.screenshotRow}>
           <Image source={{ uri: screenshotSrc }} style={card.thumb} resizeMode="cover" />
@@ -392,10 +436,14 @@ function DepositionCard({ item, isSelected, onSelect }: {
 
       {item.notes && <Text style={card.notes}>{item.notes}</Text>}
 
+      {/* Tap hint */}
       {isPending && (
         <View style={card.tapHint}>
-          <Ionicons name={isSelected ? "checkbox" : "square-outline"} size={14}
-            color={isSelected ? Colors.primary : Colors.textMuted} />
+          <Ionicons
+            name={isSelected ? "checkbox" : "square-outline"}
+            size={14}
+            color={isSelected ? Colors.primary : Colors.textMuted}
+          />
           <Text style={[card.tapHintText, isSelected && { color: Colors.primary }]}>
             {isSelected ? "Selected — included in payment" : "Tap to select for payment"}
           </Text>
@@ -409,18 +457,19 @@ function DepositionCard({ item, isSelected, onSelect }: {
 export default function FosDepositionScreen() {
   const insets = useSafeAreaInsets();
   const qc = useQueryClient();
+
+  // ✅ Use the existing OneSignal hook — this handles push token registration
+  usePushNotifications();
+
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [bulkPayVisible, setBulkPayVisible] = useState(false);
-
-  useEffect(() => {
-    if (Platform.OS !== "web") registerPushToken();
-  }, []);
 
   const { data: depData, isLoading, error, refetch } = useQuery({
     queryKey: ["/api/fos-depositions"],
     queryFn: async () => {
       const res = await authFetch("/api/fos-depositions");
       const text = await res.text();
+      console.log("[fos-dep] status:", res.status, "body:", text.slice(0, 200));
       if (!res.ok) {
         let msg = `HTTP ${res.status}`;
         try { msg = JSON.parse(text).message || msg; } catch {}
@@ -441,21 +490,26 @@ export default function FosDepositionScreen() {
   const totalOnline = depositions.reduce((s, d) => s + parseFloat(d.online_amount || 0), 0);
   const pendingCount = pendingDepositions.length;
 
-  const selectedItems = depositions.filter((d) => d.payment_method === "pending" && selectedIds.has(d.id));
+  const selectedItems = depositions.filter(
+    (d) => d.payment_method === "pending" && selectedIds.has(d.id)
+  );
   const selectedTotal = selectedItems.reduce((s, d) => s + parseFloat(d.amount || 0), 0);
 
   const toggleSelect = useCallback((item: any) => {
     setSelectedIds((prev) => {
       const next = new Set(prev);
-      if (next.has(item.id)) next.delete(item.id); else next.add(item.id);
+      if (next.has(item.id)) next.delete(item.id);
+      else next.add(item.id);
       return next;
     });
   }, []);
 
   const selectAll = useCallback(() => {
-    setSelectedIds(selectedIds.size === pendingDepositions.length
-      ? new Set()
-      : new Set(pendingDepositions.map((d) => d.id)));
+    setSelectedIds(
+      selectedIds.size === pendingDepositions.length
+        ? new Set()
+        : new Set(pendingDepositions.map((d) => d.id))
+    );
   }, [selectedIds, pendingDepositions]);
 
   const onPaid = useCallback(() => {
@@ -463,23 +517,36 @@ export default function FosDepositionScreen() {
     setSelectedIds(new Set());
   }, [qc]);
 
-  if (isLoading) return (
-    <View style={{ flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: Colors.background }}>
-      <ActivityIndicator color={Colors.primary} size="large" />
-      <Text style={{ marginTop: 12, color: Colors.textSecondary, fontSize: 14 }}>Loading depositions...</Text>
-    </View>
-  );
+  // ── Loading ────────────────────────────────────────────────────────────────
+  if (isLoading) {
+    return (
+      <View style={{ flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: Colors.background }}>
+        <ActivityIndicator color={Colors.primary} size="large" />
+        <Text style={{ marginTop: 12, color: Colors.textSecondary, fontSize: 14 }}>Loading depositions...</Text>
+      </View>
+    );
+  }
 
-  if (error) return (
-    <View style={{ flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: Colors.background, padding: 24 }}>
-      <Ionicons name="cloud-offline-outline" size={48} color={Colors.textMuted} />
-      <Text style={{ fontSize: 16, fontWeight: "700", color: Colors.text, marginTop: 12, textAlign: "center" }}>Could not load depositions</Text>
-      <Text style={{ fontSize: 13, color: Colors.textMuted, marginTop: 6, textAlign: "center" }}>{(error as Error).message}</Text>
-      <Pressable style={{ marginTop: 20, backgroundColor: Colors.primary, paddingHorizontal: 24, paddingVertical: 12, borderRadius: 12 }} onPress={() => refetch()}>
-        <Text style={{ color: "#fff", fontWeight: "700", fontSize: 14 }}>Retry</Text>
-      </Pressable>
-    </View>
-  );
+  // ── Error ──────────────────────────────────────────────────────────────────
+  if (error) {
+    return (
+      <View style={{ flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: Colors.background, padding: 24 }}>
+        <Ionicons name="cloud-offline-outline" size={48} color={Colors.textMuted} />
+        <Text style={{ fontSize: 16, fontWeight: "700", color: Colors.text, marginTop: 12, textAlign: "center" }}>
+          Could not load depositions
+        </Text>
+        <Text style={{ fontSize: 13, color: Colors.textMuted, marginTop: 6, textAlign: "center" }}>
+          {(error as Error).message}
+        </Text>
+        <Pressable
+          style={{ marginTop: 20, backgroundColor: Colors.primary, paddingHorizontal: 24, paddingVertical: 12, borderRadius: 12 }}
+          onPress={() => refetch()}
+        >
+          <Text style={{ color: "#fff", fontWeight: "700", fontSize: 14 }}>Retry</Text>
+        </Pressable>
+      </View>
+    );
+  }
 
   return (
     <View style={{ flex: 1, backgroundColor: Colors.background }}>
@@ -488,73 +555,102 @@ export default function FosDepositionScreen() {
         keyExtractor={(item) => String(item.id)}
         contentContainerStyle={[
           main.container,
-          { paddingBottom: selectedIds.size > 0 ? insets.bottom + 120 : insets.bottom + 32, paddingTop: Platform.OS === "web" ? 67 : 12 },
+          {
+            paddingBottom: selectedIds.size > 0 ? insets.bottom + 120 : insets.bottom + 32,
+            paddingTop: Platform.OS === "web" ? 67 : 12,
+          },
           depositions.length === 0 && { flex: 1 },
         ]}
-        ListHeaderComponent={depositions.length > 0 ? (
-          <View style={{ gap: 12, marginBottom: 4 }}>
-            <View style={main.summaryRow}>
-              <View style={[main.sumCard, { borderTopColor: Colors.warning }]}>
-                <Ionicons name="time-outline" size={18} color={Colors.warning} />
-                <Text style={main.sumNum}>{pendingCount}</Text>
-                <Text style={main.sumLabel}>Pending</Text>
-              </View>
-              <View style={[main.sumCard, { borderTopColor: Colors.success }]}>
-                <Ionicons name="cash-outline" size={18} color={Colors.success} />
-                <Text style={[main.sumNum, { color: Colors.success }]}>₹{fmt(totalCash)}</Text>
-                <Text style={main.sumLabel}>Cash</Text>
-              </View>
-              <View style={[main.sumCard, { borderTopColor: "#2563eb" }]}>
-                <Ionicons name="phone-portrait-outline" size={18} color="#2563eb" />
-                <Text style={[main.sumNum, { color: "#2563eb" }]}>₹{fmt(totalOnline)}</Text>
-                <Text style={main.sumLabel}>Online</Text>
-              </View>
-            </View>
-            <View style={main.totalBanner}>
-              <View>
-                <Text style={main.totalLabel}>Total Assigned</Text>
-                <Text style={main.totalAmt}>₹{fmt(totalAssigned)}</Text>
-              </View>
-              {pendingCount > 0 && (
-                <View style={main.pendingAlert}>
-                  <Ionicons name="alert-circle" size={14} color={Colors.warning} />
-                  <Text style={main.pendingAlertText}>{pendingCount} awaiting payment</Text>
+        ListHeaderComponent={
+          depositions.length > 0 ? (
+            <View style={{ gap: 12, marginBottom: 4 }}>
+              {/* Summary cards */}
+              <View style={main.summaryRow}>
+                <View style={[main.sumCard, { borderTopColor: Colors.warning }]}>
+                  <Ionicons name="time-outline" size={18} color={Colors.warning} />
+                  <Text style={main.sumNum}>{pendingCount}</Text>
+                  <Text style={main.sumLabel}>Pending</Text>
                 </View>
+                <View style={[main.sumCard, { borderTopColor: Colors.success }]}>
+                  <Ionicons name="cash-outline" size={18} color={Colors.success} />
+                  <Text style={[main.sumNum, { color: Colors.success }]}>₹{fmt(totalCash)}</Text>
+                  <Text style={main.sumLabel}>Cash</Text>
+                </View>
+                <View style={[main.sumCard, { borderTopColor: "#2563eb" }]}>
+                  <Ionicons name="phone-portrait-outline" size={18} color="#2563eb" />
+                  <Text style={[main.sumNum, { color: "#2563eb" }]}>₹{fmt(totalOnline)}</Text>
+                  <Text style={main.sumLabel}>Online</Text>
+                </View>
+              </View>
+
+              {/* Total banner */}
+              <View style={main.totalBanner}>
+                <View>
+                  <Text style={main.totalLabel}>Total Assigned</Text>
+                  <Text style={main.totalAmt}>₹{fmt(totalAssigned)}</Text>
+                </View>
+                {pendingCount > 0 && (
+                  <View style={main.pendingAlert}>
+                    <Ionicons name="alert-circle" size={14} color={Colors.warning} />
+                    <Text style={main.pendingAlertText}>{pendingCount} awaiting payment</Text>
+                  </View>
+                )}
+              </View>
+
+              <Text style={main.sectionTitle}>Your Assigned Deposits</Text>
+
+              {/* Select All button */}
+              {pendingCount > 0 && (
+                <Pressable style={main.selectAllBtn} onPress={selectAll}>
+                  <Ionicons
+                    name={selectedIds.size === pendingCount ? "checkbox" : "square-outline"}
+                    size={18}
+                    color={Colors.primary}
+                  />
+                  <Text style={main.selectAllText}>
+                    {selectedIds.size === pendingCount
+                      ? "Deselect All"
+                      : `Select All Pending (${pendingCount})`}
+                  </Text>
+                </Pressable>
               )}
             </View>
-            <Text style={main.sectionTitle}>Your Assigned Deposits</Text>
-            {pendingCount > 0 && (
-              <Pressable style={main.selectAllBtn} onPress={selectAll}>
-                <Ionicons name={selectedIds.size === pendingCount ? "checkbox" : "square-outline"} size={18} color={Colors.primary} />
-                <Text style={main.selectAllText}>
-                  {selectedIds.size === pendingCount ? "Deselect All" : `Select All Pending (${pendingCount})`}
-                </Text>
-              </Pressable>
-            )}
-          </View>
-        ) : null}
+          ) : null
+        }
         renderItem={({ item }) => (
-          <DepositionCard item={item} isSelected={selectedIds.has(item.id)} onSelect={toggleSelect} />
+          <DepositionCard
+            item={item}
+            isSelected={selectedIds.has(item.id)}
+            onSelect={toggleSelect}
+          />
         )}
         ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
         onRefresh={() => refetch()}
         refreshing={isLoading}
         ListEmptyComponent={
           <View style={main.empty}>
-            <View style={main.emptyIcon}><Ionicons name="wallet-outline" size={44} color={Colors.primary} /></View>
+            <View style={main.emptyIcon}>
+              <Ionicons name="wallet-outline" size={44} color={Colors.primary} />
+            </View>
             <Text style={main.emptyTitle}>No Deposits Assigned</Text>
             <Text style={main.emptyText}>Admin hasn't assigned any deposits to you yet.</Text>
-            <Pressable style={{ marginTop: 16, paddingHorizontal: 20, paddingVertical: 10, borderRadius: 10, borderWidth: 1, borderColor: Colors.border }} onPress={() => refetch()}>
+            <Pressable
+              style={{ marginTop: 16, paddingHorizontal: 20, paddingVertical: 10, borderRadius: 10, borderWidth: 1, borderColor: Colors.border }}
+              onPress={() => refetch()}
+            >
               <Text style={{ color: Colors.textSecondary, fontWeight: "600", fontSize: 13 }}>Refresh</Text>
             </Pressable>
           </View>
         }
       />
 
+      {/* ── Sticky "Mark as Paid" bar ── */}
       {selectedIds.size > 0 && (
         <View style={[main.stickyBar, { paddingBottom: insets.bottom + 12 }]}>
           <View>
-            <Text style={main.stickyLabel}>{selectedIds.size} customer{selectedIds.size > 1 ? "s" : ""} selected</Text>
+            <Text style={main.stickyLabel}>
+              {selectedIds.size} customer{selectedIds.size > 1 ? "s" : ""} selected
+            </Text>
             <Text style={main.stickyTotal}>₹{fmt(selectedTotal)}</Text>
           </View>
           <Pressable style={main.stickyPayBtn} onPress={() => setBulkPayVisible(true)}>
@@ -564,8 +660,12 @@ export default function FosDepositionScreen() {
         </View>
       )}
 
-      <BulkPaymentSheet visible={bulkPayVisible} selectedItems={selectedItems}
-        onClose={() => setBulkPayVisible(false)} onPaid={onPaid} />
+      <BulkPaymentSheet
+        visible={bulkPayVisible}
+        selectedItems={selectedItems}
+        onClose={() => setBulkPayVisible(false)}
+        onPaid={onPaid}
+      />
     </View>
   );
 }
@@ -574,33 +674,71 @@ export default function FosDepositionScreen() {
 const main = StyleSheet.create({
   container: { padding: 16, gap: 10 },
   summaryRow: { flexDirection: "row", gap: 10 },
-  sumCard: { flex: 1, backgroundColor: Colors.surface, borderRadius: 14, padding: 12, borderTopWidth: 3, alignItems: "center", gap: 3, shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 6, elevation: 2 },
+  sumCard: {
+    flex: 1, backgroundColor: Colors.surface, borderRadius: 14, padding: 12,
+    borderTopWidth: 3, alignItems: "center", gap: 3,
+    shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 6, elevation: 2,
+  },
   sumNum: { fontSize: 14, fontWeight: "800", color: Colors.text },
   sumLabel: { fontSize: 10, color: Colors.textSecondary, fontWeight: "600", textAlign: "center" },
-  totalBanner: { backgroundColor: Colors.primary, borderRadius: 16, padding: 18, flexDirection: "row", justifyContent: "space-between", alignItems: "center", shadowColor: Colors.primary, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 5 },
+  totalBanner: {
+    backgroundColor: Colors.primary, borderRadius: 16, padding: 18,
+    flexDirection: "row", justifyContent: "space-between", alignItems: "center",
+    shadowColor: Colors.primary, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 5,
+  },
   totalLabel: { color: "rgba(255,255,255,0.8)", fontSize: 13, fontWeight: "600" },
   totalAmt: { color: "#fff", fontSize: 28, fontWeight: "800", marginTop: 2 },
-  pendingAlert: { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: "rgba(255,255,255,0.2)", paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20 },
+  pendingAlert: {
+    flexDirection: "row", alignItems: "center", gap: 6,
+    backgroundColor: "rgba(255,255,255,0.2)", paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20,
+  },
   pendingAlertText: { color: "#fff", fontSize: 12, fontWeight: "700" },
   sectionTitle: { fontSize: 15, fontWeight: "800", color: Colors.text, marginTop: 4 },
-  selectAllBtn: { flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 8, paddingHorizontal: 12, backgroundColor: Colors.primary + "10", borderRadius: 10, borderWidth: 1, borderColor: Colors.primary + "30" },
+  selectAllBtn: {
+    flexDirection: "row", alignItems: "center", gap: 8,
+    paddingVertical: 8, paddingHorizontal: 12,
+    backgroundColor: Colors.primary + "10", borderRadius: 10,
+    borderWidth: 1, borderColor: Colors.primary + "30",
+  },
   selectAllText: { fontSize: 13, fontWeight: "700", color: Colors.primary },
-  stickyBar: { position: "absolute", bottom: 0, left: 0, right: 0, flexDirection: "row", alignItems: "center", justifyContent: "space-between", backgroundColor: Colors.surface, paddingTop: 16, paddingHorizontal: 20, borderTopWidth: 1, borderTopColor: Colors.border, shadowColor: "#000", shadowOffset: { width: 0, height: -4 }, shadowOpacity: 0.1, shadowRadius: 12, elevation: 10 },
+  stickyBar: {
+    position: "absolute", bottom: 0, left: 0, right: 0,
+    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
+    backgroundColor: Colors.surface,
+    paddingTop: 16, paddingHorizontal: 20,
+    borderTopWidth: 1, borderTopColor: Colors.border,
+    shadowColor: "#000", shadowOffset: { width: 0, height: -4 }, shadowOpacity: 0.1, shadowRadius: 12, elevation: 10,
+  },
   stickyLabel: { fontSize: 12, color: Colors.textSecondary, fontWeight: "600" },
   stickyTotal: { fontSize: 22, fontWeight: "800", color: Colors.text, marginTop: 2 },
-  stickyPayBtn: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: Colors.primary, borderRadius: 14, paddingHorizontal: 24, paddingVertical: 14 },
+  stickyPayBtn: {
+    flexDirection: "row", alignItems: "center", gap: 8,
+    backgroundColor: Colors.primary, borderRadius: 14,
+    paddingHorizontal: 24, paddingVertical: 14,
+  },
   stickyPayText: { fontSize: 15, fontWeight: "800", color: "#fff" },
   empty: { flex: 1, justifyContent: "center", alignItems: "center", gap: 12 },
-  emptyIcon: { width: 80, height: 80, borderRadius: 40, backgroundColor: Colors.primary + "12", justifyContent: "center", alignItems: "center" },
+  emptyIcon: {
+    width: 80, height: 80, borderRadius: 40,
+    backgroundColor: Colors.primary + "12", justifyContent: "center", alignItems: "center",
+  },
   emptyTitle: { fontSize: 18, fontWeight: "800", color: Colors.text },
   emptyText: { fontSize: 14, color: Colors.textMuted, textAlign: "center", maxWidth: 260 },
 });
 
 const card = StyleSheet.create({
-  root: { backgroundColor: Colors.surface, borderRadius: 16, padding: 16, borderLeftWidth: 4, shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 8, elevation: 3 },
-  selectedRoot: { borderWidth: 1.5, borderColor: Colors.primary, backgroundColor: Colors.primary + "05" },
+  root: {
+    backgroundColor: Colors.surface, borderRadius: 16, padding: 16, borderLeftWidth: 4,
+    shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 8, elevation: 3,
+  },
+  selectedRoot: {
+    borderWidth: 1.5, borderColor: Colors.primary, backgroundColor: Colors.primary + "05",
+  },
   header: { flexDirection: "row", alignItems: "flex-start", gap: 10 },
-  checkbox: { width: 22, height: 22, borderRadius: 6, borderWidth: 2, borderColor: Colors.border, alignItems: "center", justifyContent: "center", marginTop: 2, flexShrink: 0 },
+  checkbox: {
+    width: 22, height: 22, borderRadius: 6, borderWidth: 2, borderColor: Colors.border,
+    alignItems: "center", justifyContent: "center", marginTop: 2, flexShrink: 0,
+  },
   checkboxActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
   name: { fontSize: 15, fontWeight: "700", color: Colors.text },
   meta: { fontSize: 12, color: Colors.textSecondary, marginTop: 2 },
@@ -609,7 +747,10 @@ const card = StyleSheet.create({
   badge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20 },
   badgeText: { fontSize: 11, fontWeight: "700" },
   subRow: { flexDirection: "row", gap: 8, marginTop: 10, flexWrap: "wrap" },
-  subChip: { flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: Colors.success + "12", paddingHorizontal: 10, paddingVertical: 5, borderRadius: 20 },
+  subChip: {
+    flexDirection: "row", alignItems: "center", gap: 4,
+    backgroundColor: Colors.success + "12", paddingHorizontal: 10, paddingVertical: 5, borderRadius: 20,
+  },
   subAmt: { fontSize: 12, fontWeight: "700" },
   screenshotRow: { flexDirection: "row", alignItems: "center", gap: 10, marginTop: 10 },
   thumb: { width: 52, height: 52, borderRadius: 8 },
@@ -621,30 +762,53 @@ const card = StyleSheet.create({
 
 const pay = StyleSheet.create({
   overlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" },
-  sheet: { backgroundColor: Colors.surface, borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 24, gap: 14 },
+  sheet: {
+    backgroundColor: Colors.surface, borderTopLeftRadius: 28, borderTopRightRadius: 28,
+    padding: 24, gap: 14,
+  },
   handle: { width: 40, height: 4, backgroundColor: Colors.border, borderRadius: 2, alignSelf: "center", marginBottom: 4 },
-  infoCard: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", backgroundColor: Colors.surfaceAlt, borderRadius: 14, padding: 14 },
+  infoCard: {
+    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
+    backgroundColor: Colors.surfaceAlt, borderRadius: 14, padding: 14,
+  },
   infoName: { fontSize: 15, fontWeight: "700", color: Colors.text },
   infoMeta: { fontSize: 12, color: Colors.textSecondary, marginTop: 2 },
   infoAmt: { fontSize: 22, fontWeight: "800", color: Colors.primary },
   title: { fontSize: 18, fontWeight: "800", color: Colors.text, textAlign: "center" },
   optRow: { flexDirection: "row", gap: 10 },
-  opt: { flex: 1, borderRadius: 16, padding: 14, alignItems: "center", gap: 6, backgroundColor: Colors.surface, borderWidth: 2 },
+  opt: {
+    flex: 1, borderRadius: 16, padding: 14, alignItems: "center", gap: 6,
+    backgroundColor: Colors.surface, borderWidth: 2,
+  },
   optIcon: { width: 50, height: 50, borderRadius: 25, justifyContent: "center", alignItems: "center" },
   optLabel: { fontSize: 13, fontWeight: "800" },
   optHint: { fontSize: 10, color: Colors.textMuted, textAlign: "center" },
-  cancelBtn: { borderWidth: 1, borderColor: Colors.border, borderRadius: 12, paddingVertical: 13, alignItems: "center" },
+  cancelBtn: {
+    borderWidth: 1, borderColor: Colors.border, borderRadius: 12,
+    paddingVertical: 13, alignItems: "center",
+  },
   cancelText: { fontSize: 15, fontWeight: "600", color: Colors.textSecondary },
   fieldLabel: { fontSize: 12, fontWeight: "700", color: Colors.textSecondary, textTransform: "uppercase", letterSpacing: 0.4 },
-  amtRow: { flexDirection: "row", alignItems: "center", borderWidth: 2, borderColor: Colors.success, borderRadius: 16, padding: 14, gap: 4 },
+  amtRow: {
+    flexDirection: "row", alignItems: "center",
+    borderWidth: 2, borderColor: Colors.success, borderRadius: 16, padding: 14, gap: 4,
+  },
   rupee: { fontSize: 26, fontWeight: "800", color: Colors.success },
   amtInput: { flex: 1, fontSize: 32, fontWeight: "800", color: Colors.text },
   hint: { fontSize: 12, color: Colors.textMuted, textAlign: "center" },
-  screenshotPicker: { borderWidth: 1.5, borderColor: "#2563eb", borderStyle: "dashed", borderRadius: 14, padding: 14 },
+  screenshotPicker: {
+    borderWidth: 1.5, borderColor: "#2563eb", borderStyle: "dashed", borderRadius: 14, padding: 14,
+  },
   screenshotThumb: { width: 48, height: 48, borderRadius: 8 },
   btnRow: { flexDirection: "row", gap: 10 },
-  backBtn: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, borderWidth: 1, borderColor: Colors.border, borderRadius: 12, paddingVertical: 13 },
+  backBtn: {
+    flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6,
+    borderWidth: 1, borderColor: Colors.border, borderRadius: 12, paddingVertical: 13,
+  },
   backText: { fontSize: 14, fontWeight: "600", color: Colors.textSecondary },
-  confirmBtn: { flex: 2, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, backgroundColor: Colors.primary, borderRadius: 12, paddingVertical: 13 },
+  confirmBtn: {
+    flex: 2, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8,
+    backgroundColor: Colors.primary, borderRadius: 12, paddingVertical: 13,
+  },
   confirmText: { fontSize: 14, fontWeight: "700", color: "#fff" },
 });
