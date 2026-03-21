@@ -8,9 +8,18 @@ module.exports = ({ config }) => {
     orientation: "portrait",
     scheme: "dhanrajenterprises",
     userInterfaceStyle: "automatic",
-    // ✅ MUST stay true — react-native-reanimated v3+ REQUIRES New Architecture
-    // OneSignal blank screen is fixed via proper initialization timing instead
     newArchEnabled: true,
+
+    // ✅ ADDED: Required for EAS Update (OTA) to work
+    // Once new APK is installed with this config,
+    // every git push will update phones automatically
+    updates: {
+      url: "https://u.expo.dev/1b09251a-4423-4759-a22b-fc2f0a44fd8e",
+    },
+    runtimeVersion: {
+      policy: "sdkVersion",
+    },
+
     icon: "./assets/images/dhanraj-logo.png",
     splash: {
       image: "./assets/images/dhanraj-logo.png",
@@ -23,7 +32,6 @@ module.exports = ({ config }) => {
     },
     android: {
       package: "com.dhanraj.app",
-      // ✅ FIXED: Added all required permissions for notifications
       permissions: [
         "NOTIFICATIONS",
         "RECEIVE_BOOT_COMPLETED",
@@ -48,12 +56,10 @@ module.exports = ({ config }) => {
       "expo-router",
       "expo-font",
       "expo-web-browser",
-      // ✅ OneSignal plugin — production mode
       [
         "onesignal-expo-plugin",
         {
           mode: "production",
-          // ✅ FIXED: Pass App ID here so native layer is configured at build time
           devTeam: "",
         },
       ],
@@ -64,7 +70,6 @@ module.exports = ({ config }) => {
     },
     extra: {
       apiUrl: "https://dhanraj-production.up.railway.app",
-      // ✅ FIXED: Expose OneSignal App ID via Expo constants so it's accessible in JS
       oneSignalAppId: "bff2c8e0-de24-4aad-a373-d030c210155f",
       eas: {
         projectId: "1b09251a-4423-4759-a22b-fc2f0a44fd8e",
