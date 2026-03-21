@@ -192,22 +192,24 @@ export const api = {
   checkIn: () => apiRequest("POST", "/api/attendance/checkin"),
   checkOut: () => apiRequest("POST", "/api/attendance/checkout"),
 
+  // ✅ NEW: Save OneSignal push token to server
+  // Called on every app launch so deleted tokens are always restored
+  savePushToken: async (token: string) => {
+    return apiRequest("POST", "/api/push-token", { token });
+  },
+
   // ─── ADMIN ────────────────────────────────────────────────────────────────
   admin: {
-    // ✅ All admin methods — no more "undefined is not a function"
     getAgents: () => apiRequest("GET", "/api/admin/agents"),
     getStats: () => apiRequest("GET", "/api/admin/stats"),
     getCases: () => apiRequest("GET", "/api/admin/cases"),
 
-    // ✅ FIX: getBktCases was missing — caused crash in all-cases.tsx
     getBktCases: (category?: string) =>
       apiRequest("GET", `/api/admin/bkt-cases${category ? `?category=${category}` : ""}`),
 
     getAllDepositions: () => apiRequest("GET", "/api/admin/depositions"),
     getFosDepositions: () => apiRequest("GET", "/api/admin/fos-depositions"),
 
-    // ✅ FIX: updateCaseStatus was missing — caused "undefined is not a function"
-    // when tapping Mark Paid / Rollback in all-cases.tsx
     updateCaseStatus: (id: number, data: {
       status: string;
       rollback_yn?: boolean | null;
