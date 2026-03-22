@@ -113,8 +113,6 @@ export default function AdminDashboard() {
     finally { setPushTesting(false); }
   };
 
-  // ✅ FIX: replaced deprecated FileSystem.writeAsStringAsync
-  // Now uses expo-file-system/legacy to avoid Expo SDK 54 deprecation error
   const downloadExcel = async (
     apiPath: string,
     fileName: string,
@@ -134,7 +132,6 @@ export default function AdminDashboard() {
         document.body.removeChild(a);
         URL.revokeObjectURL(blobUrl);
       } else {
-        // ✅ Use legacy import to avoid writeAsStringAsync deprecation
         const FileSystem = require("expo-file-system/legacy");
         const Sharing = require("expo-sharing");
         const res = await expoFetch(url, { credentials: "include" });
@@ -191,16 +188,25 @@ export default function AdminDashboard() {
     ]);
   };
 
-  // ✅ FIX: staleTime:0 + refetchOnMount so stats always fresh
-  const { data, isLoading, refetch } = useQuery({
+  const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["/api/admin/stats"],
     queryFn: () => api.admin.getStats(),
     staleTime: 0,
     refetchOnMount: true,
+    retry: 2,
   });
 
-  // ✅ FIX: handle both { stats: [] } and plain [] shapes
-  const stats = Array.isArray(data) ? data : (data?.stats || []);
+  // Handle all possible API response shapes
+  const stats = (() => {
+    if (!data) return [];
+    if (Array.isArray(data)) return data;
+    if (Array.isArray((data as any).stats))  return (data as any).stats;
+    if (Array.isArray((data as any).agents)) return (data as any).agents;
+    if (Array.isArray((data as any).data))   return (data as any).data;
+    const firstArr = Object.values(data as object).find(v => Array.isArray(v));
+    return (firstArr as any[]) || [];
+  })();
+
   const totalAgents = stats.length;
   const totalCases  = stats.reduce((s: number, a: any) => s + (a.total      || 0), 0);
   const totalPaid   = stats.reduce((s: number, a: any) => s + (a.paid       || 0), 0);
@@ -208,21 +214,39 @@ export default function AdminDashboard() {
   const totalUnpaid = stats.reduce((s: number, a: any) => s + (a.notProcess || 0), 0);
 
   if (isLoading) return (
-    <View style={{ flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: Colors.background }}>
+    <View style={styles.centerScreen}>
       <ActivityIndicator color={Colors.primary} size="large" />
     </View>
   );
 
+  if (isError) return (
+    <View style={styles.centerScreen}>
+      <Ionicons name="alert-circle-outline" size={48} color={Colors.danger} />
+      <Text style={[styles.emptyText, { color: Colors.danger, marginTop: 12 }]}>Failed to load dashboard</Text>
+      <Text style={[styles.emptyText, { fontSize: 12, marginTop: 4 }]}>{String(error)}</Text>
+      <Pressable onPress={() => refetch()} style={styles.retryBtn}>
+        <Text style={styles.retryBtnText}>Retry</Text>
+      </Pressable>
+    </View>
+  );
+
   return (
-    <>
+    // ✅ KEY FIX: <View style={styles.outerWrap}> replaces bare <> fragment.
+    // On web, <> renders as a plain div with no height, so flex:1 on ScrollView
+    // has nothing to expand into — collapsing the content to 0px (blank screen).
+    <View style={styles.outerWrap}>
       <ScrollView
-        style={{ flex: 1, backgroundColor: Colors.background }}
-        contentContainerStyle={[styles.container, { paddingBottom: insets.bottom + 24, paddingTop: Platform.OS === "web" ? 67 : 0 }]}
+        style={styles.scroll}
+        contentContainerStyle={[
+          styles.container,
+          { paddingBottom: insets.bottom + 24, paddingTop: Platform.OS === "web" ? 16 : 0 },
+        ]}
       >
+        {/* Import Allocation */}
         <Pressable style={styles.importBanner} onPress={() => setImportVisible(true)}>
           <View style={styles.importBannerLeft}>
             <Ionicons name="cloud-upload" size={28} color="#fff" />
-            <View>
+            <View style={styles.importBannerText}>
               <Text style={styles.importBannerTitle}>Import Allocation Data</Text>
               <Text style={styles.importBannerSub}>Upload allocation file to sync cases & create FOS users</Text>
             </View>
@@ -230,10 +254,11 @@ export default function AdminDashboard() {
           <Ionicons name="chevron-forward" size={22} color="rgba(255,255,255,0.7)" />
         </Pressable>
 
+        {/* Import BKT */}
         <Pressable style={[styles.importBanner, { backgroundColor: Colors.primary }]} onPress={() => setBktPerfImportVisible(true)}>
           <View style={styles.importBannerLeft}>
             <Ionicons name="bar-chart-outline" size={28} color="#fff" />
-            <View>
+            <View style={styles.importBannerText}>
               <Text style={styles.importBannerTitle}>Import BKT Performance Summary</Text>
               <Text style={styles.importBannerSub}>Upload summary Excel: Fos_Name, Bkt, Values, PAID, UNPAID, Grand Total, Percentage, Rollback</Text>
             </View>
@@ -241,10 +266,17 @@ export default function AdminDashboard() {
           <Ionicons name="chevron-forward" size={22} color="rgba(255,255,255,0.7)" />
         </Pressable>
 
-        <Pressable style={[styles.importBanner, { backgroundColor: Colors.success }, ptpDownloading && { opacity: 0.7 }]} onPress={handleDownloadPTP} disabled={ptpDownloading}>
+        {/* Download PTP */}
+        <Pressable
+          style={[styles.importBanner, { backgroundColor: Colors.success }, ptpDownloading && { opacity: 0.7 }]}
+          onPress={handleDownloadPTP}
+          disabled={ptpDownloading}
+        >
           <View style={styles.importBannerLeft}>
-            {ptpDownloading ? <ActivityIndicator color="#fff" size="small" style={{ marginRight: 4 }} /> : <Ionicons name="download-outline" size={28} color="#fff" />}
-            <View>
+            {ptpDownloading
+              ? <ActivityIndicator color="#fff" size="small" style={{ marginRight: 4 }} />
+              : <Ionicons name="download-outline" size={28} color="#fff" />}
+            <View style={styles.importBannerText}>
               <Text style={styles.importBannerTitle}>Download PTP Report</Text>
               <Text style={styles.importBannerSub}>{ptpDownloading ? "Preparing file…" : "Export all PTP cases with customer details as Excel"}</Text>
             </View>
@@ -252,10 +284,17 @@ export default function AdminDashboard() {
           {!ptpDownloading && <Ionicons name="chevron-forward" size={22} color="rgba(255,255,255,0.7)" />}
         </Pressable>
 
-        <Pressable style={[styles.importBanner, { backgroundColor: Colors.info }, feedbackDownloading && { opacity: 0.7 }]} onPress={handleDownloadFeedback} disabled={feedbackDownloading}>
+        {/* Download Feedback */}
+        <Pressable
+          style={[styles.importBanner, { backgroundColor: Colors.info }, feedbackDownloading && { opacity: 0.7 }]}
+          onPress={handleDownloadFeedback}
+          disabled={feedbackDownloading}
+        >
           <View style={styles.importBannerLeft}>
-            {feedbackDownloading ? <ActivityIndicator color="#fff" size="small" style={{ marginRight: 4 }} /> : <Ionicons name="chatbox-outline" size={28} color="#fff" />}
-            <View>
+            {feedbackDownloading
+              ? <ActivityIndicator color="#fff" size="small" style={{ marginRight: 4 }} />
+              : <Ionicons name="chatbox-outline" size={28} color="#fff" />}
+            <View style={styles.importBannerText}>
               <Text style={styles.importBannerTitle}>Download Feedback Report</Text>
               <Text style={styles.importBannerSub}>{feedbackDownloading ? "Preparing file…" : "Export all FOS feedback with full details as Excel"}</Text>
             </View>
@@ -263,10 +302,17 @@ export default function AdminDashboard() {
           {!feedbackDownloading && <Ionicons name="chevron-forward" size={22} color="rgba(255,255,255,0.7)" />}
         </Pressable>
 
-        <Pressable style={[styles.importBanner, { backgroundColor: Colors.danger }, ptpClearing && { opacity: 0.7 }]} onPress={handleClearPTP} disabled={ptpClearing}>
+        {/* Clear PTP */}
+        <Pressable
+          style={[styles.importBanner, { backgroundColor: Colors.danger }, ptpClearing && { opacity: 0.7 }]}
+          onPress={handleClearPTP}
+          disabled={ptpClearing}
+        >
           <View style={styles.importBannerLeft}>
-            {ptpClearing ? <ActivityIndicator color="#fff" size="small" style={{ marginRight: 4 }} /> : <Ionicons name="trash-outline" size={28} color="#fff" />}
-            <View>
+            {ptpClearing
+              ? <ActivityIndicator color="#fff" size="small" style={{ marginRight: 4 }} />
+              : <Ionicons name="trash-outline" size={28} color="#fff" />}
+            <View style={styles.importBannerText}>
               <Text style={styles.importBannerTitle}>Clear All PTP Dates</Text>
               <Text style={styles.importBannerSub}>{ptpClearing ? "Clearing…" : "Reset all PTP statuses and dates from the database"}</Text>
             </View>
@@ -352,7 +398,9 @@ export default function AdminDashboard() {
         </View>
 
         <Text style={styles.sectionTitle}>FOS Agents Performance</Text>
+
         {stats.map((agent: any) => <AgentCard key={agent.id} agent={agent} />)}
+
         {stats.length === 0 && (
           <View style={styles.empty}>
             <Ionicons name="people-outline" size={48} color={Colors.textMuted} />
@@ -386,51 +434,177 @@ export default function AdminDashboard() {
           qc.invalidateQueries({ queryKey: ["/api/bkt-perf-summary"] });
         }}
       />
-    </>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
+  // ✅ THE FIX: replaces bare <> fragment — gives ScrollView a real flex parent on web
+  outerWrap: {
+    flex: 1,
+    backgroundColor: Colors.background,
+  },
+  scroll: {
+    flex: 1,
+    backgroundColor: Colors.background,
+  },
+  centerScreen: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: Colors.background,
+    padding: 24,
+  },
+  retryBtn: {
+    marginTop: 16,
+    backgroundColor: Colors.primary,
+    borderRadius: 10,
+    paddingHorizontal: 24,
+    paddingVertical: 10,
+  },
+  retryBtnText: {
+    color: "#fff",
+    fontWeight: "700",
+    fontSize: 14,
+  },
   container: { padding: 16, gap: 16 },
-  importBanner: { backgroundColor: Colors.primary, borderRadius: 16, padding: 18, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  importBanner: {
+    backgroundColor: Colors.primary,
+    borderRadius: 16,
+    padding: 18,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
   importBannerLeft: { flexDirection: "row", alignItems: "center", gap: 14, flex: 1 },
+  importBannerText: { flex: 1 },
   importBannerTitle: { color: "#fff", fontSize: 16, fontWeight: "700" },
   importBannerSub: { color: "rgba(255,255,255,0.8)", fontSize: 12, marginTop: 2, flexShrink: 1 },
   summaryGrid: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
-  summaryCard: { flex: 1, minWidth: "28%", backgroundColor: Colors.surface, borderRadius: 14, padding: 14, alignItems: "center", gap: 6, borderTopWidth: 3, borderWidth: 1, borderColor: Colors.border, shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 4 },
+  summaryCard: {
+    flex: 1,
+    minWidth: "28%",
+    backgroundColor: Colors.surface,
+    borderRadius: 14,
+    padding: 14,
+    alignItems: "center",
+    gap: 6,
+    borderTopWidth: 3,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
+  },
   summaryNum: { fontSize: 26, fontWeight: "800", color: Colors.text },
   summaryLabel: { fontSize: 11, color: Colors.textSecondary, fontWeight: "600", textAlign: "center" },
   quickLinks: { flexDirection: "row", gap: 10 },
-  quickLink: { flex: 1, backgroundColor: Colors.surface, borderRadius: 14, padding: 14, alignItems: "center", gap: 6, borderWidth: 1, borderColor: Colors.border },
+  quickLink: {
+    flex: 1,
+    backgroundColor: Colors.surface,
+    borderRadius: 14,
+    padding: 14,
+    alignItems: "center",
+    gap: 6,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
   quickLinkText: { fontSize: 11, fontWeight: "600", color: Colors.textSecondary, textAlign: "center" },
   sectionTitle: { fontSize: 18, fontWeight: "700", color: Colors.text },
-  agentCard: { backgroundColor: Colors.surface, borderRadius: 16, padding: 16, gap: 12, borderWidth: 1, borderColor: Colors.border, shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 4 },
+  agentCard: {
+    backgroundColor: Colors.surface,
+    borderRadius: 16,
+    padding: 16,
+    gap: 12,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
+  },
   agentCardTop: { flexDirection: "row", alignItems: "center", gap: 12 },
-  agentAvatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: Colors.primary, alignItems: "center", justifyContent: "center" },
+  agentAvatar: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: Colors.primary,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   agentInfo: { flex: 1 },
   agentName: { fontSize: 15, fontWeight: "700", color: Colors.text },
-  agentEmpId: { fontSize: 12, color: Colors.textSecondary },
   rateCircle: { width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center" },
   rateText: { fontSize: 12, fontWeight: "800" },
   statsRow: { flexDirection: "row", gap: 6 },
-  statPill: { flex: 1, backgroundColor: Colors.surfaceAlt, borderRadius: 10, padding: 8, alignItems: "center", gap: 2 },
+  statPill: {
+    flex: 1,
+    backgroundColor: Colors.surfaceAlt,
+    borderRadius: 10,
+    padding: 8,
+    alignItems: "center",
+    gap: 2,
+  },
   statPillNum: { fontSize: 16, fontWeight: "800", color: Colors.text },
   statPillLabel: { fontSize: 9, fontWeight: "600", color: Colors.textSecondary },
   empty: { flex: 1, justifyContent: "center", alignItems: "center", gap: 12, paddingVertical: 60 },
   emptyText: { fontSize: 14, color: Colors.textMuted, textAlign: "center" },
-  pushPanel: { backgroundColor: Colors.surface, borderRadius: 16, borderWidth: 1, borderColor: Colors.border, overflow: "hidden", shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.15, shadowRadius: 4, elevation: 2 },
-  pushPanelHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 16, paddingVertical: 14, gap: 10 },
+  pushPanel: {
+    backgroundColor: Colors.surface,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    overflow: "hidden",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  pushPanelHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    gap: 10,
+  },
   pushPanelLeft: { flexDirection: "row", alignItems: "center", gap: 10, flex: 1 },
   pushPanelRight: { flexDirection: "row", alignItems: "center", gap: 10 },
   pushPanelTitle: { fontSize: 14, fontWeight: "700", color: Colors.text },
   pushPanelSub: { fontSize: 11, color: Colors.textSecondary, marginTop: 1 },
-  testAllBtn: { backgroundColor: Colors.primary, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 6, minWidth: 70, alignItems: "center" },
+  testAllBtn: {
+    backgroundColor: Colors.primary,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    minWidth: 70,
+    alignItems: "center",
+  },
   testAllBtnText: { color: "#fff", fontSize: 12, fontWeight: "700" },
   pushAgentList: { borderTopWidth: 1, borderTopColor: Colors.border },
-  pushAgentRow: { flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingVertical: 10, gap: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: Colors.border },
+  pushAgentRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    gap: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: Colors.border,
+  },
   pushDot: { width: 8, height: 8, borderRadius: 4 },
   pushAgentName: { flex: 1, fontSize: 13, color: Colors.text, fontWeight: "600" },
   pushAgentStatus: { fontSize: 11, color: Colors.textSecondary, fontWeight: "600" },
   pushAgentEmpty: { padding: 16, color: Colors.textMuted, fontSize: 13, textAlign: "center" },
-  testOneBtn: { width: 30, height: 30, borderRadius: 8, backgroundColor: Colors.primary + "18", alignItems: "center", justifyContent: "center" },
+  testOneBtn: {
+    width: 30,
+    height: 30,
+    borderRadius: 8,
+    backgroundColor: Colors.primary + "18",
+    alignItems: "center",
+    justifyContent: "center",
+  },
 });
