@@ -1,35 +1,40 @@
 // context/usePushNotifications.ts
-// ✅ FIXED: Always re-registers push token on every app launch / agent login
-// so if token is deleted from DB it gets picked up again automatically.
+// ✅ Works on both APK and Web
+// ✅ Always re-registers token on every login — deleted tokens auto-restore
 
 import { useEffect, useRef } from "react";
 import { Platform, InteractionManager, PermissionsAndroid } from "react-native";
 import Constants from "expo-constants";
+import { getApiUrl } from "@/lib/query-client";
+import { tokenStore } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 
 const ONESIGNAL_APP_ID =
   Constants.expoConfig?.extra?.oneSignalAppId ||
   "bff2c8e0-de24-4aad-a373-d030c210155f";
 
-// ─── Save token directly to server (bypass api wrapper) ──────────────────────
+// ─── Save token directly to server ───────────────────────────────────────────
 async function savePushTokenToServer(playerId: string): Promise<void> {
-  const { getApiUrl } = require("@/lib/query-client");
-  const { tokenStore } = require("@/lib/api");
   const base = getApiUrl();
   const authToken = Platform.OS !== "web" ? await tokenStore.get() : null;
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (authToken) headers["Authorization"] = `Bearer ${authToken}`;
+
   const res = await fetch(`${base}/api/push-token`, {
     method: "POST",
     headers,
     credentials: "include",
     body: JSON.stringify({ token: playerId }),
   });
+
   const json = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(json.message || `HTTP ${res.status}`);
   console.log("[OneSignal] ✅ Server confirmed token saved:", json);
 }
+
+// ─── Get OneSignal module (native only) ──────────────────────────────────────
 function getOneSignal() {
+  if (Platform.OS === "web") return null;
   try {
     const mod = require("react-native-onesignal");
     const OS = mod?.OneSignal ?? mod?.default ?? mod;
@@ -44,11 +49,11 @@ function getOneSignal() {
   }
 }
 
-// ─── Android 13+ permission ───────────────────────────────────────────────────
+// ─── Android 13+ notification permission ─────────────────────────────────────
 async function requestAndroid13Permission(): Promise<boolean> {
   if (Platform.OS !== "android") return true;
   try {
-    // @ts-ignore
+    // @ts-ignore — POST_NOTIFICATIONS added in Android 13
     const granted = await PermissionsAndroid.request(
       PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS,
       {
@@ -67,7 +72,7 @@ async function requestAndroid13Permission(): Promise<boolean> {
   }
 }
 
-// ─── Get OneSignal player ID ──────────────────────────────────────────────────
+// ─── Get OneSignal player/subscription ID ────────────────────────────────────
 async function getOnesignalPlayerId(OneSignal: any): Promise<string | null> {
   try {
     if (typeof OneSignal.User?.getOnesignalId === "function") {
@@ -84,7 +89,7 @@ async function getOnesignalPlayerId(OneSignal: any): Promise<string | null> {
   }
 }
 
-// ─── Init state ───────────────────────────────────────────────────────────────
+// ─── One-time init guard ──────────────────────────────────────────────────────
 let initialized = false;
 let initPromise: Promise<void> | null = null;
 
@@ -109,7 +114,7 @@ function ensureInit(): Promise<void> {
 
         try {
           await OneSignal.Notifications.requestPermission(true);
-          console.log("[OneSignal] ✅ Notification permission requested");
+          console.log("[OneSignal] ✅ Permission requested");
         } catch (e) {
           console.warn("[OneSignal] requestPermission error:", e);
         }
@@ -118,7 +123,7 @@ function ensureInit(): Promise<void> {
 
         try {
           await OneSignal.User.pushSubscription.optIn();
-          console.log("[OneSignal] ✅ Push subscription opted in");
+          console.log("[OneSignal] ✅ Opted in");
         } catch (e) {
           console.warn("[OneSignal] optIn error:", e);
         }
@@ -135,7 +140,7 @@ function ensureInit(): Promise<void> {
   return initPromise;
 }
 
-// ─── Save token to server ─────────────────────────────────────────────────────
+// ─── Register push token (polls until available) ──────────────────────────────
 export async function registerPushToken(): Promise<void> {
   if (Platform.OS === "web") return;
 
@@ -150,16 +155,14 @@ export async function registerPushToken(): Promise<void> {
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     console.log(`[OneSignal] Attempt ${attempt}/${maxAttempts}`);
 
-    try {
-      await OneSignal.User.pushSubscription.optIn();
-    } catch (_) {}
+    try { await OneSignal.User.pushSubscription.optIn(); } catch (_) {}
 
     const playerId = await getOnesignalPlayerId(OneSignal);
 
     if (playerId) {
       try {
         await savePushTokenToServer(playerId);
-        console.log(`[OneSignal] ✅ Token saved on attempt ${attempt}:`, playerId.slice(0, 20) + "...");
+        console.log(`[OneSignal] ✅ Token saved on attempt ${attempt}`);
         return;
       } catch (e: any) {
         console.warn("[OneSignal] Server save failed:", e.message);
@@ -174,19 +177,19 @@ export async function registerPushToken(): Promise<void> {
   console.warn("[OneSignal] ❌ Could not save token after", maxAttempts, "attempts");
 }
 
-// ─── Hook ─────────────────────────────────────────────────────────────────────
+// ─── Hook — call inside RootLayoutNav ────────────────────────────────────────
 export function usePushNotifications() {
   const { agent } = useAuth();
   const agentIdRef = useRef<number | null>(null);
 
-  // Init on mount
+  // Init OneSignal on mount (native only)
   useEffect(() => {
     if (Platform.OS === "web") return;
     ensureInit();
   }, []);
 
-  // ✅ FIX: Register token on EVERY agent load — no savedRef guard
-  // This ensures if token is deleted from DB, it gets re-saved on next app open
+  // ✅ Register token every time agent loads — no savedRef guard
+  // This means deleted tokens are always restored on next app open/login
   useEffect(() => {
     if (Platform.OS === "web") return;
     if (!agent) {
@@ -195,12 +198,12 @@ export function usePushNotifications() {
     }
 
     agentIdRef.current = agent.id;
-    console.log("[OneSignal] Agent:", agent.id, agent.name, "— registering token...");
+    console.log("[OneSignal] Agent logged in:", agent.id, agent.name);
 
     const OneSignal = getOneSignal();
     if (!OneSignal) return;
 
-    // Listen for subscription changes (token refreshes)
+    // Re-save token if OneSignal refreshes it
     const handleSubscriptionChange = async (event: any) => {
       console.log("[OneSignal] Subscription changed:", JSON.stringify(event));
       const id = await getOnesignalPlayerId(OneSignal);
@@ -209,7 +212,7 @@ export function usePushNotifications() {
           await savePushTokenToServer(id);
           console.log("[OneSignal] ✅ Token re-saved via subscription change");
         } catch (e: any) {
-          console.warn("[OneSignal] Event save failed:", e.message);
+          console.warn("[OneSignal] Re-save failed:", e.message);
         }
       }
     };
@@ -217,10 +220,10 @@ export function usePushNotifications() {
     try {
       OneSignal.User?.pushSubscription?.addEventListener("change", handleSubscriptionChange);
     } catch (e) {
-      console.warn("[OneSignal] Listener error:", e);
+      console.warn("[OneSignal] Listener setup error:", e);
     }
 
-    // ✅ Always attempt registration — no guard so deleted tokens get restored
+    // Always register — no guard — so deleted tokens restore automatically
     registerPushToken().catch((e) =>
       console.warn("[OneSignal] registerPushToken error:", e?.message)
     );
@@ -229,7 +232,7 @@ export function usePushNotifications() {
       console.log("[OneSignal] Notification tapped:", event?.notification?.additionalData);
     };
     const handleForeground = (event: any) => {
-      console.log("[OneSignal] Foreground:", event?.notification?.title);
+      console.log("[OneSignal] Foreground notification:", event?.notification?.title);
     };
 
     try {
@@ -248,5 +251,5 @@ export function usePushNotifications() {
         console.warn("[OneSignal] Cleanup error:", e);
       }
     };
-  }, [agent?.id]); // ✅ Runs every time agent changes — always re-registers
+  }, [agent?.id]); // Runs on every agent change — always re-registers
 }
