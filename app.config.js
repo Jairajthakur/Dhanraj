@@ -9,17 +9,12 @@ module.exports = ({ config }) => {
     scheme: "dhanrajenterprises",
     userInterfaceStyle: "automatic",
     newArchEnabled: true,
-
-    // ✅ ADDED: Required for EAS Update (OTA) to work
-    // Once new APK is installed with this config,
-    // every git push will update phones automatically
     updates: {
       url: "https://u.expo.dev/1b09251a-4423-4759-a22b-fc2f0a44fd8e",
     },
     runtimeVersion: {
       policy: "sdkVersion",
     },
-
     icon: "./assets/images/dhanraj-logo.png",
     splash: {
       image: "./assets/images/dhanraj-logo.png",
@@ -50,7 +45,8 @@ module.exports = ({ config }) => {
       bundler: "metro",
       favicon: "./assets/images/dhanraj-logo.png",
       output: "static",
-      baseUrl: "/Dhanraj/",
+      // ✅ FIX: "/" for Railway, "/Dhanraj/" for GitHub Pages
+      baseUrl: process.env.EXPO_PUBLIC_BASE_URL || "/Dhanraj/",
     },
     plugins: [
       "expo-router",
