@@ -9,7 +9,7 @@ RUN npm install --legacy-peer-deps
 
 COPY . .
 
-RUN npx expo export --platform web --output-dir static-build || echo "Web build skipped"
+RUN EXPO_PUBLIC_BASE_URL=/ npx expo export --platform web --output-dir static-build
 
 RUN npx esbuild server/index.ts --platform=node --packages=external --bundle --format=cjs --outdir=server_dist
 
