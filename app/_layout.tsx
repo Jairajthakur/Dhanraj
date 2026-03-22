@@ -76,8 +76,6 @@ function RootLayoutNav() {
   const { agent, isLoading } = useAuth();
   const segments = useSegments();
   const navigationState = useRootNavigationState();
-
-  // ✅ Track the last route we redirected to — never redirect to the same place twice
   const lastRedirect = useRef<string | null>(null);
 
   usePushNotifications();
@@ -89,12 +87,10 @@ function RootLayoutNav() {
 
     const getTargetRoute = (): string | null => {
       if (!agent) {
-        // Not logged in → always go to login
         const isAlreadyOnLogin = segments[0] === "(app)" && segments[1] === "login";
         return isAlreadyOnLogin ? null : "/(app)/login";
       }
 
-      // Logged in → figure out correct home for this role
       const roleHome: Record<string, string> = {
         admin: "/(admin)",
         fos:   "/(app)/dashboard",
@@ -103,7 +99,6 @@ function RootLayoutNav() {
       const home = roleHome[agent.role];
       if (!home) return null;
 
-      // Already in the right section — don't redirect
       const inCorrectSection =
         (agent.role === "admin" && segments[0] === "(admin)") ||
         (agent.role === "fos"   && segments[0] === "(app)" && segments[1] !== "login") ||
@@ -116,15 +111,12 @@ function RootLayoutNav() {
 
     const target = getTargetRoute();
 
-    // ✅ Only redirect if target is different from where we last redirected
-    // This is the key fix — prevents the infinite loop
     if (target && target !== lastRedirect.current) {
       lastRedirect.current = target;
       router.replace(target as any);
     }
   }, [agent?.id, agent?.role, isLoading, navigationState?.key, segments.join("/")]);
 
-  // Reset redirect tracker when agent changes (logout/login)
   useEffect(() => {
     lastRedirect.current = null;
   }, [agent?.id]);
@@ -155,8 +147,34 @@ export default function RootLayout() {
     return () => clearTimeout(t);
   }, []);
 
-  // ✅ On web: skip splash entirely — render immediately
-  // On native: wait for fonts (max 2s)
+  // ✅ FIX: Inject full-height CSS into the DOM on web.
+  // Expo's static output generates its own HTML without height:100% on
+  // html/body/#root — so all flex:1 views collapse to 0px (blank screens).
+  // This runs synchronously before first paint and fixes it permanently.
+  useEffect(() => {
+    if (Platform.OS !== "web") return;
+    const style = document.createElement("style");
+    style.id = "expo-root-fix";
+    // Avoid injecting twice (e.g. hot reload)
+    if (!document.getElementById("expo-root-fix")) {
+      style.innerHTML = `
+        html, body {
+          height: 100% !important;
+          margin: 0 !important;
+          padding: 0 !important;
+          overflow: hidden !important;
+        }
+        #root {
+          height: 100% !important;
+          width: 100% !important;
+          display: flex !important;
+          flex-direction: column !important;
+        }
+      `;
+      document.head.appendChild(style);
+    }
+  }, []);
+
   const appReady = Platform.OS === "web"
     ? true
     : (fontsLoaded || !!fontError || fontTimeout) && appMounted;
