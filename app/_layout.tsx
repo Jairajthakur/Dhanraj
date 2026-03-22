@@ -155,8 +155,10 @@ export default function RootLayout() {
     return () => clearTimeout(t);
   }, []);
 
+  // ✅ On web: skip splash entirely — render immediately
+  // On native: wait for fonts (max 2s)
   const appReady = Platform.OS === "web"
-    ? appMounted && fontTimeout
+    ? true
     : (fontsLoaded || !!fontError || fontTimeout) && appMounted;
 
   useEffect(() => {
