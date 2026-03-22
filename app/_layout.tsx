@@ -43,13 +43,13 @@ function SplashLoader() {
         toValue: 1,
         duration: 600,
         easing: Easing.out(Easing.cubic),
-        useNativeDriver: true,
+        useNativeDriver: Platform.OS !== "web",
       }),
       Animated.spring(scaleAnim, {
         toValue: 1,
         friction: 6,
         tension: 80,
-        useNativeDriver: true,
+        useNativeDriver: Platform.OS !== "web",
       }),
     ]).start();
 
@@ -61,13 +61,13 @@ function SplashLoader() {
             toValue: -8,
             duration: 300,
             easing: Easing.out(Easing.quad),
-            useNativeDriver: true,
+            useNativeDriver: Platform.OS !== "web",
           }),
           Animated.timing(dot, {
             toValue: 0,
             duration: 300,
             easing: Easing.in(Easing.quad),
-            useNativeDriver: true,
+            useNativeDriver: Platform.OS !== "web",
           }),
           Animated.delay(600 - delay),
         ])
