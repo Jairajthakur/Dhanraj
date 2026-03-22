@@ -44,9 +44,41 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       try {
         const cached = await agentCache.get();
 
-        // ✅ On web with no cached session, skip server check entirely.
-        // There is no cookie/token to verify, and hitting /api/auth/me
-        // will always 401 → causes an infinite render loop.
+        // ✅ KEY FIX: On web, cookies are sent automatically by the browser.
+        // We MUST always call /api/auth/me on web to check if the session cookie
+        // is valid — we cannot rely on agentCache (which uses AsyncStorage and
+        // is always empty on web). Skipping this check caused agent=null on every
+        // page load, triggering a redirect loop and blank admin screen.
+        if (Platform.OS === "web") {
+          try {
+            const res = await api.me();
+            if (!cancelled && res?.agent) {
+              setAgent(res.agent);
+              // Also persist to cache so subsequent non-web checks work
+              await agentCache.set(res.agent);
+            } else if (!cancelled) {
+              setAgent(null);
+            }
+          } catch (e: any) {
+            if (!cancelled) {
+              const isAuthError =
+                e?.message === "Unauthorized" ||
+                e?.message?.includes("401") ||
+                e?.status === 401 ||
+                e?.statusCode === 401;
+              // On auth error, user needs to login
+              // On network error, leave agent as null (can't verify)
+              setAgent(null);
+              if (!isAuthError) {
+                console.warn("[AuthContext] Network error on web bootstrap:", e?.message);
+              }
+            }
+          }
+          return;
+        }
+
+        // ── Native (iOS / Android) path ──────────────────────────────────
+        // No cache means definitely not logged in — skip server check
         if (!cached) {
           if (!cancelled) {
             setAgent(null);
@@ -63,7 +95,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (!cancelled && res?.agent) {
           setAgent(res.agent);
           await agentCache.set(res.agent);
-          if (res?.token && Platform.OS !== "web") {
+          if (res?.token) {
             await tokenStore.set(res.token);
           }
         }
@@ -103,7 +135,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     }, 6000);
 
-    bootstrap().finally(() => clearTimeout(timeout));
+    bootstrap().finally(() => {
+      clearTimeout(timeout);
+      if (!cancelled) setIsLoading(false);
+    });
 
     return () => {
       cancelled = true;
