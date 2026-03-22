@@ -1,5 +1,5 @@
 builder = "nixpacks"
-buildCommand = "npm install --legacy-peer-deps && npm run expo:static:build && npm run server:build"
+buildCommand = "npm install --legacy-peer-deps && npm run build"
 
 [deploy]
 startCommand = "node server_dist/index.js"
