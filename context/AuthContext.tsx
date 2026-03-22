@@ -62,15 +62,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
       } catch (e: any) {
         if (!cancelled) {
-          const cached = await agentCache.get();
-          const isAuthError = e?.message === "Unauthorized";
-          if (isAuthError || !cached) {
+          const isAuthError =
+            e?.message === "Unauthorized" ||
+            e?.message?.includes("401") ||
+            e?.status === 401 ||
+            e?.statusCode === 401;
+
+          if (isAuthError) {
+            // 401 = no active session — clear cache and show login form
             await agentCache.clear();
             await tokenStore.clear();
             setAgent(null);
           } else {
-            // Network error but cached session exists — stay logged in
-            setAgent(cached);
+            // Network error — stay logged in if cached session exists
+            const cached = await agentCache.get();
+            setAgent(cached ?? null);
           }
         }
       } finally {
