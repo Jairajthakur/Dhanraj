@@ -48,14 +48,12 @@ function setupCors(app: express.Application) {
       origin?.startsWith("http://localhost:") ||
       origin?.startsWith("http://127.0.0.1:");
 
-    // Mobile APK has no origin header — allow all, still send credentials header
     if (!origin) {
       res.header("Access-Control-Allow-Origin", "*");
     } else if (origins.has(origin) || isLocalhost) {
       res.header("Access-Control-Allow-Origin", origin);
       res.header("Access-Control-Allow-Credentials", "true");
     } else {
-      // Allow all origins for mobile support
       res.header("Access-Control-Allow-Origin", origin);
       res.header("Access-Control-Allow-Credentials", "true");
     }
@@ -109,17 +107,6 @@ function setupRequestLogging(app: express.Application) {
   });
 }
 
-function getAppName(): string {
-  try {
-    const appJsonPath = path.resolve(process.cwd(), "app.json");
-    const appJsonContent = fs.readFileSync(appJsonPath, "utf-8");
-    const appJson = JSON.parse(appJsonContent);
-    return appJson.expo?.name || "Dhanraj Enterprises";
-  } catch {
-    return "Dhanraj Enterprises";
-  }
-}
-
 function serveExpoManifest(platform: string, res: Response) {
   const manifestPath = path.resolve(
     process.cwd(),
@@ -137,68 +124,74 @@ function serveExpoManifest(platform: string, res: Response) {
   res.send(manifest);
 }
 
-function serveLandingPage({
-  req,
-  res,
-  landingPageTemplate,
-  appName,
-}: {
-  req: Request;
-  res: Response;
-  landingPageTemplate: string;
-  appName: string;
-}) {
-  const forwardedProto = req.header("x-forwarded-proto");
-  const protocol = forwardedProto || req.protocol || "https";
-  const forwardedHost = req.header("x-forwarded-host");
-  const host = forwardedHost || req.get("host");
-  const baseUrl = `${protocol}://${host}`;
-  const expsUrl = `${host}`;
-
-  const html = landingPageTemplate
-    .replace(/BASE_URL_PLACEHOLDER/g, baseUrl)
-    .replace(/EXPS_URL_PLACEHOLDER/g, expsUrl)
-    .replace(/APP_NAME_PLACEHOLDER/g, appName);
-
-  res.setHeader("Content-Type", "text/html; charset=utf-8");
-  res.status(200).send(html);
-}
-
 function configureExpoAndLanding(app: express.Application) {
-  const templatePath = path.resolve(
-    process.cwd(),
-    "server",
-    "templates",
-    "landing-page.html"
-  );
+  log("Configuring static file serving...");
 
-  let landingPageTemplate: string | null = null;
-  if (fs.existsSync(templatePath)) {
-    landingPageTemplate = fs.readFileSync(templatePath, "utf-8");
-  }
-  const appName = getAppName();
-
-  log("Serving static Expo files with dynamic manifest routing");
-
-  app.use((req: Request, res: Response, next: NextFunction) => {
-    if (req.path.startsWith("/api")) return next();
-    if (req.path !== "/" && req.path !== "/manifest") return next();
-
-    const platform = req.header("expo-platform");
-    if (platform && (platform === "ios" || platform === "android")) {
-      return serveExpoManifest(platform, res);
-    }
-
-    if (req.path === "/" && landingPageTemplate) {
-      return serveLandingPage({ req, res, landingPageTemplate, appName });
-    }
-
-    next();
-  });
-
-  app.use("/assets", express.static(path.resolve(process.cwd(), "assets")));
+  // Serve uploads and assets
   app.use("/uploads", express.static(path.resolve(process.cwd(), "server/uploads")));
-  app.use(express.static(path.resolve(process.cwd(), "static-build")));
+  app.use("/assets", express.static(path.resolve(process.cwd(), "assets")));
+
+  const webBuildPath = path.resolve(process.cwd(), "static-build");
+  const webIndexPath = path.join(webBuildPath, "index.html");
+
+  const webBuildExists = fs.existsSync(webBuildPath) && fs.existsSync(webIndexPath);
+
+  if (webBuildExists) {
+    log(`[web] ✅ Web build found at: ${webBuildPath}`);
+
+    // Serve all static assets from static-build (JS, CSS, images etc.)
+    app.use(express.static(webBuildPath, {
+      // Don't serve index.html for asset requests — let the catch-all below do it
+      index: false,
+    }));
+
+    // Handle Expo mobile manifest requests
+    app.use((req: Request, res: Response, next: NextFunction) => {
+      if (req.path.startsWith("/api")) return next();
+
+      const platform = req.header("expo-platform");
+      if (platform === "ios" || platform === "android") {
+        return serveExpoManifest(platform, res);
+      }
+
+      // SPA catch-all — serve index.html for ALL non-API routes
+      // This enables client-side routing (expo-router) to work on web
+      return res.sendFile(webIndexPath);
+    });
+
+  } else {
+    log("[web] ⚠️ Web build NOT found — serving API only");
+    log(`[web] Expected at: ${webBuildPath}`);
+
+    // Fallback: serve a simple status page
+    app.get("/", (_req: Request, res: Response) => {
+      res.send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dhanraj Enterprises</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: Arial, sans-serif; background: #0f172a; color: #e2e8f0; display: flex; align-items: center; justify-content: center; height: 100vh; }
+    .card { background: #1e293b; padding: 40px; border-radius: 12px; text-align: center; max-width: 420px; width: 90%; }
+    h1 { color: #6366f1; margin-bottom: 8px; font-size: 28px; }
+    p { color: #94a3b8; margin-bottom: 24px; }
+    .badge { background: #22c55e; color: white; padding: 6px 16px; border-radius: 20px; font-size: 14px; }
+    .warn { background: #f59e0b; color: white; padding: 10px 16px; border-radius: 8px; font-size: 13px; margin-top: 20px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Dhanraj Enterprises</h1>
+    <p>Backend API Server is running</p>
+    <span class="badge">🟢 Online</span>
+    <div class="warn">⚠️ Web app build not found.<br>Check Railway build logs.</div>
+  </div>
+</body>
+</html>`);
+    });
+  }
 }
 
 function setupErrorHandler(app: express.Application) {
@@ -218,7 +211,7 @@ function setupErrorHandler(app: express.Application) {
   setupBodyParsing(app);
   setupRequestLogging(app);
 
-  // Health check routes
+  // Health check routes (before everything else)
   app.get("/api/health", (_req, res) => {
     res.json({ status: "ok", timestamp: new Date().toISOString() });
   });
