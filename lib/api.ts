@@ -82,8 +82,14 @@ async function apiRequest(method: string, route: string, data?: any) {
   });
 
   if (res.status === 401) {
-    await agentCache.clear();
-    await tokenStore.clear();
+    // ✅ Do NOT clear agentCache here on web.
+    // Clearing cache inside apiRequest triggers AuthContext to re-render,
+    // which re-runs bootstrap, which calls api.me() again → infinite loop.
+    // Cache clearing is AuthContext's responsibility on web.
+    if (Platform.OS !== "web") {
+      await agentCache.clear();
+      await tokenStore.clear();
+    }
     throw new Error("Unauthorized");
   }
 
@@ -192,8 +198,6 @@ export const api = {
   checkIn: () => apiRequest("POST", "/api/attendance/checkin"),
   checkOut: () => apiRequest("POST", "/api/attendance/checkout"),
 
-  // ✅ NEW: Save OneSignal push token to server
-  // Called on every app launch so deleted tokens are always restored
   savePushToken: async (token: string) => {
     return apiRequest("POST", "/api/push-token", { token });
   },
@@ -216,7 +220,6 @@ export const api = {
       table: "loan" | "bkt";
     }) => apiRequest("PUT", `/api/admin/cases/${id}/status`, data),
 
-    // ─── FILE UPLOADS ────────────────────────────────────────────────────────
     importCases: async (file: any) => {
       const form = createFormData(file);
       const token = await tokenStore.get();
