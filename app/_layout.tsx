@@ -8,7 +8,7 @@ import { useFonts, Outfit_400Regular } from "@expo-google-fonts/outfit";
 import { queryClient } from "../lib/query-client";
 import { AuthProvider, useAuth } from "../context/AuthContext";
 import { setQueryClientRef } from "../lib/api";
-import { SafeAreaProvider, initialWindowMetrics } from "react-native-safe-area-context";
+import { SafeAreaProvider } from "react-native-safe-area-context";
 import { usePushNotifications } from "@/context/usePushNotifications";
 
 setQueryClientRef(queryClient);
@@ -167,9 +167,7 @@ export default function RootLayout() {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <SafeAreaProvider
-        initialMetrics={Platform.OS === "web" ? null : initialWindowMetrics}
-      >
+      <SafeAreaProvider>
         <StatusBar style="dark" />
         <AuthProvider>
           <RootLayoutNav />
