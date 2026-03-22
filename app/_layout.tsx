@@ -127,44 +127,24 @@ const splashStyles = StyleSheet.create({
     alignItems: "center",
     gap: 48,
   },
-  logoWrap: {
-    alignItems: "center",
-    gap: 14,
-  },
-  logo: {
-    width: 110,
-    height: 110,
-    borderRadius: 24,
-  },
+  logoWrap: { alignItems: "center", gap: 14 },
+  logo: { width: 110, height: 110, borderRadius: 24 },
   appName: {
-    fontSize: 18,
-    fontWeight: "800",
-    color: "#1A1A1A",
-    letterSpacing: 1.5,
-    textAlign: "center",
+    fontSize: 18, fontWeight: "800", color: "#1A1A1A",
+    letterSpacing: 1.5, textAlign: "center",
   },
   tagline: {
-    fontSize: 12,
-    fontWeight: "500",
-    color: "#888",
-    letterSpacing: 0.5,
-    textAlign: "center",
+    fontSize: 12, fontWeight: "500", color: "#888",
+    letterSpacing: 0.5, textAlign: "center",
   },
-  dotsRow: {
-    flexDirection: "row",
-    gap: 10,
-    alignItems: "center",
-  },
+  dotsRow: { flexDirection: "row", gap: 10, alignItems: "center" },
   dot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: "#1A1A1A",
-    opacity: 0.7,
+    width: 8, height: 8, borderRadius: 4,
+    backgroundColor: "#1A1A1A", opacity: 0.7,
   },
 });
 
-// ✅ FIX: Only call SplashScreen on native — it doesn't exist on web
+// ✅ Only call SplashScreen on native — not supported on web
 if (Platform.OS !== "web") {
   SplashScreen.preventAutoHideAsync().catch(() => {});
 }
@@ -175,49 +155,53 @@ function RootLayoutNav() {
   const navigationState = useRootNavigationState();
   const hasRedirected = useRef(false);
 
-  // ✅ Push token registration (native only — safe on web)
+  // ✅ Push token registration (native only)
   usePushNotifications();
 
   useEffect(() => {
     if (!navigationState?.key || isLoading) return;
 
-    const inLogin = segments[0] === "login";
+    // ✅ FIX: login screen is at /(app)/login, NOT /login
+    // Check current segment to avoid redirect loops
     const inApp   = segments[0] === "(app)";
     const inAdmin = segments[0] === "(admin)";
     const inRepo  = segments[0] === "(repo)";
+    const inLogin = inApp && segments[1] === "login";
+    const inIndex = segments[0] === "index" || segments.length === 0;
 
     if (!agent) {
+      // Not logged in — send to login screen
       if (!inLogin) {
         hasRedirected.current = false;
-        router.replace("/login");
+        router.replace("/(app)/login");
       }
       return;
     }
 
+    // Already in the right place — don't redirect
     if (agent.role === "admin" && inAdmin) return;
-    if (agent.role === "fos"   && inApp)   return;
-    if (agent.role === "repo"  && inRepo)  return;
+    if (agent.role === "fos"   && inApp && !inLogin) return;
+    if (agent.role === "repo"  && inRepo) return;
 
-    if (agent.role === "fos" && inLogin) {
-      router.replace("/(app)/dashboard");
-      return;
-    }
-    if (agent.role === "admin" && inLogin) {
-      router.replace("/(admin)");
-      return;
-    }
-    if (agent.role === "repo" && inLogin) {
-      router.replace("/(repo)");
+    // On login screen but already authenticated — redirect to home
+    if (inLogin || inIndex) {
+      if (hasRedirected.current) return;
+      hasRedirected.current = true;
+
+      if (agent.role === "admin")     router.replace("/(admin)");
+      else if (agent.role === "fos")  router.replace("/(app)/dashboard");
+      else if (agent.role === "repo") router.replace("/(repo)");
       return;
     }
 
+    // Cross-role protection — wrong section for this role
     if (hasRedirected.current) return;
     hasRedirected.current = true;
 
     if (agent.role === "admin")     router.replace("/(admin)");
     else if (agent.role === "fos")  router.replace("/(app)/dashboard");
     else if (agent.role === "repo") router.replace("/(repo)");
-  }, [agent?.role, isLoading, navigationState?.key, segments[0]]);
+  }, [agent?.role, isLoading, navigationState?.key, segments[0], segments[1]]);
 
   useEffect(() => {
     hasRedirected.current = false;
@@ -230,7 +214,6 @@ function RootLayoutNav() {
   return (
     <Stack screenOptions={{ headerShown: false }}>
       <Stack.Screen name="index" />
-      <Stack.Screen name="login" />
       <Stack.Screen name="(app)" />
       <Stack.Screen name="(admin)" />
       <Stack.Screen name="(repo)" />
@@ -251,8 +234,6 @@ export default function RootLayout() {
     setAppMounted(true);
   }, []);
 
-  // On web — 500ms max wait, then show app immediately
-  // On native — wait for fonts (max 2s)
   useEffect(() => {
     const timeout = Platform.OS === "web" ? 500 : 2000;
     const t = setTimeout(() => setFontTimeout(true), timeout);
@@ -261,10 +242,9 @@ export default function RootLayout() {
 
   const appReady =
     Platform.OS === "web"
-      ? appMounted && fontTimeout  // wait 500ms on web so React can hydrate
+      ? appMounted && fontTimeout
       : (fontsLoaded || !!fontError || fontTimeout) && appMounted;
 
-  // ✅ FIX: Only call SplashScreen.hideAsync on native
   useEffect(() => {
     if (appReady && Platform.OS !== "web") {
       SplashScreen.hideAsync().catch(() => {});
@@ -280,10 +260,7 @@ export default function RootLayout() {
       <SafeAreaProvider
         initialMetrics={
           Platform.OS === "web"
-            ? {
-                insets: { top: 0, left: 0, right: 0, bottom: 0 },
-                frame: { x: 0, y: 0, width: 0, height: 0 },
-              }
+            ? { insets: { top: 0, left: 0, right: 0, bottom: 0 }, frame: { x: 0, y: 0, width: 0, height: 0 } }
             : initialWindowMetrics
         }
       >
