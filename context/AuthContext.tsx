@@ -1,7 +1,4 @@
 // context/AuthContext.tsx
-// ✅ Fixed: token registration is now fully handled by usePushNotifications hook
-// The hook watches agent?.id and re-registers whenever a different user logs in
-
 import React, {
   createContext,
   useContext,
@@ -45,11 +42,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const bootstrap = async () => {
       try {
-        // Show cached agent immediately so UI doesn't wait for network
         const cached = await agentCache.get();
-        if (cached && !cancelled) setAgent(cached);
 
-        // Verify with server
+        // ✅ On web with no cached session, skip server check entirely.
+        // There is no cookie/token to verify, and hitting /api/auth/me
+        // will always 401 → causes an infinite render loop.
+        if (!cached) {
+          if (!cancelled) {
+            setAgent(null);
+            setIsLoading(false);
+          }
+          return;
+        }
+
+        // Show cached agent immediately so UI doesn't wait for network
+        if (!cancelled) setAgent(cached);
+
+        // Verify cached session is still valid with server
         const res = await api.me();
         if (!cancelled && res?.agent) {
           setAgent(res.agent);
@@ -57,8 +66,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           if (res?.token && Platform.OS !== "web") {
             await tokenStore.set(res.token);
           }
-          // ✅ Token registration is handled by usePushNotifications hook
-          // which watches agent?.id — no need to call it here
         }
       } catch (e: any) {
         if (!cancelled) {
@@ -69,12 +76,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             e?.statusCode === 401;
 
           if (isAuthError) {
-            // 401 = no active session — clear cache and show login form
+            // Session expired — clear and show login
             await agentCache.clear();
             await tokenStore.clear();
             setAgent(null);
           } else {
-            // Network error — stay logged in if cached session exists
+            // Network error — keep cached session, stay logged in
             const cached = await agentCache.get();
             setAgent(cached ?? null);
           }
@@ -89,7 +96,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (!cancelled) {
         agentCache.get().then((cached) => {
           if (!cancelled) {
-            if (cached) setAgent(cached);
+            setAgent(cached ?? null);
             setIsLoading(false);
           }
         });
@@ -127,10 +134,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     };
 
-    const subscription = AppState.addEventListener(
-      "change",
-      handleAppStateChange
-    );
+    const subscription = AppState.addEventListener("change", handleAppStateChange);
     return () => subscription.remove();
   }, []);
 
@@ -145,10 +149,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (res?.token && Platform.OS !== "web") {
         await tokenStore.set(res.token);
       }
-
-      // ✅ Setting agent here triggers usePushNotifications hook (agent?.id changes)
-      // The hook will call registerPushToken() which waits for OneSignal init
-      // and polls until the subscription ID is available
       setAgent(res.agent);
     } finally {
       setIsLoading(false);
