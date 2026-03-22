@@ -20,15 +20,13 @@ import { StatusBar } from "expo-status-bar";
 import { useFonts, Outfit_400Regular } from "@expo-google-fonts/outfit";
 import { queryClient } from "../lib/query-client";
 import { AuthProvider, useAuth } from "../context/AuthContext";
-import { setQueryClientRef } from "../lib/api"; // ✅ FIX: allows api.ts to invalidate queries after imports
+import { setQueryClientRef } from "../lib/api";
 import {
   SafeAreaProvider,
   initialWindowMetrics,
 } from "react-native-safe-area-context";
 import { usePushNotifications } from "@/context/usePushNotifications";
 
-// ✅ FIX: Register queryClient so api.ts can invalidate queries after
-//         allocation/bkt/deposition imports — fixes blank screen after upload
 setQueryClientRef(queryClient);
 
 // ─── Branded Splash Loader ────────────────────────────────────────────────────
@@ -40,7 +38,6 @@ function SplashLoader() {
   const dot3 = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    // Logo fade + scale in
     Animated.parallel([
       Animated.timing(opacityAnim, {
         toValue: 1,
@@ -56,7 +53,6 @@ function SplashLoader() {
       }),
     ]).start();
 
-    // Bouncing dots loop
     const dotAnimation = (dot: Animated.Value, delay: number) =>
       Animated.loop(
         Animated.sequence([
@@ -93,7 +89,6 @@ function SplashLoader() {
 
   return (
     <View style={splashStyles.container}>
-      {/* Logo */}
       <Animated.View
         style={[
           splashStyles.logoWrap,
@@ -109,7 +104,6 @@ function SplashLoader() {
         <Text style={splashStyles.tagline}>Field Collection Management</Text>
       </Animated.View>
 
-      {/* Bouncing dots */}
       <Animated.View style={[splashStyles.dotsRow, { opacity: opacityAnim }]}>
         {[dot1, dot2, dot3].map((dot, i) => (
           <Animated.View
@@ -170,29 +164,28 @@ const splashStyles = StyleSheet.create({
   },
 });
 
-// ✅ FIXED: Prevent auto-hide — we control this ourselves
-SplashScreen.preventAutoHideAsync().catch(() => {});
+// ✅ FIX: Only call SplashScreen on native — it doesn't exist on web
+if (Platform.OS !== "web") {
+  SplashScreen.preventAutoHideAsync().catch(() => {});
+}
 
 function RootLayoutNav() {
   const { agent, isLoading } = useAuth();
   const segments = useSegments();
   const navigationState = useRootNavigationState();
-  // ✅ FIXED: Track if we've already redirected to avoid redirect loops
   const hasRedirected = useRef(false);
 
-  // ✅ Registers OneSignal player ID whenever agent is logged in
+  // ✅ Push token registration (native only — safe on web)
   usePushNotifications();
 
   useEffect(() => {
-    // ✅ FIXED: Wait for navigation AND auth to be ready before redirecting
     if (!navigationState?.key || isLoading) return;
 
-    const inLogin  = segments[0] === "login";
-    const inApp    = segments[0] === "(app)";
-    const inAdmin  = segments[0] === "(admin)";
-    const inRepo   = segments[0] === "(repo)";
+    const inLogin = segments[0] === "login";
+    const inApp   = segments[0] === "(app)";
+    const inAdmin = segments[0] === "(admin)";
+    const inRepo  = segments[0] === "(repo)";
 
-    // Not logged in → go to login
     if (!agent) {
       if (!inLogin) {
         hasRedirected.current = false;
@@ -201,11 +194,11 @@ function RootLayoutNav() {
       return;
     }
 
-    // ✅ FIXED: Don't redirect if already in the correct area — prevents blank screen loops
     if (agent.role === "admin" && inAdmin) return;
     if (agent.role === "fos"   && inApp)   return;
     if (agent.role === "repo"  && inRepo)  return;
-    if (agent.role === "fos"   && inLogin) {
+
+    if (agent.role === "fos" && inLogin) {
       router.replace("/(app)/dashboard");
       return;
     }
@@ -218,7 +211,6 @@ function RootLayoutNav() {
       return;
     }
 
-    // ✅ FIXED: Only redirect once per auth change to prevent loops
     if (hasRedirected.current) return;
     hasRedirected.current = true;
 
@@ -227,7 +219,6 @@ function RootLayoutNav() {
     else if (agent.role === "repo") router.replace("/(repo)");
   }, [agent?.role, isLoading, navigationState?.key, segments[0]]);
 
-  // ✅ FIXED: Reset redirect flag when agent changes (logout/login)
   useEffect(() => {
     hasRedirected.current = false;
   }, [agent?.id]);
@@ -256,29 +247,30 @@ export default function RootLayout() {
     Platform.OS === "web" ? {} : { Outfit_400Regular }
   );
 
-  // ✅ FIXED: Mark app as mounted on first render
   useEffect(() => {
     setAppMounted(true);
   }, []);
 
-  // ✅ FIXED: Shorter timeout — 2s max wait for fonts
+  // On web — 500ms max wait, then show app immediately
+  // On native — wait for fonts (max 2s)
   useEffect(() => {
-    const t = setTimeout(() => setFontTimeout(true), 2000);
+    const timeout = Platform.OS === "web" ? 500 : 2000;
+    const t = setTimeout(() => setFontTimeout(true), timeout);
     return () => clearTimeout(t);
   }, []);
 
   const appReady =
     Platform.OS === "web"
-      ? appMounted
+      ? appMounted && fontTimeout  // wait 500ms on web so React can hydrate
       : (fontsLoaded || !!fontError || fontTimeout) && appMounted;
 
+  // ✅ FIX: Only call SplashScreen.hideAsync on native
   useEffect(() => {
-    if (appReady) {
+    if (appReady && Platform.OS !== "web") {
       SplashScreen.hideAsync().catch(() => {});
     }
   }, [appReady]);
 
-  // ✅ Show branded splash while fonts/app loads instead of plain background
   if (!appReady) {
     return <SplashLoader />;
   }
