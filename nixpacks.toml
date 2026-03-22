@@ -1,5 +1,5 @@
-[phases.build]
-cmds = ["npm install", "npm run build"]
+# railway.toml buildCommand takes precedence over this file.
+# This file exists only as a fallback — do not define conflicting cmds here.
 
-[start]
-cmd = "npm start"
+[phases.setup]
+nixPkgs = ["nodejs_20"]
