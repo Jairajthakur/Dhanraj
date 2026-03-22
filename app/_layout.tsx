@@ -167,12 +167,21 @@ export default function RootLayout() {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <SafeAreaProvider>
-        <StatusBar style="dark" />
-        <AuthProvider>
-          <RootLayoutNav />
-        </AuthProvider>
-      </SafeAreaProvider>
+      {Platform.OS === "web" ? (
+        <View style={{ flex: 1, width: "100%", height: "100%" }}>
+          <StatusBar style="dark" />
+          <AuthProvider>
+            <RootLayoutNav />
+          </AuthProvider>
+        </View>
+      ) : (
+        <SafeAreaProvider>
+          <StatusBar style="dark" />
+          <AuthProvider>
+            <RootLayoutNav />
+          </AuthProvider>
+        </SafeAreaProvider>
+      )}
     </QueryClientProvider>
   );
 }
