@@ -36,19 +36,19 @@ export const agentCache = {
 export const tokenStore = {
   get: async (): Promise<string | null> => {
     try {
-      if (Platform.OS === "web") return null;
+      if (Platform.OS === "web") return localStorage.getItem(TOKEN_KEY);
       return await AsyncStorage.getItem(TOKEN_KEY);
     } catch { return null; }
   },
   set: async (token: string): Promise<void> => {
     try {
-      if (Platform.OS === "web") return;
+      if (Platform.OS === "web") { localStorage.setItem(TOKEN_KEY, token); return; }
       await AsyncStorage.setItem(TOKEN_KEY, token);
     } catch {}
   },
   clear: async (): Promise<void> => {
     try {
-      if (Platform.OS === "web") return;
+      if (Platform.OS === "web") { localStorage.removeItem(TOKEN_KEY); return; }
       await AsyncStorage.removeItem(TOKEN_KEY);
     } catch {}
   },
@@ -69,10 +69,8 @@ async function apiRequest(method: string, route: string, data?: any) {
     "Content-Type": "application/json",
   };
 
-  if (Platform.OS !== "web") {
-    const token = await tokenStore.get();
-    if (token) headers["Authorization"] = `Bearer ${token}`;
-  }
+  const token = await tokenStore.get();
+  if (token) headers["Authorization"] = `Bearer ${token}`;
 
   const res = await fetch(url, {
     method,
@@ -151,7 +149,7 @@ export const api = {
   login: async (username: string, password: string) => {
     const res = await apiRequest("POST", "/api/auth/login", { username, password });
     if (res?.agent) await agentCache.set(res.agent);
-    if (res?.token && Platform.OS !== "web") await tokenStore.set(res.token);
+    if (res?.token) await tokenStore.set(res.token);
     return res;
   },
 
@@ -166,11 +164,11 @@ export const api = {
       const res = await apiRequest("GET", "/api/auth/me");
       if (res?.agent) {
         await agentCache.set(res.agent);
-        if (res?.token && Platform.OS !== "web") await tokenStore.set(res.token);
+        if (res?.token) await tokenStore.set(res.token);
       }
       return res;
     } catch (e: any) {
-      if (Platform.OS !== "web" && e?.message !== "Unauthorized") {
+      if (e?.message !== "Unauthorized") {
         const cached = await agentCache.get();
         if (cached) return { agent: cached };
       }
