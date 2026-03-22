@@ -45,8 +45,9 @@ module.exports = ({ config }) => {
       bundler: "metro",
       favicon: "./assets/images/dhanraj-logo.png",
       output: "static",
-      // ✅ FIX: "/" for Railway, "/Dhanraj/" for GitHub Pages
-      baseUrl: process.env.EXPO_PUBLIC_BASE_URL || "/Dhanraj/",
+      // ✅ FIX: Railway serves from "/" — baseUrl must be "/" not "/Dhanraj/"
+      // Only use "/Dhanraj/" when deploying to GitHub Pages
+      baseUrl: process.env.EXPO_PUBLIC_BASE_URL || "/",
     },
     plugins: [
       "expo-router",
