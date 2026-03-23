@@ -10,7 +10,6 @@ import Colors from "@/constants/colors";
 import { getApiUrl } from "@/lib/query-client";
 
 const n = (v: any) => parseFloat(v) || 0;
-const ni = (v: any) => parseInt(v) || 0;
 
 const fmt = (v: number) =>
   v >= 10000000 ? `₹${(v / 10000000).toFixed(2)}Cr`
@@ -107,17 +106,19 @@ const pc = StyleSheet.create({
 });
 
 function SummaryBktBlock({ row }: { row: any }) {
-  const rawBkt  = String(row.bkt || "").toLowerCase().replace(/[\s_]/g, "");
-  const color   = getBktColor(rawBkt);
-  const label   = getBktLabel(rawBkt);
-  const targets = BKT_TARGETS[rawBkt] || null;
+  const rawBkt   = String(row.bkt || "").toLowerCase().replace(/[\s_]/g, "");
+  const color    = getBktColor(rawBkt);
+  const label    = getBktLabel(rawBkt);
+  const targets  = BKT_TARGETS[rawBkt] || null;
 
-  // TW counts
-  const twPaid   = ni(row.count_paid   ?? 0);
-  const twUnpaid = ni(row.count_unpaid ?? 0);
-  const twTotal  = ni(row.count_total  ?? 0);
+  // Non-penal only
+  const posPaid       = n(row.pos_paid        ?? 0);
+  const posGrandTotal = n(row.pos_grand_total ?? 0);
+  const posUnpaid     = n(row.pos_unpaid      ?? 0);
+  const resPct        = posGrandTotal > 0 ? (posPaid / posGrandTotal) * 100 : 0;
+  const reqRes        = targets && posGrandTotal > 0
+    ? Math.max(0, (targets.resolution / 100) * posGrandTotal - posPaid) : null;
 
-  // Rollback
   const rbPaid       = n(row.rollback_paid        ?? 0);
   const rbGrandTotal = n(row.rollback_grand_total ?? 0);
   const rbPct        = rbGrandTotal > 0 ? (rbPaid / rbGrandTotal) * 100 : 0;
@@ -127,27 +128,41 @@ function SummaryBktBlock({ row }: { row: any }) {
   return (
     <View style={[sb.block, { borderTopColor: color }]}>
       <Text style={[sb.cat, { color }]}>{label}</Text>
+      <Text style={[sb.pct, { color }]}>{resPct.toFixed(1)}%</Text>
+      <MiniBar pct={resPct} color={color} targetPct={targets?.resolution} />
 
-      {/* TW — Total Workable */}
-      <Text style={[sb.sectionLbl, { color }]}>TW</Text>
+      <Text style={[sb.sectionLbl, { color: Colors.primary }]}>POS</Text>
       <View style={sb.row}>
         <Text style={sb.lbl}>Paid</Text>
-        <Text style={[sb.amt, { color: Colors.success }]}>{twPaid}</Text>
+        <Text style={[sb.amt, { color: Colors.success }]}>{fmt(posPaid)}</Text>
       </View>
       <View style={sb.row}>
         <Text style={sb.lbl}>Unpaid</Text>
-        <Text style={[sb.amt, { color: Colors.danger }]}>{twUnpaid}</Text>
+        <Text style={[sb.amt, { color: Colors.danger }]}>{fmt(posUnpaid)}</Text>
       </View>
       <View style={sb.row}>
         <Text style={sb.lbl}>Total</Text>
-        <Text style={[sb.amt, { color }]}>{twTotal}</Text>
+        <Text style={[sb.amt, { color }]}>{fmt(posGrandTotal)}</Text>
       </View>
 
-      {/* Rollback */}
+      <Text style={[sb.sectionLbl, { color: Colors.success }]}>
+        Resolution{targets ? ` (T:${targets.resolution}%)` : ""}
+      </Text>
+      <View style={sb.row}>
+        <Text style={sb.lbl}>Res %</Text>
+        <Text style={[sb.amt, { color: Colors.success }]}>{resPct.toFixed(1)}%</Text>
+      </View>
+      <View style={sb.row}>
+        <Text style={sb.lbl}>Req</Text>
+        <Text style={[sb.amt, { color: reqRes === 0 ? Colors.success : Colors.danger }]}>
+          {reqRes === null ? "—" : reqRes === 0 ? "✓" : fmt(reqRes)}
+        </Text>
+      </View>
+
       {targets?.rollback != null && (
         <>
           <Text style={[sb.sectionLbl, { color: Colors.info }]}>
-            RB (T:{targets.rollback}%)
+            Rollback (T:{targets.rollback}%)
           </Text>
           <MiniBar pct={rbPct} color={Colors.info} targetPct={targets.rollback} />
           <View style={sb.row}>
@@ -165,13 +180,13 @@ function SummaryBktBlock({ row }: { row: any }) {
     </View>
   );
 }
-
 const sb = StyleSheet.create({
   block: { flex: 1, minWidth: "22%", backgroundColor: Colors.background, borderRadius: 10, borderTopWidth: 3, padding: 8, gap: 3 },
   cat: { fontSize: 10, fontWeight: "800", textTransform: "uppercase" },
   row: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   lbl: { fontSize: 9, color: Colors.textMuted, fontWeight: "600" },
   amt: { fontSize: 10, fontWeight: "800" },
+  pct: { fontSize: 15, fontWeight: "900", textAlign: "center" },
   sectionLbl: { fontSize: 8, fontWeight: "900", textTransform: "uppercase", letterSpacing: 0.3, marginTop: 2 },
 });
 
@@ -245,8 +260,8 @@ export default function AdminBktPerformance() {
             const rows: any[] = summaryByFos[fosKey] || [];
             const displayName = rows[0]?.fos_name || fosKey;
             const allRows = [...rows].sort((a, b) => String(a.bkt).localeCompare(String(b.bkt)));
-            const bktRows  = allRows.filter(r => String(r.bkt).toLowerCase().replace(/[\s_]/g,"") !== "penal");
-            const penalRow = allRows.find(r => String(r.bkt).toLowerCase().replace(/[\s_]/g,"") === "penal");
+            const bktRows   = allRows.filter(r => String(r.bkt).toLowerCase().replace(/[\s_]/g,"") !== "penal");
+            const penalRow  = allRows.find(r => String(r.bkt).toLowerCase().replace(/[\s_]/g,"") === "penal");
 
             return (
               <View style={styles.agentCard}>
@@ -274,7 +289,7 @@ export default function AdminBktPerformance() {
             <View style={styles.empty}>
               <Ionicons name="bar-chart-outline" size={48} color={Colors.textMuted} />
               <Text style={styles.emptyText}>
-                No BKT cases found.{"\n"}Import allocation data to see performance here.
+                No BKT cases found.{"\n"}Import BKT case data to see performance here.
               </Text>
             </View>
           }
@@ -290,14 +305,20 @@ const styles = StyleSheet.create({
   searchInput: { flex: 1, fontSize: 14, color: Colors.text, paddingVertical: 0 },
   countBadge: { alignSelf: "flex-start" },
   countText: { fontSize: 11, color: Colors.textMuted, fontWeight: "600" },
+
   center: { flex: 1, justifyContent: "center", alignItems: "center" },
   blocksRow: { flexDirection: "row", gap: 8, flexWrap: "wrap" },
+
   agentCard: { backgroundColor: Colors.surface, borderRadius: 16, padding: 14, gap: 10, shadowColor: "#000", shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 1 },
   agentHeader: { flexDirection: "row", alignItems: "center", gap: 10 },
   agentAvatar: { width: 38, height: 38, borderRadius: 19, backgroundColor: Colors.primary, justifyContent: "center", alignItems: "center" },
   agentAvatarText: { color: "#fff", fontWeight: "800", fontSize: 16 },
   agentName: { fontSize: 14, fontWeight: "700", color: Colors.text },
   empId: { fontSize: 11, color: Colors.textMuted },
+
   empty: { flex: 1, alignItems: "center", justifyContent: "center", paddingVertical: 80, gap: 12 },
   emptyText: { fontSize: 14, color: Colors.textMuted, textAlign: "center", lineHeight: 22 },
+
+  subSectionLabel: { fontSize: 10, fontWeight: "800", color: Colors.textSecondary, textTransform: "uppercase", letterSpacing: 0.5 },
+  noData: { fontSize: 12, color: Colors.textMuted, textAlign: "center", paddingVertical: 8 },
 });
