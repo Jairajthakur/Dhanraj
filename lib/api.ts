@@ -189,6 +189,11 @@ export const api = {
   // ✅ ADDED: fetch a single case by ID
   getCaseById: (id: number) => apiRequest("GET", `/api/cases/${id}`),
 
+  // ✅ ADDED: profile & photo (used by id-card screen)
+  getProfile: () => apiRequest("GET", "/api/profile"),
+  saveProfilePhoto: (photoDataUri: string) =>
+    apiRequest("POST", "/api/profile/photo", { photo: photoDataUri }),
+
   getBktCases: (category?: string) =>
     apiRequest("GET", `/api/bkt-cases${category ? `?category=${category}` : ""}`),
   getStats: () => apiRequest("GET", "/api/stats"),
