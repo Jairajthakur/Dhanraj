@@ -1,6 +1,13 @@
 import React from "react";
 import {
-  View, Text, StyleSheet, ScrollView, Pressable, Linking, ActivityIndicator, Platform
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  Pressable,
+  Linking,
+  ActivityIndicator,
+  Platform,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -18,27 +25,65 @@ const STATUS_COLORS: Record<string, string> = {
 function fmt(v: any, prefix = "") {
   if (v === null || v === undefined || v === "") return "—";
   const n = parseFloat(v);
-  if (!isNaN(n) && prefix) return prefix + n.toLocaleString("en-IN", { maximumFractionDigits: 2 });
+  if (!isNaN(n) && prefix)
+    return prefix + n.toLocaleString("en-IN", { maximumFractionDigits: 2 });
   return String(v);
 }
 
-function Row({ label, value, phone, highlight }: { label: string; value?: any; phone?: boolean; highlight?: string }) {
-  const display = (value !== null && value !== undefined && value !== "") ? String(value) : "—";
+function Row({
+  label,
+  value,
+  phone,
+  highlight,
+}: {
+  label: string;
+  value?: any;
+  phone?: boolean;
+  highlight?: string;
+}) {
+  const display =
+    value !== null && value !== undefined && value !== ""
+      ? String(value)
+      : "—";
   return (
     <View style={styles.row}>
       <Text style={styles.rowLabel}>{label}</Text>
       {phone && display !== "—" ? (
-        <Pressable onPress={() => Linking.openURL(`tel:${display.split(",")[0].trim()}`)}>
-          <Text style={[styles.rowValue, { color: Colors.info, textDecorationLine: "underline" }]}>{display}</Text>
+        <Pressable
+          onPress={() =>
+            Linking.openURL(`tel:${display.split(",")[0].trim()}`)
+          }
+        >
+          <Text
+            style={[
+              styles.rowValue,
+              { color: Colors.info, textDecorationLine: "underline" },
+            ]}
+          >
+            {display}
+          </Text>
         </Pressable>
       ) : (
-        <Text style={[styles.rowValue, highlight ? { color: highlight, fontWeight: "700" } : undefined]}>{display}</Text>
+        <Text
+          style={[
+            styles.rowValue,
+            highlight ? { color: highlight, fontWeight: "700" } : undefined,
+          ]}
+        >
+          {display}
+        </Text>
       )}
     </View>
   );
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function Section({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}) {
   return (
     <View style={styles.section}>
       <Text style={styles.sectionTitle}>{title}</Text>
@@ -52,32 +97,107 @@ export default function CustomerDetailScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["/api/cases", id],
     queryFn: () => api.getCaseById(Number(id)),
+    retry: 1,
   });
 
+  // ── Loading ──────────────────────────────────────────────────────────────
   if (isLoading) {
     return (
-      <View style={{ flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: Colors.background }}>
+      <View
+        style={{
+          flex: 1,
+          justifyContent: "center",
+          alignItems: "center",
+          backgroundColor: Colors.background,
+        }}
+      >
         <ActivityIndicator color={Colors.primary} size="large" />
       </View>
     );
   }
 
-  const c = data?.case;
-  if (!c) return null;
+  // ── Error ────────────────────────────────────────────────────────────────
+  if (isError) {
+    return (
+      <View style={styles.centerState}>
+        <View style={styles.stateIconWrap}>
+          <Ionicons name="wifi-outline" size={36} color={Colors.danger} />
+        </View>
+        <Text style={[styles.stateTitle, { color: Colors.danger }]}>
+          Failed to load
+        </Text>
+        <Text style={styles.stateSubtitle}>
+          {(error as any)?.message || "Something went wrong"}
+        </Text>
+        <Pressable style={styles.retryBtn} onPress={() => refetch()}>
+          <Ionicons name="refresh" size={16} color="#fff" />
+          <Text style={styles.retryText}>Try Again</Text>
+        </Pressable>
+        <Pressable onPress={() => router.back()} style={{ marginTop: 12 }}>
+          <Text style={{ color: Colors.primary, fontWeight: "700", fontSize: 14 }}>
+            ← Go Back
+          </Text>
+        </Pressable>
+      </View>
+    );
+  }
+
+  // ── No data ──────────────────────────────────────────────────────────────
+  // Handles both: data?.case (server returns { case: {...} })
+  // and data itself being the case object (server returns case directly)
+  const c = data?.case ?? (data?.id ? data : null);
+
+  if (!c) {
+    return (
+      <View style={styles.centerState}>
+        <View style={styles.stateIconWrap}>
+          <Ionicons
+            name="document-outline"
+            size={36}
+            color={Colors.textMuted}
+          />
+        </View>
+        <Text style={styles.stateTitle}>No data found</Text>
+        <Text style={styles.stateSubtitle}>Case ID: {id}</Text>
+        <Pressable onPress={() => router.back()} style={{ marginTop: 16 }}>
+          <Text style={{ color: Colors.primary, fontWeight: "700", fontSize: 14 }}>
+            ← Go Back
+          </Text>
+        </Pressable>
+      </View>
+    );
+  }
 
   const statusColor = STATUS_COLORS[c.status] || Colors.textSecondary;
 
   return (
     <ScrollView
       style={{ flex: 1, backgroundColor: Colors.background }}
-      contentContainerStyle={[styles.container, { paddingBottom: insets.bottom + 32, paddingTop: Platform.OS === "web" ? 67 : 0 }]}
+      contentContainerStyle={[
+        styles.container,
+        {
+          paddingBottom: insets.bottom + 32,
+          paddingTop: Platform.OS === "web" ? 67 : 0,
+        },
+      ]}
     >
-      <View style={[styles.statusBanner, { borderColor: statusColor + "40", backgroundColor: statusColor + "15" }]}>
+      {/* Status banner */}
+      <View
+        style={[
+          styles.statusBanner,
+          {
+            borderColor: statusColor + "40",
+            backgroundColor: statusColor + "15",
+          },
+        ]}
+      >
         <View style={[styles.statusDot, { backgroundColor: statusColor }]} />
-        <Text style={[styles.statusLabel, { color: statusColor }]}>{c.status}</Text>
+        <Text style={[styles.statusLabel, { color: statusColor }]}>
+          {c.status}
+        </Text>
         {c.latest_feedback && (
           <View style={styles.fbBadge}>
             <Text style={styles.fbText}>{c.latest_feedback}</Text>
@@ -108,13 +228,25 @@ export default function CustomerDetailScreen() {
 
       <Section title="Payment Details">
         <Row label="EMI AMOUNT" value={fmt(c.emi_amount, "₹")} />
-        <Row label="EMI DUE" value={fmt(c.emi_due, "₹")} highlight={Colors.danger} />
+        <Row
+          label="EMI DUE"
+          value={fmt(c.emi_due, "₹")}
+          highlight={Colors.danger}
+        />
         <Row label="POS" value={fmt(c.pos, "₹")} />
         <Row label="CBC" value={fmt(c.cbc, "₹")} />
         <Row label="LPP" value={fmt(c.lpp, "₹")} />
-        <Row label="CBC + LPP" value={fmt(c.cbc_lpp, "₹")} highlight={Colors.warning} />
+        <Row
+          label="CBC + LPP"
+          value={fmt(c.cbc_lpp, "₹")}
+          highlight={Colors.warning}
+        />
         <Row label="ROLLBACK" value={fmt(c.rollback, "₹")} />
-        <Row label="CLEARANCE" value={fmt(c.clearance, "₹")} highlight={Colors.success} />
+        <Row
+          label="CLEARANCE"
+          value={fmt(c.clearance, "₹")}
+          highlight={Colors.success}
+        />
       </Section>
 
       <Section title="Important Dates">
@@ -137,7 +269,9 @@ export default function CustomerDetailScreen() {
         {c.mobile_no && (
           <Pressable
             style={[styles.callBtn, { flex: 1 }]}
-            onPress={() => Linking.openURL(`tel:${c.mobile_no.split(",")[0].trim()}`)}
+            onPress={() =>
+              Linking.openURL(`tel:${c.mobile_no.split(",")[0].trim()}`)
+            }
           >
             <Ionicons name="call" size={20} color="#fff" />
             <Text style={styles.callBtnText}>Call</Text>
@@ -150,46 +284,136 @@ export default function CustomerDetailScreen() {
 
 const styles = StyleSheet.create({
   container: { padding: 16, gap: 12 },
+
+  // ── States ─────────────────────────────────────────────────────────────────
+  centerState: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: Colors.background,
+    padding: 32,
+    gap: 8,
+  },
+  stateIconWrap: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: Colors.surface,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  stateTitle: {
+    fontSize: 17,
+    fontWeight: "700",
+    color: Colors.text,
+    marginTop: 4,
+  },
+  stateSubtitle: {
+    fontSize: 13,
+    color: Colors.textSecondary,
+    textAlign: "center",
+    marginTop: 2,
+  },
+  retryBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: Colors.primary,
+    borderRadius: 12,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    marginTop: 12,
+  },
+  retryText: {
+    color: "#fff",
+    fontWeight: "700",
+    fontSize: 14,
+  },
+
+  // ── Content ────────────────────────────────────────────────────────────────
   statusBanner: {
-    flexDirection: "row", alignItems: "center", gap: 10,
-    padding: 12, borderRadius: 12, borderWidth: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    padding: 12,
+    borderRadius: 12,
+    borderWidth: 1,
   },
   statusDot: { width: 8, height: 8, borderRadius: 4 },
   statusLabel: { fontSize: 15, fontWeight: "700" },
   fbBadge: {
-    marginLeft: "auto", backgroundColor: "rgba(0,0,0,0.07)",
-    borderRadius: 8, paddingHorizontal: 10, paddingVertical: 3,
+    marginLeft: "auto",
+    backgroundColor: "rgba(0,0,0,0.07)",
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 3,
   },
   fbText: { fontSize: 12, fontWeight: "600", color: Colors.text },
   commentBox: {
-    backgroundColor: Colors.surface, borderRadius: 10, padding: 12,
-    borderLeftWidth: 3, borderLeftColor: Colors.primary,
+    backgroundColor: Colors.surface,
+    borderRadius: 10,
+    padding: 12,
+    borderLeftWidth: 3,
+    borderLeftColor: Colors.primary,
   },
-  commentText: { fontSize: 13, color: Colors.textSecondary, lineHeight: 19 },
+  commentText: {
+    fontSize: 13,
+    color: Colors.textSecondary,
+    lineHeight: 19,
+  },
   section: {
-    backgroundColor: Colors.surface, borderRadius: 12, overflow: "hidden",
-    borderWidth: 1, borderColor: Colors.border,
+    backgroundColor: Colors.surface,
+    borderRadius: 12,
+    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: Colors.border,
   },
   sectionTitle: {
-    fontSize: 11, fontWeight: "700", color: Colors.textSecondary,
-    textTransform: "uppercase", letterSpacing: 0.8,
-    paddingHorizontal: 14, paddingVertical: 8,
-    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: Colors.border,
+    fontSize: 11,
+    fontWeight: "700",
+    color: Colors.textSecondary,
+    textTransform: "uppercase",
+    letterSpacing: 0.8,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: Colors.border,
   },
   table: {},
   row: {
-    flexDirection: "row", justifyContent: "space-between", alignItems: "center",
-    paddingHorizontal: 14, paddingVertical: 10,
-    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: Colors.border,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: Colors.border,
   },
-  rowLabel: { fontSize: 12, color: Colors.textSecondary, fontWeight: "600", flex: 1 },
-  rowValue: { fontSize: 13, color: Colors.text, fontWeight: "500", flex: 1.5, textAlign: "right" },
-  actionRow: {
-    flexDirection: "row", gap: 10,
+  rowLabel: {
+    fontSize: 12,
+    color: Colors.textSecondary,
+    fontWeight: "600",
+    flex: 1,
   },
+  rowValue: {
+    fontSize: 13,
+    color: Colors.text,
+    fontWeight: "500",
+    flex: 1.5,
+    textAlign: "right",
+  },
+  actionRow: { flexDirection: "row", gap: 10 },
   callBtn: {
-    backgroundColor: Colors.primary, borderRadius: 14, padding: 15,
-    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8,
+    backgroundColor: Colors.primary,
+    borderRadius: 14,
+    padding: 15,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
   },
   callBtnText: { color: "#fff", fontSize: 15, fontWeight: "700" },
 });
