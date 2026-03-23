@@ -5,7 +5,52 @@ import * as fs from "fs";
 import * as path from "path";
 
 const app = express();
+
+// ─── Betterstack Logging ──────────────────────────────────────────────────────
+const BETTERSTACK_TOKEN = process.env.BETTERSTACK_SOURCE_TOKEN || "";
+
+const sendToBetterstack = async (level: string, message: string, extra: Record<string, unknown> = {}) => {
+  if (!BETTERSTACK_TOKEN) return;
+  try {
+    await fetch("https://in.logs.betterstack.com", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${BETTERSTACK_TOKEN}`,
+      },
+      body: JSON.stringify({
+        level,
+        message,
+        timestamp: new Date().toISOString(),
+        service: "dhanraj-railway",
+        ...extra,
+      }),
+    });
+  } catch (_) {
+    // Never let logging crash the app
+  }
+};
+
+// Override console.log and console.error to forward to Betterstack
+const _log = console.log.bind(console);
+const _error = console.error.bind(console);
+const _warn = console.warn.bind(console);
+
+console.log = (...args: unknown[]) => {
+  _log(...args);
+  sendToBetterstack("info", args.map(String).join(" "));
+};
+console.error = (...args: unknown[]) => {
+  _error(...args);
+  sendToBetterstack("error", args.map(String).join(" "));
+};
+console.warn = (...args: unknown[]) => {
+  _warn(...args);
+  sendToBetterstack("warn", args.map(String).join(" "));
+};
+
 const log = console.log;
+// ─────────────────────────────────────────────────────────────────────────────
 
 // Prevent crashes from unhandled rejections
 process.on("unhandledRejection", (reason) => {
@@ -100,6 +145,16 @@ function setupRequestLogging(app: express.Application) {
         logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
       }
       if (logLine.length > 80) logLine = logLine.slice(0, 79) + "…";
+
+      // ✅ Send API request logs to Betterstack with extra metadata
+      const level = res.statusCode >= 500 ? "error" : res.statusCode >= 400 ? "warn" : "info";
+      sendToBetterstack(level, logLine, {
+        method: req.method,
+        path: reqPath,
+        status: res.statusCode,
+        duration_ms: duration,
+      });
+
       log(logLine);
     });
 
@@ -139,13 +194,8 @@ function configureExpoAndLanding(app: express.Application) {
   if (webBuildExists) {
     log(`[web] ✅ Web build found at: ${webBuildPath}`);
 
-    // Serve all static assets from static-build (JS, CSS, images etc.)
-    app.use(express.static(webBuildPath, {
-      // Don't serve index.html for asset requests — let the catch-all below do it
-      index: false,
-    }));
+    app.use(express.static(webBuildPath, { index: false }));
 
-    // Handle Expo mobile manifest requests
     app.use((req: Request, res: Response, next: NextFunction) => {
       if (req.path.startsWith("/api")) return next();
 
@@ -154,8 +204,6 @@ function configureExpoAndLanding(app: express.Application) {
         return serveExpoManifest(platform, res);
       }
 
-      // SPA catch-all — serve index.html for ALL non-API routes
-      // This enables client-side routing (expo-router) to work on web
       return res.sendFile(webIndexPath);
     });
 
@@ -163,7 +211,6 @@ function configureExpoAndLanding(app: express.Application) {
     log("[web] ⚠️ Web build NOT found — serving API only");
     log(`[web] Expected at: ${webBuildPath}`);
 
-    // Fallback: serve a simple status page
     app.get("/", (_req: Request, res: Response) => {
       res.send(`<!DOCTYPE html>
 <html lang="en">
@@ -211,7 +258,6 @@ function setupErrorHandler(app: express.Application) {
   setupBodyParsing(app);
   setupRequestLogging(app);
 
-  // Health check routes (before everything else)
   app.get("/api/health", (_req, res) => {
     res.json({ status: "ok", timestamp: new Date().toISOString() });
   });
