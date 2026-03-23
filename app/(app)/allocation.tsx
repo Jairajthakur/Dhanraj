@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from "react";
 import {
-  View, Text, StyleSheet, FlatList, Pressable, TextInput, Linking, Alert, ActivityIndicator, Modal, ScrollView, Platform
+  View, Text, StyleSheet, FlatList, Pressable, TextInput, Linking,
+  Alert, ActivityIndicator, Modal, ScrollView, Platform
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -17,7 +18,6 @@ const STATUS_COLORS: Record<string, string> = {
   Paid: Colors.statusPaid,
 };
 
-// ✅ Detail feedback options per status
 const PAID_DETAIL_OPTIONS = ["PAID", "PART PAYMENT", "SETTLED"];
 const UNPAID_DETAIL_OPTIONS = [
   "CUSTOMER ALREADY PAID",
@@ -28,24 +28,45 @@ const UNPAID_DETAIL_OPTIONS = [
 ];
 const PTP_DETAIL_OPTIONS = ["PTP DATE SET", "WILL PAY TOMORROW", "WILL ARRANGE FUNDS", "CALL LATER"];
 
+// ✅ Monthly feedback options
+const MONTHLY_FEEDBACK_OPTIONS = [
+  "SWITCH OFF",
+  "NOT AVAILABLE",
+  "DISCONNECTED",
+  "REFUSED TO PAY",
+  "DISPUTED",
+  "NOT AT HOME",
+  "CUSTOMER MET - WILL PAY",
+  "CUSTOMER MET - REFUSED",
+  "PARTIAL PAYMENT DONE",
+  "RESCHEDULED",
+  "SKIP TRACE",
+  "LEGAL ACTION INITIATED",
+];
+
 const FEEDBACK_CODES = ["PAID", "RTP", "SKIP", "PTP", "CAVNA", "ANF", "EXP", "SFT", "VSL"];
 const PROJECTION_OPTIONS = ["ST", "RF", "RB"];
 
+// Current month label e.g. "March 2026"
+const CURRENT_MONTH = new Date().toLocaleString("en-IN", { month: "long", year: "numeric" });
+
 function fmt(v: any, prefix = "") {
   if (v === null || v === undefined || v === "") return "—";
-  const n = parseFloat(v);
+  const n = parseFloat(String(v).replace(/,/g, ""));
   if (!isNaN(n)) return prefix + n.toLocaleString("en-IN", { maximumFractionDigits: 0 });
   return String(v);
 }
 
+// ✅ Show raw text value for Rollback/Clearance from Excel
+function fmtRaw(v: any) {
+  if (v === null || v === undefined || v === "" || v === "0" || Number(v) === 0) return "—";
+  return String(v);
+}
+
 function YNToggle({
-  label,
-  value,
-  onChange,
+  label, value, onChange,
 }: {
-  label: string;
-  value: boolean | null;
-  onChange: (v: boolean | null) => void;
+  label: string; value: boolean | null; onChange: (v: boolean | null) => void;
 }) {
   return (
     <View style={{ marginBottom: 12 }}>
@@ -94,6 +115,13 @@ function FeedbackModal({ visible, caseItem, onClose, onSave, isLocked = false }:
   const [nonStarter, setNonStarter] = useState<boolean | null>(caseItem?.non_starter ?? null);
   const [kycPurchase, setKycPurchase] = useState<boolean | null>(caseItem?.kyc_purchase ?? null);
   const [workable, setWorkable] = useState<boolean | null>(caseItem?.workable ?? null);
+
+  // ✅ Monthly feedback state
+  const [monthlyFeedback, setMonthlyFeedback] = useState<string>(
+    caseItem?.monthly_feedback || ""
+  );
+  const [showMonthlyFeedback, setShowMonthlyFeedback] = useState(false);
+
   const [loading, setLoading] = useState(false);
 
   const handleStatusChange = (newStatus: string) => {
@@ -135,6 +163,7 @@ function FeedbackModal({ visible, caseItem, onClose, onSave, isLocked = false }:
         non_starter: nonStarter,
         kyc_purchase: kycPurchase,
         workable,
+        monthly_feedback: monthlyFeedback || null,
       });
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       onSave();
@@ -145,14 +174,6 @@ function FeedbackModal({ visible, caseItem, onClose, onSave, isLocked = false }:
       setLoading(false);
     }
   };
-
-  // Detail feedback options per status
-  const detailOptions =
-    status === "Paid" ? PAID_DETAIL_OPTIONS :
-    status === "PTP"  ? PTP_DETAIL_OPTIONS  : null;
-
-  // ✅ Show PTP options if feedback code is PTP (regardless of status)
-  const showPtpOptions = feedbackCode === "PTP" || status === "PTP";
 
   const renderDetailOptions = (options: string[], activeColor: string) => (
     <View style={{ gap: 8, marginBottom: 12 }}>
@@ -180,6 +201,65 @@ function FeedbackModal({ visible, caseItem, onClose, onSave, isLocked = false }:
     </View>
   );
 
+  // ✅ Monthly feedback section — shared across all statuses
+  const renderMonthlyFeedback = () => (
+    <View style={fbStyles.monthlySection}>
+      <Pressable
+        style={fbStyles.monthlySectionHeader}
+        onPress={() => setShowMonthlyFeedback(v => !v)}
+      >
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+          <Ionicons name="calendar-outline" size={16} color={Colors.primary} />
+          <Text style={fbStyles.monthlySectionTitle}>Monthly Feedback — {CURRENT_MONTH}</Text>
+        </View>
+        <Ionicons
+          name={showMonthlyFeedback ? "chevron-up" : "chevron-down"}
+          size={16}
+          color={Colors.textMuted}
+        />
+      </Pressable>
+      {monthlyFeedback ? (
+        <View style={fbStyles.monthlySelected}>
+          <Ionicons name="checkmark-circle" size={14} color={Colors.primary} />
+          <Text style={fbStyles.monthlySelectedText}>{monthlyFeedback}</Text>
+          <Pressable onPress={() => setMonthlyFeedback("")}>
+            <Ionicons name="close-circle" size={16} color={Colors.textMuted} />
+          </Pressable>
+        </View>
+      ) : null}
+      {showMonthlyFeedback && (
+        <View style={{ gap: 6, marginTop: 8 }}>
+          {MONTHLY_FEEDBACK_OPTIONS.map((opt) => (
+            <Pressable
+              key={opt}
+              style={[
+                fbStyles.monthlyOption,
+                monthlyFeedback === opt && {
+                  backgroundColor: Colors.primary + "18",
+                  borderColor: Colors.primary,
+                },
+              ]}
+              onPress={() => {
+                setMonthlyFeedback(monthlyFeedback === opt ? "" : opt);
+                setShowMonthlyFeedback(false);
+              }}
+            >
+              <Text style={[
+                fbStyles.monthlyOptionText,
+                monthlyFeedback === opt && { color: Colors.primary, fontWeight: "700" },
+              ]}>
+                {opt}
+              </Text>
+              {monthlyFeedback === opt && (
+                <Ionicons name="checkmark-circle" size={16} color={Colors.primary} />
+              )}
+            </Pressable>
+          ))}
+        </View>
+      )}
+    </View>
+  );
+
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <View style={fbStyles.overlay}>
@@ -190,7 +270,26 @@ function FeedbackModal({ visible, caseItem, onClose, onSave, isLocked = false }:
             {caseItem?.customer_name} · {caseItem?.loan_no}
           </Text>
 
-          {/* ✅ Locked banner */}
+          {/* ✅ Case info row — Rollback & Clearance from Excel */}
+          <View style={fbStyles.caseInfoRow}>
+            {caseItem?.rollback && fmtRaw(caseItem.rollback) !== "—" && (
+              <View style={[fbStyles.caseInfoChip, { backgroundColor: Colors.info + "18" }]}>
+                <Text style={fbStyles.caseInfoLabel}>ROLLBACK</Text>
+                <Text style={[fbStyles.caseInfoValue, { color: Colors.info }]}>
+                  {fmtRaw(caseItem.rollback)}
+                </Text>
+              </View>
+            )}
+            {caseItem?.clearance && fmtRaw(caseItem.clearance) !== "—" && (
+              <View style={[fbStyles.caseInfoChip, { backgroundColor: Colors.success + "18" }]}>
+                <Text style={fbStyles.caseInfoLabel}>CLEARANCE</Text>
+                <Text style={[fbStyles.caseInfoValue, { color: Colors.success }]}>
+                  {fmtRaw(caseItem.clearance)}
+                </Text>
+              </View>
+            )}
+          </View>
+
           {isLocked && (
             <View style={fbStyles.lockedBanner}>
               <Ionicons name="lock-closed" size={14} color={Colors.warning} />
@@ -221,16 +320,12 @@ function FeedbackModal({ visible, caseItem, onClose, onSave, isLocked = false }:
             </View>
           </ScrollView>
 
-          {/* ====== PAID LAYOUT ====== */}
+          {/* ====== PAID ====== */}
           {status === "Paid" && (
             <>
               <Text style={fbStyles.sectionLabel}>Detail Feedback</Text>
               {renderDetailOptions(PAID_DETAIL_OPTIONS, Colors.success)}
-
-              {/* Rollback */}
               <YNToggle label="Rollback" value={rollbackYn} onChange={setRollbackYn} />
-
-              {/* Comments */}
               <Text style={fbStyles.sectionLabel}>Comments (Optional)</Text>
               <TextInput
                 style={fbStyles.commentInput}
@@ -241,16 +336,15 @@ function FeedbackModal({ visible, caseItem, onClose, onSave, isLocked = false }:
                 multiline
                 numberOfLines={3}
               />
+              {renderMonthlyFeedback()}
             </>
           )}
 
-          {/* ====== PTP LAYOUT ====== */}
+          {/* ====== PTP ====== */}
           {status === "PTP" && (
             <>
               <Text style={fbStyles.sectionLabel}>Detail Feedback</Text>
               {renderDetailOptions(PTP_DETAIL_OPTIONS, Colors.statusPTP)}
-
-              {/* PTP Date */}
               <Text style={fbStyles.sectionLabel}>PTP Date</Text>
               <TextInput
                 style={[fbStyles.commentInput, { minHeight: 44, marginBottom: 12 }]}
@@ -260,11 +354,7 @@ function FeedbackModal({ visible, caseItem, onClose, onSave, isLocked = false }:
                 onChangeText={setPtpDate}
                 keyboardType="numeric"
               />
-
-              {/* Rollback */}
               <YNToggle label="Rollback" value={rollbackYn} onChange={setRollbackYn} />
-
-              {/* Comments */}
               <Text style={fbStyles.sectionLabel}>Comments (Optional)</Text>
               <TextInput
                 style={fbStyles.commentInput}
@@ -275,18 +365,19 @@ function FeedbackModal({ visible, caseItem, onClose, onSave, isLocked = false }:
                 multiline
                 numberOfLines={3}
               />
+              {renderMonthlyFeedback()}
             </>
           )}
 
-          {/* ====== UNPAID LAYOUT ====== */}
+          {/* ====== UNPAID ====== */}
           {status === "Unpaid" && (
             <>
               {isLocked ? (
-                /* ✅ Locked — show all fields as read-only display */
                 <View style={fbStyles.lockedFieldsContainer}>
                   {[
                     { label: "Feedback Code", value: caseItem?.feedback_code },
                     { label: "Detail Feedback", value: caseItem?.latest_feedback },
+                    { label: "Monthly Feedback", value: caseItem?.monthly_feedback },
                     { label: "Customer Available", value: caseItem?.customer_available === true ? "Y" : caseItem?.customer_available === false ? "N" : "" },
                     { label: "Vehicle Available", value: caseItem?.vehicle_available === true ? "Y" : caseItem?.vehicle_available === false ? "N" : "" },
                     { label: "Third Party", value: caseItem?.third_party === true ? "Y" : caseItem?.third_party === false ? "N" : "" },
@@ -303,8 +394,12 @@ function FeedbackModal({ visible, caseItem, onClose, onSave, isLocked = false }:
                   ))}
                 </View>
               ) : (
-                /* ✅ Unlocked — full Unpaid form */
                 <>
+                  {/* ✅ Monthly Feedback at top of Unpaid */}
+                  {renderMonthlyFeedback()}
+
+                  <View style={fbStyles.divider} />
+
                   <YNToggle label="Customer Available" value={customerAvailable} onChange={setCustomerAvailable} />
                   <YNToggle label="Vehicle Available" value={vehicleAvailable} onChange={setVehicleAvailable} />
                   <YNToggle label="Third Party" value={thirdParty} onChange={setThirdParty} />
@@ -350,7 +445,7 @@ function FeedbackModal({ visible, caseItem, onClose, onSave, isLocked = false }:
                     </View>
                   </ScrollView>
 
-                  {/* Detail Feedback — PTP options if feedback code is PTP, else unpaid options */}
+                  {/* Detail Feedback */}
                   <Text style={fbStyles.sectionLabel}>Detail Feedback</Text>
                   {feedbackCode === "PTP" ? (
                     <>
@@ -398,10 +493,7 @@ function FeedbackModal({ visible, caseItem, onClose, onSave, isLocked = false }:
                     ))}
                   </View>
 
-                  {/* Non Starter */}
                   <YNToggle label="Non Starter" value={nonStarter} onChange={setNonStarter} />
-
-                  {/* KYC Purchase */}
                   <YNToggle label="KYC Purchase" value={kycPurchase} onChange={setKycPurchase} />
 
                   {/* Workable */}
@@ -428,6 +520,9 @@ function FeedbackModal({ visible, caseItem, onClose, onSave, isLocked = false }:
                     })}
                   </View>
 
+                  {/* Rollback */}
+                  <YNToggle label="Rollback" value={rollbackYn} onChange={setRollbackYn} />
+
                   {/* Comments */}
                   <Text style={fbStyles.sectionLabel}>Comments (Optional)</Text>
                   <TextInput
@@ -453,7 +548,10 @@ function FeedbackModal({ visible, caseItem, onClose, onSave, isLocked = false }:
               onPress={save}
               disabled={loading}
             >
-              {loading ? <ActivityIndicator color="#fff" size="small" /> : <Text style={fbStyles.saveText}>Save</Text>}
+              {loading
+                ? <ActivityIndicator color="#fff" size="small" />
+                : <Text style={fbStyles.saveText}>Save</Text>
+              }
             </Pressable>
           </View>
           <View style={{ height: 40 }} />
@@ -462,7 +560,6 @@ function FeedbackModal({ visible, caseItem, onClose, onSave, isLocked = false }:
     </Modal>
   );
 }
-
 
 function CaseCard({ item, onFeedback }: { item: any; onFeedback: (item: any) => void }) {
   const call = () => {
@@ -474,6 +571,12 @@ function CaseCard({ item, onFeedback }: { item: any; onFeedback: (item: any) => 
   };
 
   const statusColor = STATUS_COLORS[item.status] || Colors.textMuted;
+
+  // ✅ Rollback and clearance from Excel — show actual text value
+  const rollbackRaw = fmtRaw(item.rollback);
+  const clearanceRaw = fmtRaw(item.clearance);
+  const hasRollback = rollbackRaw !== "—";
+  const hasClearance = clearanceRaw !== "—";
 
   return (
     <View style={styles.card}>
@@ -536,20 +639,33 @@ function CaseCard({ item, onFeedback }: { item: any; onFeedback: (item: any) => 
           </View>
         </View>
 
+        {/* ✅ Rollback & Clearance — show actual text from Excel */}
         <View style={styles.infoRow}>
-          <View style={styles.infoCell}>
+          <View style={[styles.infoCell, hasRollback && { borderWidth: 1, borderColor: Colors.info + "60" }]}>
             <Text style={styles.infoLabel}>ROLLBACK</Text>
-            <Text style={styles.infoValue}>{fmt(item.rollback, "₹")}</Text>
+            <Text style={[styles.infoValue, hasRollback && { color: Colors.info, fontWeight: "800" }]}>
+              {rollbackRaw}
+            </Text>
           </View>
-          <View style={styles.infoCell}>
+          <View style={[styles.infoCell, hasClearance && { borderWidth: 1, borderColor: Colors.success + "60" }]}>
             <Text style={styles.infoLabel}>CLEARANCE</Text>
-            <Text style={[styles.infoValue, { color: Colors.success }]}>{fmt(item.clearance, "₹")}</Text>
+            <Text style={[styles.infoValue, hasClearance && { color: Colors.success, fontWeight: "800" }]}>
+              {clearanceRaw}
+            </Text>
           </View>
           <View style={styles.infoCellSmall}>
             <Text style={styles.infoLabel}>TEN</Text>
             <Text style={styles.infoValue}>{item.tenor ?? "—"}</Text>
           </View>
         </View>
+
+        {/* ✅ Rollback YN badge — shown if FOS marked rollback */}
+        {item.rollback_yn === true && (
+          <View style={styles.rollbackYnBadge}>
+            <Ionicons name="refresh-circle" size={13} color={Colors.info} />
+            <Text style={styles.rollbackYnText}>Rollback Marked</Text>
+          </View>
+        )}
       </Pressable>
 
       {item.mobile_no && (
@@ -559,7 +675,7 @@ function CaseCard({ item, onFeedback }: { item: any; onFeedback: (item: any) => 
         </Pressable>
       )}
 
-      {/* ✅ Show feedback code + detail feedback */}
+      {/* Feedback code + detail */}
       {item.feedback_code && (
         <View style={styles.feedbackRow}>
           <Text style={styles.feedbackLabel}>FB Code: </Text>
@@ -570,25 +686,29 @@ function CaseCard({ item, onFeedback }: { item: any; onFeedback: (item: any) => 
         </View>
       )}
 
-      {/* ✅ Show PTP date prominently if set */}
+      {/* ✅ Monthly feedback badge */}
+      {item.monthly_feedback && (
+        <View style={styles.monthlyFeedbackRow}>
+          <Ionicons name="calendar-outline" size={13} color={Colors.primary} />
+          <Text style={styles.monthlyFeedbackText}>{item.monthly_feedback}</Text>
+        </View>
+      )}
+
+      {/* PTP date */}
       {item.ptp_date && (
         <View style={styles.ptpDateRow}>
           <Ionicons name="calendar" size={13} color={Colors.statusPTP} />
           <Text style={styles.ptpDateLabel}>PTP Date: </Text>
-          <Text style={styles.ptpDateValue}>
-            {String(item.ptp_date).slice(0, 10)}
-          </Text>
+          <Text style={styles.ptpDateValue}>{String(item.ptp_date).slice(0, 10)}</Text>
         </View>
       )}
 
-      {/* ✅ Show telecaller PTP date if set */}
+      {/* Telecaller PTP */}
       {item.telecaller_ptp_date && (
-        <View style={styles.ptpDateRow}>
+        <View style={[styles.ptpDateRow, { backgroundColor: Colors.info + "12" }]}>
           <Ionicons name="calendar-outline" size={13} color={Colors.info} />
           <Text style={[styles.ptpDateLabel, { color: Colors.info }]}>Telecaller PTP: </Text>
-          <Text style={[styles.ptpDateValue, { color: Colors.info }]}>
-            {String(item.telecaller_ptp_date).slice(0, 10)}
-          </Text>
+          <Text style={[styles.ptpDateValue, { color: Colors.info }]}>{String(item.telecaller_ptp_date).slice(0, 10)}</Text>
         </View>
       )}
 
@@ -636,13 +756,12 @@ export default function AllocationScreen() {
     const cases = data?.cases || [];
     return cases
       .filter((c: any) => c.status === activeTab)
-      .filter(
-        (c: any) =>
-          !search ||
-          c.customer_name?.toLowerCase().includes(search.toLowerCase()) ||
-          c.loan_no?.toLowerCase().includes(search.toLowerCase()) ||
-          c.app_id?.toLowerCase().includes(search.toLowerCase()) ||
-          c.registration_no?.toLowerCase().includes(search.toLowerCase())
+      .filter((c: any) =>
+        !search ||
+        c.customer_name?.toLowerCase().includes(search.toLowerCase()) ||
+        c.loan_no?.toLowerCase().includes(search.toLowerCase()) ||
+        c.app_id?.toLowerCase().includes(search.toLowerCase()) ||
+        c.registration_no?.toLowerCase().includes(search.toLowerCase())
       );
   }, [data, activeTab, search]);
 
@@ -668,18 +787,8 @@ export default function AllocationScreen() {
             onPress={() => setActiveTab(tab)}
           >
             <Text style={[styles.tabText, activeTab === tab && styles.tabTextActive]}>{tab}</Text>
-            <View
-              style={[
-                styles.tabCount,
-                activeTab === tab && { backgroundColor: "rgba(255,255,255,0.3)" },
-              ]}
-            >
-              <Text
-                style={[
-                  styles.tabCountText,
-                  activeTab === tab && { color: "#fff" },
-                ]}
-              >
+            <View style={[styles.tabCount, activeTab === tab && { backgroundColor: "rgba(255,255,255,0.3)" }]}>
+              <Text style={[styles.tabCountText, activeTab === tab && { color: "#fff" }]}>
                 {counts[tab as keyof typeof counts]}
               </Text>
             </View>
@@ -787,7 +896,20 @@ const styles = StyleSheet.create({
   feedbackRow: { flexDirection: "row", alignItems: "center", flexWrap: "wrap" },
   feedbackLabel: { fontSize: 12, color: Colors.textSecondary, fontWeight: "600" },
   feedbackValue: { fontSize: 12, color: Colors.text, fontWeight: "500" },
-  // ✅ PTP date row
+  // ✅ Monthly feedback badge on card
+  monthlyFeedbackRow: {
+    flexDirection: "row", alignItems: "center", gap: 6,
+    backgroundColor: Colors.primary + "12", borderRadius: 8,
+    paddingHorizontal: 10, paddingVertical: 5,
+  },
+  monthlyFeedbackText: { fontSize: 12, color: Colors.primary, fontWeight: "600", flex: 1 },
+  // ✅ Rollback YN badge
+  rollbackYnBadge: {
+    flexDirection: "row", alignItems: "center", gap: 5,
+    backgroundColor: Colors.info + "15", borderRadius: 8,
+    paddingHorizontal: 10, paddingVertical: 4, alignSelf: "flex-start",
+  },
+  rollbackYnText: { fontSize: 11, color: Colors.info, fontWeight: "700" },
   ptpDateRow: {
     flexDirection: "row", alignItems: "center", gap: 5,
     backgroundColor: Colors.statusPTP + "12", borderRadius: 8,
@@ -817,8 +939,32 @@ const fbStyles = StyleSheet.create({
   },
   handle: { width: 40, height: 4, backgroundColor: Colors.border, borderRadius: 2, alignSelf: "center", marginBottom: 12 },
   title: { fontSize: 20, fontWeight: "700", color: Colors.text, marginBottom: 4 },
-  customerName: { fontSize: 13, color: Colors.textSecondary, marginBottom: 12, textTransform: "uppercase" },
+  customerName: { fontSize: 13, color: Colors.textSecondary, marginBottom: 8, textTransform: "uppercase" },
   sectionLabel: { fontSize: 13, fontWeight: "700", color: Colors.textSecondary, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 8 },
+  divider: { height: 1, backgroundColor: Colors.border, marginVertical: 12 },
+
+  // ✅ Case info chips (Rollback/Clearance from Excel shown in modal header)
+  caseInfoRow: { flexDirection: "row", gap: 8, marginBottom: 12 },
+  caseInfoChip: {
+    flex: 1, borderRadius: 10, padding: 10, gap: 2,
+  },
+  caseInfoLabel: { fontSize: 9, fontWeight: "700", color: Colors.textMuted, textTransform: "uppercase" },
+  caseInfoValue: { fontSize: 13, fontWeight: "800" },
+
+  lockedBanner: {
+    flexDirection: "row", alignItems: "center", gap: 8,
+    backgroundColor: Colors.warning + "18", borderRadius: 10,
+    padding: 10, marginBottom: 12,
+  },
+  lockedText: { flex: 1, fontSize: 12, color: Colors.warning, fontWeight: "600" },
+  lockedFieldsContainer: { gap: 8, marginBottom: 12 },
+  lockedField: {
+    flexDirection: "row", justifyContent: "space-between", alignItems: "center",
+    backgroundColor: Colors.surfaceAlt, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10,
+  },
+  lockedFieldLabel: { fontSize: 12, color: Colors.textSecondary, fontWeight: "600" },
+  lockedFieldValue: { fontSize: 13, color: Colors.text, fontWeight: "700" },
+
   tabChip: {
     paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20,
     backgroundColor: Colors.surfaceAlt, borderWidth: 1, borderColor: Colors.border,
@@ -829,15 +975,12 @@ const fbStyles = StyleSheet.create({
     borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.surfaceAlt,
   },
   feedbackOptionText: { fontSize: 14, fontWeight: "600", color: Colors.text },
-  // ✅ New detail option button style
   detailOptionBtn: {
     flexDirection: "row", alignItems: "center", justifyContent: "space-between",
     paddingVertical: 14, paddingHorizontal: 16, borderRadius: 12,
     borderWidth: 1.5, borderColor: Colors.border, backgroundColor: Colors.surfaceAlt,
   },
-  detailOptionDot: {
-    width: 10, height: 10, borderRadius: 5, backgroundColor: Colors.border,
-  },
+  detailOptionDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: Colors.border },
   detailOptionText: { fontSize: 14, fontWeight: "600", color: Colors.text },
   commentInput: {
     borderWidth: 1, borderColor: Colors.border, borderRadius: 12, padding: 12,
@@ -852,4 +995,29 @@ const fbStyles = StyleSheet.create({
   cancelText: { fontSize: 15, fontWeight: "600", color: Colors.textSecondary },
   saveBtn: { flex: 2, paddingVertical: 14, borderRadius: 12, alignItems: "center" },
   saveText: { fontSize: 15, fontWeight: "700", color: "#fff" },
+
+  // ✅ Monthly feedback styles
+  monthlySection: {
+    borderWidth: 1, borderColor: Colors.border, borderRadius: 14,
+    overflow: "hidden", marginBottom: 12,
+  },
+  monthlySectionHeader: {
+    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
+    paddingHorizontal: 14, paddingVertical: 12, backgroundColor: Colors.surfaceAlt,
+  },
+  monthlySectionTitle: { fontSize: 13, fontWeight: "700", color: Colors.text },
+  monthlySelected: {
+    flexDirection: "row", alignItems: "center", gap: 6,
+    paddingHorizontal: 14, paddingVertical: 8,
+    backgroundColor: Colors.primary + "10",
+  },
+  monthlySelectedText: { flex: 1, fontSize: 13, color: Colors.primary, fontWeight: "600" },
+  monthlyOption: {
+    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
+    paddingVertical: 11, paddingHorizontal: 14,
+    borderWidth: 1, borderColor: Colors.border,
+    borderRadius: 10, backgroundColor: Colors.surfaceAlt,
+    marginHorizontal: 8,
+  },
+  monthlyOptionText: { fontSize: 13, color: Colors.text, fontWeight: "600" },
 });
