@@ -196,7 +196,6 @@ export default function AdminDashboard() {
     retry: 2,
   });
 
-  // Handle all possible API response shapes
   const stats = (() => {
     if (!data) return [];
     if (Array.isArray(data)) return data;
@@ -231,9 +230,6 @@ export default function AdminDashboard() {
   );
 
   return (
-    // ✅ KEY FIX: <View style={styles.outerWrap}> replaces bare <> fragment.
-    // On web, <> renders as a plain div with no height, so flex:1 on ScrollView
-    // has nothing to expand into — collapsing the content to 0px (blank screen).
     <View style={styles.outerWrap}>
       <ScrollView
         style={styles.scroll}
@@ -248,19 +244,19 @@ export default function AdminDashboard() {
             <Ionicons name="cloud-upload" size={28} color="#fff" />
             <View style={styles.importBannerText}>
               <Text style={styles.importBannerTitle}>Import Allocation Data</Text>
-              <Text style={styles.importBannerSub}>Upload allocation file to sync cases & create FOS users</Text>
+              <Text style={styles.importBannerSub}>Upload allocation file to sync cases & create FOS users. BKT1/2/3 performance auto-updates.</Text>
             </View>
           </View>
           <Ionicons name="chevron-forward" size={22} color="rgba(255,255,255,0.7)" />
         </Pressable>
 
-        {/* Import BKT */}
-        <Pressable style={[styles.importBanner, { backgroundColor: Colors.primary }]} onPress={() => setBktPerfImportVisible(true)}>
+        {/* ✅ RENAMED: Import Penal Performance only */}
+        <Pressable style={[styles.importBanner, { backgroundColor: "#7C3AED" }]} onPress={() => setBktPerfImportVisible(true)}>
           <View style={styles.importBannerLeft}>
             <Ionicons name="bar-chart-outline" size={28} color="#fff" />
             <View style={styles.importBannerText}>
-              <Text style={styles.importBannerTitle}>Import BKT Performance Summary</Text>
-              <Text style={styles.importBannerSub}>Upload summary Excel: Fos_Name, Bkt, Values, PAID, UNPAID, Grand Total, Percentage, Rollback</Text>
+              <Text style={styles.importBannerTitle}>Import Penal Performance</Text>
+              <Text style={styles.importBannerSub}>Upload penal summary Excel: Fos_Name, Values, PAID, UNPAID, Grand Total, Percentage, Rollback</Text>
             </View>
           </View>
           <Ionicons name="chevron-forward" size={22} color="rgba(255,255,255,0.7)" />
@@ -423,6 +419,8 @@ export default function AdminDashboard() {
           qc.invalidateQueries({ queryKey: ["/api/stats"] });
           qc.invalidateQueries({ queryKey: ["/api/admin/bkt-cases"] });
           qc.invalidateQueries({ queryKey: ["/api/bkt-cases"] });
+          qc.invalidateQueries({ queryKey: ["/api/admin/bkt-perf-summary"] });
+          qc.invalidateQueries({ queryKey: ["/api/bkt-perf-summary"] });
           refetch();
         }}
       />
@@ -439,7 +437,6 @@ export default function AdminDashboard() {
 }
 
 const styles = StyleSheet.create({
-  // ✅ THE FIX: replaces bare <> fragment — gives ScrollView a real flex parent on web
   outerWrap: {
     flex: 1,
     backgroundColor: Colors.background,
