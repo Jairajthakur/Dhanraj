@@ -509,8 +509,8 @@ function CaseCard({ item, onFeedback }: { item: any; onFeedback: (item: any) => 
   };
 
   const statusColor = STATUS_COLORS[item.status] || Colors.textMuted;
-  const rollbackRaw = fmtRaw(item.rollback);
-  const clearanceRaw = fmtRaw(item.clearance);
+  const rollbackRaw = fmtRaw(item.rollback ?? item.RollBack ?? item.rollback_status);
+  const clearanceRaw = fmtRaw(item.clearance ?? item.Clerance1 ?? item.clerance_1 ?? item["Clerance 1"] ?? item.clearance_status);
   const hasRollback = rollbackRaw !== "—";
   const hasClearance = clearanceRaw !== "—";
 
