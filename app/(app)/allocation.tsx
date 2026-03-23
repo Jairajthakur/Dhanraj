@@ -10,6 +10,7 @@ import { router } from "expo-router";
 import * as Haptics from "expo-haptics";
 import Colors from "@/constants/colors";
 import { api } from "@/lib/api";
+import { caseStore } from "@/lib/caseStore";
 
 const TABS = ["Unpaid", "PTP", "Paid"];
 const STATUS_COLORS: Record<string, string> = {
@@ -287,7 +288,6 @@ function FeedbackModal({ visible, caseItem, onClose, onSave, isLocked = false }:
             </View>
           )}
 
-          {/* STATUS */}
           <Text style={fbStyles.sectionLabel}>Status</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
             <View style={{ flexDirection: "row", gap: 8 }}>
@@ -310,7 +310,6 @@ function FeedbackModal({ visible, caseItem, onClose, onSave, isLocked = false }:
             </View>
           </ScrollView>
 
-          {/* ====== PAID ====== */}
           {status === "Paid" && (
             <>
               <Text style={fbStyles.sectionLabel}>Detail Feedback</Text>
@@ -330,7 +329,6 @@ function FeedbackModal({ visible, caseItem, onClose, onSave, isLocked = false }:
             </>
           )}
 
-          {/* ====== PTP ====== */}
           {status === "PTP" && (
             <>
               <Text style={fbStyles.sectionLabel}>Detail Feedback</Text>
@@ -359,7 +357,6 @@ function FeedbackModal({ visible, caseItem, onClose, onSave, isLocked = false }:
             </>
           )}
 
-          {/* ====== UNPAID ====== */}
           {status === "Unpaid" && (
             <>
               {isLocked ? (
@@ -387,11 +384,9 @@ function FeedbackModal({ visible, caseItem, onClose, onSave, isLocked = false }:
                 <>
                   {renderMonthlyFeedback()}
                   <View style={fbStyles.divider} />
-
                   <YNToggle label="Customer Available" value={customerAvailable} onChange={setCustomerAvailable} />
                   <YNToggle label="Vehicle Available" value={vehicleAvailable} onChange={setVehicleAvailable} />
                   <YNToggle label="Third Party" value={thirdParty} onChange={setThirdParty} />
-
                   {thirdParty === true && (
                     <>
                       <Text style={fbStyles.sectionLabel}>Third Party Name</Text>
@@ -413,8 +408,6 @@ function FeedbackModal({ visible, caseItem, onClose, onSave, isLocked = false }:
                       />
                     </>
                   )}
-
-                  {/* Feedback Code */}
                   <Text style={fbStyles.sectionLabel}>Feedback Code</Text>
                   <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
                     <View style={{ flexDirection: "row", gap: 8 }}>
@@ -432,8 +425,6 @@ function FeedbackModal({ visible, caseItem, onClose, onSave, isLocked = false }:
                       ))}
                     </View>
                   </ScrollView>
-
-                  {/* Detail Feedback */}
                   <Text style={fbStyles.sectionLabel}>Detail Feedback</Text>
                   {feedbackCode === "PTP" ? (
                     <>
@@ -462,8 +453,6 @@ function FeedbackModal({ visible, caseItem, onClose, onSave, isLocked = false }:
                       />
                     </>
                   )}
-
-                  {/* Projection */}
                   <Text style={fbStyles.sectionLabel}>Projection</Text>
                   <View style={{ flexDirection: "row", gap: 8, marginBottom: 12 }}>
                     {PROJECTION_OPTIONS.map((p) => (
@@ -480,11 +469,8 @@ function FeedbackModal({ visible, caseItem, onClose, onSave, isLocked = false }:
                       </Pressable>
                     ))}
                   </View>
-
                   <YNToggle label="Non Starter" value={nonStarter} onChange={setNonStarter} />
                   <YNToggle label="KYC Purchase" value={kycPurchase} onChange={setKycPurchase} />
-
-                  {/* Workable */}
                   <Text style={fbStyles.sectionLabel}>Workable</Text>
                   <View style={{ flexDirection: "row", gap: 8, marginBottom: 12 }}>
                     {(["Workable", "Non Workable"] as const).map((w) => {
@@ -507,9 +493,7 @@ function FeedbackModal({ visible, caseItem, onClose, onSave, isLocked = false }:
                       );
                     })}
                   </View>
-
                   <YNToggle label="Rollback" value={rollbackYn} onChange={setRollbackYn} />
-
                   <Text style={fbStyles.sectionLabel}>Comments (Optional)</Text>
                   <TextInput
                     style={fbStyles.commentInput}
@@ -547,12 +531,12 @@ function FeedbackModal({ visible, caseItem, onClose, onSave, isLocked = false }:
   );
 }
 
-// ✅ FIX: navigateToDetail helper — passes full item data so Details screen
-// never needs to make an API call (fixes blank Details screen)
+// ✅ FIX: Store item in global store THEN navigate — no URL param size issues
 function navigateToDetail(item: any) {
+  caseStore.set(item);
   router.push({
     pathname: "/(app)/customer/[id]",
-    params: { id: item.id, data: JSON.stringify(item) },
+    params: { id: String(item.id) },
   });
 }
 
@@ -566,7 +550,6 @@ function CaseCard({ item, onFeedback }: { item: any; onFeedback: (item: any) => 
   };
 
   const statusColor = STATUS_COLORS[item.status] || Colors.textMuted;
-
   const rollbackRaw = fmtRaw(item.rollback);
   const clearanceRaw = fmtRaw(item.clearance);
   const hasRollback = rollbackRaw !== "—";
@@ -574,11 +557,7 @@ function CaseCard({ item, onFeedback }: { item: any; onFeedback: (item: any) => 
 
   return (
     <View style={styles.card}>
-      {/* ✅ FIX: Card tap uses navigateToDetail — passes full data */}
-      <Pressable
-        style={styles.cardTapArea}
-        onPress={() => navigateToDetail(item)}
-      >
+      <Pressable style={styles.cardTapArea} onPress={() => navigateToDetail(item)}>
         <View style={styles.cardHeader}>
           <View style={styles.cardNameRow}>
             <Ionicons name="person-circle" size={20} color={Colors.primary} />
@@ -706,8 +685,6 @@ function CaseCard({ item, onFeedback }: { item: any; onFeedback: (item: any) => 
           <Ionicons name="call" size={16} color="#fff" />
           <Text style={styles.actionBtnText}>Call</Text>
         </Pressable>
-
-        {/* ✅ FIX: Details button uses navigateToDetail — passes full data */}
         <Pressable
           style={[styles.actionBtn, styles.detailBtn]}
           onPress={() => navigateToDetail(item)}
@@ -715,7 +692,6 @@ function CaseCard({ item, onFeedback }: { item: any; onFeedback: (item: any) => 
           <Ionicons name="eye" size={16} color={Colors.textSecondary} />
           <Text style={[styles.actionBtnText, { color: Colors.textSecondary }]}>Details</Text>
         </Pressable>
-
         {item.status === "Unpaid" && item.latest_feedback ? (
           <Pressable style={[styles.actionBtn, styles.statusChangeBtn]} onPress={() => onFeedback(item)}>
             <Ionicons name="swap-horizontal" size={16} color="#fff" />
