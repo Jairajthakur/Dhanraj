@@ -1,37 +1,43 @@
-import { Platform } from "react-native";
+// lib/caseStore.ts
+// Uses sessionStorage so data survives full-page navigation on web (Railway/static deploy)
 
-const STORE_KEY = "selected_case";
-let _selectedCase: any = null;
+const STORE_KEY = "fos_selected_case";
+let _mem: any = null;
+
+function isWeb(): boolean {
+  return typeof window !== "undefined" && typeof sessionStorage !== "undefined";
+}
 
 export const caseStore = {
   set: (item: any) => {
-    try {
-      if (Platform.OS === "web") {
+    _mem = item;
+    if (isWeb()) {
+      try {
         sessionStorage.setItem(STORE_KEY, JSON.stringify(item));
-      } else {
-        _selectedCase = item;
-      }
-    } catch {
-      _selectedCase = item;
+      } catch {}
     }
   },
-  get: () => {
-    try {
-      if (Platform.OS === "web") {
+
+  get: (): any => {
+    // Try memory first (native app)
+    if (_mem) return _mem;
+    // Fall back to sessionStorage (web)
+    if (isWeb()) {
+      try {
         const v = sessionStorage.getItem(STORE_KEY);
-        return v ? JSON.parse(v) : null;
-      }
-      return _selectedCase;
-    } catch {
-      return _selectedCase;
+        if (v) {
+          _mem = JSON.parse(v);
+          return _mem;
+        }
+      } catch {}
     }
+    return null;
   },
+
   clear: () => {
-    try {
-      if (Platform.OS === "web") {
-        sessionStorage.removeItem(STORE_KEY);
-      }
-    } catch {}
-    _selectedCase = null;
+    _mem = null;
+    if (isWeb()) {
+      try { sessionStorage.removeItem(STORE_KEY); } catch {}
+    }
   },
 };
