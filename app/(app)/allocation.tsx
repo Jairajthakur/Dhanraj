@@ -99,7 +99,7 @@ function FeedbackModal({ visible, caseItem, onClose, onSave, isLocked = false }:
   // Unpaid simple fields
   const [comments, setComments] = useState(caseItem?.feedback_comments || "");
 
-  // Monthly feedback fields (all the detailed ones)
+  // Monthly feedback fields
   const [monthlyFeedback, setMonthlyFeedback] = useState<string>(caseItem?.monthly_feedback || "");
   const [showMonthlyOptions, setShowMonthlyOptions] = useState(false);
   const [detailFeedback, setDetailFeedback] = useState(caseItem?.latest_feedback || "");
@@ -137,7 +137,6 @@ function FeedbackModal({ visible, caseItem, onClose, onSave, isLocked = false }:
   };
 
   const save = async () => {
-    // Validate based on active tab
     if (activeTab === "Monthly Feedback" && !feedbackCode) {
       Alert.alert("Error", "Please select a Feedback Code");
       return;
@@ -147,12 +146,11 @@ function FeedbackModal({ visible, caseItem, onClose, onSave, isLocked = false }:
       return;
     }
 
-    // Determine final status from active tab
     let finalStatus = status;
     if (activeTab === "Paid") finalStatus = "Paid";
     else if (activeTab === "PTP") finalStatus = "PTP";
     else if (activeTab === "Unpaid") finalStatus = "Unpaid";
-    else if (activeTab === "Monthly Feedback") finalStatus = "Unpaid"; // monthly feedback keeps unpaid status
+    else if (activeTab === "Monthly Feedback") finalStatus = "Unpaid";
 
     setLoading(true);
     try {
@@ -258,9 +256,10 @@ function FeedbackModal({ visible, caseItem, onClose, onSave, isLocked = false }:
             </View>
           </ScrollView>
 
-          <ScrollView showsVerticalScrollIndicator={false} style={{ flex: 1 }}>
+          {/* ✅ FIX: use flexGrow + flexShrink instead of flex: 1 */}
+          <ScrollView showsVerticalScrollIndicator={false} style={{ flexGrow: 1, flexShrink: 1 }}>
 
-            {/* ====== UNPAID — simple, only comments ====== */}
+            {/* ====== UNPAID ====== */}
             {activeTab === "Unpaid" && (
               <>
                 <View style={fbStyles.simpleUnpaidBanner}>
@@ -282,10 +281,9 @@ function FeedbackModal({ visible, caseItem, onClose, onSave, isLocked = false }:
               </>
             )}
 
-            {/* ====== MONTHLY FEEDBACK — all detailed fields ====== */}
+            {/* ====== MONTHLY FEEDBACK ====== */}
             {activeTab === "Monthly Feedback" && (
               <>
-                {/* Monthly feedback dropdown */}
                 <Text style={fbStyles.sectionLabel}>Monthly Feedback — {CURRENT_MONTH}</Text>
                 <Pressable
                   style={fbStyles.monthlyDropdownBtn}
@@ -350,7 +348,6 @@ function FeedbackModal({ visible, caseItem, onClose, onSave, isLocked = false }:
                   </>
                 )}
 
-                {/* Feedback Code */}
                 <Text style={fbStyles.sectionLabel}>Feedback Code</Text>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
                   <View style={{ flexDirection: "row", gap: 8 }}>
@@ -369,7 +366,6 @@ function FeedbackModal({ visible, caseItem, onClose, onSave, isLocked = false }:
                   </View>
                 </ScrollView>
 
-                {/* Detail Feedback */}
                 <Text style={fbStyles.sectionLabel}>Detail Feedback</Text>
                 {feedbackCode === "PTP" ? (
                   <>
@@ -399,7 +395,6 @@ function FeedbackModal({ visible, caseItem, onClose, onSave, isLocked = false }:
                   </>
                 )}
 
-                {/* Projection */}
                 <Text style={fbStyles.sectionLabel}>Projection</Text>
                 <View style={{ flexDirection: "row", gap: 8, marginBottom: 12 }}>
                   {PROJECTION_OPTIONS.map((p) => (
@@ -420,7 +415,6 @@ function FeedbackModal({ visible, caseItem, onClose, onSave, isLocked = false }:
                 <YNToggle label="Non Starter" value={nonStarter} onChange={setNonStarter} />
                 <YNToggle label="KYC Purchase" value={kycPurchase} onChange={setKycPurchase} />
 
-                {/* Workable */}
                 <Text style={fbStyles.sectionLabel}>Workable</Text>
                 <View style={{ flexDirection: "row", gap: 8, marginBottom: 12 }}>
                   {(["Workable", "Non Workable"] as const).map((w) => {
@@ -856,7 +850,8 @@ const styles = StyleSheet.create({
 
 const fbStyles = StyleSheet.create({
   overlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" },
-  sheet: { backgroundColor: Colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, maxHeight: "92%", flex: 0 },
+  // ✅ FIX: changed flex: 0 → flexShrink: 1 so the sheet sizes to content properly
+  sheet: { backgroundColor: Colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, maxHeight: "92%", flexShrink: 1 },
   handle: { width: 40, height: 4, backgroundColor: Colors.border, borderRadius: 2, alignSelf: "center", marginBottom: 12 },
   title: { fontSize: 20, fontWeight: "700", color: Colors.text, marginBottom: 4 },
   customerName: { fontSize: 13, color: Colors.textSecondary, marginBottom: 8, textTransform: "uppercase" },
