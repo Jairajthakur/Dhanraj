@@ -185,6 +185,10 @@ export const api = {
   },
 
   getCases: () => apiRequest("GET", "/api/cases"),
+
+  // ✅ ADDED: fetch a single case by ID
+  getCaseById: (id: number) => apiRequest("GET", `/api/cases/${id}`),
+
   getBktCases: (category?: string) =>
     apiRequest("GET", `/api/bkt-cases${category ? `?category=${category}` : ""}`),
   getStats: () => apiRequest("GET", "/api/stats"),
