@@ -60,35 +60,57 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 }
 
 export default function CustomerDetailScreen() {
-  const { id, data: dataParam } = useLocalSearchParams<{ id: string; data?: string }>();
+  // ✅ FIX: Accept both `id` and `data` from navigation params
+  const params = useLocalSearchParams<{ id: string; data?: string }>();
+  const id = params.id;
+  const dataParam = params.data;
   const insets = useSafeAreaInsets();
   const router = useRouter();
 
-  // Use passed data from navigation params first (no API call needed)
+  // ✅ FIX: Parse passed data from navigation (avoids API call entirely)
   const passedCase = React.useMemo(() => {
-    if (dataParam) {
-      try { return JSON.parse(dataParam); } catch {}
+    if (!dataParam) return null;
+    try {
+      const parsed = JSON.parse(dataParam);
+      // Make sure it's a real object with expected fields
+      if (parsed && typeof parsed === "object" && parsed.id) return parsed;
+    } catch (e) {
+      console.warn("[CustomerDetail] Failed to parse passed data:", e);
     }
     return null;
   }, [dataParam]);
 
-  // Only call API if no data was passed (fallback)
+  // ✅ FIX: Only call API if no data was passed AND we have a valid id
+  const shouldFetch = !passedCase && !!id && !isNaN(Number(id));
+
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["/api/cases", id],
-    queryFn: () => api.getCaseById(Number(id)),
-    enabled: !passedCase,
+    queryFn: async () => {
+      // ✅ FIX: Wrap in try/catch so errors are visible, not swallowed
+      try {
+        const result = await api.getCaseById(Number(id));
+        console.log("[CustomerDetail] API result:", JSON.stringify(result)?.slice(0, 200));
+        return result;
+      } catch (e) {
+        console.error("[CustomerDetail] API error:", e);
+        throw e;
+      }
+    },
+    enabled: shouldFetch,
     retry: 1,
   });
 
-  if (!passedCase && isLoading) {
+  // ✅ FIX: Show loading only when actually fetching
+  if (shouldFetch && isLoading) {
     return (
       <View style={{ flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: Colors.background }}>
         <ActivityIndicator color={Colors.primary} size="large" />
+        <Text style={{ color: Colors.textMuted, marginTop: 12, fontSize: 13 }}>Loading case details...</Text>
       </View>
     );
   }
 
-  if (!passedCase && isError) {
+  if (shouldFetch && isError) {
     return (
       <View style={styles.centerState}>
         <View style={styles.stateIconWrap}>
@@ -107,9 +129,14 @@ export default function CustomerDetailScreen() {
     );
   }
 
-  // Resolve case — passed params take priority over API response
-  const c = passedCase ?? data?.case ?? (data?.id ? data : null);
+  // ✅ FIX: Robust resolver — handles all API response shapes:
+  // { case: {...} }, { id: ..., loan_no: ... }, or direct object
+  const c = passedCase
+    ?? data?.case        // shape: { case: { id, loan_no, ... } }
+    ?? data?.data        // shape: { data: { id, loan_no, ... } }
+    ?? (data?.id ? data : null); // shape: { id, loan_no, ... } (direct)
 
+  // ✅ FIX: Show "No data" with helpful debug info instead of silent blank screen
   if (!c) {
     return (
       <View style={styles.centerState}>
@@ -117,7 +144,10 @@ export default function CustomerDetailScreen() {
           <Ionicons name="document-outline" size={36} color={Colors.textMuted} />
         </View>
         <Text style={styles.stateTitle}>No data found</Text>
-        <Text style={styles.stateSubtitle}>Case ID: {id}</Text>
+        <Text style={styles.stateSubtitle}>
+          Case ID: {id}{"\n"}
+          {!dataParam ? "No data passed — API fallback used" : "Data param was invalid"}
+        </Text>
         <Pressable onPress={() => router.back()} style={{ marginTop: 16 }}>
           <Text style={{ color: Colors.primary, fontWeight: "700", fontSize: 14 }}>← Go Back</Text>
         </Pressable>
@@ -130,8 +160,12 @@ export default function CustomerDetailScreen() {
   return (
     <ScrollView
       style={{ flex: 1, backgroundColor: Colors.background }}
-      contentContainerStyle={[styles.container, { paddingBottom: insets.bottom + 32, paddingTop: Platform.OS === "web" ? 67 : 0 }]}
+      contentContainerStyle={[
+        styles.container,
+        { paddingBottom: insets.bottom + 32, paddingTop: Platform.OS === "web" ? 67 : 0 },
+      ]}
     >
+      {/* Status Banner */}
       <View style={[styles.statusBanner, { borderColor: statusColor + "40", backgroundColor: statusColor + "15" }]}>
         <View style={[styles.statusDot, { backgroundColor: statusColor }]} />
         <Text style={[styles.statusLabel, { color: statusColor }]}>{c.status}</Text>
@@ -142,11 +176,21 @@ export default function CustomerDetailScreen() {
         )}
       </View>
 
-      {c.feedback_comments && (
+      {/* Feedback comment */}
+      {c.feedback_comments ? (
         <View style={styles.commentBox}>
           <Text style={styles.commentText}>{c.feedback_comments}</Text>
         </View>
-      )}
+      ) : null}
+
+      {/* Monthly feedback */}
+      {c.monthly_feedback ? (
+        <View style={[styles.commentBox, { borderLeftColor: Colors.primary }]}>
+          <Text style={[styles.commentText, { color: Colors.primary, fontWeight: "600" }]}>
+            Monthly: {c.monthly_feedback}
+          </Text>
+        </View>
+      ) : null}
 
       <Section title="Loan Details">
         <Row label="LOAN NO" value={c.loan_no} />
@@ -177,6 +221,8 @@ export default function CustomerDetailScreen() {
       <Section title="Important Dates">
         <Row label="FIRST EMI DUE DATE" value={c.first_emi_due_date} />
         <Row label="LOAN MATURITY DATE" value={c.loan_maturity_date} />
+        {c.ptp_date ? <Row label="PTP DATE" value={String(c.ptp_date).slice(0, 10)} highlight={Colors.statusPTP} /> : null}
+        {c.telecaller_ptp_date ? <Row label="TELECALLER PTP" value={String(c.telecaller_ptp_date).slice(0, 10)} highlight={Colors.info} /> : null}
       </Section>
 
       <Section title="Asset Details">
@@ -190,8 +236,23 @@ export default function CustomerDetailScreen() {
         <Row label="REFERENCE ADDRESS" value={c.reference_address} />
       </Section>
 
+      {/* Feedback Summary */}
+      {(c.feedback_code || c.projection || c.workable !== null) ? (
+        <Section title="Feedback Summary">
+          {c.feedback_code ? <Row label="FEEDBACK CODE" value={c.feedback_code} highlight={Colors.accent} /> : null}
+          {c.projection ? <Row label="PROJECTION" value={c.projection} /> : null}
+          {c.customer_available !== null && c.customer_available !== undefined
+            ? <Row label="CUSTOMER AVAILABLE" value={c.customer_available ? "Yes" : "No"} /> : null}
+          {c.vehicle_available !== null && c.vehicle_available !== undefined
+            ? <Row label="VEHICLE AVAILABLE" value={c.vehicle_available ? "Yes" : "No"} /> : null}
+          {c.workable !== null && c.workable !== undefined
+            ? <Row label="WORKABLE" value={c.workable ? "Workable" : "Non Workable"} /> : null}
+        </Section>
+      ) : null}
+
+      {/* Call Button */}
       <View style={styles.actionRow}>
-        {c.mobile_no && (
+        {c.mobile_no ? (
           <Pressable
             style={[styles.callBtn, { flex: 1 }]}
             onPress={() => Linking.openURL(`tel:${c.mobile_no.split(",")[0].trim()}`)}
@@ -199,7 +260,7 @@ export default function CustomerDetailScreen() {
             <Ionicons name="call" size={20} color="#fff" />
             <Text style={styles.callBtnText}>Call</Text>
           </Pressable>
-        )}
+        ) : null}
       </View>
     </ScrollView>
   );
