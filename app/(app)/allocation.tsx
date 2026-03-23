@@ -156,10 +156,10 @@ function FeedbackModal({ visible, caseItem, onClose, onSave, isLocked = false }:
     try {
       await api.updateFeedback(caseItem.id, {
         status: finalStatus,
-        feedback: activeTab === "Monthly Feedback" ? detailFeedback : paidDetailFeedback,
-        comments: activeTab === "Unpaid" ? comments : activeTab === "Monthly Feedback" ? comments : paidComments,
+        feedback: (activeTab === "Monthly Feedback" || activeTab === "Unpaid") ? detailFeedback : paidDetailFeedback,
+        comments: (activeTab === "Unpaid" || activeTab === "Monthly Feedback") ? comments : paidComments,
         ptp_date: activeTab === "PTP" ? toIsoDate(ptpDate) : null,
-        rollback_yn: activeTab === "Monthly Feedback" ? rollbackYn : paidRollbackYn,
+        rollback_yn: (activeTab === "Monthly Feedback" || activeTab === "Unpaid") ? rollbackYn : paidRollbackYn,
         customer_available: customerAvailable,
         vehicle_available: vehicleAvailable,
         third_party: thirdParty,
@@ -262,12 +262,9 @@ function FeedbackModal({ visible, caseItem, onClose, onSave, isLocked = false }:
             {/* ====== UNPAID ====== */}
             {activeTab === "Unpaid" && (
               <>
-                <View style={fbStyles.simpleUnpaidBanner}>
-                  <Ionicons name="information-circle-outline" size={16} color={Colors.textMuted} />
-                  <Text style={fbStyles.simpleUnpaidText}>
-                    For detailed feedback, use the Monthly Feedback tab.
-                  </Text>
-                </View>
+                <Text style={fbStyles.sectionLabel}>Detail Feedback</Text>
+                {renderDetailOptions(MONTHLY_FEEDBACK_OPTIONS, detailFeedback, setDetailFeedback, Colors.statusUnpaid)}
+                <YNToggle label="Rollback" value={rollbackYn} onChange={setRollbackYn} />
                 <Text style={fbStyles.sectionLabel}>Comments (Optional)</Text>
                 <TextInput
                   style={fbStyles.commentInput}
@@ -284,42 +281,6 @@ function FeedbackModal({ visible, caseItem, onClose, onSave, isLocked = false }:
             {/* ====== MONTHLY FEEDBACK ====== */}
             {activeTab === "Monthly Feedback" && (
               <>
-                <Text style={fbStyles.sectionLabel}>Monthly Feedback — {CURRENT_MONTH}</Text>
-                <Pressable
-                  style={fbStyles.monthlyDropdownBtn}
-                  onPress={() => setShowMonthlyOptions(v => !v)}
-                >
-                  <Text style={[fbStyles.monthlyDropdownText, monthlyFeedback && { color: Colors.primary, fontWeight: "700" }]}>
-                    {monthlyFeedback || "Select monthly feedback..."}
-                  </Text>
-                  <Ionicons name={showMonthlyOptions ? "chevron-up" : "chevron-down"} size={16} color={Colors.textMuted} />
-                </Pressable>
-                {monthlyFeedback ? (
-                  <Pressable style={fbStyles.clearBtn} onPress={() => setMonthlyFeedback("")}>
-                    <Ionicons name="close-circle" size={14} color={Colors.textMuted} />
-                    <Text style={fbStyles.clearBtnText}>Clear</Text>
-                  </Pressable>
-                ) : null}
-                {showMonthlyOptions && (
-                  <View style={{ gap: 6, marginBottom: 12 }}>
-                    {MONTHLY_FEEDBACK_OPTIONS.map((opt) => (
-                      <Pressable
-                        key={opt}
-                        style={[
-                          fbStyles.detailOptionBtn,
-                          monthlyFeedback === opt && { backgroundColor: Colors.primary + "18", borderColor: Colors.primary },
-                        ]}
-                        onPress={() => { setMonthlyFeedback(opt); setShowMonthlyOptions(false); }}
-                      >
-                        <Text style={[fbStyles.detailOptionText, monthlyFeedback === opt && { color: Colors.primary, fontWeight: "700" }]}>
-                          {opt}
-                        </Text>
-                        {monthlyFeedback === opt && <Ionicons name="checkmark-circle" size={18} color={Colors.primary} />}
-                      </Pressable>
-                    ))}
-                  </View>
-                )}
-
                 <View style={fbStyles.divider} />
 
                 <YNToggle label="Customer Available" value={customerAvailable} onChange={setCustomerAvailable} />
