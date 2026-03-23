@@ -28,7 +28,6 @@ const UNPAID_DETAIL_OPTIONS = [
 ];
 const PTP_DETAIL_OPTIONS = ["PTP DATE SET", "WILL PAY TOMORROW", "WILL ARRANGE FUNDS", "CALL LATER"];
 
-// ✅ Monthly feedback options
 const MONTHLY_FEEDBACK_OPTIONS = [
   "SWITCH OFF",
   "NOT AVAILABLE",
@@ -47,7 +46,6 @@ const MONTHLY_FEEDBACK_OPTIONS = [
 const FEEDBACK_CODES = ["PAID", "RTP", "SKIP", "PTP", "CAVNA", "ANF", "EXP", "SFT", "VSL"];
 const PROJECTION_OPTIONS = ["ST", "RF", "RB"];
 
-// Current month label e.g. "March 2026"
 const CURRENT_MONTH = new Date().toLocaleString("en-IN", { month: "long", year: "numeric" });
 
 function fmt(v: any, prefix = "") {
@@ -57,7 +55,6 @@ function fmt(v: any, prefix = "") {
   return String(v);
 }
 
-// ✅ Show raw text value for Rollback/Clearance from Excel
 function fmtRaw(v: any) {
   if (v === null || v === undefined || v === "" || v === "0" || Number(v) === 0) return "—";
   return String(v);
@@ -115,13 +112,8 @@ function FeedbackModal({ visible, caseItem, onClose, onSave, isLocked = false }:
   const [nonStarter, setNonStarter] = useState<boolean | null>(caseItem?.non_starter ?? null);
   const [kycPurchase, setKycPurchase] = useState<boolean | null>(caseItem?.kyc_purchase ?? null);
   const [workable, setWorkable] = useState<boolean | null>(caseItem?.workable ?? null);
-
-  // ✅ Monthly feedback state
-  const [monthlyFeedback, setMonthlyFeedback] = useState<string>(
-    caseItem?.monthly_feedback || ""
-  );
+  const [monthlyFeedback, setMonthlyFeedback] = useState<string>(caseItem?.monthly_feedback || "");
   const [showMonthlyFeedback, setShowMonthlyFeedback] = useState(false);
-
   const [loading, setLoading] = useState(false);
 
   const handleStatusChange = (newStatus: string) => {
@@ -201,7 +193,6 @@ function FeedbackModal({ visible, caseItem, onClose, onSave, isLocked = false }:
     </View>
   );
 
-  // ✅ Monthly feedback section — shared across all statuses
   const renderMonthlyFeedback = () => (
     <View style={fbStyles.monthlySection}>
       <Pressable
@@ -270,7 +261,6 @@ function FeedbackModal({ visible, caseItem, onClose, onSave, isLocked = false }:
             {caseItem?.customer_name} · {caseItem?.loan_no}
           </Text>
 
-          {/* ✅ Case info row — Rollback & Clearance from Excel */}
           <View style={fbStyles.caseInfoRow}>
             {caseItem?.rollback && fmtRaw(caseItem.rollback) !== "—" && (
               <View style={[fbStyles.caseInfoChip, { backgroundColor: Colors.info + "18" }]}>
@@ -395,9 +385,7 @@ function FeedbackModal({ visible, caseItem, onClose, onSave, isLocked = false }:
                 </View>
               ) : (
                 <>
-                  {/* ✅ Monthly Feedback at top of Unpaid */}
                   {renderMonthlyFeedback()}
-
                   <View style={fbStyles.divider} />
 
                   <YNToggle label="Customer Available" value={customerAvailable} onChange={setCustomerAvailable} />
@@ -520,10 +508,8 @@ function FeedbackModal({ visible, caseItem, onClose, onSave, isLocked = false }:
                     })}
                   </View>
 
-                  {/* Rollback */}
                   <YNToggle label="Rollback" value={rollbackYn} onChange={setRollbackYn} />
 
-                  {/* Comments */}
                   <Text style={fbStyles.sectionLabel}>Comments (Optional)</Text>
                   <TextInput
                     style={fbStyles.commentInput}
@@ -561,6 +547,15 @@ function FeedbackModal({ visible, caseItem, onClose, onSave, isLocked = false }:
   );
 }
 
+// ✅ FIX: navigateToDetail helper — passes full item data so Details screen
+// never needs to make an API call (fixes blank Details screen)
+function navigateToDetail(item: any) {
+  router.push({
+    pathname: "/(app)/customer/[id]",
+    params: { id: item.id, data: JSON.stringify(item) },
+  });
+}
+
 function CaseCard({ item, onFeedback }: { item: any; onFeedback: (item: any) => void }) {
   const call = () => {
     const phones = item.mobile_no?.split(",") || [];
@@ -572,7 +567,6 @@ function CaseCard({ item, onFeedback }: { item: any; onFeedback: (item: any) => 
 
   const statusColor = STATUS_COLORS[item.status] || Colors.textMuted;
 
-  // ✅ Rollback and clearance from Excel — show actual text value
   const rollbackRaw = fmtRaw(item.rollback);
   const clearanceRaw = fmtRaw(item.clearance);
   const hasRollback = rollbackRaw !== "—";
@@ -580,9 +574,10 @@ function CaseCard({ item, onFeedback }: { item: any; onFeedback: (item: any) => 
 
   return (
     <View style={styles.card}>
+      {/* ✅ FIX: Card tap uses navigateToDetail — passes full data */}
       <Pressable
         style={styles.cardTapArea}
-        onPress={() => router.push({ pathname: "/(app)/customer/[id]", params: { id: item.id } })}
+        onPress={() => navigateToDetail(item)}
       >
         <View style={styles.cardHeader}>
           <View style={styles.cardNameRow}>
@@ -639,7 +634,6 @@ function CaseCard({ item, onFeedback }: { item: any; onFeedback: (item: any) => 
           </View>
         </View>
 
-        {/* ✅ Rollback & Clearance — show actual text from Excel */}
         <View style={styles.infoRow}>
           <View style={[styles.infoCell, hasRollback && { borderWidth: 1, borderColor: Colors.info + "60" }]}>
             <Text style={styles.infoLabel}>ROLLBACK</Text>
@@ -659,7 +653,6 @@ function CaseCard({ item, onFeedback }: { item: any; onFeedback: (item: any) => 
           </View>
         </View>
 
-        {/* ✅ Rollback YN badge — shown if FOS marked rollback */}
         {item.rollback_yn === true && (
           <View style={styles.rollbackYnBadge}>
             <Ionicons name="refresh-circle" size={13} color={Colors.info} />
@@ -675,7 +668,6 @@ function CaseCard({ item, onFeedback }: { item: any; onFeedback: (item: any) => 
         </Pressable>
       )}
 
-      {/* Feedback code + detail */}
       {item.feedback_code && (
         <View style={styles.feedbackRow}>
           <Text style={styles.feedbackLabel}>FB Code: </Text>
@@ -686,7 +678,6 @@ function CaseCard({ item, onFeedback }: { item: any; onFeedback: (item: any) => 
         </View>
       )}
 
-      {/* ✅ Monthly feedback badge */}
       {item.monthly_feedback && (
         <View style={styles.monthlyFeedbackRow}>
           <Ionicons name="calendar-outline" size={13} color={Colors.primary} />
@@ -694,7 +685,6 @@ function CaseCard({ item, onFeedback }: { item: any; onFeedback: (item: any) => 
         </View>
       )}
 
-      {/* PTP date */}
       {item.ptp_date && (
         <View style={styles.ptpDateRow}>
           <Ionicons name="calendar" size={13} color={Colors.statusPTP} />
@@ -703,7 +693,6 @@ function CaseCard({ item, onFeedback }: { item: any; onFeedback: (item: any) => 
         </View>
       )}
 
-      {/* Telecaller PTP */}
       {item.telecaller_ptp_date && (
         <View style={[styles.ptpDateRow, { backgroundColor: Colors.info + "12" }]}>
           <Ionicons name="calendar-outline" size={13} color={Colors.info} />
@@ -717,13 +706,16 @@ function CaseCard({ item, onFeedback }: { item: any; onFeedback: (item: any) => 
           <Ionicons name="call" size={16} color="#fff" />
           <Text style={styles.actionBtnText}>Call</Text>
         </Pressable>
+
+        {/* ✅ FIX: Details button uses navigateToDetail — passes full data */}
         <Pressable
           style={[styles.actionBtn, styles.detailBtn]}
-          onPress={() => router.push({ pathname: "/(app)/customer/[id]", params: { id: item.id } })}
+          onPress={() => navigateToDetail(item)}
         >
           <Ionicons name="eye" size={16} color={Colors.textSecondary} />
           <Text style={[styles.actionBtnText, { color: Colors.textSecondary }]}>Details</Text>
         </Pressable>
+
         {item.status === "Unpaid" && item.latest_feedback ? (
           <Pressable style={[styles.actionBtn, styles.statusChangeBtn]} onPress={() => onFeedback(item)}>
             <Ionicons name="swap-horizontal" size={16} color="#fff" />
@@ -896,14 +888,12 @@ const styles = StyleSheet.create({
   feedbackRow: { flexDirection: "row", alignItems: "center", flexWrap: "wrap" },
   feedbackLabel: { fontSize: 12, color: Colors.textSecondary, fontWeight: "600" },
   feedbackValue: { fontSize: 12, color: Colors.text, fontWeight: "500" },
-  // ✅ Monthly feedback badge on card
   monthlyFeedbackRow: {
     flexDirection: "row", alignItems: "center", gap: 6,
     backgroundColor: Colors.primary + "12", borderRadius: 8,
     paddingHorizontal: 10, paddingVertical: 5,
   },
   monthlyFeedbackText: { fontSize: 12, color: Colors.primary, fontWeight: "600", flex: 1 },
-  // ✅ Rollback YN badge
   rollbackYnBadge: {
     flexDirection: "row", alignItems: "center", gap: 5,
     backgroundColor: Colors.info + "15", borderRadius: 8,
@@ -942,15 +932,10 @@ const fbStyles = StyleSheet.create({
   customerName: { fontSize: 13, color: Colors.textSecondary, marginBottom: 8, textTransform: "uppercase" },
   sectionLabel: { fontSize: 13, fontWeight: "700", color: Colors.textSecondary, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 8 },
   divider: { height: 1, backgroundColor: Colors.border, marginVertical: 12 },
-
-  // ✅ Case info chips (Rollback/Clearance from Excel shown in modal header)
   caseInfoRow: { flexDirection: "row", gap: 8, marginBottom: 12 },
-  caseInfoChip: {
-    flex: 1, borderRadius: 10, padding: 10, gap: 2,
-  },
+  caseInfoChip: { flex: 1, borderRadius: 10, padding: 10, gap: 2 },
   caseInfoLabel: { fontSize: 9, fontWeight: "700", color: Colors.textMuted, textTransform: "uppercase" },
   caseInfoValue: { fontSize: 13, fontWeight: "800" },
-
   lockedBanner: {
     flexDirection: "row", alignItems: "center", gap: 8,
     backgroundColor: Colors.warning + "18", borderRadius: 10,
@@ -964,7 +949,6 @@ const fbStyles = StyleSheet.create({
   },
   lockedFieldLabel: { fontSize: 12, color: Colors.textSecondary, fontWeight: "600" },
   lockedFieldValue: { fontSize: 13, color: Colors.text, fontWeight: "700" },
-
   tabChip: {
     paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20,
     backgroundColor: Colors.surfaceAlt, borderWidth: 1, borderColor: Colors.border,
@@ -995,8 +979,6 @@ const fbStyles = StyleSheet.create({
   cancelText: { fontSize: 15, fontWeight: "600", color: Colors.textSecondary },
   saveBtn: { flex: 2, paddingVertical: 14, borderRadius: 12, alignItems: "center" },
   saveText: { fontSize: 15, fontWeight: "700", color: "#fff" },
-
-  // ✅ Monthly feedback styles
   monthlySection: {
     borderWidth: 1, borderColor: Colors.border, borderRadius: 14,
     overflow: "hidden", marginBottom: 12,
