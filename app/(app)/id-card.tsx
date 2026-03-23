@@ -16,16 +16,44 @@ const PHOTO_KEY = "id_card_photo";
 export default function IdCardScreen() {
   const insets = useSafeAreaInsets();
   const { agent } = useAuth();
+
+  // ✅ FIX: Start with ready=false so we never show a blank screen —
+  // we show a loading spinner until both AsyncStorage + API are resolved.
   const [photoUri, setPhotoUri] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    AsyncStorage.getItem(PHOTO_KEY).then((val) => {
-      if (val) setPhotoUri(val);
-    });
-    api.getProfile().then((p: any) => {
-      if (p?.photo_url) setPhotoUri(p.photo_url);
-    }).catch(() => {});
+    let cancelled = false;
+
+    async function loadPhoto() {
+      try {
+        // 1. Load from local storage first (instant, no network)
+        const local = await AsyncStorage.getItem(PHOTO_KEY);
+        if (!cancelled && local) setPhotoUri(local);
+      } catch (e) {
+        console.warn("[IdCard] AsyncStorage read failed:", e);
+      }
+
+      try {
+        // 2. Then try API for server-saved photo (may override local)
+        const p = await api.getProfile();
+        if (!cancelled && p?.photo_url) {
+          setPhotoUri(p.photo_url);
+          // Also sync back to local storage
+          await AsyncStorage.setItem(PHOTO_KEY, p.photo_url).catch(() => {});
+        }
+      } catch (e) {
+        // ✅ FIX: Silently ignore API error — card still renders with local photo
+        console.warn("[IdCard] getProfile failed (non-fatal):", e);
+      } finally {
+        // ✅ FIX: Always mark ready so the card is never stuck blank
+        if (!cancelled) setReady(true);
+      }
+    }
+
+    loadPhoto();
+    return () => { cancelled = true; };
   }, []);
 
   const handlePickPhoto = async () => {
@@ -43,7 +71,10 @@ export default function IdCardScreen() {
       const dataUri = `data:image/jpeg;base64,${asset.base64}`;
       await AsyncStorage.setItem(PHOTO_KEY, dataUri);
       setPhotoUri(dataUri);
-      await api.saveProfilePhoto(dataUri);
+      // ✅ FIX: Don't await — fire and forget so UI isn't blocked
+      api.saveProfilePhoto(dataUri).catch((e) =>
+        console.warn("[IdCard] saveProfilePhoto failed:", e)
+      );
     } catch (e: any) {
       Alert.alert("Error", e.message);
     } finally {
@@ -65,7 +96,10 @@ export default function IdCardScreen() {
       const dataUri = `data:image/jpeg;base64,${asset.base64}`;
       await AsyncStorage.setItem(PHOTO_KEY, dataUri);
       setPhotoUri(dataUri);
-      await api.saveProfilePhoto(dataUri);
+      // ✅ FIX: Don't await — fire and forget
+      api.saveProfilePhoto(dataUri).catch((e) =>
+        console.warn("[IdCard] saveProfilePhoto failed:", e)
+      );
     } catch (e: any) {
       Alert.alert("Error", e.message);
     } finally {
@@ -85,6 +119,16 @@ export default function IdCardScreen() {
     ]);
   };
 
+  // ✅ FIX: Show spinner while loading instead of blank screen
+  if (!ready) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator color={Colors.primary} size="large" />
+        <Text style={styles.loadingText}>Loading ID Card...</Text>
+      </View>
+    );
+  }
+
   return (
     <ScrollView
       style={{ flex: 1, backgroundColor: Colors.background }}
@@ -93,13 +137,16 @@ export default function IdCardScreen() {
         paddingTop: Platform.OS === "web" ? 67 : 16,
       }]}
     >
+      {/* ── ID CARD ── */}
       <View style={styles.card}>
+
+        {/* Header */}
         <View style={styles.cardHeader}>
           <Text style={styles.headerSubtitle}>Authorised Collection Agency For</Text>
           <View style={styles.brandRow}>
             <View style={styles.brandIcon}>
-              <View style={[styles.brandBar, { backgroundColor: "#2E7D32" }]} />
-              <View style={[styles.brandBar, { backgroundColor: "#2E7D32", marginLeft: 3 }]} />
+              <View style={[styles.brandBar, { backgroundColor: "#2E7D32", height: 18 }]} />
+              <View style={[styles.brandBar, { backgroundColor: "#2E7D32", height: 26, marginLeft: 3 }]} />
             </View>
             <View>
               <Text style={styles.brandName}>Hero</Text>
@@ -108,6 +155,7 @@ export default function IdCardScreen() {
           </View>
         </View>
 
+        {/* Photo strip */}
         <View style={styles.photoSection}>
           <View style={styles.geometricBg}>
             <View style={[styles.geoBlock, styles.geoRed]} />
@@ -121,7 +169,15 @@ export default function IdCardScreen() {
                 <ActivityIndicator color={Colors.primary} />
               </View>
             ) : photoUri ? (
-              <Image source={{ uri: photoUri }} style={styles.photo} />
+              <Image
+                source={{ uri: photoUri }}
+                style={styles.photo}
+                // ✅ FIX: If remote URL fails to load, fall back silently
+                onError={() => {
+                  console.warn("[IdCard] Image failed to load, clearing URI");
+                  setPhotoUri(null);
+                }}
+              />
             ) : (
               <View style={styles.photoPlaceholder}>
                 <Ionicons name="person" size={44} color={Colors.textMuted} />
@@ -133,6 +189,7 @@ export default function IdCardScreen() {
           </Pressable>
         </View>
 
+        {/* Body */}
         <View style={styles.cardBody}>
           <Text style={styles.agentName}>{agent?.name || "—"}</Text>
           <Text style={styles.designation}>Collection Officer</Text>
@@ -145,7 +202,10 @@ export default function IdCardScreen() {
             <Text style={styles.financeText}> FINANCE</Text>
           </View>
           <Text style={styles.companyName}>DHANRAJ ENTERPRISES</Text>
-          <Text style={styles.address}>2nd Floor Ghodajkar Complex Maharana{"\n"}Pratap Chowk, Hingoli Naka Nanded</Text>
+          <Text style={styles.address}>
+            2nd Floor Ghodajkar Complex Maharana{"\n"}
+            Pratap Chowk, Hingoli Naka Nanded
+          </Text>
 
           <View style={styles.emergencyRow}>
             <Ionicons name="call" size={12} color={Colors.danger} />
@@ -154,6 +214,7 @@ export default function IdCardScreen() {
           <Text style={styles.phone}>{agent?.phone || "9689898388"}</Text>
         </View>
 
+        {/* Footer stripe */}
         <View style={styles.cardFooter}>
           <View style={[styles.footerBar, { backgroundColor: "#2E7D32" }]} />
           <View style={[styles.footerBar, { backgroundColor: Colors.danger }]} />
@@ -161,6 +222,7 @@ export default function IdCardScreen() {
         </View>
       </View>
 
+      {/* Change photo button */}
       <Pressable style={styles.photoBtn} onPress={showPhotoOptions} disabled={saving}>
         <Ionicons name="camera-outline" size={18} color={Colors.primary} />
         <Text style={styles.photoBtnText}>{photoUri ? "Change Photo" : "Add Photo"}</Text>
@@ -170,9 +232,24 @@ export default function IdCardScreen() {
 }
 
 const styles = StyleSheet.create({
+  // ✅ NEW: Loading state
+  loadingContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: Colors.background,
+    gap: 12,
+  },
+  loadingText: {
+    fontSize: 14,
+    color: Colors.textMuted,
+    fontWeight: "500",
+  },
+
   container: { alignItems: "center", gap: 16, padding: 20 },
   card: {
-    width: "100%", maxWidth: 340,
+    width: "100%",
+    maxWidth: 340,
     backgroundColor: "#fff",
     borderRadius: 20,
     overflow: "hidden",
@@ -233,18 +310,15 @@ const styles = StyleSheet.create({
   },
   geometricBg: {
     position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
+    top: 0, left: 0, right: 0, bottom: 0,
     flexDirection: "row",
   },
   geoBlock: {
     flex: 1,
     transform: [{ skewX: "-15deg" }],
   },
-  geoRed: { backgroundColor: "#C62828", marginHorizontal: -10 },
-  geoDark: { backgroundColor: "#1a1a2e" },
+  geoRed:   { backgroundColor: "#C62828", marginHorizontal: -10 },
+  geoDark:  { backgroundColor: "#1a1a2e" },
   geoGreen: { backgroundColor: "#2E7D32", marginHorizontal: -10 },
   photoWrapper: {
     width: 90,
