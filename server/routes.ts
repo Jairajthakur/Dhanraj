@@ -226,7 +226,7 @@ async function recalcBktPerfFromAllocation(): Promise<void> {
       COALESCE(SUM(lc.pos::numeric) FILTER (WHERE lc.rollback_yn IS DISTINCT FROM true),0) AS rollback_unpaid,
       COALESCE(SUM(lc.pos::numeric),0) AS rollback_grand_total
     FROM loan_cases lc JOIN fos_agents fa ON fa.id=lc.agent_id
-    WHERE lc.bkt IS NOT NULL AND lc.agent_id IS NOT NULL AND UPPER(COALESCE(lc.pro,''))!='UC'
+    WHERE lc.bkt IS NOT NULL AND lc.agent_id IS NOT NULL AND UPPER(COALESCE(lc.pro,'')) NOT IN ('UC','RUC')
     GROUP BY lc.agent_id, fa.name, lc.bkt
   `);
   let updated = 0;
@@ -419,7 +419,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         monthlyFeedback: monthly_feedback || null, // ✅ NEW
       };
       await storage.updateLoanCaseFeedback(caseId, status, feedback, comments, ptp_date, ynVal, extraFields);
-      if (old && old.bkt && old.agent_id && (old.pro || "").toUpperCase() !== "UC") {
+      if (old && old.bkt && old.agent_id && !["UC","RUC"].includes((old.pro || "").toUpperCase())) {
         const pos = parseFloat(old.pos) || 0;
         const bktKey = `bkt${old.bkt}`;
         const wasPaid = old.status === "Paid"; const nowPaid = status === "Paid";
@@ -851,7 +851,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         monthlyFeedback: monthly_feedback || null, // ✅ NEW
       };
       await storage.updateBktCaseFeedback(caseId, status, feedback, comments, ptp_date, ynVal, bktExtraFields);
-      if (old && old.case_category && old.agent_id && (old.pro || "").toUpperCase() !== "UC") {
+      if (old && old.case_category && old.agent_id && !["UC","RUC"].includes((old.pro || "").toUpperCase())) {
         const pos = parseFloat(old.pos) || 0;
         const bktKey = (old.case_category as string).toLowerCase().replace(/\s+/g, "");
         const wasPaid = old.status === "Paid"; const nowPaid = status === "Paid";
@@ -1129,7 +1129,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!old) return res.status(404).json({ message: "Case not found" });
       const ynVal = rollback_yn === true || rollback_yn === "true" ? true : rollback_yn === false || rollback_yn === "false" ? false : null;
       await storage.query(`UPDATE ${tbl} SET status=$1, rollback_yn=$2, updated_at=NOW() WHERE id=$3`, [status, ynVal, caseId]);
-      if (old.bkt_key && old.agent_id && (old.pro || "").toUpperCase() !== "UC") {
+      if (old.bkt_key && old.agent_id && !["UC","RUC"].includes((old.pro || "").toUpperCase())) {
         const pos = parseFloat(old.pos) || 0;
         const bktKey = table === "bkt" ? old.bkt_key.toLowerCase().replace(/\s+/g, "") : `bkt${old.bkt_key}`;
         const wasPaid = old.status === "Paid"; const nowPaid = status === "Paid";
