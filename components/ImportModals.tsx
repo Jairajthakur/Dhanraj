@@ -10,8 +10,6 @@ import { tokenStore } from "@/lib/api";
 import { getApiUrl } from "@/lib/query-client";
 
 // ─── Shared file upload helper ────────────────────────────────────────────────
-// Uses XMLHttpRequest instead of fetch() — Android supports XHR FormData with
-// file URIs natively without needing Blob or expo-file-system at all.
 async function uploadExcelFile(
   nativeFile: any,
   endpoint: string,
@@ -19,7 +17,6 @@ async function uploadExcelFile(
 ): Promise<any> {
   const url = new URL(endpoint, getApiUrl()).toString();
 
-  // Web path — use standard fetch with File object
   if (Platform.OS === "web") {
     const formData = new FormData();
     formData.append("file", nativeFile as any);
@@ -40,31 +37,22 @@ async function uploadExcelFile(
     return res.json();
   }
 
-  // ✅ Native Android/iOS path — use XMLHttpRequest with file URI directly
-  // XHR on React Native handles local file:// URIs in FormData natively
   const token = await tokenStore.get();
 
   return new Promise((resolve, reject) => {
     const formData = new FormData();
-
-    // Append file using RN's special object format for local URIs
     formData.append("file", {
       uri: nativeFile.uri,
       name: nativeFile.name,
       type: nativeFile.type ||
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     } as any);
-
     if (extraFields) {
       Object.entries(extraFields).forEach(([k, v]) => formData.append(k, v));
     }
-
     const xhr = new XMLHttpRequest();
     xhr.open("POST", url);
-
-    // Set auth header
     if (token) xhr.setRequestHeader("Authorization", `Bearer ${token}`);
-
     xhr.onload = () => {
       if (xhr.status >= 200 && xhr.status < 300) {
         try { resolve(JSON.parse(xhr.responseText)); }
@@ -75,11 +63,9 @@ async function uploadExcelFile(
         reject(new Error(msg));
       }
     };
-
     xhr.onerror = () => reject(new Error("Network error during upload"));
     xhr.ontimeout = () => reject(new Error("Upload timed out"));
-    xhr.timeout = 60000; // 60 second timeout
-
+    xhr.timeout = 60000;
     xhr.send(formData);
   });
 }
@@ -253,9 +239,7 @@ export function ImportModal({
   );
 }
 
-// ─── BktPerfImportModal ───────────────────────────────────────────────────────
-const BKT_OPTIONS = ["Auto-detect", "1", "2", "3", "Penal"];
-
+// ─── BktPerfImportModal — Penal Only ─────────────────────────────────────────
 export function BktPerfImportModal({
   visible, onClose, onDone,
 }: {
@@ -265,7 +249,6 @@ export function BktPerfImportModal({
 }) {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<any>(null);
-  const [selectedBkt, setSelectedBkt] = useState("Auto-detect");
   const { fileName, nativeFile, fileInputRef, pickFile, onWebChange, reset } = useFilePicker();
 
   const handleImport = async () => {
@@ -273,10 +256,9 @@ export function BktPerfImportModal({
     setLoading(true);
     setResult(null);
     try {
-      const extraFields =
-        selectedBkt !== "Auto-detect" ? { bkt: selectedBkt } : undefined;
+      // Always penal — no BKT selector needed
       const data = await uploadExcelFile(
-        nativeFile, "/api/admin/import-bkt-perf", extraFields
+        nativeFile, "/api/admin/import-bkt-perf", { bkt: "Penal" }
       );
       setResult(data);
       onDone();
@@ -294,35 +276,26 @@ export function BktPerfImportModal({
       <View style={importStyles.overlay}>
         <View style={importStyles.sheet}>
           <View style={importStyles.handle} />
+
+          {/* Header */}
           <View style={importStyles.header}>
-            <Ionicons name="bar-chart" size={22} color={Colors.primary} />
-            <Text style={importStyles.title}>Import BKT Performance Summary</Text>
+            <Ionicons name="bar-chart" size={22} color="#7C3AED" />
+            <Text style={importStyles.title}>Import Penal Performance</Text>
           </View>
+
+          {/* Info */}
           <View style={importStyles.infoBox}>
             <Ionicons name="information-circle" size={16} color={Colors.info} />
             <Text style={importStyles.infoText}>
-              Pivot table Excel with POS + Rollback data. Select BKT if auto-detection fails.
+              Upload penal pivot table Excel with POS + Rollback data.
+              BKT1/2/3 are calculated automatically from allocation. This imports Penal only.
             </Text>
           </View>
 
-          <View style={bktSelStyles.container}>
-            <Text style={bktSelStyles.label}>BKT / Sheet:</Text>
-            <View style={bktSelStyles.row}>
-              {BKT_OPTIONS.map((opt) => (
-                <Pressable
-                  key={opt}
-                  style={[bktSelStyles.chip, selectedBkt === opt && bktSelStyles.chipActive]}
-                  onPress={() => setSelectedBkt(opt)}
-                >
-                  <Text style={[
-                    bktSelStyles.chipText,
-                    selectedBkt === opt && bktSelStyles.chipTextActive,
-                  ]}>
-                    {opt}
-                  </Text>
-                </Pressable>
-              ))}
-            </View>
+          {/* Penal badge */}
+          <View style={penalStyles.badge}>
+            <Ionicons name="checkmark-circle" size={16} color="#7C3AED" />
+            <Text style={penalStyles.badgeText}>Penal Performance</Text>
           </View>
 
           {Platform.OS === "web" && (
@@ -345,9 +318,7 @@ export function BktPerfImportModal({
 
           {result && (
             <View style={importStyles.resultBox}>
-              <Text style={importStyles.resultTitle}>
-                ✅ Import Complete · BKT {result.bkt ?? selectedBkt}
-              </Text>
+              <Text style={importStyles.resultTitle}>✅ Penal Import Complete</Text>
               <View style={importStyles.resultGrid}>
                 <View style={importStyles.resultItem}>
                   <Text style={[importStyles.resultNum, { color: Colors.success }]}>
@@ -362,6 +333,14 @@ export function BktPerfImportModal({
                   <Text style={importStyles.resultLabel}>Skipped</Text>
                 </View>
               </View>
+              {result.errors?.length > 0 && (
+                <View style={importStyles.errorList}>
+                  <Text style={importStyles.errorTitle}>Errors ({result.errors.length}):</Text>
+                  {result.errors.slice(0, 5).map((e: string, i: number) => (
+                    <Text key={i} style={importStyles.errorItem}>• {e}</Text>
+                  ))}
+                </View>
+              )}
             </View>
           )}
 
@@ -372,7 +351,7 @@ export function BktPerfImportModal({
             <Pressable
               style={[
                 importStyles.importBtn,
-                { backgroundColor: Colors.primary },
+                { backgroundColor: "#7C3AED" },
                 (!nativeFile || loading) && { opacity: 0.5 },
               ]}
               onPress={handleImport}
@@ -382,7 +361,7 @@ export function BktPerfImportModal({
                 ? <ActivityIndicator color="#fff" size="small" />
                 : <>
                     <Ionicons name="cloud-upload" size={18} color="#fff" />
-                    <Text style={importStyles.importText}>Import</Text>
+                    <Text style={importStyles.importText}>Import Penal</Text>
                   </>
               }
             </Pressable>
@@ -445,15 +424,22 @@ const importStyles = StyleSheet.create({
   importText: { fontSize: 15, fontWeight: "700", color: "#fff" },
 });
 
-const bktSelStyles = StyleSheet.create({
-  container: { gap: 6 },
-  label: { fontSize: 12, fontWeight: "700", color: Colors.textSecondary },
-  row: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  chip: {
-    paddingHorizontal: 14, paddingVertical: 7, borderRadius: 20,
-    backgroundColor: Colors.surfaceAlt, borderWidth: 1.5, borderColor: Colors.border,
+const penalStyles = StyleSheet.create({
+  badge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    backgroundColor: "#7C3AED18",
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderWidth: 1,
+    borderColor: "#7C3AED40",
+    alignSelf: "flex-start",
   },
-  chipActive: { backgroundColor: Colors.primary + "20", borderColor: Colors.primary },
-  chipText: { fontSize: 13, fontWeight: "600", color: Colors.textMuted },
-  chipTextActive: { color: Colors.primary, fontWeight: "800" },
+  badgeText: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#7C3AED",
+  },
 });
