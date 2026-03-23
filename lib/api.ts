@@ -82,10 +82,6 @@ async function apiRequest(method: string, route: string, data?: any) {
   });
 
   if (res.status === 401) {
-    // ✅ Do NOT clear agentCache here on web.
-    // Clearing cache inside apiRequest triggers AuthContext to re-render,
-    // which re-runs bootstrap, which calls api.me() again → infinite loop.
-    // Cache clearing is AuthContext's responsibility on web.
     if (Platform.OS !== "web") {
       await agentCache.clear();
       await tokenStore.clear();
@@ -115,7 +111,6 @@ async function apiRequest(method: string, route: string, data?: any) {
 // ─── Helper for React Native file upload ─────────────────────────────────────
 function createFormData(file: any, extraData?: any) {
   const form = new FormData();
-
   form.append("file", {
     uri: file.uri,
     name: file.name || "file.xlsx",
@@ -124,13 +119,11 @@ function createFormData(file: any, extraData?: any) {
       file.type ||
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   } as any);
-
   if (extraData) {
     Object.keys(extraData).forEach((key) => {
       form.append(key, extraData[key]);
     });
   }
-
   return form;
 }
 
@@ -186,16 +179,17 @@ export const api = {
 
   getCases: () => apiRequest("GET", "/api/cases"),
 
-  // ✅ ADDED: fetch a single case by ID
+  // ✅ Returns { case: { id, loan_no, ... } }
   getCaseById: (id: number) => apiRequest("GET", `/api/cases/${id}`),
 
-  // ✅ ADDED: profile & photo (used by id-card screen)
+  // ✅ FIX: Correct server route is /api/profile (GET) and /api/profile-photo (POST)
   getProfile: () => apiRequest("GET", "/api/profile"),
-  saveProfilePhoto: (photoDataUri: string) =>
-    apiRequest("POST", "/api/profile/photo", { photo: photoDataUri }),
+  saveProfilePhoto: (photoUrl: string) =>
+    apiRequest("POST", "/api/profile-photo", { photoUrl }),
 
   getBktCases: (category?: string) =>
     apiRequest("GET", `/api/bkt-cases${category ? `?category=${category}` : ""}`),
+
   getStats: () => apiRequest("GET", "/api/stats"),
 
   updateFeedback: (id: number, data: any) =>
@@ -207,9 +201,8 @@ export const api = {
   checkIn: () => apiRequest("POST", "/api/attendance/checkin"),
   checkOut: () => apiRequest("POST", "/api/attendance/checkout"),
 
-  savePushToken: async (token: string) => {
-    return apiRequest("POST", "/api/push-token", { token });
-  },
+  savePushToken: async (token: string) =>
+    apiRequest("POST", "/api/push-token", { token }),
 
   // ─── ADMIN ────────────────────────────────────────────────────────────────
   admin: {
