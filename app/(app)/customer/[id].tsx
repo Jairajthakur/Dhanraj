@@ -1,233 +1,274 @@
-import React from "react";
+import React, { useState, useEffect } from "react";
 import {
-  View, Text, StyleSheet, ScrollView, Pressable,
-  Linking, Platform,
+  View, Text, StyleSheet, ScrollView, Pressable, Image,
+  Alert, ActivityIndicator, Platform
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useLocalSearchParams, useRouter } from "expo-router";
+import * as ImagePicker from "expo-image-picker";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Ionicons } from "@expo/vector-icons";
 import Colors from "@/constants/colors";
-import { caseStore } from "@/lib/caseStore";
+import { useAuth } from "@/context/AuthContext";
+import { api } from "@/lib/api";
 
-const STATUS_COLORS: Record<string, string> = {
-  Unpaid: Colors.statusUnpaid,
-  PTP: Colors.statusPTP,
-  Paid: Colors.statusPaid,
-};
+const PHOTO_KEY = "id_card_photo";
 
-function fmt(v: any, prefix = "") {
-  if (v === null || v === undefined || v === "") return "—";
-  const n = parseFloat(String(v).replace(/,/g, ""));
-  if (!isNaN(n) && prefix)
-    return prefix + n.toLocaleString("en-IN", { maximumFractionDigits: 2 });
-  return String(v);
-}
-
-function Row({ label, value, phone, highlight }: {
-  label: string; value?: any; phone?: boolean; highlight?: string;
-}) {
-  const display = value !== null && value !== undefined && value !== "" ? String(value) : "—";
-  return (
-    <View style={styles.row}>
-      <Text style={styles.rowLabel}>{label}</Text>
-      {phone && display !== "—" ? (
-        <Pressable onPress={() => Linking.openURL(`tel:${display.split(",")[0].trim()}`)}>
-          <Text style={[styles.rowValue, { color: Colors.info, textDecorationLine: "underline" }]}>
-            {display}
-          </Text>
-        </Pressable>
-      ) : (
-        <Text style={[styles.rowValue, highlight ? { color: highlight, fontWeight: "700" } : undefined]}>
-          {display}
-        </Text>
-      )}
-    </View>
-  );
-}
-
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <View style={styles.section}>
-      <Text style={styles.sectionTitle}>{title}</Text>
-      {children}
-    </View>
-  );
-}
-
-export default function CustomerDetailScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+export default function IdCardScreen() {
   const insets = useSafeAreaInsets();
-  const router = useRouter();
+  const { agent } = useAuth();
+  const [photoUri, setPhotoUri] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [ready, setReady] = useState(false);
 
-  // ✅ Read directly from global store — no useState, no useEffect, no async
-  const c = caseStore.get();
+  useEffect(() => {
+    let cancelled = false;
 
-  // ✅ Debug log — check Metro terminal when you tap Details
-  console.log("[CustomerDetail] id param:", id);
-  console.log("[CustomerDetail] caseStore data:", c ? `ID=${c.id} NAME=${c.customer_name}` : "NULL");
+    async function loadPhoto() {
+      // 1. Load local photo first
+      try {
+        const local = await AsyncStorage.getItem(PHOTO_KEY);
+        if (!cancelled && local) setPhotoUri(local);
+      } catch (e) {
+        console.warn("[IdCard] AsyncStorage read failed:", e);
+      }
 
-  if (!c) {
+      // 2. Try server photo — but DON'T crash if it fails
+      try {
+        const p = await api.getProfile();
+        if (!cancelled && p?.photo_url) {
+          // ✅ Only use server URL if it's a real URL, not base64
+          // base64 strings are huge and crash the app on some devices
+          if (p.photo_url.startsWith("http")) {
+            setPhotoUri(p.photo_url);
+          }
+        }
+      } catch (e) {
+        console.warn("[IdCard] getProfile failed (non-fatal):", e);
+      } finally {
+        if (!cancelled) setReady(true);
+      }
+    }
+
+    loadPhoto();
+    return () => { cancelled = true; };
+  }, []);
+
+  const pickAndSave = async (useCamera: boolean) => {
+    try {
+      const result = useCamera
+        ? await ImagePicker.launchCameraAsync({
+            allowsEditing: true, aspect: [1, 1], quality: 0.5,
+            // ✅ Do NOT use base64 — it's too large and crashes the app
+            // We use the local URI instead
+          })
+        : await ImagePicker.launchImageLibraryAsync({
+            mediaTypes: ["images"],
+            allowsEditing: true, aspect: [1, 1], quality: 0.5,
+          });
+
+      if (result.canceled || !result.assets?.[0]) return;
+
+      setSaving(true);
+      const localUri = result.assets[0].uri;
+
+      // ✅ Save local URI to AsyncStorage (not base64)
+      await AsyncStorage.setItem(PHOTO_KEY, localUri);
+      setPhotoUri(localUri);
+
+      // ✅ Fire and forget — don't await, don't block UI
+      // Skip saving to server since base64 causes crashes
+      // api.saveProfilePhoto(localUri).catch(() => {});
+
+    } catch (e: any) {
+      Alert.alert("Error", e.message || "Failed to pick photo");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const showPhotoOptions = () => {
+    if (Platform.OS === "web") { pickAndSave(false); return; }
+    Alert.alert("Add Photo", "Choose source", [
+      { text: "Camera", onPress: () => pickAndSave(true) },
+      { text: "Gallery", onPress: () => pickAndSave(false) },
+      { text: "Cancel", style: "cancel" },
+    ]);
+  };
+
+  if (!ready) {
     return (
-      <View style={styles.centerState}>
-        <Ionicons name="document-outline" size={48} color={Colors.textMuted} />
-        <Text style={styles.stateTitle}>No data found</Text>
-        <Text style={styles.stateSubtitle}>
-          The case data was not passed correctly.{"\n"}Please go back and try again.
-        </Text>
-        <Pressable style={styles.backBtn} onPress={() => router.back()}>
-          <Text style={styles.backBtnText}>← Go Back</Text>
-        </Pressable>
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator color={Colors.primary} size="large" />
+        <Text style={styles.loadingText}>Loading ID Card...</Text>
       </View>
     );
   }
 
-  const statusColor = STATUS_COLORS[c.status] || Colors.textSecondary;
-
   return (
     <ScrollView
       style={{ flex: 1, backgroundColor: Colors.background }}
-      contentContainerStyle={[
-        styles.container,
-        { paddingBottom: insets.bottom + 32, paddingTop: Platform.OS === "web" ? 67 : 0 },
-      ]}
+      contentContainerStyle={[styles.container, {
+        paddingBottom: insets.bottom + 24,
+        paddingTop: Platform.OS === "web" ? 67 : 16,
+      }]}
     >
-      {/* Status Banner */}
-      <View style={[styles.statusBanner, { borderColor: statusColor + "40", backgroundColor: statusColor + "15" }]}>
-        <View style={[styles.statusDot, { backgroundColor: statusColor }]} />
-        <Text style={[styles.statusLabel, { color: statusColor }]}>{c.status}</Text>
-        {c.latest_feedback ? (
-          <View style={styles.fbBadge}>
-            <Text style={styles.fbText}>{c.latest_feedback}</Text>
+      <View style={styles.card}>
+
+        {/* Header */}
+        <View style={styles.cardHeader}>
+          <Text style={styles.headerSubtitle}>Authorised Collection Agency For</Text>
+          <View style={styles.brandRow}>
+            <View style={styles.brandIcon}>
+              <View style={[styles.brandBar, { backgroundColor: "#2E7D32", height: 18 }]} />
+              <View style={[styles.brandBar, { backgroundColor: "#2E7D32", height: 26, marginLeft: 3 }]} />
+            </View>
+            <View>
+              <Text style={styles.brandName}>Hero</Text>
+              <Text style={styles.brandSub}>FINCORP</Text>
+            </View>
           </View>
-        ) : null}
+        </View>
+
+        {/* Photo strip */}
+        <View style={styles.photoSection}>
+          <View style={styles.geometricBg}>
+            <View style={[styles.geoBlock, styles.geoRed]} />
+            <View style={[styles.geoBlock, styles.geoDark]} />
+            <View style={[styles.geoBlock, styles.geoGreen]} />
+          </View>
+          <Pressable style={styles.photoWrapper} onPress={showPhotoOptions} disabled={saving}>
+            {saving ? (
+              <View style={styles.photoPlaceholder}>
+                <ActivityIndicator color={Colors.primary} />
+              </View>
+            ) : photoUri ? (
+              <Image
+                source={{ uri: photoUri }}
+                style={styles.photo}
+                onError={() => {
+                  console.warn("[IdCard] Image failed to load");
+                  setPhotoUri(null);
+                }}
+              />
+            ) : (
+              <View style={styles.photoPlaceholder}>
+                <Ionicons name="person" size={44} color={Colors.textMuted} />
+              </View>
+            )}
+            <View style={styles.photoEditBadge}>
+              <Ionicons name="camera" size={12} color="#fff" />
+            </View>
+          </Pressable>
+        </View>
+
+        {/* Body */}
+        <View style={styles.cardBody}>
+          <Text style={styles.agentName}>{agent?.name || "—"}</Text>
+          <Text style={styles.designation}>Collection Officer</Text>
+          <Text style={styles.iibf}>IIBF Regn. No. : {agent?.username || "—"}</Text>
+          <View style={styles.divider} />
+          <View style={styles.companyBrandRow}>
+            <Text style={styles.heroText}>Hero</Text>
+            <Text style={styles.financeText}> FINANCE</Text>
+          </View>
+          <Text style={styles.companyName}>DHANRAJ ENTERPRISES</Text>
+          <Text style={styles.address}>
+            2nd Floor Ghodajkar Complex Maharana{"\n"}
+            Pratap Chowk, Hingoli Naka Nanded
+          </Text>
+          <View style={styles.emergencyRow}>
+            <Ionicons name="call" size={12} color={Colors.danger} />
+            <Text style={styles.emergencyLabel}>Emergency Contact</Text>
+          </View>
+          <Text style={styles.phone}>{agent?.phone || "9689898388"}</Text>
+        </View>
+
+        {/* Footer stripe */}
+        <View style={styles.cardFooter}>
+          <View style={[styles.footerBar, { backgroundColor: "#2E7D32" }]} />
+          <View style={[styles.footerBar, { backgroundColor: Colors.danger }]} />
+          <View style={[styles.footerBar, { backgroundColor: "#1565C0" }]} />
+        </View>
       </View>
 
-      {c.feedback_comments ? (
-        <View style={styles.commentBox}>
-          <Text style={styles.commentText}>{c.feedback_comments}</Text>
-        </View>
-      ) : null}
-
-      {c.monthly_feedback ? (
-        <View style={[styles.commentBox, { borderLeftColor: Colors.primary }]}>
-          <Text style={[styles.commentText, { color: Colors.primary, fontWeight: "600" }]}>
-            Monthly: {c.monthly_feedback}
-          </Text>
-        </View>
-      ) : null}
-
-      <Section title="Loan Details">
-        <Row label="LOAN NO" value={c.loan_no} />
-        <Row label="APP ID" value={c.app_id} />
-        <Row label="BKT" value={c.bkt} highlight={Colors.primary} />
-        <Row label="PRO" value={c.pro} />
-        <Row label="TENOR" value={c.tenor ? `${c.tenor} months` : null} />
-        <Row label="FOS NAME" value={c.fos_name} />
-      </Section>
-
-      <Section title="Customer Info">
-        <Row label="CUSTOMER NAME" value={c.customer_name} />
-        <Row label="NUMBER" value={c.mobile_no} phone />
-        <Row label="ADDRESS" value={c.address} />
-      </Section>
-
-      <Section title="Payment Details">
-        <Row label="EMI AMOUNT" value={fmt(c.emi_amount, "₹")} />
-        <Row label="EMI DUE" value={fmt(c.emi_due, "₹")} highlight={Colors.danger} />
-        <Row label="POS" value={fmt(c.pos, "₹")} />
-        <Row label="CBC" value={fmt(c.cbc, "₹")} />
-        <Row label="LPP" value={fmt(c.lpp, "₹")} />
-        <Row label="CBC + LPP" value={fmt(c.cbc_lpp, "₹")} highlight={Colors.warning} />
-        <Row label="ROLLBACK" value={fmt(c.rollback, "₹")} />
-        <Row label="CLEARANCE" value={fmt(c.clearance, "₹")} highlight={Colors.success} />
-      </Section>
-
-      <Section title="Important Dates">
-        <Row label="FIRST EMI DUE DATE" value={c.first_emi_due_date} />
-        <Row label="LOAN MATURITY DATE" value={c.loan_maturity_date} />
-        {c.ptp_date ? (
-          <Row label="PTP DATE" value={String(c.ptp_date).slice(0, 10)} highlight={Colors.statusPTP} />
-        ) : null}
-        {c.telecaller_ptp_date ? (
-          <Row label="TELECALLER PTP" value={String(c.telecaller_ptp_date).slice(0, 10)} highlight={Colors.info} />
-        ) : null}
-      </Section>
-
-      <Section title="Asset Details">
-        <Row label="ASSET MAKE" value={c.asset_make} />
-        <Row label="REGISTRATION NO" value={c.registration_no} />
-        <Row label="ENGINE NO" value={c.engine_no} />
-        <Row label="CHASSIS NO" value={c.chassis_no} />
-      </Section>
-
-      <Section title="References">
-        <Row label="REFERENCE ADDRESS" value={c.reference_address} />
-      </Section>
-
-      {c.mobile_no ? (
-        <Pressable
-          style={styles.callBtn}
-          onPress={() => Linking.openURL(`tel:${c.mobile_no.split(",")[0].trim()}`)}
-        >
-          <Ionicons name="call" size={20} color="#fff" />
-          <Text style={styles.callBtnText}>Call {c.mobile_no.split(",")[0].trim()}</Text>
-        </Pressable>
-      ) : null}
+      <Pressable style={styles.photoBtn} onPress={showPhotoOptions} disabled={saving}>
+        <Ionicons name="camera-outline" size={18} color={Colors.primary} />
+        <Text style={styles.photoBtnText}>{photoUri ? "Change Photo" : "Add Photo"}</Text>
+      </Pressable>
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { padding: 16, gap: 12 },
-  centerState: {
+  loadingContainer: {
     flex: 1, justifyContent: "center", alignItems: "center",
-    backgroundColor: Colors.background, padding: 32, gap: 12,
+    backgroundColor: Colors.background, gap: 12,
   },
-  stateTitle: { fontSize: 18, fontWeight: "700", color: Colors.text },
-  stateSubtitle: { fontSize: 13, color: Colors.textSecondary, textAlign: "center", lineHeight: 20 },
-  backBtn: {
-    marginTop: 8, backgroundColor: Colors.primary,
-    paddingHorizontal: 24, paddingVertical: 12, borderRadius: 12,
+  loadingText: { fontSize: 14, color: Colors.textMuted, fontWeight: "500" },
+  container: { alignItems: "center", gap: 16, padding: 20 },
+  card: {
+    width: "100%", maxWidth: 340, backgroundColor: "#fff",
+    borderRadius: 20, overflow: "hidden",
+    shadowColor: "#000", shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.2, shadowRadius: 24, elevation: 10,
+    borderWidth: 3, borderColor: "#E8B800",
   },
-  backBtnText: { color: "#fff", fontWeight: "700", fontSize: 15 },
-  statusBanner: {
-    flexDirection: "row", alignItems: "center", gap: 10,
-    padding: 12, borderRadius: 12, borderWidth: 1,
+  cardHeader: {
+    backgroundColor: "#1a1a2e", paddingTop: 16, paddingBottom: 12,
+    paddingHorizontal: 20, alignItems: "center", gap: 6,
   },
-  statusDot: { width: 8, height: 8, borderRadius: 4 },
-  statusLabel: { fontSize: 15, fontWeight: "700" },
-  fbBadge: {
-    marginLeft: "auto", backgroundColor: "rgba(0,0,0,0.07)",
-    borderRadius: 8, paddingHorizontal: 10, paddingVertical: 3,
+  headerSubtitle: { color: "rgba(255,255,255,0.7)", fontSize: 10, letterSpacing: 0.5 },
+  brandRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  brandIcon: { flexDirection: "row", alignItems: "flex-end", height: 28 },
+  brandBar: { width: 8, borderRadius: 2 },
+  brandName: { color: "#fff", fontSize: 26, fontWeight: "900", letterSpacing: -0.5, lineHeight: 28 },
+  brandSub: { color: "rgba(255,255,255,0.85)", fontSize: 10, fontWeight: "700", letterSpacing: 3, marginTop: -2 },
+  photoSection: { height: 120, position: "relative", alignItems: "center", justifyContent: "flex-end" },
+  geometricBg: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, flexDirection: "row" },
+  geoBlock: { flex: 1, transform: [{ skewX: "-15deg" }] },
+  geoRed: { backgroundColor: "#C62828", marginHorizontal: -10 },
+  geoDark: { backgroundColor: "#1a1a2e" },
+  geoGreen: { backgroundColor: "#2E7D32", marginHorizontal: -10 },
+  photoWrapper: {
+    width: 90, height: 90, borderRadius: 45, borderWidth: 4, borderColor: "#fff",
+    overflow: "visible", position: "absolute", bottom: -30,
+    shadowColor: "#000", shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25, shadowRadius: 8, elevation: 8,
   },
-  fbText: { fontSize: 12, fontWeight: "600", color: Colors.text },
-  commentBox: {
-    backgroundColor: Colors.surface, borderRadius: 10, padding: 12,
-    borderLeftWidth: 3, borderLeftColor: Colors.danger,
+  photo: { width: 82, height: 82, borderRadius: 41 },
+  photoPlaceholder: {
+    width: 82, height: 82, borderRadius: 41,
+    backgroundColor: "#f0f0f0", alignItems: "center", justifyContent: "center",
   },
-  commentText: { fontSize: 13, color: Colors.textSecondary, lineHeight: 19 },
-  section: {
-    backgroundColor: Colors.surface, borderRadius: 12, overflow: "hidden",
+  photoEditBadge: {
+    position: "absolute", bottom: 2, right: 2, width: 22, height: 22,
+    borderRadius: 11, backgroundColor: Colors.primary,
+    alignItems: "center", justifyContent: "center", borderWidth: 2, borderColor: "#fff",
+  },
+  cardBody: {
+    paddingTop: 40, paddingBottom: 16, paddingHorizontal: 20,
+    alignItems: "center", gap: 4, backgroundColor: "#fff",
+  },
+  agentName: { fontSize: 18, fontWeight: "800", color: "#1a1a2e", textAlign: "center", letterSpacing: 0.3 },
+  designation: { fontSize: 12, color: "#C62828", fontWeight: "700", letterSpacing: 0.5 },
+  iibf: { fontSize: 11, color: "#555", fontWeight: "500", marginBottom: 4 },
+  divider: { width: "80%", height: StyleSheet.hairlineWidth, backgroundColor: "#ddd", marginVertical: 8 },
+  companyBrandRow: { flexDirection: "row", alignItems: "baseline" },
+  heroText: { fontSize: 22, fontWeight: "900", color: "#C62828", letterSpacing: -0.5, fontStyle: "italic" },
+  financeText: { fontSize: 22, fontWeight: "700", color: "#1a1a2e", letterSpacing: 0.5 },
+  companyName: { fontSize: 14, fontWeight: "900", color: "#1a1a2e", letterSpacing: 1, textAlign: "center", marginTop: 2 },
+  address: { fontSize: 9, color: "#777", textAlign: "center", lineHeight: 13, marginTop: 2 },
+  emergencyRow: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 8 },
+  emergencyLabel: { fontSize: 10, color: Colors.danger, fontWeight: "600", letterSpacing: 0.3 },
+  phone: { fontSize: 16, fontWeight: "800", color: "#1a1a2e", letterSpacing: 1 },
+  cardFooter: { flexDirection: "row", height: 8 },
+  footerBar: { flex: 1 },
+  photoBtn: {
+    flexDirection: "row", alignItems: "center", gap: 8,
+    backgroundColor: Colors.surface, borderRadius: 12,
+    paddingVertical: 14, paddingHorizontal: 24,
     borderWidth: 1, borderColor: Colors.border,
+    width: "100%", maxWidth: 340, justifyContent: "center",
   },
-  sectionTitle: {
-    fontSize: 11, fontWeight: "700", color: Colors.textSecondary,
-    textTransform: "uppercase", letterSpacing: 0.8,
-    paddingHorizontal: 14, paddingVertical: 8,
-    backgroundColor: Colors.surfaceAlt,
-    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: Colors.border,
-  },
-  row: {
-    flexDirection: "row", justifyContent: "space-between", alignItems: "center",
-    paddingHorizontal: 14, paddingVertical: 10,
-    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: Colors.border,
-  },
-  rowLabel: { fontSize: 12, color: Colors.textSecondary, fontWeight: "600", flex: 1 },
-  rowValue: { fontSize: 13, color: Colors.text, fontWeight: "500", flex: 1.5, textAlign: "right" },
-  callBtn: {
-    backgroundColor: Colors.primary, borderRadius: 14, padding: 16,
-    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8,
-    marginTop: 4,
-  },
-  callBtnText: { color: "#fff", fontSize: 15, fontWeight: "700" },
+  photoBtnText: { fontSize: 15, fontWeight: "600", color: Colors.primary },
 });
