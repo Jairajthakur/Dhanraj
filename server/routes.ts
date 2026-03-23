@@ -158,6 +158,24 @@ function parseDate(val: any): string | null {
   const d = new Date(s); if (isNaN(d.getTime())) return null; return s;
 }
 
+// Detect text like "RollBack", "ROLLBACK", "RB" in the rollback column
+function isRollbackText(val: any): boolean {
+  if (val === null || val === undefined || val === "") return false;
+  const s = String(val).trim().toLowerCase().replace(/[\s_\-]/g, "");
+  return s === "rollback" || s === "rb" || s === "yes" || s === "y" || s === "true" || s === "1";
+}
+
+// Returns true if rollback column has text marker, false if numeric/empty
+function parseRollbackYn(val: any): boolean | null {
+  if (val === null || val === undefined || val === "") return null;
+  const s = String(val).trim();
+  // If it's a text marker like "RollBack"
+  if (isNaN(Number(s.replace(/,/g, ""))) || isRollbackText(s)) return isRollbackText(s) ? true : null;
+  // If it's a number > 0, treat as rollback
+  const n = parseFloat(s.replace(/,/g, ""));
+  return n > 0 ? true : null;
+}
+
 const HEADER_SENTINEL = new Set(["loan no", "loanno", "loan number", "customer name", "customername", "fos name", "fosname", "fos_name", "rollback", "emi", "pos"]);
 function isRepeatHeaderRow(mapped: Record<string, any>): boolean {
   const loanNo = String(mapped.loan_no || "").toLowerCase().trim();
@@ -881,7 +899,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           else { try { const username = fosLower.replace(/\s+/g, ".").replace(/[^a-z0-9.]/g, ""); const newAgent = await storage.createFosAgent({ name: mapped.fos_name, username, password: randomBytes(16).toString("hex") }); agentByName[fosLower] = newAgent.id; agentId = newAgent.id; agentsCreated++; } catch { const found = await storage.getAgentByUsername(mapped.fos_name.toLowerCase().trim().replace(/\s+/g, ".").replace(/[^a-z0-9.]/g, "")); if (found) { agentByName[mapped.fos_name.toLowerCase().trim()] = found.id; agentId = found.id; } } }
         }
         try {
-          await storage.upsertLoanCase({ agentId, fosName: mapped.fos_name || null, loanNo: mapped.loan_no, customerName: mapped.customer_name, bkt: mapped.bkt ? parseInt(mapped.bkt) || null : null, appId: mapped.app_id || null, address: mapped.address || null, mobileNo: mapped.mobile_no || null, referenceAddress: mapped.reference_address || null, pos: parseNum(mapped.pos), assetMake: mapped.asset_make || null, registrationNo: mapped.registration_no || null, engineNo: mapped.engine_no || null, chassisNo: mapped.chassis_no || null, emiAmount: parseNum(mapped.emi_amount), emiDue: parseNum(mapped.emi_due), cbc: parseNum(mapped.cbc), lpp: parseNum(mapped.lpp), cbcLpp: parseNum(mapped.cbc_lpp), rollback: parseNum(mapped.rollback), clearance: parseNum(mapped.clearance), firstEmiDueDate: parseDate(mapped.first_emi_due_date), loanMaturityDate: parseDate(mapped.loan_maturity_date), tenor: mapped.tenor ? parseInt(mapped.tenor) || null : null, pro: mapped.pro || null, status: normalizeStatus(mapped.status), latestFeedback: mapped.latest_feedback || null, feedbackComments: mapped.feedback_comments || null, telecallerPtpDate: parseDate(mapped.telecaller_ptp_date) });
+          await storage.upsertLoanCase({ agentId, fosName: mapped.fos_name || null, loanNo: mapped.loan_no, customerName: mapped.customer_name, bkt: mapped.bkt ? parseInt(mapped.bkt) || null : null, appId: mapped.app_id || null, address: mapped.address || null, mobileNo: mapped.mobile_no || null, referenceAddress: mapped.reference_address || null, pos: parseNum(mapped.pos), assetMake: mapped.asset_make || null, registrationNo: mapped.registration_no || null, engineNo: mapped.engine_no || null, chassisNo: mapped.chassis_no || null, emiAmount: parseNum(mapped.emi_amount), emiDue: parseNum(mapped.emi_due), cbc: parseNum(mapped.cbc), lpp: parseNum(mapped.lpp), cbcLpp: parseNum(mapped.cbc_lpp), rollback: parseNum(mapped.rollback), clearance: parseNum(mapped.clearance), firstEmiDueDate: parseDate(mapped.first_emi_due_date), loanMaturityDate: parseDate(mapped.loan_maturity_date), tenor: mapped.tenor ? parseInt(mapped.tenor) || null : null, pro: mapped.pro || null, status: normalizeStatus(mapped.status), latestFeedback: mapped.latest_feedback || null, feedbackComments: mapped.feedback_comments || null, telecallerPtpDate: parseDate(mapped.telecaller_ptp_date), rollbackYn: parseRollbackYn(mapped.rollback) });
           imported++;
         } catch (e: any) { errors.push(`Row ${i + headerRowIdx + 2}: ${e.message}`); skipped++; }
       }
