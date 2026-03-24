@@ -16,6 +16,12 @@ interface Agent {
   role: "fos" | "admin" | "repo";
   phone?: string;
   photo_url?: string;
+  agent_id?: string; // ✅ e.g. "DE001", "DE002" — from server or generated
+}
+
+// ✅ Generates "DE001", "DE002" etc. from numeric id
+export function formatAgentId(id: number): string {
+  return "DE" + String(id).padStart(3, "0");
 }
 
 interface AuthContextType {
@@ -44,17 +50,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       try {
         const cached = await agentCache.get();
 
-        // ✅ KEY FIX: On web, cookies are sent automatically by the browser.
-        // We MUST always call /api/auth/me on web to check if the session cookie
-        // is valid — we cannot rely on agentCache (which uses AsyncStorage and
-        // is always empty on web). Skipping this check caused agent=null on every
-        // page load, triggering a redirect loop and blank admin screen.
         if (Platform.OS === "web") {
           try {
             const res = await api.me();
             if (!cancelled && res?.agent) {
               setAgent(res.agent);
-              // Also persist to cache so subsequent non-web checks work
               await agentCache.set(res.agent);
             } else if (!cancelled) {
               setAgent(null);
@@ -66,8 +66,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 e?.message?.includes("401") ||
                 e?.status === 401 ||
                 e?.statusCode === 401;
-              // On auth error, user needs to login
-              // On network error, leave agent as null (can't verify)
               setAgent(null);
               if (!isAuthError) {
                 console.warn("[AuthContext] Network error on web bootstrap:", e?.message);
@@ -77,8 +75,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           return;
         }
 
-        // ── Native (iOS / Android) path ──────────────────────────────────
-        // No cache means definitely not logged in — skip server check
         if (!cached) {
           if (!cancelled) {
             setAgent(null);
@@ -87,10 +83,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           return;
         }
 
-        // Show cached agent immediately so UI doesn't wait for network
         if (!cancelled) setAgent(cached);
 
-        // Verify cached session is still valid with server
         const res = await api.me();
         if (!cancelled && res?.agent) {
           setAgent(res.agent);
@@ -108,12 +102,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             e?.statusCode === 401;
 
           if (isAuthError) {
-            // Session expired — clear and show login
             await agentCache.clear();
             await tokenStore.clear();
             setAgent(null);
           } else {
-            // Network error — keep cached session, stay logged in
             const cached = await agentCache.get();
             setAgent(cached ?? null);
           }
@@ -123,7 +115,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     };
 
-    // Safety timeout — never block UI for more than 6s
     const timeout = setTimeout(() => {
       if (!cancelled) {
         agentCache.get().then((cached) => {
