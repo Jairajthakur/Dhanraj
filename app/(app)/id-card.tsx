@@ -8,7 +8,7 @@ import * as ImagePicker from "expo-image-picker";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Ionicons } from "@expo/vector-icons";
 import Colors from "@/constants/colors";
-import { useAuth } from "@/context/AuthContext";
+import { useAuth, formatAgentId } from "@/context/AuthContext";
 import { api } from "@/lib/api";
 
 const PHOTO_KEY = "id_card_photo";
@@ -19,6 +19,12 @@ export default function IdCardScreen() {
   const [photoUri, setPhotoUri] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [ready, setReady] = useState(false);
+
+  // ✅ Generate "DE001", "DE002" etc. from agent.id
+  // Falls back to agent.agent_id if server provides it directly
+  const agentIdDisplay = agent
+    ? (agent.agent_id || formatAgentId(agent.id))
+    : "—";
 
   useEffect(() => {
     let cancelled = false;
@@ -153,10 +159,8 @@ export default function IdCardScreen() {
           <Text style={styles.agentName}>{agent?.name || "—"}</Text>
           <Text style={styles.designation}>Collection Officer</Text>
 
-          {/* ✅ Changed from IIBF Regn. No. to Agent ID No. */}
-          <Text style={styles.agentId}>
-            Agent ID No. : {agent?.agent_id || agent?.username || "—"}
-          </Text>
+          {/* ✅ Shows DE001, DE002 etc. generated from agent.id */}
+          <Text style={styles.agentId}>Agent ID No. : {agentIdDisplay}</Text>
 
           <View style={styles.divider} />
           <View style={styles.companyBrandRow}>
@@ -243,7 +247,6 @@ const styles = StyleSheet.create({
   },
   agentName: { fontSize: 18, fontWeight: "800", color: "#1a1a2e", textAlign: "center", letterSpacing: 0.3 },
   designation: { fontSize: 12, color: "#C62828", fontWeight: "700", letterSpacing: 0.5 },
-  // ✅ Renamed from iibf → agentId
   agentId: { fontSize: 11, color: "#555", fontWeight: "500", marginBottom: 4 },
   divider: { width: "80%", height: StyleSheet.hairlineWidth, backgroundColor: "#ddd", marginVertical: 8 },
   companyBrandRow: { flexDirection: "row", alignItems: "baseline" },
