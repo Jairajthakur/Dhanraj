@@ -24,7 +24,6 @@ export default function IdCardScreen() {
     let cancelled = false;
 
     async function loadPhoto() {
-      // 1. Load local photo first
       try {
         const local = await AsyncStorage.getItem(PHOTO_KEY);
         if (!cancelled && local) setPhotoUri(local);
@@ -32,12 +31,9 @@ export default function IdCardScreen() {
         console.warn("[IdCard] AsyncStorage read failed:", e);
       }
 
-      // 2. Try server photo — but DON'T crash if it fails
       try {
         const p = await api.getProfile();
         if (!cancelled && p?.photo_url) {
-          // ✅ Only use server URL if it's a real URL, not base64
-          // base64 strings are huge and crash the app on some devices
           if (p.photo_url.startsWith("http")) {
             setPhotoUri(p.photo_url);
           }
@@ -58,8 +54,6 @@ export default function IdCardScreen() {
       const result = useCamera
         ? await ImagePicker.launchCameraAsync({
             allowsEditing: true, aspect: [1, 1], quality: 0.5,
-            // ✅ Do NOT use base64 — it's too large and crashes the app
-            // We use the local URI instead
           })
         : await ImagePicker.launchImageLibraryAsync({
             mediaTypes: ["images"],
@@ -70,15 +64,8 @@ export default function IdCardScreen() {
 
       setSaving(true);
       const localUri = result.assets[0].uri;
-
-      // ✅ Save local URI to AsyncStorage (not base64)
       await AsyncStorage.setItem(PHOTO_KEY, localUri);
       setPhotoUri(localUri);
-
-      // ✅ Fire and forget — don't await, don't block UI
-      // Skip saving to server since base64 causes crashes
-      // api.saveProfilePhoto(localUri).catch(() => {});
-
     } catch (e: any) {
       Alert.alert("Error", e.message || "Failed to pick photo");
     } finally {
@@ -165,7 +152,12 @@ export default function IdCardScreen() {
         <View style={styles.cardBody}>
           <Text style={styles.agentName}>{agent?.name || "—"}</Text>
           <Text style={styles.designation}>Collection Officer</Text>
-          <Text style={styles.iibf}>IIBF Regn. No. : {agent?.username || "—"}</Text>
+
+          {/* ✅ Changed from IIBF Regn. No. to Agent ID No. */}
+          <Text style={styles.agentId}>
+            Agent ID No. : {agent?.agent_id || agent?.username || "—"}
+          </Text>
+
           <View style={styles.divider} />
           <View style={styles.companyBrandRow}>
             <Text style={styles.heroText}>Hero</Text>
@@ -251,7 +243,8 @@ const styles = StyleSheet.create({
   },
   agentName: { fontSize: 18, fontWeight: "800", color: "#1a1a2e", textAlign: "center", letterSpacing: 0.3 },
   designation: { fontSize: 12, color: "#C62828", fontWeight: "700", letterSpacing: 0.5 },
-  iibf: { fontSize: 11, color: "#555", fontWeight: "500", marginBottom: 4 },
+  // ✅ Renamed from iibf → agentId
+  agentId: { fontSize: 11, color: "#555", fontWeight: "500", marginBottom: 4 },
   divider: { width: "80%", height: StyleSheet.hairlineWidth, backgroundColor: "#ddd", marginVertical: 8 },
   companyBrandRow: { flexDirection: "row", alignItems: "baseline" },
   heroText: { fontSize: 22, fontWeight: "900", color: "#C62828", letterSpacing: -0.5, fontStyle: "italic" },
