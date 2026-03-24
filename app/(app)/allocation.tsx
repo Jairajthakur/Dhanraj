@@ -97,10 +97,8 @@ function FeedbackModal({ visible, caseItem, onClose, onSave, isLocked = false }:
   const [activeTab, setActiveTab] = useState("Unpaid");
   const [status, setStatus] = useState(caseItem?.status || "Unpaid");
 
-  // Unpaid simple fields
   const [comments, setComments] = useState(caseItem?.feedback_comments || "");
 
-  // Monthly feedback fields
   const [monthlyFeedback, setMonthlyFeedback] = useState<string>(caseItem?.monthly_feedback || "");
   const [showMonthlyOptions, setShowMonthlyOptions] = useState(false);
   const [detailFeedback, setDetailFeedback] = useState(caseItem?.latest_feedback || "");
@@ -121,7 +119,6 @@ function FeedbackModal({ visible, caseItem, onClose, onSave, isLocked = false }:
   const [kycPurchase, setKycPurchase] = useState<boolean | null>(caseItem?.kyc_purchase ?? null);
   const [workable, setWorkable] = useState<boolean | null>(caseItem?.workable ?? null);
 
-  // PTP / Paid fields
   const [paidDetailFeedback, setPaidDetailFeedback] = useState(caseItem?.latest_feedback || "");
   const [paidComments, setPaidComments] = useState(caseItem?.feedback_comments || "");
   const [paidRollbackYn, setPaidRollbackYn] = useState<boolean | null>(
@@ -232,32 +229,29 @@ function FeedbackModal({ visible, caseItem, onClose, onSave, isLocked = false }:
             )}
           </View>
 
-          {/* Tab selector */}
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 16 }}>
-            <View style={{ flexDirection: "row", gap: 8 }}>
-              {TABS.map((t) => {
-                const isActive = activeTab === t;
-                const color = t === "Paid" ? Colors.success
-                  : t === "PTP" ? Colors.statusPTP
-                  : t === "Monthly Feedback" ? Colors.primary
-                  : Colors.statusUnpaid;
-                return (
-                  <Pressable
-                    key={t}
-                    style={[
-                      fbStyles.tabChip,
-                      isActive && { backgroundColor: color, borderColor: color },
-                    ]}
-                    onPress={() => setActiveTab(t)}
-                  >
-                    <Text style={[fbStyles.tabChipText, isActive && { color: "#fff" }]}>{t}</Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-          </ScrollView>
+          {/* ✅ FIX: replaced horizontal ScrollView with flexWrap View to fix Android font rendering bug */}
+          <View style={fbStyles.tabRow}>
+            {TABS.map((t) => {
+              const isActive = activeTab === t;
+              const color = t === "Paid" ? Colors.success
+                : t === "PTP" ? Colors.statusPTP
+                : t === "Monthly Feedback" ? Colors.primary
+                : Colors.statusUnpaid;
+              return (
+                <Pressable
+                  key={t}
+                  style={[
+                    fbStyles.tabChip,
+                    isActive && { backgroundColor: color, borderColor: color },
+                  ]}
+                  onPress={() => setActiveTab(t)}
+                >
+                  <Text style={[fbStyles.tabChipText, isActive && { color: "#fff" }]}>{t}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
 
-          {/* ✅ FIX: use flexGrow + flexShrink instead of flex: 1 */}
           <ScrollView showsVerticalScrollIndicator={false} style={{ flexGrow: 1, flexShrink: 1 }}>
 
             {/* ====== UNPAID ====== */}
@@ -311,22 +305,21 @@ function FeedbackModal({ visible, caseItem, onClose, onSave, isLocked = false }:
                 )}
 
                 <Text style={fbStyles.sectionLabel}>Feedback Code</Text>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
-                  <View style={{ flexDirection: "row", gap: 8 }}>
-                    {FEEDBACK_CODES.map((f) => (
-                      <Pressable
-                        key={f}
-                        style={[
-                          fbStyles.tabChip,
-                          feedbackCode === f && { backgroundColor: Colors.accent, borderColor: Colors.accent },
-                        ]}
-                        onPress={() => setFeedbackCode(f)}
-                      >
-                        <Text style={[fbStyles.tabChipText, feedbackCode === f && { color: "#fff" }]}>{f}</Text>
-                      </Pressable>
-                    ))}
-                  </View>
-                </ScrollView>
+                {/* ✅ FIX: flexWrap instead of horizontal ScrollView */}
+                <View style={fbStyles.chipWrapRow}>
+                  {FEEDBACK_CODES.map((f) => (
+                    <Pressable
+                      key={f}
+                      style={[
+                        fbStyles.tabChip,
+                        feedbackCode === f && { backgroundColor: Colors.accent, borderColor: Colors.accent },
+                      ]}
+                      onPress={() => setFeedbackCode(f)}
+                    >
+                      <Text style={[fbStyles.tabChipText, feedbackCode === f && { color: "#fff" }]}>{f}</Text>
+                    </Pressable>
+                  ))}
+                </View>
 
                 <Text style={fbStyles.sectionLabel}>Detail Feedback</Text>
                 {feedbackCode === "PTP" ? (
@@ -813,7 +806,6 @@ const styles = StyleSheet.create({
 
 const fbStyles = StyleSheet.create({
   overlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" },
-  // ✅ FIX: changed flex: 0 → flexShrink: 1 so the sheet sizes to content properly
   sheet: { backgroundColor: Colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, maxHeight: "92%", flexShrink: 1 },
   handle: { width: 40, height: 4, backgroundColor: Colors.border, borderRadius: 2, alignSelf: "center", marginBottom: 12 },
   title: { fontSize: 20, fontWeight: "700", color: Colors.text, marginBottom: 4 },
@@ -824,8 +816,34 @@ const fbStyles = StyleSheet.create({
   caseInfoChip: { flex: 1, borderRadius: 10, padding: 10, gap: 2 },
   caseInfoLabel: { fontSize: 9, fontWeight: "700", color: Colors.textMuted, textTransform: "uppercase" },
   caseInfoValue: { fontSize: 13, fontWeight: "800" },
-  tabChip: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, backgroundColor: Colors.surfaceAlt, borderWidth: 1, borderColor: Colors.border },
-  tabChipText: { fontSize: 13, fontWeight: "600", color: Colors.textSecondary },
+  // ✅ FIX: replaced horizontal ScrollView with flexWrap row
+  tabRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    marginBottom: 16,
+  },
+  chipWrapRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    marginBottom: 12,
+  },
+  tabChip: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    backgroundColor: Colors.surfaceElevated,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  // ✅ FIX: explicit color + fontFamily to prevent Android font rendering bug in Modal
+  tabChipText: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: Colors.text,
+    fontFamily: Platform.OS === "android" ? "Roboto" : undefined,
+  },
   feedbackOption: { paddingVertical: 12, paddingHorizontal: 16, borderRadius: 10, borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.surfaceAlt },
   feedbackOptionText: { fontSize: 14, fontWeight: "600", color: Colors.text },
   detailOptionBtn: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 14, paddingHorizontal: 16, borderRadius: 12, borderWidth: 1.5, borderColor: Colors.border, backgroundColor: Colors.surfaceAlt, marginBottom: 4 },
