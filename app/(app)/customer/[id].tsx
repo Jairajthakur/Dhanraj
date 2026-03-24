@@ -1,10 +1,12 @@
 import React from "react";
-import { View, Text, ScrollView, Pressable, Linking, Platform, StyleSheet } from "react-native";
+import { View, Text, ScrollView, Pressable, Linking, Platform, StyleSheet, ActivityIndicator } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useQuery } from "@tanstack/react-query";
 import { Ionicons } from "@expo/vector-icons";
 import Colors from "@/constants/colors";
 import { caseStore } from "@/lib/caseStore";
+import { api } from "@/lib/api";
 
 function fmt(v: any, prefix = "") {
   if (v === null || v === undefined || v === "") return "—";
@@ -39,7 +41,27 @@ export default function CustomerDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const c = caseStore.get();
+
+  // Try caseStore first (native / in-session navigation)
+  const cached = caseStore.get();
+  const useCache = cached && String(cached.id) === String(id);
+
+  // Always fetch from API as fallback (especially for web direct URL / refresh)
+  const { data, isLoading } = useQuery({
+    queryKey: [`/api/cases/${id}`],
+    queryFn: () => api.getCaseById(Number(id)),
+    enabled: !useCache && !!id,
+  });
+
+  const c = useCache ? cached : data?.case;
+
+  if (isLoading) {
+    return (
+      <View style={{ flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: Colors.background }}>
+        <ActivityIndicator color={Colors.primary} size="large" />
+      </View>
+    );
+  }
 
   if (!c) {
     return (
