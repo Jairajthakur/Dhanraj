@@ -6,7 +6,6 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "@/context/AuthContext";
 import Colors from "@/constants/colors";
-import { api } from "@/lib/api";
 
 export default function LoginScreen() {
   const { login } = useAuth();
@@ -15,7 +14,6 @@ export default function LoginScreen() {
   const [password, setPassword] = useState("");
   const [showPass, setShowPass] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [debugLoading, setDebugLoading] = useState(false);
 
   const handleLogin = async () => {
     if (!username.trim() || !password.trim()) {
@@ -32,37 +30,6 @@ export default function LoginScreen() {
     }
   };
 
-  const debugOneSignal = async () => {
-    setDebugLoading(true);
-    const steps: string[] = [];
-    try {
-      const mod = require("react-native-onesignal");
-      const OneSignal = mod?.OneSignal ?? mod?.default ?? mod;
-      if (!OneSignal) { Alert.alert("Error", "OneSignal undefined"); return; }
-      try { OneSignal.initialize("bff2c8e0-de24-4aad-a373-d030c210155f"); steps.push("✅ initialize()"); } catch (e: any) { steps.push("⚠️ init: " + e.message); }
-      await new Promise((r) => setTimeout(r, 500));
-      try { const perm = OneSignal.Notifications.permission; steps.push("📋 permission: " + JSON.stringify(perm)); } catch (e: any) { steps.push("⚠️ permission: " + e.message); }
-      try { const result = await OneSignal.Notifications.requestPermission(true); steps.push("✅ requestPermission: " + JSON.stringify(result)); } catch (e: any) { steps.push("⚠️ requestPermission: " + e.message); }
-      await new Promise((r) => setTimeout(r, 1000));
-      try { const perm2 = OneSignal.Notifications.permission; steps.push("📋 permission after: " + JSON.stringify(perm2)); } catch (e: any) { steps.push("⚠️ permission2: " + e.message); }
-      try { await OneSignal.User.pushSubscription.optIn(); steps.push("✅ optIn()"); } catch (e: any) { steps.push("❌ optIn: " + e.message); }
-      await new Promise((r) => setTimeout(r, 3000));
-      const optedIn = OneSignal?.User?.pushSubscription?.optedIn;
-      steps.push("📋 optedIn after: " + optedIn);
-      let onesignalId: string | null = null;
-      try { onesignalId = await OneSignal.User.getOnesignalId(); steps.push("📋 onesignalId: " + (onesignalId?.slice(0, 24) ?? "null")); } catch (e: any) { steps.push("❌ getOnesignalId: " + e.message); }
-      let pushToken: string | null = null;
-      try { pushToken = OneSignal?.User?.pushSubscription?.token ?? null; steps.push("📋 pushToken: " + (pushToken?.slice(0, 20) ?? "null")); } catch (e: any) { steps.push("⚠️ pushToken: " + e.message); }
-      const tokenToSave = pushToken || onesignalId;
-      if (tokenToSave) {
-        try { await api.savePushToken(tokenToSave); steps.push("✅ SAVED TO SERVER!"); } catch (e: any) { steps.push("❌ save: " + e.message); }
-      } else { steps.push("❌ No token/ID to save"); }
-      Alert.alert("Result", steps.join("\n"), [{ text: "OK" }]);
-    } catch (e: any) { Alert.alert("Error", e.message); }
-    finally { setDebugLoading(false); }
-  };
-
-  // ✅ On web: wrap in a full-height View so flex layout works correctly
   const Wrapper = Platform.OS === "web"
     ? ({ children }: { children: React.ReactNode }) => (
         <View style={{ flex: 1, width: "100%", minHeight: "100vh" as any, backgroundColor: Colors.background }}>
@@ -125,16 +92,6 @@ export default function LoginScreen() {
               <><Text style={styles.loginBtnText}>Sign In</Text><Ionicons name="arrow-forward" size={18} color="#fff" /></>
             )}
           </Pressable>
-
-          <Pressable
-            style={[styles.debugBtn, debugLoading && { opacity: 0.6 }]}
-            onPress={debugOneSignal} disabled={debugLoading}
-          >
-            {debugLoading
-              ? <ActivityIndicator size="small" color={Colors.textMuted} />
-              : <><Ionicons name="notifications-outline" size={14} color={Colors.textMuted} /><Text style={styles.debugBtnText}>Force Register Notifications</Text></>
-            }
-          </Pressable>
         </View>
 
         <Text style={styles.footer}>Hero FinCorp · FOS Collection System</Text>
@@ -161,7 +118,5 @@ const styles = StyleSheet.create({
   eyeBtn: { padding: 6 },
   loginBtn: { backgroundColor: Colors.primary, borderRadius: 14, paddingVertical: 16, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 8, marginTop: 4 },
   loginBtnText: { color: "#fff", fontSize: 17, fontWeight: "800" },
-  debugBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 10, borderRadius: 10, backgroundColor: Colors.surfaceAlt, borderWidth: 1, borderColor: Colors.border, borderStyle: "dashed" },
-  debugBtnText: { fontSize: 12, color: Colors.textMuted, fontWeight: "600" },
   footer: { fontSize: 12, color: Colors.textMuted, textAlign: "center" },
 });
