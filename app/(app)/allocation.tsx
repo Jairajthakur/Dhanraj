@@ -10,6 +10,7 @@ import { router } from "expo-router";
 import * as Haptics from "expo-haptics";
 import Colors from "@/constants/colors";
 import { api } from "@/lib/api";
+import { caseStore } from "@/lib/caseStore";
 
 const TABS = ["Unpaid", "PTP", "Paid", "Monthly Feedback"];
 
@@ -493,6 +494,7 @@ function FeedbackModal({ visible, caseItem, onClose, onSave, isLocked = false }:
 }
 
 function navigateToDetail(item: any) {
+  caseStore.set(item);
   router.push({
     pathname: "/(app)/customer/[id]",
     params: { id: String(item.id) },
