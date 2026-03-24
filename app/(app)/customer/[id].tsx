@@ -42,23 +42,26 @@ export default function CustomerDetailScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
 
-  // Try caseStore first (native / in-session navigation)
-  const cached = caseStore.get();
-  const useCache = cached && String(cached.id) === String(id);
-
-  // Always fetch from API as fallback (especially for web direct URL / refresh)
-  const { data, isLoading } = useQuery({
+  // Always fetch from API — works on native, web, direct URL, and refresh
+  const { data, isLoading, isError } = useQuery({
     queryKey: [`/api/cases/${id}`],
     queryFn: () => api.getCaseById(Number(id)),
-    enabled: !useCache && !!id,
+    enabled: !!id,
+    placeholderData: () => {
+      const cached = caseStore.get();
+      if (cached && String(cached.id) === String(id)) return { case: cached };
+      return undefined;
+    },
+    staleTime: 30 * 1000,
   });
 
-  const c = useCache ? cached : data?.case;
+  const c = data?.case;
 
-  if (isLoading) {
+  if (isLoading && !c) {
     return (
       <View style={{ flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: Colors.background }}>
         <ActivityIndicator color={Colors.primary} size="large" />
+        <Text style={{ marginTop: 12, color: Colors.textMuted, fontSize: 13 }}>Loading...</Text>
       </View>
     );
   }
@@ -68,8 +71,13 @@ export default function CustomerDetailScreen() {
       <View style={{ flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: Colors.background, padding: 32, gap: 12 }}>
         <Ionicons name="document-outline" size={48} color={Colors.textMuted} />
         <Text style={{ fontSize: 18, fontWeight: "700", color: Colors.text }}>No data found</Text>
-        <Text style={{ fontSize: 13, color: Colors.textSecondary, textAlign: "center" }}>Go back and tap Details again.</Text>
-        <Pressable onPress={() => router.back()} style={{ backgroundColor: Colors.primary, paddingHorizontal: 24, paddingVertical: 12, borderRadius: 12 }}>
+        <Text style={{ fontSize: 13, color: Colors.textSecondary, textAlign: "center" }}>
+          {isError ? "Failed to load. Check your connection." : "Go back and tap Details again."}
+        </Text>
+        <Pressable
+          onPress={() => router.back()}
+          style={{ backgroundColor: Colors.primary, paddingHorizontal: 24, paddingVertical: 12, borderRadius: 12 }}
+        >
           <Text style={{ color: "#fff", fontWeight: "700" }}>Go Back</Text>
         </Pressable>
       </View>
@@ -80,11 +88,16 @@ export default function CustomerDetailScreen() {
   const sc = SC[c.status] || Colors.textSecondary;
 
   return (
-    <ScrollView style={{ flex: 1, backgroundColor: Colors.background }} contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: insets.bottom + 32, paddingTop: Platform.OS === "web" ? 67 : 0 }}>
+    <ScrollView
+      style={{ flex: 1, backgroundColor: Colors.background }}
+      contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: insets.bottom + 32, paddingTop: Platform.OS === "web" ? 67 : 0 }}
+    >
       <View style={[S.banner, { borderColor: sc + "40", backgroundColor: sc + "15" }]}>
         <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: sc }} />
         <Text style={{ fontSize: 15, fontWeight: "700", color: sc }}>{c.status}</Text>
-        {c.latest_feedback ? <View style={S.fb}><Text style={{ fontSize: 12, fontWeight: "600", color: Colors.text }}>{c.latest_feedback}</Text></View> : null}
+        {c.latest_feedback
+          ? <View style={S.fb}><Text style={{ fontSize: 12, fontWeight: "600", color: Colors.text }}>{c.latest_feedback}</Text></View>
+          : null}
       </View>
 
       <Sec title="Loan Details">
@@ -132,7 +145,10 @@ export default function CustomerDetailScreen() {
       </Sec>
 
       {c.mobile_no
-        ? <Pressable style={{ backgroundColor: Colors.primary, borderRadius: 14, padding: 16, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 }} onPress={() => Linking.openURL(`tel:${c.mobile_no.split(",")[0].trim()}`)}>
+        ? <Pressable
+            style={{ backgroundColor: Colors.primary, borderRadius: 14, padding: 16, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 }}
+            onPress={() => Linking.openURL(`tel:${c.mobile_no.split(",")[0].trim()}`)}
+          >
             <Ionicons name="call" size={20} color="#fff" />
             <Text style={{ color: "#fff", fontSize: 15, fontWeight: "700" }}>Call</Text>
           </Pressable>
