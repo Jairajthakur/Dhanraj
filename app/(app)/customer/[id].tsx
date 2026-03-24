@@ -1,8 +1,7 @@
-import React from "react";
+import React, { useState, useEffect } from "react";
 import { View, Text, ScrollView, Pressable, Linking, Platform, StyleSheet, ActivityIndicator } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useQuery } from "@tanstack/react-query";
 import { Ionicons } from "@expo/vector-icons";
 import Colors from "@/constants/colors";
 import { caseStore } from "@/lib/caseStore";
@@ -21,7 +20,9 @@ function Row({ label, value, highlight, phone }: { label: string; value?: any; h
     <View style={S.row}>
       <Text style={S.rl}>{label}</Text>
       {phone && d !== "—"
-        ? <Pressable onPress={() => Linking.openURL(`tel:${d.split(",")[0].trim()}`)}><Text style={[S.rv, { color: Colors.info, textDecorationLine: "underline" }]}>{d}</Text></Pressable>
+        ? <Pressable onPress={() => Linking.openURL(`tel:${d.split(",")[0].trim()}`)}>
+            <Text style={[S.rv, { color: Colors.info, textDecorationLine: "underline" }]}>{d}</Text>
+          </Pressable>
         : <Text style={[S.rv, highlight ? { color: highlight, fontWeight: "700" } : null]}>{d}</Text>
       }
     </View>
@@ -42,22 +43,33 @@ export default function CustomerDetailScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
 
-  // Always fetch from API — works on native, web, direct URL, and refresh
-  const { data, isLoading, isError } = useQuery({
-    queryKey: [`/api/cases/${id}`],
-    queryFn: () => api.getCaseById(Number(id)),
-    enabled: !!id,
-    placeholderData: () => {
-      const cached = caseStore.get();
-      if (cached && String(cached.id) === String(id)) return { case: cached };
-      return undefined;
-    },
-    staleTime: 30 * 1000,
+  const [c, setC] = useState<any>(() => {
+    // Initialize immediately from caseStore
+    const cached = caseStore.get();
+    if (cached && String(cached.id) === String(id)) return cached;
+    return null;
   });
+  const [loading, setLoading] = useState(!c);
+  const [error, setError] = useState(false);
 
-  const c = data?.case;
+  useEffect(() => {
+    // If we already have data from caseStore, no need to fetch
+    if (c) return;
 
-  if (isLoading && !c) {
+    // Fallback: fetch from API (web direct URL, or caseStore miss)
+    if (!id) { setLoading(false); return; }
+
+    setLoading(true);
+    api.getCaseById(Number(id))
+      .then((res) => {
+        if (res?.case) setC(res.case);
+        else setError(true);
+      })
+      .catch(() => setError(true))
+      .finally(() => setLoading(false));
+  }, [id]);
+
+  if (loading) {
     return (
       <View style={{ flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: Colors.background }}>
         <ActivityIndicator color={Colors.primary} size="large" />
@@ -72,7 +84,7 @@ export default function CustomerDetailScreen() {
         <Ionicons name="document-outline" size={48} color={Colors.textMuted} />
         <Text style={{ fontSize: 18, fontWeight: "700", color: Colors.text }}>No data found</Text>
         <Text style={{ fontSize: 13, color: Colors.textSecondary, textAlign: "center" }}>
-          {isError ? "Failed to load. Check your connection." : "Go back and tap Details again."}
+          {error ? "Failed to load. Check your connection." : "Go back and tap Details again."}
         </Text>
         <Pressable
           onPress={() => router.back()}
