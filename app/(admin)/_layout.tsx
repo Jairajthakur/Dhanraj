@@ -8,12 +8,13 @@ import { useAuth } from "@/context/AuthContext";
 import * as Haptics from "expo-haptics";
 
 const ADMIN_MENU = [
-  { key: "dashboard", label: "Dashboard", icon: "home" as const, screen: "/(admin)" },
-  { key: "cases", label: "All Cases", icon: "list" as const, screen: "/(admin)/all-cases" },
-  { key: "bkt", label: "BKT Performance", icon: "layers" as const, screen: "/(admin)/bkt-cases" },
-  { key: "salary", label: "Salary Management", icon: "wallet" as const, screen: "/(admin)/salary" },
-  { key: "depositions", label: "Depositions", icon: "cash" as const, screen: "/(admin)/depositions" },
-  { key: "attendance", label: "Attendance", icon: "checkmark-circle" as const, screen: "/(admin)/attendance" },
+  { key: "dashboard",   label: "Dashboard",        icon: "home"             as const, screen: "/(admin)"                },
+  { key: "cases",       label: "All Cases",         icon: "list"             as const, screen: "/(admin)/all-cases"      },
+  { key: "bkt",         label: "BKT Performance",   icon: "layers"           as const, screen: "/(admin)/bkt-cases"      },
+  { key: "agency",      label: "Agency Target",     icon: "trophy"           as const, screen: "/(admin)/agency-target"  },
+  { key: "salary",      label: "Salary Management", icon: "wallet"           as const, screen: "/(admin)/salary"         },
+  { key: "depositions", label: "Depositions",       icon: "cash"             as const, screen: "/(admin)/depositions"    },
+  { key: "attendance",  label: "Attendance",        icon: "checkmark-circle" as const, screen: "/(admin)/attendance"     },
 ];
 
 function AdminDrawer({ visible, onClose }: { visible: boolean; onClose: () => void }) {
@@ -111,6 +112,7 @@ export default function AdminLayout() {
         <Stack.Screen name="index" />
         <Stack.Screen name="all-cases" />
         <Stack.Screen name="bkt-cases" />
+        <Stack.Screen name="agency-target" />
         <Stack.Screen name="salary" />
         <Stack.Screen name="depositions" />
         <Stack.Screen name="attendance" />
@@ -139,8 +141,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  drawerOverlay: { flex: 1, flexDirection: "row" },
-  drawerBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.65)" },
+  drawerOverlay:    { flex: 1, flexDirection: "row" },
+  drawerBackdrop:   { flex: 1, backgroundColor: "rgba(0,0,0,0.65)" },
   drawerContainer: {
     width: "82%",
     maxWidth: 310,
@@ -176,7 +178,7 @@ const styles = StyleSheet.create({
     elevation: 6,
   },
   drawerHeaderInfo: { flex: 1, gap: 6 },
-  drawerName: { color: Colors.text, fontSize: 16, fontWeight: "800", letterSpacing: -0.2 },
+  drawerName:       { color: Colors.text, fontSize: 16, fontWeight: "800", letterSpacing: -0.2 },
   drawerRoleBadge: {
     backgroundColor: Colors.accent + "25",
     borderRadius: 6,
@@ -184,7 +186,7 @@ const styles = StyleSheet.create({
     paddingVertical: 3,
     alignSelf: "flex-start",
   },
-  drawerRoleText: { color: Colors.accent, fontSize: 11, fontWeight: "700", letterSpacing: 0.5 },
+  drawerRoleText:  { color: Colors.accent, fontSize: 11, fontWeight: "700", letterSpacing: 0.5 },
   menuSection: {
     marginHorizontal: 12,
     backgroundColor: Colors.surfaceAlt,
