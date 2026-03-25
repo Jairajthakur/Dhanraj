@@ -348,12 +348,12 @@ function SummaryStrip({ bktData }: { bktData: Record<string, any> }) {
       </View>
       <View style={ss.divider} />
       <View style={ss.stat}>
-        <Text style={[ss.statVal, { color: Colors.primary }]}>{overallRes.toFixed(1)}%</Text>
+        <Text style={[ss.statVal, { color: "#fff" }]}>{overallRes.toFixed(1)}%</Text>
         <Text style={ss.statLabel}>Res %</Text>
       </View>
       <View style={ss.divider} />
       <View style={ss.stat}>
-        <Text style={[ss.statVal, { color: Colors.text }]}>{overallCases}</Text>
+        <Text style={[ss.statVal, { color: "#fff" }]}>{overallCases}</Text>
         <Text style={ss.statLabel}>Cases</Text>
       </View>
     </View>
@@ -366,7 +366,7 @@ const ss = StyleSheet.create({
   bigNum:    { fontSize: 22, fontWeight: "900", color: "#fff" },
   divider:   { width: 1, height: 32, backgroundColor: "rgba(255,255,255,0.2)", marginHorizontal: 12 },
   stat:      { alignItems: "center", gap: 2 },
-  statVal:   { fontSize: 14, fontWeight: "800" },
+  statVal:   { fontSize: 14, fontWeight: "800", color: "#fff" },
   statLabel: { fontSize: 9, color: "rgba(255,255,255,0.65)", fontWeight: "600", textTransform: "uppercase" },
 });
 
