@@ -286,8 +286,8 @@ function BktTargetCard({ bktKey, data, targets }: { bktKey: string; data: any; t
       </View>
       <ProgressBar value={resPct} target={targets.resTarget} color={meta.color} />
       <View style={card.row3}>
-        <StatCell label="Paid Cases" value={String(paidCount)}                  color={Colors.success} />
-        <StatCell label="Res %"      value={resPct.toFixed(1) + "%"}             color={meta.color}    />
+        <StatCell label="Paid Cases" value={String(paidCount)}                      color={Colors.success} />
+        <StatCell label="Res %"      value={resPct.toFixed(1) + "%"}                color={meta.color}    />
         <StatCell label="Required"   value={resMet ? "✓ Met" : fmtAmt(resRequired)} color={resMet ? Colors.success : Colors.danger} />
       </View>
 
@@ -304,8 +304,8 @@ function BktTargetCard({ bktKey, data, targets }: { bktKey: string; data: any; t
       </View>
       <ProgressBar value={rbPct} target={targets.rbTarget} color={Colors.info} />
       <View style={card.row3}>
-        <StatCell label="RB POS"   value={fmtAmt(rollbackPOS)}               color={Colors.info} />
-        <StatCell label="RB %"     value={rbPct.toFixed(1) + "%"}              color={Colors.info} />
+        <StatCell label="RB POS"   value={fmtAmt(rollbackPOS)}                 color={Colors.info} />
+        <StatCell label="RB %"     value={rbPct.toFixed(1) + "%"}               color={Colors.info} />
         <StatCell label="Required" value={rbMet ? "✓ Met" : fmtAmt(rbRequired)} color={rbMet ? Colors.success : Colors.info} />
       </View>
     </View>
@@ -338,7 +338,7 @@ function SummaryStrip({ bktData }: { bktData: Record<string, any> }) {
   return (
     <View style={ss.wrap}>
       <View style={ss.left}>
-        <Text style={ss.subLabel}>Overall TW Portfolio</Text>
+        <Text style={ss.subLabel}>TW Portfolio</Text>
         <Text style={ss.bigNum}>{fmtAmt(overallTotal)}</Text>
       </View>
       <View style={ss.divider} />
@@ -408,6 +408,8 @@ export default function AgencyTargetScreen() {
     for (const c of cases) {
       const bktRaw = String(c.bkt ?? "").trim();
       if (!bktRaw || !BKT_META[bktRaw]) continue;
+      // ── TW filter: skip UC and RUC ──
+      if (String(c.pro ?? "").trim().toUpperCase() !== "TW") continue;
       if (!map[bktRaw]) map[bktRaw] = { totalPOS: 0, paidPOS: 0, unpaidPOS: 0, ptpPOS: 0, rollbackPOS: 0, caseCount: 0, paidCount: 0 };
       const pos = parseFloat(c.pos      || 0);
       const rb  = parseFloat(c.rollback || 0);
@@ -447,7 +449,7 @@ export default function AgencyTargetScreen() {
         <View style={styles.topBar}>
           <View style={styles.topBarLeft}>
             <Ionicons name="trophy" size={16} color={Colors.primary} />
-            <Text style={styles.topBarTitle}>Agency Targets</Text>
+            <Text style={styles.topBarTitle}>Agency Targets — TW</Text>
           </View>
           <Pressable style={styles.editBtn} onPress={() => setEditVisible(true)}>
             <Ionicons name="settings-outline" size={14} color={Colors.primary} />
@@ -473,7 +475,7 @@ export default function AgencyTargetScreen() {
         <View style={styles.infoBanner}>
           <Ionicons name="information-circle-outline" size={15} color={Colors.info} />
           <Text style={styles.infoText}>
-            Live from allocation data. Tap <Text style={{ fontWeight: "700" }}>Set Targets</Text> to customise goals per BKT.
+            Showing <Text style={{ fontWeight: "700" }}>TW cases only</Text>. UC and RUC are excluded. Tap <Text style={{ fontWeight: "700" }}>Set Targets</Text> to customise goals per BKT.
           </Text>
         </View>
 
@@ -494,9 +496,9 @@ export default function AgencyTargetScreen() {
         ) : (
           <View style={styles.empty}>
             <Ionicons name="bar-chart-outline" size={56} color={Colors.textMuted} />
-            <Text style={styles.emptyTitle}>No BKT Data Yet</Text>
+            <Text style={styles.emptyTitle}>No TW Data Yet</Text>
             <Text style={styles.emptyText}>
-              Import an Allocation Excel from the Dashboard to populate agency targets.
+              Import an Allocation Excel from the Dashboard to populate TW agency targets.
             </Text>
             <Pressable style={styles.retryBtn} onPress={() => refetch()}>
               <Ionicons name="refresh" size={14} color="#fff" />
