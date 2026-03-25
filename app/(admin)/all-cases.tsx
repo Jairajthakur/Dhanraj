@@ -60,7 +60,7 @@ function TableRow({
     value !== null && value !== undefined && value !== ""
       ? String(value)
       : "";
-  if (!display) return null; // ✅ Skip empty rows
+  if (!display) return null;
   return (
     <View style={[detailStyles.row, even && { backgroundColor: Colors.surfaceAlt }]}>
       <View style={detailStyles.labelCell}>
@@ -225,9 +225,7 @@ function CaseDetailModal({
     ? STATUS_COLORS[localItem.status] || Colors.primary
     : Colors.primary;
 
-  // ✅ All fields from your actual DB schema, grouped into sections
   const rows = localItem ? [
-    // ── Feedback ──────────────────────────────────────────────
     { section: "Feedback" },
     { label: "Feedback Code",     value: localItem.feedback_code },
     { label: "Detail Feedback",   value: localItem.latest_feedback },
@@ -255,10 +253,9 @@ function CaseDetailModal({
     { label: "PTP Date",          value: fmtDate(localItem.ptp_date) },
     { label: "Telecaller PTP",    value: fmtDate(localItem.telecaller_ptp_date) },
 
-    // ── Case Info ─────────────────────────────────────────────
     { section: "Case Info" },
     { label: "Status",            value: localItem.status },
-    { label: "FOS Agent",         value: localItem.agent_name },  // ✅ fos_name aliased as agent_name from backend
+    { label: "FOS Agent",         value: localItem.agent_name },
     { label: "Company",           value: localItem.company_name },
     { label: "Customer Name",     value: localItem.customer_name },
     { label: "Loan No",           value: localItem.loan_no },
@@ -273,7 +270,6 @@ function CaseDetailModal({
     { label: "Ref 2 Mobile",      value: localItem.ref2_mobile, phone: true },
     { label: "Ref Number",        value: localItem.ref_number },
 
-    // ── Financial ─────────────────────────────────────────────
     { section: "Financial" },
     { label: "POS",               value: fmt(localItem.pos, "₹") },
     { label: "EMI",               value: fmt(localItem.emi_amount, "₹") },
@@ -284,7 +280,6 @@ function CaseDetailModal({
     { label: "Rollback",          value: fmt(localItem.rollback, "₹") },
     { label: "Clearance",         value: fmt(localItem.clearance, "₹") },
 
-    // ── Vehicle ───────────────────────────────────────────────
     { section: "Vehicle" },
     { label: "Asset Name",        value: localItem.asset_name },
     { label: "Asset Make",        value: localItem.asset_make },
@@ -434,7 +429,6 @@ export default function AllCasesScreen() {
     qc.invalidateQueries({ queryKey: ["/api/admin/stats"] });
   };
 
-  // ✅ Invalidate + sync selectedCase with fresh server data
   const invalidateAndSyncSelected = async () => {
     invalidateAll();
     if (selectedCase) {
@@ -871,101 +865,101 @@ export default function AllCasesScreen() {
 }
 
 const actionStyles = StyleSheet.create({
-  bar: { flexDirection: "row", gap: 6, marginTop: 4, flexWrap: "wrap" },
-  btn: { flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 10, paddingVertical: 7, borderRadius: 8, borderWidth: 1, borderColor: Colors.border },
-  btnText: { fontSize: 12, fontWeight: "700", color: Colors.text },
-  btnInactive: { backgroundColor: Colors.surfaceAlt, borderColor: Colors.border },
-  btnActivePaid: { backgroundColor: Colors.success, borderColor: Colors.success },
-  btnUnpaid: { backgroundColor: Colors.danger, borderColor: Colors.danger },
+  bar:               { flexDirection: "row", gap: 6, marginTop: 4, flexWrap: "wrap" },
+  btn:               { flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 10, paddingVertical: 7, borderRadius: 8, borderWidth: 1, borderColor: Colors.border },
+  btnText:           { fontSize: 12, fontWeight: "700", color: Colors.text },
+  btnInactive:       { backgroundColor: Colors.surfaceAlt, borderColor: Colors.border },
+  btnActivePaid:     { backgroundColor: Colors.success, borderColor: Colors.success },
+  btnUnpaid:         { backgroundColor: Colors.danger, borderColor: Colors.danger },
   btnActiveRollback: { backgroundColor: Colors.info, borderColor: Colors.info },
 });
 
 const styles = StyleSheet.create({
-  filterBar: { backgroundColor: Colors.surface, padding: 12, gap: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: Colors.border },
-  tableSwitcher: { flexDirection: "row", backgroundColor: Colors.surfaceAlt, borderRadius: 10, padding: 3 },
-  switchBtn: { flex: 1, paddingVertical: 8, alignItems: "center", borderRadius: 8 },
-  switchBtnActive: { backgroundColor: Colors.primary },
-  switchBtnText: { fontSize: 13, fontWeight: "700", color: Colors.textSecondary },
+  filterBar:           { backgroundColor: Colors.surface, padding: 12, gap: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: Colors.border },
+  tableSwitcher:       { flexDirection: "row", backgroundColor: Colors.surfaceAlt, borderRadius: 10, padding: 3 },
+  switchBtn:           { flex: 1, paddingVertical: 8, alignItems: "center", borderRadius: 8 },
+  switchBtnActive:     { backgroundColor: Colors.primary },
+  switchBtnText:       { fontSize: 13, fontWeight: "700", color: Colors.textSecondary },
   switchBtnTextActive: { color: "#fff" },
-  summaryRow: { flexDirection: "row", gap: 8 },
-  summaryChip: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8 },
-  summaryChipText: { fontSize: 12, fontWeight: "700" },
-  searchBox: { flexDirection: "row", alignItems: "center", backgroundColor: Colors.surfaceAlt, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, borderWidth: 1, borderColor: Colors.border },
-  searchInput: { flex: 1, fontSize: 14, color: Colors.text },
-  filters: { flexDirection: "row", gap: 8 },
-  filterChip: { paddingHorizontal: 14, paddingVertical: 7, borderRadius: 20, backgroundColor: Colors.surfaceAlt, borderWidth: 1, borderColor: Colors.border },
-  filterChipText: { fontSize: 12, fontWeight: "600", color: Colors.textSecondary },
-  count: { fontSize: 13, color: Colors.textSecondary, fontWeight: "600" },
-  list: { padding: 12, gap: 10 },
-  resetPanel: { backgroundColor: Colors.surface, borderRadius: 14, padding: 14, gap: 10, borderWidth: 1, borderColor: Colors.danger + "30" },
-  resetPanelHeader: { flexDirection: "row", alignItems: "center", gap: 8 },
-  resetPanelTitle: { fontSize: 14, fontWeight: "700", color: Colors.danger },
-  resetPanelSub: { fontSize: 12, color: Colors.textSecondary },
-  agentResetRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 8, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: Colors.border },
-  agentResetInfo: { flex: 1 },
-  agentResetName: { fontSize: 13, fontWeight: "700", color: Colors.text },
-  agentResetCount: { fontSize: 11, color: Colors.textSecondary, marginTop: 2 },
-  resetBtn: { flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: Colors.danger, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 7 },
-  resetBtnText: { fontSize: 12, fontWeight: "700", color: "#fff" },
-  noFeedbackBadge: { backgroundColor: Colors.surfaceAlt, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
+  summaryRow:          { flexDirection: "row", gap: 8 },
+  summaryChip:         { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8 },
+  summaryChipText:     { fontSize: 12, fontWeight: "700" },
+  searchBox:           { flexDirection: "row", alignItems: "center", backgroundColor: Colors.surfaceAlt, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, borderWidth: 1, borderColor: Colors.border },
+  searchInput:         { flex: 1, fontSize: 14, color: Colors.text },
+  filters:             { flexDirection: "row", gap: 8 },
+  filterChip:          { paddingHorizontal: 14, paddingVertical: 7, borderRadius: 20, backgroundColor: Colors.surfaceAlt, borderWidth: 1, borderColor: Colors.border },
+  filterChipText:      { fontSize: 12, fontWeight: "600", color: Colors.textSecondary },
+  count:               { fontSize: 13, color: Colors.textSecondary, fontWeight: "600" },
+  list:                { padding: 12, gap: 10 },
+  resetPanel:          { backgroundColor: Colors.surface, borderRadius: 14, padding: 14, gap: 10, borderWidth: 1, borderColor: Colors.danger + "30" },
+  resetPanelHeader:    { flexDirection: "row", alignItems: "center", gap: 8 },
+  resetPanelTitle:     { fontSize: 14, fontWeight: "700", color: Colors.danger },
+  resetPanelSub:       { fontSize: 12, color: Colors.textSecondary },
+  agentResetRow:       { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 8, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: Colors.border },
+  agentResetInfo:      { flex: 1 },
+  agentResetName:      { fontSize: 13, fontWeight: "700", color: Colors.text },
+  agentResetCount:     { fontSize: 11, color: Colors.textSecondary, marginTop: 2 },
+  resetBtn:            { flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: Colors.danger, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 7 },
+  resetBtnText:        { fontSize: 12, fontWeight: "700", color: "#fff" },
+  noFeedbackBadge:     { backgroundColor: Colors.surfaceAlt, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
   noFeedbackBadgeText: { fontSize: 11, color: Colors.textMuted, fontWeight: "600" },
-  card: { backgroundColor: Colors.surface, borderRadius: 14, padding: 14, gap: 8, shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 6, elevation: 2 },
-  cardHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
-  customerName: { flex: 1, fontSize: 14, fontWeight: "700", color: Colors.text, textTransform: "uppercase", marginRight: 8 },
-  statusBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20 },
-  statusText: { fontSize: 11, fontWeight: "700" },
-  tagRow: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
-  tag: { flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: Colors.surfaceAlt, borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4 },
-  tagLabel: { fontSize: 9, fontWeight: "700", color: Colors.textMuted, textTransform: "uppercase" },
-  tagValue: { fontSize: 11, fontWeight: "700", color: Colors.text },
-  regNo: { fontSize: 12, color: Colors.textSecondary },
-  agentTagText: { fontSize: 12, fontWeight: "600", color: Colors.primary },
-  feedbackRow: { flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap" },
-  feedbackCodeBadge: { backgroundColor: Colors.accent + "20", borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 },
-  feedbackCodeText: { fontSize: 11, fontWeight: "700", color: Colors.accent },
-  feedback: { flex: 1, fontSize: 12, color: Colors.textSecondary, fontStyle: "italic" },
-  cardActions: { flexDirection: "row", justifyContent: "flex-end", marginTop: 2 },
-  viewDetail: { flexDirection: "row", alignItems: "center", gap: 4 },
-  viewDetailText: { fontSize: 11, color: Colors.primary, fontWeight: "600" },
-  empty: { flex: 1, justifyContent: "center", alignItems: "center", gap: 12, paddingVertical: 60 },
-  emptyText: { fontSize: 15, color: Colors.textMuted, textAlign: "center" },
+  card:                { backgroundColor: Colors.surface, borderRadius: 14, padding: 14, gap: 8, shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 6, elevation: 2 },
+  cardHeader:          { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  customerName:        { flex: 1, fontSize: 14, fontWeight: "700", color: Colors.text, textTransform: "uppercase", marginRight: 8 },
+  statusBadge:         { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20 },
+  statusText:          { fontSize: 11, fontWeight: "700" },
+  tagRow:              { flexDirection: "row", flexWrap: "wrap", gap: 6 },
+  tag:                 { flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: Colors.surfaceAlt, borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4 },
+  tagLabel:            { fontSize: 9, fontWeight: "700", color: Colors.textMuted, textTransform: "uppercase" },
+  tagValue:            { fontSize: 11, fontWeight: "700", color: Colors.text },
+  regNo:               { fontSize: 12, color: Colors.textSecondary },
+  agentTagText:        { fontSize: 12, fontWeight: "600", color: Colors.primary },
+  feedbackRow:         { flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap" },
+  feedbackCodeBadge:   { backgroundColor: Colors.accent + "20", borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 },
+  feedbackCodeText:    { fontSize: 11, fontWeight: "700", color: Colors.accent },
+  feedback:            { flex: 1, fontSize: 12, color: Colors.textSecondary, fontStyle: "italic" },
+  cardActions:         { flexDirection: "row", justifyContent: "flex-end", marginTop: 2 },
+  viewDetail:          { flexDirection: "row", alignItems: "center", gap: 4 },
+  viewDetailText:      { fontSize: 11, color: Colors.primary, fontWeight: "600" },
+  empty:               { flex: 1, justifyContent: "center", alignItems: "center", gap: 12, paddingVertical: 60 },
+  emptyText:           { fontSize: 15, color: Colors.textMuted, textAlign: "center" },
 });
 
 const agentModalStyles = StyleSheet.create({
-  header: { flexDirection: "row", alignItems: "center", gap: 12, padding: 16, backgroundColor: Colors.surface, borderBottomWidth: 1, borderBottomColor: Colors.border, paddingTop: 52 },
-  headerTitle: { fontSize: 16, fontWeight: "700", color: Colors.text },
-  headerSub: { fontSize: 11, color: Colors.textSecondary, marginTop: 2 },
-  resetAllBtn: { backgroundColor: Colors.danger, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8 },
-  resetAllBtnText: { fontSize: 12, fontWeight: "700", color: "#fff" },
-  caseRow: { flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: Colors.surface, borderRadius: 12, padding: 14, borderWidth: 1, borderColor: Colors.border },
-  caseInfo: { flex: 1 },
-  caseName: { fontSize: 13, fontWeight: "700", color: Colors.text, textTransform: "uppercase", flex: 1 },
-  caseLoan: { fontSize: 11, color: Colors.textSecondary, marginBottom: 2 },
-  caseFeedback: { fontSize: 11, color: Colors.accent, fontStyle: "italic", marginBottom: 4 },
-  statusBadge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10 },
-  statusText: { fontSize: 10, fontWeight: "700" },
-  resetCaseBtn: { flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: Colors.danger, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, minWidth: 70, justifyContent: "center", alignSelf: "flex-start" },
+  header:           { flexDirection: "row", alignItems: "center", gap: 12, padding: 16, backgroundColor: Colors.surface, borderBottomWidth: 1, borderBottomColor: Colors.border, paddingTop: 52 },
+  headerTitle:      { fontSize: 16, fontWeight: "700", color: Colors.text },
+  headerSub:        { fontSize: 11, color: Colors.textSecondary, marginTop: 2 },
+  resetAllBtn:      { backgroundColor: Colors.danger, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8 },
+  resetAllBtnText:  { fontSize: 12, fontWeight: "700", color: "#fff" },
+  caseRow:          { flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: Colors.surface, borderRadius: 12, padding: 14, borderWidth: 1, borderColor: Colors.border },
+  caseInfo:         { flex: 1 },
+  caseName:         { fontSize: 13, fontWeight: "700", color: Colors.text, textTransform: "uppercase", flex: 1 },
+  caseLoan:         { fontSize: 11, color: Colors.textSecondary, marginBottom: 2 },
+  caseFeedback:     { fontSize: 11, color: Colors.accent, fontStyle: "italic", marginBottom: 4 },
+  statusBadge:      { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10 },
+  statusText:       { fontSize: 10, fontWeight: "700" },
+  resetCaseBtn:     { flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: Colors.danger, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, minWidth: 70, justifyContent: "center", alignSelf: "flex-start" },
   resetCaseBtnText: { fontSize: 12, fontWeight: "700", color: "#fff" },
-  noFeedbackTag: { backgroundColor: Colors.surfaceAlt, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, alignSelf: "flex-start" },
-  noFeedbackTagText: { fontSize: 11, color: Colors.textMuted, fontWeight: "600" },
+  noFeedbackTag:    { backgroundColor: Colors.surfaceAlt, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, alignSelf: "flex-start" },
+  noFeedbackTagText:{ fontSize: 11, color: Colors.textMuted, fontWeight: "600" },
 });
 
 const detailStyles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: Colors.background },
-  header: { flexDirection: "row", alignItems: "center", paddingHorizontal: 12, paddingVertical: 14, gap: 10 },
-  backBtn: { padding: 4 },
-  headerTitle: { flex: 1, fontSize: 16, fontWeight: "700", color: "#fff" },
-  statusPill: { backgroundColor: "rgba(255,255,255,0.9)", borderRadius: 16, paddingHorizontal: 10, paddingVertical: 4 },
-  statusPillText: { fontSize: 11, fontWeight: "800" },
-  sectionHeader: { backgroundColor: Colors.primary + "18", paddingHorizontal: 16, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: Colors.primary + "30" },
+  screen:            { flex: 1, backgroundColor: Colors.background },
+  header:            { flexDirection: "row", alignItems: "center", paddingHorizontal: 12, paddingVertical: 14, gap: 10 },
+  backBtn:           { padding: 4 },
+  headerTitle:       { flex: 1, fontSize: 16, fontWeight: "700", color: "#fff" },
+  statusPill:        { backgroundColor: "rgba(255,255,255,0.9)", borderRadius: 16, paddingHorizontal: 10, paddingVertical: 4 },
+  statusPillText:    { fontSize: 11, fontWeight: "800" },
+  sectionHeader:     { backgroundColor: Colors.primary + "18", paddingHorizontal: 16, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: Colors.primary + "30" },
   sectionHeaderText: { fontSize: 12, fontWeight: "800", color: Colors.primary, textTransform: "uppercase", letterSpacing: 0.8 },
-  resetCaseBtn: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: Colors.danger + "12", borderBottomWidth: 1, borderBottomColor: Colors.danger + "30", paddingHorizontal: 16, paddingVertical: 12 },
-  resetCaseBtnText: { fontSize: 13, fontWeight: "700", color: Colors.danger },
-  noFeedbackBanner: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: Colors.surfaceAlt, borderBottomWidth: 1, borderBottomColor: Colors.border, paddingHorizontal: 16, paddingVertical: 10 },
-  noFeedbackText: { fontSize: 12, color: Colors.textMuted },
-  row: { flexDirection: "row", borderBottomWidth: 1, borderBottomColor: Colors.border, backgroundColor: Colors.surface },
-  labelCell: { width: "42%", backgroundColor: Colors.surfaceAlt, padding: 12, justifyContent: "center", borderRightWidth: 1, borderRightColor: Colors.border },
-  labelText: { fontSize: 13, fontWeight: "700", color: Colors.primary },
-  valueCell: { flex: 1, padding: 12, justifyContent: "center" },
-  valueText: { fontSize: 13, color: Colors.text, fontWeight: "400" },
+  resetCaseBtn:      { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: Colors.danger + "12", borderBottomWidth: 1, borderBottomColor: Colors.danger + "30", paddingHorizontal: 16, paddingVertical: 12 },
+  resetCaseBtnText:  { fontSize: 13, fontWeight: "700", color: Colors.danger },
+  noFeedbackBanner:  { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: Colors.surfaceAlt, borderBottomWidth: 1, borderBottomColor: Colors.border, paddingHorizontal: 16, paddingVertical: 10 },
+  noFeedbackText:    { fontSize: 12, color: Colors.textMuted },
+  row:               { flexDirection: "row", borderBottomWidth: 1, borderBottomColor: Colors.border, backgroundColor: Colors.surface },
+  labelCell:         { width: "42%", backgroundColor: Colors.surfaceAlt, padding: 12, justifyContent: "center", borderRightWidth: 1, borderRightColor: Colors.border },
+  labelText:         { fontSize: 13, fontWeight: "700", color: Colors.primary },
+  valueCell:         { flex: 1, padding: 12, justifyContent: "center" },
+  valueText:         { fontSize: 13, color: Colors.text, fontWeight: "400" },
 });
