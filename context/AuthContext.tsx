@@ -16,10 +16,9 @@ interface Agent {
   role: "fos" | "admin" | "repo";
   phone?: string;
   photo_url?: string;
-  agent_id?: string; // ✅ e.g. "DE001", "DE002" — from server or generated
+  agent_id?: string;
 }
 
-// ✅ Generates "DE001", "DE002" etc. from numeric id
 export function formatAgentId(id: number): string {
   return "DE" + String(id).padStart(3, "0");
 }
@@ -75,6 +74,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           return;
         }
 
+        // ✅ On mobile: immediately show cached agent so user is never
+        // logged out due to a slow/failed network on startup
         if (!cached) {
           if (!cancelled) {
             setAgent(null);
@@ -83,38 +84,50 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           return;
         }
 
+        // Show cached agent right away
         if (!cancelled) setAgent(cached);
 
-        const res = await api.me();
-        if (!cancelled && res?.agent) {
-          setAgent(res.agent);
-          await agentCache.set(res.agent);
-          if (res?.token) {
-            await tokenStore.set(res.token);
+        // Then revalidate in background
+        try {
+          const res = await api.me();
+          if (!cancelled && res?.agent) {
+            setAgent(res.agent);
+            await agentCache.set(res.agent);
+            if (res?.token) {
+              await tokenStore.set(res.token);
+            }
+          }
+        } catch (e: any) {
+          if (!cancelled) {
+            const isAuthError =
+              e?.message === "Unauthorized" ||
+              e?.message?.includes("401") ||
+              e?.status === 401 ||
+              e?.statusCode === 401;
+
+            if (isAuthError) {
+              // ✅ Only clear and logout on a confirmed 401
+              await agentCache.clear();
+              await tokenStore.clear();
+              setAgent(null);
+            } else {
+              // ✅ Network error / server down — keep cached agent, stay logged in
+              console.warn("[AuthContext] Network error during revalidation, keeping cached session:", e?.message);
+              setAgent(cached);
+            }
           }
         }
       } catch (e: any) {
         if (!cancelled) {
-          const isAuthError =
-            e?.message === "Unauthorized" ||
-            e?.message?.includes("401") ||
-            e?.status === 401 ||
-            e?.statusCode === 401;
-
-          if (isAuthError) {
-            await agentCache.clear();
-            await tokenStore.clear();
-            setAgent(null);
-          } else {
-            const cached = await agentCache.get();
-            setAgent(cached ?? null);
-          }
+          const cached = await agentCache.get();
+          setAgent(cached ?? null);
         }
       } finally {
         if (!cancelled) setIsLoading(false);
       }
     };
 
+    // Safety timeout — if bootstrap takes too long, fall back to cache
     const timeout = setTimeout(() => {
       if (!cancelled) {
         agentCache.get().then((cached) => {
@@ -152,11 +165,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           await agentCache.set(res.agent);
         }
       } catch (e: any) {
+        // ✅ Only logout on confirmed 401, not network errors
         if (e?.message === "Unauthorized") {
           await agentCache.clear();
           await tokenStore.clear();
           setAgent(null);
         }
+        // else: network blip, stay logged in
       }
     };
 
@@ -182,13 +197,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   // ─── Logout ─────────────────────────────────────────────────────────────
+  // ✅ AuthContext is the single source of truth for clearing session
   const logout = async () => {
-    try {
-      await api.logout();
-    } catch (_) {}
     await agentCache.clear();
     await tokenStore.clear();
     setAgent(null);
+    try { await api.logout(); } catch (_) {}
   };
 
   return (
