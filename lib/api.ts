@@ -81,11 +81,10 @@ async function apiRequest(method: string, route: string, data?: any) {
     body: data ? JSON.stringify(data) : undefined,
   });
 
+  // ✅ FIX: Do NOT clear agentCache/tokenStore here.
+  // Let AuthContext handle logout logic so cached session
+  // can be used as fallback on network blips or server restarts.
   if (res.status === 401) {
-    if (Platform.OS !== "web") {
-      await agentCache.clear();
-      await tokenStore.clear();
-    }
     throw new Error("Unauthorized");
   }
 
@@ -202,9 +201,8 @@ export const api = {
     return res;
   },
 
+  // ✅ FIX: logout only clears via AuthContext, just call the endpoint here
   logout: async () => {
-    await agentCache.clear();
-    await tokenStore.clear();
     try { await apiRequest("POST", "/api/auth/logout"); } catch {}
   },
 
@@ -309,10 +307,10 @@ export const api = {
   savePushToken: (token: string) =>
     apiRequest("POST", "/api/push-token", { token }),
 
-  // ── ✅ Call recordings ────────────────────────────────────────────────────
+  // ── Call recordings ───────────────────────────────────────────────────────
   getCallRecordings: () => apiRequest("GET", "/api/call-recordings"),
 
-  // ── ✅ Twilio outbound call ───────────────────────────────────────────────
+  // ── Twilio outbound call ──────────────────────────────────────────────────
   makeCall: (data: {
     customerPhone: string;
     agentName: string;
@@ -398,7 +396,7 @@ export const api = {
       apiRequest("POST", `/api/admin/test-push/${agentId}`),
     testPushAll: () => apiRequest("POST", "/api/admin/test-push-all"),
 
-    // ── ✅ Call recordings ────────────────────────────────────────────────────
+    // ── Call recordings ───────────────────────────────────────────────────────
     getCallRecordings: () => apiRequest("GET", "/api/admin/call-recordings"),
 
     // ── Exports ──────────────────────────────────────────────────────────────
