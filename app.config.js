@@ -45,8 +45,6 @@ module.exports = ({ config }) => {
       bundler: "metro",
       favicon: "./assets/images/dhanraj-logo.png",
       output: "static",
-      // ✅ FIX: Railway serves from "/" — baseUrl must be "/" not "/Dhanraj/"
-      // Only use "/Dhanraj/" when deploying to GitHub Pages
       baseUrl: process.env.EXPO_PUBLIC_BASE_URL || "/",
     },
     plugins: [
@@ -58,6 +56,8 @@ module.exports = ({ config }) => {
         {
           mode: "production",
           devTeam: "",
+          smallIcons: ["ic_stat_notify"],
+          largeIcons: ["ic_launcher"],
         },
       ],
     ],
@@ -67,7 +67,7 @@ module.exports = ({ config }) => {
     },
     extra: {
       apiUrl: "https://dhanraj-production.up.railway.app",
-      oneSignalAppId: "bff2c8e0-de24-4aad-a373-d030c210155f",
+      oneSignalAppId: "bff2c8e0-de24-4aad-a473-d030c210155f",
       eas: {
         projectId: "1b09251a-4423-4759-a22b-fc2f0a44fd8e",
       },
