@@ -4,7 +4,7 @@ module.exports = ({ config }) => {
     name: "Dhanraj Enterprises",
     slug: "dhanraj-enterprises",
     owner: "jai234",
-    version: "1.0.0",
+    version: "1.0.1",          // ← bump version to force fresh build
     orientation: "portrait",
     scheme: "dhanrajenterprises",
     userInterfaceStyle: "automatic",
@@ -35,7 +35,7 @@ module.exports = ({ config }) => {
       ],
       backgroundColor: "#000000",
       notification: {
-        icon: "./assets/images/ic_stat_notify.png",
+        icon: "./assets/images/dhanraj-logo.png",
         color: "#FF6B00",
       },
       adaptiveIcon: {
@@ -60,8 +60,6 @@ module.exports = ({ config }) => {
         {
           mode: "production",
           devTeam: "",
-          smallIcons: ["./assets/images/ic_stat_notify.png"],
-          largeIcons: ["./assets/images/dhanraj-logo.png"],
         },
       ],
     ],
