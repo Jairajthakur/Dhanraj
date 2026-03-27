@@ -92,7 +92,19 @@ async function sendPush(playerId: string, title: string, body: string, data: Rec
     const res = await fetch("https://onesignal.com/api/v1/notifications", {
       method: "POST",
       headers: { "Content-Type": "application/json", "Authorization": `Basic ${apiKey}` },
-      body: JSON.stringify({ app_id: appId, target_channel: "push", include_aliases: { onesignal_id: [playerId] }, headings: { en: title }, contents: { en: body }, data, priority: 10, ttl: 259200, android_visibility: 1 }),
+      body: JSON.stringify({
+        app_id: appId,
+        target_channel: "push",
+        include_aliases: { onesignal_id: [playerId] },
+        headings: { en: title },
+        contents: { en: body },
+        data,
+        priority: 10,
+        ttl: 259200,
+        android_visibility: 1,
+        large_icon: "ic_launcher",
+        small_icon: "ic_stat_notify",
+      }),
     });
     const json: any = await res.json().catch(() => ({}));
     if (!res.ok || json.errors) { const err = Array.isArray(json.errors) ? json.errors[0] : JSON.stringify(json.errors); return { ok: false, error: err }; }
@@ -107,7 +119,19 @@ async function sendPushToMany(playerIds: string[], title: string, body: string, 
     const res = await fetch("https://onesignal.com/api/v1/notifications", {
       method: "POST",
       headers: { "Content-Type": "application/json", "Authorization": `Basic ${apiKey}` },
-      body: JSON.stringify({ app_id: appId, target_channel: "push", include_aliases: { onesignal_id: playerIds }, headings: { en: title }, contents: { en: body }, data, priority: 10, ttl: 259200, android_visibility: 1 }),
+      body: JSON.stringify({
+        app_id: appId,
+        target_channel: "push",
+        include_aliases: { onesignal_id: playerIds },
+        headings: { en: title },
+        contents: { en: body },
+        data,
+        priority: 10,
+        ttl: 259200,
+        android_visibility: 1,
+        large_icon: "ic_launcher",
+        small_icon: "ic_stat_notify",
+      }),
     });
     const json: any = await res.json().catch(() => ({}));
     return { sent: json.recipients ?? playerIds.length, total: playerIds.length };
@@ -306,7 +330,6 @@ function getAppUrl(): string {
   return process.env.APP_URL || "";
 }
 
-// Download a Twilio recording as a Buffer (follows redirect, uses Basic Auth)
 function downloadTwilioRecording(recordingUrl: string): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -330,7 +353,6 @@ function downloadTwilioRecording(recordingUrl: string): Promise<Buffer> {
   });
 }
 
-// Upload a Buffer to Google Drive using a service-account JSON
 async function uploadToGoogleDrive(
   audioBuffer: Buffer,
   filename: string,
@@ -368,7 +390,6 @@ async function uploadToGoogleDrive(
   };
 }
 
-// Ensure call_recordings table exists
 async function ensureCallRecordingsTable(): Promise<void> {
   await storage.query(`
     CREATE TABLE IF NOT EXISTS call_recordings (
@@ -1325,7 +1346,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // ── Twilio TwiML — bridge agent phone into the call ─────────────────────────
+  // ── Twilio TwiML ─────────────────────────────────────────────────────────────
   app.post("/api/twilio/voice", async (req, res) => {
     try {
       const agentId = Number(req.query.agentId);
@@ -1355,7 +1376,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // ── Twilio webhook — recording ready → upload to Google Drive ────────────────
+  // ── Twilio webhook — recording ready ─────────────────────────────────────────
   app.post("/api/twilio/recording-complete", async (req, res) => {
     res.sendStatus(200);
 
@@ -1424,7 +1445,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // ── Twilio — incoming call routed to the case's agent ────────────────────────
+  // ── Twilio — incoming call ───────────────────────────────────────────────────
   app.post("/api/twilio/incoming", async (req, res) => {
     try {
       const from: string = req.body.From || "";
@@ -1488,7 +1509,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // ── Call recordings screen ───────────────────────────────────────────────────
+  // ── Call recordings ──────────────────────────────────────────────────────────
   app.get("/api/call-recordings", requireAuth, async (req, res) => {
     try {
       const result = await storage.query(
@@ -1516,7 +1537,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
-  // ── Twilio call-status (optional logging) ────────────────────────────────────
   app.post("/api/twilio/call-status", (req, res) => {
     const { CallSid, CallStatus, CallDuration } = req.body;
     console.log(`[call-status] ${CallSid} → ${CallStatus} (${CallDuration}s)`);
@@ -1569,8 +1589,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
   }
   runFosDepositionReminderJob(); setInterval(runFosDepositionReminderJob, 60 * 60 * 1000);
 
-  // ── Evening jobs: 7 PM summary + 8 PM batch reminder ─────────────────────────
-  // Uses slot keys like "2025-01-15-19" and "2025-01-15-20" so each fires once per day.
   const eveningReminderSentSlots = new Set<string>();
 
   async function runEveningReminderJob() {
@@ -1630,7 +1648,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
 
-      // Keep the set from growing unboundedly (max ~14 slots = 7 days × 2 slots)
       if (eveningReminderSentSlots.size > 14) {
         eveningReminderSentSlots.delete(eveningReminderSentSlots.values().next().value);
       }
