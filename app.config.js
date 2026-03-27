@@ -15,7 +15,7 @@ module.exports = ({ config }) => {
     runtimeVersion: {
       policy: "sdkVersion",
     },
-    icon: "./assets/images/dhanraj-logo.png",
+    icon: "./assets/images/dhanraj-logo.png",      // ← fixed back to dhanraj logo
     splash: {
       image: "./assets/images/splash-icon.png",
       resizeMode: "contain",
