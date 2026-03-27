@@ -56,8 +56,8 @@ module.exports = ({ config }) => {
         {
           mode: "production",
           devTeam: "",
-          smallIcons: ["ic_stat_notify"],
-          largeIcons: ["ic_launcher"],
+          smallIcons: ["./assets/images/ic_stat_notify.png"],
+          largeIcons: ["./assets/images/dhanraj-logo.png"],
         },
       ],
     ],
