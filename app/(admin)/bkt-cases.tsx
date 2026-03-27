@@ -28,14 +28,24 @@ const BKT_COLORS: Record<string, string> = {
   penal: Colors.primaryLight,
 };
 
+function normalizeBkt(bkt: string) {
+  return String(bkt || "").toLowerCase().replace(/[\s_]/g, "");
+}
+
 function getBktColor(bkt: string) {
-  return BKT_COLORS[bkt.toLowerCase().replace(/[\s_]/g, "")] || Colors.primary;
+  return BKT_COLORS[normalizeBkt(bkt)] || Colors.primary;
 }
 
 function getBktLabel(bkt: string) {
-  const k = bkt.toLowerCase().replace(/[\s_]/g, "");
+  const k = normalizeBkt(bkt);
   if (k === "penal") return "PENAL";
   return k.replace("bkt", "BKT ");
+}
+
+// ✅ Returns true only for valid BKT rows (bkt1/bkt2/bkt3/penal), excludes "all"
+function isValidBktRow(bkt: string) {
+  const k = normalizeBkt(bkt);
+  return (k.startsWith("bkt") || k === "penal") && k !== "all";
 }
 
 function MiniBar({ pct, color, targetPct }: { pct: number; color: string; targetPct?: number }) {
@@ -106,12 +116,11 @@ const pc = StyleSheet.create({
 });
 
 function SummaryBktBlock({ row }: { row: any }) {
-  const rawBkt   = String(row.bkt || "").toLowerCase().replace(/[\s_]/g, "");
+  const rawBkt   = normalizeBkt(row.bkt);
   const color    = getBktColor(rawBkt);
   const label    = getBktLabel(rawBkt);
   const targets  = BKT_TARGETS[rawBkt] || null;
 
-  // Non-penal only
   const posPaid       = n(row.pos_paid        ?? 0);
   const posGrandTotal = n(row.pos_grand_total ?? 0);
   const posUnpaid     = n(row.pos_unpaid      ?? 0);
@@ -180,6 +189,7 @@ function SummaryBktBlock({ row }: { row: any }) {
     </View>
   );
 }
+
 const sb = StyleSheet.create({
   block: { flex: 1, minWidth: "22%", backgroundColor: Colors.background, borderRadius: 10, borderTopWidth: 3, padding: 8, gap: 3 },
   cat: { fontSize: 10, fontWeight: "800", textTransform: "uppercase" },
@@ -204,7 +214,11 @@ export default function AdminBktPerformance() {
     },
   });
 
-  const allSummaryRows: any[] = summaryData?.rows || [];
+  // ✅ Filter out "ALL" aggregate rows before any processing
+  const allSummaryRows: any[] = useMemo(
+    () => (summaryData?.rows || []).filter((r: any) => isValidBktRow(r.bkt)),
+    [summaryData]
+  );
 
   const summaryByFos = useMemo(() => {
     const map: Record<string, any[]> = {};
@@ -260,8 +274,8 @@ export default function AdminBktPerformance() {
             const rows: any[] = summaryByFos[fosKey] || [];
             const displayName = rows[0]?.fos_name || fosKey;
             const allRows = [...rows].sort((a, b) => String(a.bkt).localeCompare(String(b.bkt)));
-            const bktRows   = allRows.filter(r => String(r.bkt).toLowerCase().replace(/[\s_]/g,"") !== "penal");
-            const penalRow  = allRows.find(r => String(r.bkt).toLowerCase().replace(/[\s_]/g,"") === "penal");
+            const bktRows  = allRows.filter(r => normalizeBkt(r.bkt) !== "penal");
+            const penalRow = allRows.find(r => normalizeBkt(r.bkt) === "penal");
 
             return (
               <View style={styles.agentCard}>
