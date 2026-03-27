@@ -1286,7 +1286,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
-  // ── ✅ NEW: Twilio — outbound recorded call ───────────────────────────────────
+  // ── Twilio — outbound recorded call ─────────────────────────────────────────
   app.post("/api/make-call", requireAuth, async (req, res) => {
     try {
       const { customerPhone, agentName, caseId, loanNo } = req.body;
@@ -1325,7 +1325,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // ── ✅ NEW: Twilio TwiML — bridge agent phone into the call ──────────────────
+  // ── Twilio TwiML — bridge agent phone into the call ─────────────────────────
   app.post("/api/twilio/voice", async (req, res) => {
     try {
       const agentId = Number(req.query.agentId);
@@ -1341,7 +1341,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const dial = twiml.dial({ record: "record-from-ringing", trim: "trim-silence" });
         dial.number({}, phoneE164);
       } else {
-        // No agent phone — keep call alive so recording captures customer side
         twiml.say("Please hold while we connect your call.");
         twiml.pause({ length: 60 });
       }
@@ -1356,9 +1355,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // ── ✅ NEW: Twilio webhook — recording ready → upload to Google Drive ─────────
+  // ── Twilio webhook — recording ready → upload to Google Drive ────────────────
   app.post("/api/twilio/recording-complete", async (req, res) => {
-    // Acknowledge Twilio immediately — processing happens async
     res.sendStatus(200);
 
     try {
@@ -1385,7 +1383,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { fileId, webViewLink } = await uploadToGoogleDrive(audioBuffer, filename, folderId);
       console.log(`[recording] ✅ Saved: ${webViewLink}`);
 
-      // Persist Drive link
       try {
         await storage.query(
           `INSERT INTO call_recordings
@@ -1416,7 +1413,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         } else { console.error("[recording] DB error:", dbErr.message); }
       }
 
-      // Notify admins
       try {
         const adminRows = await storage.query(`SELECT push_token FROM fos_agents WHERE role='admin' AND push_token IS NOT NULL AND push_token<>''`);
         for (const admin of adminRows.rows) {
@@ -1428,8 +1424,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // ── ✅ NEW: Twilio — incoming call routed to the case's agent ─────────────────
-  // Set this as "A Call Comes In" webhook on your Twilio number in the console.
+  // ── Twilio — incoming call routed to the case's agent ────────────────────────
   app.post("/api/twilio/incoming", async (req, res) => {
     try {
       const from: string = req.body.From || "";
@@ -1440,7 +1435,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const VoiceResponse = twilio.twiml.VoiceResponse;
       const twiml = new VoiceResponse();
 
-      // Find the agent whose case matches this caller's phone number
       const match = await storage.query(
         `SELECT fa.phone AS agent_phone, fa.name AS agent_name, fa.id AS agent_id,
                 COALESCE(lc.customer_name, bc.customer_name) AS customer_name,
@@ -1494,7 +1488,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // ── ✅ NEW: Call recordings screen ────────────────────────────────────────────
+  // ── Call recordings screen ───────────────────────────────────────────────────
   app.get("/api/call-recordings", requireAuth, async (req, res) => {
     try {
       const result = await storage.query(
@@ -1575,22 +1569,76 @@ export async function registerRoutes(app: Express): Promise<Server> {
   }
   runFosDepositionReminderJob(); setInterval(runFosDepositionReminderJob, 60 * 60 * 1000);
 
-  const batchReminderSentDates = new Set<string>();
-  async function runBatchReminderJob() {
+  // ── Evening jobs: 7 PM summary + 8 PM batch reminder ─────────────────────────
+  // Uses slot keys like "2025-01-15-19" and "2025-01-15-20" so each fires once per day.
+  const eveningReminderSentSlots = new Set<string>();
+
+  async function runEveningReminderJob() {
     try {
-      const { hour, todayKey } = getISTHour(); if (hour < 19 || hour > 20) return; if (batchReminderSentDates.has(todayKey)) return;
-      const agents = await storage.query(`SELECT id, push_token FROM fos_agents WHERE role='fos' AND push_token IS NOT NULL AND push_token<>''`);
-      let sent = 0;
-      for (const agent of agents.rows) {
-        const statsResult = await storage.query(`SELECT COUNT(*) FILTER (WHERE status='Paid')::int AS paid_count, COUNT(*) FILTER (WHERE status='Unpaid')::int AS unpaid_count, COUNT(*) FILTER (WHERE status='PTP')::int AS ptp_count, COUNT(*)::int AS total FROM (SELECT status FROM loan_cases WHERE agent_id=$1 UNION ALL SELECT status FROM bkt_cases WHERE agent_id=$1) t`, [agent.id]);
-        const s = statsResult.rows[0]; const total = parseInt(s?.total || "0", 10); if (total === 0) continue;
-        const r = await sendPush(agent.push_token, "📊 End of Day Summary", `Today: ✅ ${s.paid_count} Paid | 🔄 ${s.ptp_count} PTP | ❌ ${s.unpaid_count} Unpaid out of ${total} cases.`, { screen: "dashboard", type: "daily_summary" });
-        if (r.ok) sent++;
+      const { hour, todayKey } = getISTHour();
+
+      // ── 7 PM IST — Today's summary per agent ──────────────────────────────────
+      if (hour === 19) {
+        const slotKey = `${todayKey}-19`;
+        if (!eveningReminderSentSlots.has(slotKey)) {
+          const agents = await storage.query(
+            `SELECT id, push_token FROM fos_agents WHERE role='fos' AND push_token IS NOT NULL AND push_token<>''`
+          );
+          for (const agent of agents.rows) {
+            const statsResult = await storage.query(
+              `SELECT
+                COUNT(*) FILTER (WHERE status='Paid')::int   AS paid_count,
+                COUNT(*) FILTER (WHERE status='Unpaid')::int AS unpaid_count,
+                COUNT(*) FILTER (WHERE status='PTP')::int    AS ptp_count,
+                COUNT(*)::int                                AS total
+               FROM (
+                 SELECT status FROM loan_cases WHERE agent_id=$1
+                 UNION ALL
+                 SELECT status FROM bkt_cases  WHERE agent_id=$1
+               ) t`,
+              [agent.id]
+            );
+            const s = statsResult.rows[0];
+            const total = parseInt(s?.total || "0", 10);
+            if (total === 0) continue;
+            await sendPush(
+              agent.push_token,
+              "📊 Today's Summary",
+              `✅ ${s.paid_count} Paid | 🔄 ${s.ptp_count} PTP | ❌ ${s.unpaid_count} Unpaid out of ${total} cases.`,
+              { screen: "dashboard", type: "daily_summary" }
+            );
+          }
+          eveningReminderSentSlots.add(slotKey);
+        }
       }
-      batchReminderSentDates.add(todayKey); if (batchReminderSentDates.size > 7) batchReminderSentDates.delete(batchReminderSentDates.values().next().value);
-    } catch (e: any) { console.error("[batch-reminder]", e.message); }
+
+      // ── 8 PM IST — Generate Batch broadcast ───────────────────────────────────
+      if (hour === 20) {
+        const slotKey = `${todayKey}-20`;
+        if (!eveningReminderSentSlots.has(slotKey)) {
+          const agents = await storage.query(
+            `SELECT push_token FROM fos_agents WHERE role='fos' AND push_token IS NOT NULL AND push_token<>''`
+          );
+          const playerIds: string[] = agents.rows.map((a: any) => a.push_token).filter(Boolean);
+          if (playerIds.length > 0) {
+            await sendPushToMany(playerIds, "Generate Batch", "Generate Batch", {
+              screen: "dashboard",
+              type: "generate_batch",
+            });
+          }
+          eveningReminderSentSlots.add(slotKey);
+        }
+      }
+
+      // Keep the set from growing unboundedly (max ~14 slots = 7 days × 2 slots)
+      if (eveningReminderSentSlots.size > 14) {
+        eveningReminderSentSlots.delete(eveningReminderSentSlots.values().next().value);
+      }
+    } catch (e: any) {
+      console.error("[evening-reminder]", e.message);
+    }
   }
-  runBatchReminderJob(); setInterval(runBatchReminderJob, 10 * 60 * 1000);
+  runEveningReminderJob(); setInterval(runEveningReminderJob, 10 * 60 * 1000);
 
   const monthlyCleanupDone = new Set<string>();
   async function runMonthlyCleanupJob() {
