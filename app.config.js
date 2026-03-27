@@ -15,9 +15,9 @@ module.exports = ({ config }) => {
     runtimeVersion: {
       policy: "sdkVersion",
     },
-    icon: "./assets/images/dhanraj-logo.jpg",
+    icon: "./assets/images/icon.png",
     splash: {
-      image: "./assets/images/dhanraj-logo.jpg",
+      image: "./assets/images/splash-icon.png",
       resizeMode: "contain",
       backgroundColor: "#000000",
     },
@@ -39,7 +39,7 @@ module.exports = ({ config }) => {
         color: "#FF6B00",
       },
       adaptiveIcon: {
-        foregroundImage: "./assets/images/dhanraj-logo.jpg",
+        foregroundImage: "./assets/images/android-icon-foreground.png",
         backgroundColor: "#000000",
         backgroundImage: "./assets/images/android-icon-background.png",
         monochromeImage: "./assets/images/android-icon-monochrome.png",
@@ -47,7 +47,7 @@ module.exports = ({ config }) => {
     },
     web: {
       bundler: "metro",
-      favicon: "./assets/images/dhanraj-logo.jpg",
+      favicon: "./assets/images/favicon.png",
       output: "static",
       baseUrl: process.env.EXPO_PUBLIC_BASE_URL || "/",
     },
@@ -61,7 +61,7 @@ module.exports = ({ config }) => {
           mode: "production",
           devTeam: "",
           smallIcons: ["./assets/images/ic_stat_notify.png"],
-          largeIcons: ["./assets/images/dhanraj-logo.jpg"],
+          largeIcons: ["./assets/images/dhanraj-logo.png"],
         },
       ],
     ],
