@@ -60,8 +60,8 @@ module.exports = ({ config }) => {
         {
           mode: "production",
           devTeam: "",
-          smallIcons: ["ic_stat_notify"],                        // ← filename only (no path/ext) for small
-          largeIcons: ["./assets/images/dhanraj-logo.png"],      // ← full path for large icon
+          smallIcons: ["./assets/images/ic_stat_notify.png"],
+          largeIcons: ["./assets/images/dhanraj-logo.png"],
         },
       ],
     ],
