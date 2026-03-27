@@ -4,7 +4,7 @@ module.exports = ({ config }) => {
     name: "Dhanraj Enterprises",
     slug: "dhanraj-enterprises",
     owner: "jai234",
-    version: "1.0.1",          // ← bump version to force fresh build
+    version: "1.0.2",
     orientation: "portrait",
     scheme: "dhanrajenterprises",
     userInterfaceStyle: "automatic",
@@ -15,7 +15,7 @@ module.exports = ({ config }) => {
     runtimeVersion: {
       policy: "sdkVersion",
     },
-    icon: "./assets/images/dhanraj-logo.png",
+    icon: "./assets/images/dhanraj-logo.png",   // ← used for iOS + fallback
     splash: {
       image: "./assets/images/splash-icon.png",
       resizeMode: "contain",
@@ -39,10 +39,8 @@ module.exports = ({ config }) => {
         color: "#FF6B00",
       },
       adaptiveIcon: {
-        foregroundImage: "./assets/images/android-icon-foreground.png",
-        backgroundColor: "#000000",
-        backgroundImage: "./assets/images/android-icon-background.png",
-        monochromeImage: "./assets/images/android-icon-monochrome.png",
+        foregroundImage: "./assets/images/dhanraj-logo.png",  // ← use logo directly
+        backgroundColor: "#EDE8DC",                           // ← match logo's beige bg
       },
     },
     web: {
