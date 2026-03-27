@@ -1580,7 +1580,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   async function runFosDepositionReminderJob() {
     try {
-      const result = await storage.query(`SELECT fa.id AS agent_id, fa.name AS agent_name, fa.push_token, COUNT(fd.id)::int AS pending_count, SUM(fd.amount)::numeric AS pending_total, MIN(fd.created_at) AS oldest_at FROM fos_agents fa JOIN fos_depositions fd ON fd.agent_id=fa.id AND fd.payment_method='pending' WHERE fa.push_token IS NOT NULL AND fa.push_token<>'' GROUP BY fa.id, fa.name, fa.push_token HAVING COUNT(fd.id)>0`);
+      const result = await storage.query(`SELECT fa.id AS agent_id, fa.name AS agent_name, fa.push_token, COUNT(fd.id)::int AS pending_count, SUM(fd.amount)::numeric AS pending_total, MIN(fd.created_at) AS oldest_at FROM fos_agents fa JOIN fos_depositions fd ON fd.agent_id=fa.id AND fd.payment_method='pending' AND fd.deposition_date >= CURRENT_DATE - INTERVAL '1 day' WHERE fa.push_token IS NOT NULL AND fa.push_token<>'' GROUP BY fa.id, fa.name, fa.push_token HAVING COUNT(fd.id)>0`);
       for (const row of result.rows) {
         const count = parseInt(row.pending_count || 0); const total = parseFloat(row.pending_total || 0).toLocaleString("en-IN"); const hoursOld = Math.floor((Date.now() - new Date(row.oldest_at).getTime()) / 3600000);
         await sendPush(row.push_token, `⏳ Pending Payment Reminder`, `You have ${count} pending deposit${count > 1 ? "s" : ""} totalling ₹${total} (${hoursOld}h old).`, { screen: "fos-depositions", type: "fos_dep_reminder" });
