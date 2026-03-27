@@ -36,17 +36,43 @@ async function apiReq(method: string, route: string, data?: any) {
   return res.json();
 }
 
-async function uploadFile(uri: string, name: string, type: string, route: string): Promise<any> {
+// ✅ Fixed: handles both web (File/Blob) and native (uri object) correctly
+async function uploadFile(fileAsset: any, route: string): Promise<any> {
   const base = getApiUrl();
   const token = Platform.OS !== "web" ? await tokenStore.get() : null;
-  const form = new FormData();
-  form.append("file", { uri, name, type } as any);
   const headers: Record<string, string> = {};
   if (token) headers["Authorization"] = `Bearer ${token}`;
+
+  const form = new FormData();
+
+  if (Platform.OS === "web") {
+    // On web, expo-document-picker gives us a File object in assets[0].file
+    // or a uri that is a blob: URL we can fetch
+    if (fileAsset.file instanceof File) {
+      form.append("file", fileAsset.file, fileAsset.name);
+    } else if (fileAsset.uri?.startsWith("blob:") || fileAsset.uri?.startsWith("data:")) {
+      const response = await fetch(fileAsset.uri);
+      const blob = await response.blob();
+      form.append("file", blob, fileAsset.name || "import.xlsx");
+    } else {
+      throw new Error("Could not read file on web. Please try again.");
+    }
+  } else {
+    // Native: use the RN FormData uri object syntax
+    form.append("file", {
+      uri: fileAsset.uri,
+      name: fileAsset.name || "import.xlsx",
+      type: fileAsset.mimeType || fileAsset.type || "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    } as any);
+  }
+
   const res = await fetch(`${base}${route}`, {
-    method: "POST", body: form, credentials: "include",
+    method: "POST",
+    body: form,
+    credentials: "include",
     headers: Object.keys(headers).length > 0 ? headers : undefined,
   });
+
   if (!res.ok) {
     const j = await res.json().catch(() => ({}));
     throw new Error(j.message || `HTTP ${res.status}`);
@@ -229,7 +255,6 @@ function AddDepositionModal({ visible, onClose, onSaved, agents }: any) {
 }
 
 // ─── FOS Detail Modal ─────────────────────────────────────────────────────────
-// ✅ CHANGE: Removed "Paid Cases (Last 24hr)" section — admin no longer sees it here
 function FosDetailModal({ visible, agentId, agentName, onClose, onUpdated }: any) {
   const [payItem, setPayItem] = useState<any>(null);
   const [screenshotUrl, setScreenshotUrl] = useState<string | null>(null);
@@ -240,7 +265,6 @@ function FosDetailModal({ visible, agentId, agentName, onClose, onUpdated }: any
     enabled: visible && !!agentId,
   });
 
-  // Only use depositions — paid cases are intentionally not rendered
   const depositions = data?.depositions || [];
 
   const handleDelete = (id: number) => {
@@ -269,7 +293,6 @@ function FosDetailModal({ visible, agentId, agentName, onClose, onUpdated }: any
     return "⏳ Pending";
   };
 
-  // Summary totals
   const totalAmount = depositions.reduce((s: number, d: any) => s + parseFloat(d.amount || 0), 0);
   const totalCash = depositions.reduce((s: number, d: any) => s + parseFloat(d.cash_amount || 0), 0);
   const totalOnline = depositions.reduce((s: number, d: any) => s + parseFloat(d.online_amount || 0), 0);
@@ -279,7 +302,6 @@ function FosDetailModal({ visible, agentId, agentName, onClose, onUpdated }: any
     <>
       <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
         <View style={{ flex: 1, backgroundColor: Colors.background }}>
-          {/* Header */}
           <View style={fd.header}>
             <Pressable onPress={onClose} style={fd.backBtn}>
               <Ionicons name="arrow-back" size={22} color={Colors.text} />
@@ -301,7 +323,6 @@ function FosDetailModal({ visible, agentId, agentName, onClose, onUpdated }: any
               contentContainerStyle={{ padding: 16, gap: 10, paddingBottom: 40 }}
               ListHeaderComponent={
                 depositions.length > 0 ? (
-                  // Summary cards — totals only, no paid cases list
                   <View style={fd.summaryRow}>
                     <View style={[fd.sumCard, { borderTopColor: Colors.primary }]}>
                       <Text style={fd.sumNum}>₹{fmt(totalAmount)}</Text>
@@ -390,7 +411,6 @@ function FosDetailModal({ visible, agentId, agentName, onClose, onUpdated }: any
         onSaved={() => { refetch(); onUpdated(); setPayItem(null); }}
       />
 
-      {/* Screenshot lightbox */}
       <Modal visible={!!screenshotUrl} transparent animationType="fade" onRequestClose={() => setScreenshotUrl(null)}>
         <Pressable
           style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.92)", justifyContent: "center", alignItems: "center" }}
@@ -411,31 +431,59 @@ function FosDetailModal({ visible, agentId, agentName, onClose, onUpdated }: any
 
 // ─── Import Modal ─────────────────────────────────────────────────────────────
 function ImportModal({ visible, onClose, onImported }: any) {
-  const [file, setFile] = useState<any>(null);
+  const [fileAsset, setFileAsset] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<any>(null);
+  // ✅ Web fallback: hidden <input type="file"> for web
+  const webInputRef = useRef<HTMLInputElement | null>(null);
 
   const pickFile = async () => {
+    if (Platform.OS === "web") {
+      // On web, trigger a native file input for better compatibility
+      if (!webInputRef.current) {
+        const input = document.createElement("input");
+        input.type = "file";
+        input.accept = ".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel";
+        input.onchange = (e: any) => {
+          const file = e.target.files?.[0];
+          if (file) {
+            setFileAsset({ file, name: file.name, uri: URL.createObjectURL(file) });
+          }
+        };
+        webInputRef.current = input;
+      }
+      webInputRef.current.click();
+      return;
+    }
+
     try {
       const r = await DocumentPicker.getDocumentAsync({ type: ["*/*"], copyToCacheDirectory: true });
       if (!r.canceled && r.assets?.[0]) {
-        setFile({ uri: r.assets[0].uri, name: r.assets[0].name, type: r.assets[0].mimeType || "application/octet-stream" });
+        setFileAsset(r.assets[0]);
       }
     } catch { Alert.alert("Error", "Could not open file picker"); }
   };
 
   const doImport = async () => {
-    if (!file) { Alert.alert("Error", "Select a file first"); return; }
+    if (!fileAsset) { Alert.alert("Error", "Select a file first"); return; }
     setLoading(true);
     try {
-      const res = await uploadFile(file.uri, file.name, file.type, "/api/admin/import-depositions");
-      setResult(res); onImported();
+      const res = await uploadFile(fileAsset, "/api/admin/import-depositions");
+      setResult(res);
+      onImported();
     } catch (e: any) { Alert.alert("Import Failed", e.message); }
     finally { setLoading(false); }
   };
 
+  const handleClose = () => {
+    setFileAsset(null);
+    setResult(null);
+    if (webInputRef.current) { webInputRef.current.value = ""; }
+    onClose();
+  };
+
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={handleClose}>
       <View style={ms.overlay}>
         <View style={ms.sheet}>
           <View style={ms.handle} />
@@ -446,9 +494,9 @@ function ImportModal({ visible, onClose, onImported }: any) {
 
           <Pressable style={imp.pickBtn} onPress={pickFile}>
             <Ionicons name="folder-open" size={20} color={Colors.primary} />
-            <Text style={imp.pickText}>{file?.name ?? "Choose Excel File (.xlsx)"}</Text>
-            {file && (
-              <Pressable onPress={() => setFile(null)} hitSlop={8}>
+            <Text style={imp.pickText}>{fileAsset?.name ?? "Choose Excel File (.xlsx)"}</Text>
+            {fileAsset && (
+              <Pressable onPress={() => setFileAsset(null)} hitSlop={8}>
                 <Ionicons name="close-circle" size={18} color={Colors.textMuted} />
               </Pressable>
             )}
@@ -465,10 +513,10 @@ function ImportModal({ visible, onClose, onImported }: any) {
           )}
 
           <View style={ms.btnRow}>
-            <Pressable style={ms.cancel} onPress={() => { setFile(null); setResult(null); onClose(); }}>
+            <Pressable style={ms.cancel} onPress={handleClose}>
               <Text style={ms.cancelTxt}>Close</Text>
             </Pressable>
-            <Pressable style={[ms.save, (!file || loading) && { opacity: 0.5 }]} onPress={doImport} disabled={!file || loading}>
+            <Pressable style={[ms.save, (!fileAsset || loading) && { opacity: 0.5 }]} onPress={doImport} disabled={!fileAsset || loading}>
               {loading ? <ActivityIndicator color="#fff" size="small" /> : (
                 <><Ionicons name="cloud-upload" size={16} color="#fff" /><Text style={ms.saveTxt}> Import</Text></>
               )}
