@@ -60,8 +60,8 @@ module.exports = ({ config }) => {
         {
           mode: "production",
           devTeam: "",
-          smallIcons: ["ic_stat_notify"],   // ← filename only, no path/extension
-          largeIcons: ["ic_launcher"],       // ← uses the auto-generated launcher icon
+          smallIcons: ["ic_stat_notify"],                        // ← filename only (no path/ext) for small
+          largeIcons: ["./assets/images/dhanraj-logo.png"],      // ← full path for large icon
         },
       ],
     ],
