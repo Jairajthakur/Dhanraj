@@ -102,8 +102,8 @@ async function sendPush(playerId: string, title: string, body: string, data: Rec
         priority: 10,
         ttl: 259200,
         android_visibility: 1,
+        small_icon: "ic_stat_notify",   // ✅ correct
         large_icon: "ic_launcher",
-        small_icon: "ic_stat_notify",
       }),
     });
     const json: any = await res.json().catch(() => ({}));
