@@ -15,7 +15,7 @@ module.exports = ({ config }) => {
     runtimeVersion: {
       policy: "sdkVersion",
     },
-    icon: "./assets/images/dhanraj-logo.png",      // ← fixed back to dhanraj logo
+    icon: "./assets/images/dhanraj-logo.png",
     splash: {
       image: "./assets/images/splash-icon.png",
       resizeMode: "contain",
@@ -60,8 +60,8 @@ module.exports = ({ config }) => {
         {
           mode: "production",
           devTeam: "",
-          smallIcons: ["./assets/images/ic_stat_notify.png"],
-          largeIcons: ["./assets/images/dhanraj-logo.png"],
+          smallIcons: ["ic_stat_notify"],   // ← filename only, no path/extension
+          largeIcons: ["ic_launcher"],       // ← uses the auto-generated launcher icon
         },
       ],
     ],
