@@ -81,9 +81,6 @@ async function apiRequest(method: string, route: string, data?: any) {
     body: data ? JSON.stringify(data) : undefined,
   });
 
-  // ✅ FIX: Do NOT clear agentCache/tokenStore here.
-  // Let AuthContext handle logout logic so cached session
-  // can be used as fallback on network blips or server restarts.
   if (res.status === 401) {
     throw new Error("Unauthorized");
   }
@@ -201,7 +198,6 @@ export const api = {
     return res;
   },
 
-  // ✅ FIX: logout only clears via AuthContext, just call the endpoint here
   logout: async () => {
     try { await apiRequest("POST", "/api/auth/logout"); } catch {}
   },
@@ -352,8 +348,12 @@ export const api = {
       apiRequest("POST", `/api/admin/reset-feedback/case/${caseId}`, { table }),
 
     // ── Salary ───────────────────────────────────────────────────────────────
+    // ✅ FIX: getAllSalary is the real method; getSalary is an alias
+    //    used by AdminSalaryScreen → api.admin.getSalary()
     getAllSalary: () => apiRequest("GET", "/api/admin/salary"),
+    getSalary:   () => apiRequest("GET", "/api/admin/salary"),   // ← alias used by screen
     createSalary: (data: any) => apiRequest("POST", "/api/admin/salary", data),
+    deleteSalary: (id: number) => apiRequest("DELETE", `/api/admin/salary/${id}`),
 
     // ── Depositions ──────────────────────────────────────────────────────────
     getAllDepositions: () => apiRequest("GET", "/api/admin/depositions"),
@@ -385,7 +385,10 @@ export const api = {
       apiRequest("DELETE", `/api/admin/fos-depositions/${id}`),
 
     // ── Attendance ───────────────────────────────────────────────────────────
-    getAllAttendance: () => apiRequest("GET", "/api/admin/attendance"),
+    // ✅ FIX: getAllAttendance is the real method; getAttendance is an alias
+    //    used by AdminAttendanceScreen → api.admin.getAttendance()
+    getAllAttendance:  () => apiRequest("GET", "/api/admin/attendance"),
+    getAttendance:    () => apiRequest("GET", "/api/admin/attendance"),  // ← alias used by screen
 
     // ── BKT perf ─────────────────────────────────────────────────────────────
     getBktPerfSummary: () => apiRequest("GET", "/api/admin/bkt-perf-summary"),
