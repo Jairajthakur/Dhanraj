@@ -1,13 +1,29 @@
 import React, { useCallback } from "react";
 import {
   View, Text, StyleSheet, ScrollView, RefreshControl,
-  ActivityIndicator, Platform
+  ActivityIndicator, Platform, Pressable,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQuery } from "@tanstack/react-query";
 import { Ionicons } from "@expo/vector-icons";
+import { router } from "expo-router";
 import Colors from "@/constants/colors";
 import { api } from "@/lib/api";
+
+// ─── Milestone config ─────────────────────────────────────────────────────────
+const MILESTONES = [
+  { day: 10, label: "1st Milestone", targets: { bkt1: 28, bkt2: 22, bkt3: 18 } },
+  { day: 15, label: "2nd Milestone", targets: { bkt1: 60, bkt2: 48, bkt3: 40 } },
+  { day: 20, label: "3rd Milestone", targets: { bkt1: 80, bkt2: 65, bkt3: 45 } },
+  { day: 25, label: "4th Milestone", targets: { bkt1: 85, bkt2: 68, bkt3: 60 } },
+];
+function getNextMilestone(today: number) {
+  return MILESTONES.find((m) => m.day >= today) || MILESTONES[MILESTONES.length - 1];
+}
+function fmt(v: number) {
+  if (v >= 100000) return `₹${(v / 100000).toFixed(1)}L`;
+  return `₹${v.toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
+}
 
 interface StatCardProps {
   label: string;
@@ -28,6 +44,110 @@ function StatCard({ label, value, icon, color }: StatCardProps) {
   );
 }
 
+// ─── DRR Summary Widget ───────────────────────────────────────────────────────
+function DRRWidget({ rows }: { rows: any[] }) {
+  const today = new Date().getDate();
+  const next  = getNextMilestone(today);
+  const daysLeft = Math.max(0, next.day - today);
+
+  // Aggregate per bkt
+  const bktMap: Record<string, { paid: number; total: number }> = {
+    bkt1: { paid: 0, total: 0 },
+    bkt2: { paid: 0, total: 0 },
+    bkt3: { paid: 0, total: 0 },
+  };
+  for (const row of rows) {
+    const bkt = (row.bkt || "").toLowerCase();
+    if (!bktMap[bkt]) continue;
+    bktMap[bkt].paid  += parseFloat(row.pos_paid || 0);
+    bktMap[bkt].total += parseFloat(row.pos_grand_total || 0);
+  }
+
+  const totalPaid = Object.values(bktMap).reduce((a, b) => a + b.paid, 0);
+  const totalPos  = Object.values(bktMap).reduce((a, b) => a + b.total, 0);
+  const overallPct = totalPos > 0 ? (totalPaid / totalPos) * 100 : 0;
+
+  if (totalPos === 0) return null;
+
+  return (
+    <Pressable style={drrW.card} onPress={() => router.push("/(app)/drr" as any)}>
+      {/* Header */}
+      <View style={drrW.header}>
+        <View style={drrW.headerLeft}>
+          <View style={drrW.iconWrap}>
+            <Ionicons name="trending-up" size={16} color={Colors.primary} />
+          </View>
+          <View>
+            <Text style={drrW.title}>Today's DRR</Text>
+            <Text style={drrW.sub}>Day {today} · {daysLeft}d to {next.label}</Text>
+          </View>
+        </View>
+        <View style={drrW.pctWrap}>
+          <Text style={drrW.pct}>{overallPct.toFixed(1)}%</Text>
+          <Ionicons name="chevron-forward" size={14} color={Colors.textMuted} />
+        </View>
+      </View>
+
+      {/* Progress bar */}
+      <View style={drrW.barTrack}>
+        <View style={[drrW.barFill, {
+          width: `${Math.min(100, overallPct)}%` as any,
+          backgroundColor: overallPct >= 60 ? Colors.success : overallPct >= 30 ? Colors.warning : Colors.danger,
+        }]} />
+      </View>
+
+      {/* BKT mini chips */}
+      <View style={drrW.bktRow}>
+        {(["bkt1", "bkt2", "bkt3"] as const).map((bkt) => {
+          const d = bktMap[bkt];
+          if (!d || d.total === 0) return null;
+          const bktColor = bkt === "bkt1" ? Colors.info : bkt === "bkt2" ? Colors.warning : Colors.danger;
+          const bktLabel = bkt === "bkt1" ? "BKT 1" : bkt === "bkt2" ? "BKT 2" : "BKT 3";
+          const currentPct = (d.paid / d.total) * 100;
+          const targetPct  = next.targets[bkt];
+          const achieved   = currentPct >= targetPct;
+          return (
+            <View key={bkt} style={[drrW.bktChip, { borderColor: bktColor + "50" }]}>
+              <Text style={[drrW.bktChipLabel, { color: bktColor }]}>{bktLabel}</Text>
+              <Text style={[drrW.bktChipPct, { color: achieved ? Colors.success : Colors.text }]}>
+                {currentPct.toFixed(1)}%
+              </Text>
+              <Text style={drrW.bktChipTarget}>/{targetPct}%</Text>
+            </View>
+          );
+        })}
+      </View>
+
+      <View style={drrW.footer}>
+        <Text style={drrW.footerText}>
+          {fmt(totalPaid)} collected of {fmt(totalPos)} total · Tap for details
+        </Text>
+      </View>
+    </Pressable>
+  );
+}
+
+const drrW = StyleSheet.create({
+  card:         { backgroundColor: Colors.surface, borderRadius: 16, padding: 16, gap: 10, borderWidth: 1, borderColor: Colors.primary + "40", shadowColor: Colors.primary, shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 6, elevation: 3 },
+  header:       { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  headerLeft:   { flexDirection: "row", alignItems: "center", gap: 10 },
+  iconWrap:     { width: 32, height: 32, borderRadius: 10, backgroundColor: Colors.primary + "18", alignItems: "center", justifyContent: "center" },
+  title:        { fontSize: 14, fontWeight: "800", color: Colors.text },
+  sub:          { fontSize: 11, color: Colors.textSecondary },
+  pctWrap:      { flexDirection: "row", alignItems: "center", gap: 4 },
+  pct:          { fontSize: 22, fontWeight: "900", color: Colors.primary },
+  barTrack:     { height: 8, backgroundColor: Colors.border, borderRadius: 4, overflow: "hidden" },
+  barFill:      { height: "100%", borderRadius: 4 },
+  bktRow:       { flexDirection: "row", gap: 8 },
+  bktChip:      { flex: 1, backgroundColor: Colors.surfaceAlt, borderRadius: 8, padding: 8, alignItems: "center", gap: 1, borderWidth: 1 },
+  bktChipLabel: { fontSize: 9, fontWeight: "700", textTransform: "uppercase" },
+  bktChipPct:   { fontSize: 13, fontWeight: "800" },
+  bktChipTarget:{ fontSize: 9, color: Colors.textMuted },
+  footer:       { borderTopWidth: 1, borderTopColor: Colors.border, paddingTop: 8 },
+  footerText:   { fontSize: 11, color: Colors.textSecondary, textAlign: "center" as any },
+});
+
+// ─── Main Dashboard ───────────────────────────────────────────────────────────
 export default function Dashboard() {
   const insets = useSafeAreaInsets();
 
@@ -41,10 +161,16 @@ export default function Dashboard() {
     queryFn: () => api.getTodayPtp(),
   });
 
+  const { data: drrData, refetch: refetchDrr } = useQuery({
+    queryKey: ["/api/bkt-perf-summary"],
+    queryFn: () => api.getBktPerfSummary(),
+  });
+
   const refetch = useCallback(() => {
     refetchStats();
     refetchPtp();
-  }, [refetchStats, refetchPtp]);
+    refetchDrr();
+  }, [refetchStats, refetchPtp, refetchDrr]);
 
   if (isLoading) {
     return (
@@ -56,8 +182,9 @@ export default function Dashboard() {
 
   const ptpCases: any[] = ptpData?.cases || [];
   const ptpCount: number = ptpData?.count || 0;
+  const drrRows: any[]  = drrData?.rows || [];
 
-  const fmt = (v: number) =>
+  const fmtNum = (v: number) =>
     v >= 100000 ? `₹${(v / 100000).toFixed(1)}L` : `₹${v.toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
 
   return (
@@ -78,6 +205,10 @@ export default function Dashboard() {
         <StatCard label="Not Process" value={stats?.notProcess || 0} icon="close-circle" color={Colors.danger} />
       </View>
 
+      {/* DRR Widget */}
+      {drrRows.length > 0 && <DRRWidget rows={drrRows} />}
+
+      {/* PTP Card */}
       <View style={styles.ptpCard}>
         <View style={styles.ptpHeader}>
           <View style={[styles.ptpBadge, { backgroundColor: Colors.accent + "20" }]}>
@@ -118,7 +249,7 @@ export default function Dashboard() {
                       )}
                     </View>
                   </View>
-                  <Text style={[styles.ptpPos, { color: Colors.accent }]}>{fmt(parseFloat(c.pos) || 0)}</Text>
+                  <Text style={[styles.ptpPos, { color: Colors.accent }]}>{fmtNum(parseFloat(c.pos) || 0)}</Text>
                 </View>
               );
             })}
@@ -130,151 +261,28 @@ export default function Dashboard() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    padding: 16,
-    gap: 16,
-  },
-  sectionHeading: {
-    fontSize: 20,
-    fontWeight: "800",
-    color: Colors.text,
-    letterSpacing: -0.5,
-    marginBottom: 4,
-  },
-  statsGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 10,
-  },
-  statCard: {
-    width: "47%",
-    backgroundColor: Colors.surface,
-    borderRadius: 16,
-    padding: 16,
-    borderLeftWidth: 3,
-    gap: 6,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.25,
-    shadowRadius: 8,
-    elevation: 4,
-    borderWidth: 1,
-    borderColor: Colors.border,
-  },
-  statIconWrap: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: 4,
-  },
-  statValue: {
-    fontSize: 30,
-    fontWeight: "900",
-    color: Colors.text,
-    letterSpacing: -1,
-  },
-  statLabel: {
-    fontSize: 12,
-    color: Colors.textSecondary,
-    fontWeight: "600",
-    letterSpacing: 0.3,
-  },
-  ptpCard: {
-    backgroundColor: Colors.surface,
-    borderRadius: 16,
-    padding: 18,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.25,
-    shadowRadius: 8,
-    elevation: 4,
-  },
-  ptpHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    marginBottom: 14,
-    paddingBottom: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
-  },
-  ptpBadge: {
-    width: 32,
-    height: 32,
-    borderRadius: 10,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  ptpTitle: {
-    flex: 1,
-    fontSize: 15,
-    fontWeight: "700",
-    color: Colors.text,
-  },
-  countBadge: {
-    minWidth: 28,
-    height: 28,
-    borderRadius: 14,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 8,
-  },
-  countBadgeText: {
-    fontSize: 13,
-    fontWeight: "800",
-  },
-  emptyText: {
-    fontSize: 13,
-    color: Colors.textMuted,
-    textAlign: "center",
-    paddingVertical: 12,
-  },
-  ptpList: {
-    gap: 0,
-  },
-  ptpRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingVertical: 10,
-  },
-  ptpRowBorder: {
-    borderTopWidth: 1,
-    borderTopColor: Colors.border,
-  },
-  ptpRowLeft: {
-    flex: 1,
-    gap: 2,
-  },
-  ptpName: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: Colors.text,
-  },
-  ptpLoan: {
-    fontSize: 12,
-    color: Colors.textMuted,
-  },
-  ptpPos: {
-    fontSize: 14,
-    fontWeight: "700",
-  },
-  ptpDatesRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 4,
-    marginTop: 4,
-  },
-  ptpDateTag: {
-    borderRadius: 6,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-  },
-  ptpDateLabel: {
-    fontSize: 11,
-    fontWeight: "600",
-  },
+  container:      { padding: 16, gap: 16 },
+  sectionHeading: { fontSize: 20, fontWeight: "800", color: Colors.text, letterSpacing: -0.5, marginBottom: 4 },
+  statsGrid:      { flexDirection: "row", flexWrap: "wrap", gap: 10 },
+  statCard:       { width: "47%", backgroundColor: Colors.surface, borderRadius: 16, padding: 16, borderLeftWidth: 3, gap: 6, shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.25, shadowRadius: 8, elevation: 4, borderWidth: 1, borderColor: Colors.border },
+  statIconWrap:   { width: 36, height: 36, borderRadius: 10, alignItems: "center", justifyContent: "center", marginBottom: 4 },
+  statValue:      { fontSize: 30, fontWeight: "900", color: Colors.text, letterSpacing: -1 },
+  statLabel:      { fontSize: 12, color: Colors.textSecondary, fontWeight: "600", letterSpacing: 0.3 },
+  ptpCard:        { backgroundColor: Colors.surface, borderRadius: 16, padding: 18, borderWidth: 1, borderColor: Colors.border, shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.25, shadowRadius: 8, elevation: 4 },
+  ptpHeader:      { flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 14, paddingBottom: 12, borderBottomWidth: 1, borderBottomColor: Colors.border },
+  ptpBadge:       { width: 32, height: 32, borderRadius: 10, alignItems: "center", justifyContent: "center" },
+  ptpTitle:       { flex: 1, fontSize: 15, fontWeight: "700", color: Colors.text },
+  countBadge:     { minWidth: 28, height: 28, borderRadius: 14, alignItems: "center", justifyContent: "center", paddingHorizontal: 8 },
+  countBadgeText: { fontSize: 13, fontWeight: "800" },
+  emptyText:      { fontSize: 13, color: Colors.textMuted, textAlign: "center", paddingVertical: 12 },
+  ptpList:        { gap: 0 },
+  ptpRow:         { flexDirection: "row", alignItems: "center", paddingVertical: 10 },
+  ptpRowBorder:   { borderTopWidth: 1, borderTopColor: Colors.border },
+  ptpRowLeft:     { flex: 1, gap: 2 },
+  ptpName:        { fontSize: 14, fontWeight: "600", color: Colors.text },
+  ptpLoan:        { fontSize: 12, color: Colors.textMuted },
+  ptpPos:         { fontSize: 14, fontWeight: "700" },
+  ptpDatesRow:    { flexDirection: "row", flexWrap: "wrap", gap: 4, marginTop: 4 },
+  ptpDateTag:     { borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
+  ptpDateLabel:   { fontSize: 11, fontWeight: "600" },
 });
