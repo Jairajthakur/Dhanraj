@@ -200,7 +200,7 @@ function FeedbackModal({ visible, caseItem, onClose, isLocked = false }: any) {
         non_starter:    activeTab === "Monthly Feedback" ? nonStarter   : null,
         kyc_purchase:   activeTab === "Monthly Feedback" ? kycPurchase  : null,
         workable:       activeTab === "Monthly Feedback" ? workable      : null,
-        monthly_feedback: monthlyFeedback || null,
+        monthly_feedback: activeTab === "Monthly Feedback" ? (monthlyFeedback || "SUBMITTED") : null,
       });
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       qc.invalidateQueries({ queryKey: ["/api/cases"] });
