@@ -22,6 +22,7 @@ function getNextMilestone(today: number) {
 }
 function fmt(v: number) {
   if (v >= 100000) return `₹${(v / 100000).toFixed(1)}L`;
+  if (v >= 1000) return `₹${(v / 1000).toFixed(1)}K`;
   return `₹${v.toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
 }
 
@@ -68,6 +69,33 @@ function DRRWidget({ rows }: { rows: any[] }) {
   const overallPct = totalPos > 0 ? (totalPaid / totalPos) * 100 : 0;
 
   if (totalPos === 0) return null;
+
+  // ─── Day-wise required POS calculation ───────────────────────────────────
+  // For each BKT: required = (targetAmount - alreadyPaid) / daysLeft
+  // targetAmount = (target% / 100) * totalBktPOS
+  const bktMeta = [
+    { key: "bkt1" as const, label: "BKT 1", color: Colors.info },
+    { key: "bkt2" as const, label: "BKT 2", color: Colors.warning },
+    { key: "bkt3" as const, label: "BKT 3", color: Colors.danger },
+  ];
+
+  const requiredRows = bktMeta
+    .map(({ key, label, color }) => {
+      const d = bktMap[key];
+      if (!d || d.total === 0) return null;
+      const targetPct    = next.targets[key];                        // e.g. 85
+      const targetAmount = (targetPct / 100) * d.total;             // rupee target
+      const remaining    = Math.max(0, targetAmount - d.paid);       // still needed
+      const dailyNeeded  = daysLeft > 0 ? remaining / daysLeft : remaining;
+      const currentPct   = (d.paid / d.total) * 100;
+      const achieved     = currentPct >= targetPct;
+      return { key, label, color, dailyNeeded, remaining, achieved, currentPct, targetPct, targetAmount };
+    })
+    .filter(Boolean) as NonNullable<ReturnType<typeof bktMeta[0]["key"] extends string ? any : never>>[];
+
+  // Overall daily needed across all BKTs
+  const totalRemaining   = requiredRows.reduce((s: number, r: any) => s + r.remaining, 0);
+  const overallDailyNeed = daysLeft > 0 ? totalRemaining / daysLeft : totalRemaining;
 
   return (
     <Pressable style={drrW.card} onPress={() => router.push("/(app)/drr" as any)}>
@@ -118,6 +146,60 @@ function DRRWidget({ rows }: { rows: any[] }) {
         })}
       </View>
 
+      {/* ─── Day-wise Required POS Section ─────────────────────────────── */}
+      {daysLeft > 0 && requiredRows.length > 0 && (
+        <View style={drrW.reqSection}>
+          {/* Section header */}
+          <View style={drrW.reqHeader}>
+            <Ionicons name="flash" size={13} color={Colors.warning} />
+            <Text style={drrW.reqHeaderText}>
+              Daily POS Required to reach {next.label}
+            </Text>
+            <View style={drrW.reqDaysBadge}>
+              <Text style={drrW.reqDaysBadgeText}>{daysLeft}d left</Text>
+            </View>
+          </View>
+
+          {/* Per-BKT required rows */}
+          {requiredRows.map((r: any) => (
+            <View key={r.key} style={drrW.reqRow}>
+              <View style={[drrW.reqBktDot, { backgroundColor: r.color }]} />
+              <Text style={[drrW.reqBktLabel, { color: r.color }]}>{r.label}</Text>
+
+              {r.achieved ? (
+                <View style={drrW.reqAchievedWrap}>
+                  <Ionicons name="checkmark-circle" size={13} color={Colors.success} />
+                  <Text style={drrW.reqAchievedText}>Target reached!</Text>
+                </View>
+              ) : (
+                <View style={drrW.reqAmtWrap}>
+                  <Text style={drrW.reqDailyAmt}>{fmt(r.dailyNeeded)}/day</Text>
+                  <Text style={drrW.reqRemainingAmt}>({fmt(r.remaining)} left)</Text>
+                </View>
+              )}
+            </View>
+          ))}
+
+          {/* Overall daily needed */}
+          {totalRemaining > 0 && (
+            <View style={drrW.reqTotalRow}>
+              <Text style={drrW.reqTotalLabel}>Total needed/day</Text>
+              <Text style={drrW.reqTotalAmt}>{fmt(overallDailyNeed)}</Text>
+            </View>
+          )}
+        </View>
+      )}
+
+      {/* Already past milestone day */}
+      {daysLeft === 0 && (
+        <View style={drrW.reqSection}>
+          <View style={drrW.reqHeader}>
+            <Ionicons name="flag" size={13} color={Colors.accent} />
+            <Text style={drrW.reqHeaderText}>Milestone day reached — final push!</Text>
+          </View>
+        </View>
+      )}
+
       <View style={drrW.footer}>
         <Text style={drrW.footerText}>
           {fmt(totalPaid)} collected of {fmt(totalPos)} total · Tap for details
@@ -128,23 +210,41 @@ function DRRWidget({ rows }: { rows: any[] }) {
 }
 
 const drrW = StyleSheet.create({
-  card:         { backgroundColor: Colors.surface, borderRadius: 16, padding: 16, gap: 10, borderWidth: 1, borderColor: Colors.primary + "40", shadowColor: Colors.primary, shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 6, elevation: 3 },
-  header:       { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  headerLeft:   { flexDirection: "row", alignItems: "center", gap: 10 },
-  iconWrap:     { width: 32, height: 32, borderRadius: 10, backgroundColor: Colors.primary + "18", alignItems: "center", justifyContent: "center" },
-  title:        { fontSize: 14, fontWeight: "800", color: Colors.text },
-  sub:          { fontSize: 11, color: Colors.textSecondary },
-  pctWrap:      { flexDirection: "row", alignItems: "center", gap: 4 },
-  pct:          { fontSize: 22, fontWeight: "900", color: Colors.primary },
-  barTrack:     { height: 8, backgroundColor: Colors.border, borderRadius: 4, overflow: "hidden" },
-  barFill:      { height: "100%", borderRadius: 4 },
-  bktRow:       { flexDirection: "row", gap: 8 },
-  bktChip:      { flex: 1, backgroundColor: Colors.surfaceAlt, borderRadius: 8, padding: 8, alignItems: "center", gap: 1, borderWidth: 1 },
-  bktChipLabel: { fontSize: 9, fontWeight: "700", textTransform: "uppercase" },
-  bktChipPct:   { fontSize: 13, fontWeight: "800" },
-  bktChipTarget:{ fontSize: 9, color: Colors.textMuted },
-  footer:       { borderTopWidth: 1, borderTopColor: Colors.border, paddingTop: 8 },
-  footerText:   { fontSize: 11, color: Colors.textSecondary, textAlign: "center" as any },
+  card:             { backgroundColor: Colors.surface, borderRadius: 16, padding: 16, gap: 10, borderWidth: 1, borderColor: Colors.primary + "40", shadowColor: Colors.primary, shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 6, elevation: 3 },
+  header:           { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  headerLeft:       { flexDirection: "row", alignItems: "center", gap: 10 },
+  iconWrap:         { width: 32, height: 32, borderRadius: 10, backgroundColor: Colors.primary + "18", alignItems: "center", justifyContent: "center" },
+  title:            { fontSize: 14, fontWeight: "800", color: Colors.text },
+  sub:              { fontSize: 11, color: Colors.textSecondary },
+  pctWrap:          { flexDirection: "row", alignItems: "center", gap: 4 },
+  pct:              { fontSize: 22, fontWeight: "900", color: Colors.primary },
+  barTrack:         { height: 8, backgroundColor: Colors.border, borderRadius: 4, overflow: "hidden" },
+  barFill:          { height: "100%", borderRadius: 4 },
+  bktRow:           { flexDirection: "row", gap: 8 },
+  bktChip:          { flex: 1, backgroundColor: Colors.surfaceAlt, borderRadius: 8, padding: 8, alignItems: "center", gap: 1, borderWidth: 1 },
+  bktChipLabel:     { fontSize: 9, fontWeight: "700", textTransform: "uppercase" },
+  bktChipPct:       { fontSize: 13, fontWeight: "800" },
+  bktChipTarget:    { fontSize: 9, color: Colors.textMuted },
+  footer:           { borderTopWidth: 1, borderTopColor: Colors.border, paddingTop: 8 },
+  footerText:       { fontSize: 11, color: Colors.textSecondary, textAlign: "center" as any },
+
+  // ── Required POS section ──
+  reqSection:       { backgroundColor: Colors.surfaceAlt, borderRadius: 10, padding: 10, gap: 8, borderWidth: 1, borderColor: Colors.warning + "30" },
+  reqHeader:        { flexDirection: "row", alignItems: "center", gap: 6 },
+  reqHeaderText:    { flex: 1, fontSize: 11, fontWeight: "700", color: Colors.textSecondary },
+  reqDaysBadge:     { backgroundColor: Colors.warning + "25", borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
+  reqDaysBadgeText: { fontSize: 10, fontWeight: "800", color: Colors.warning },
+  reqRow:           { flexDirection: "row", alignItems: "center", gap: 6 },
+  reqBktDot:        { width: 7, height: 7, borderRadius: 4 },
+  reqBktLabel:      { fontSize: 11, fontWeight: "700", width: 38 },
+  reqAmtWrap:       { flex: 1, flexDirection: "row", alignItems: "baseline", gap: 4 },
+  reqDailyAmt:      { fontSize: 13, fontWeight: "800", color: Colors.text },
+  reqRemainingAmt:  { fontSize: 10, color: Colors.textMuted },
+  reqAchievedWrap:  { flex: 1, flexDirection: "row", alignItems: "center", gap: 4 },
+  reqAchievedText:  { fontSize: 11, fontWeight: "600", color: Colors.success },
+  reqTotalRow:      { flexDirection: "row", justifyContent: "space-between", alignItems: "center", borderTopWidth: 1, borderTopColor: Colors.border, paddingTop: 6, marginTop: 2 },
+  reqTotalLabel:    { fontSize: 11, fontWeight: "600", color: Colors.textSecondary },
+  reqTotalAmt:      { fontSize: 14, fontWeight: "900", color: Colors.warning },
 });
 
 // ─── Main Dashboard ───────────────────────────────────────────────────────────
