@@ -52,13 +52,22 @@ export default function AdminAttendanceScreen() {
   const [agentFilter, setAgentFilter] = useState("All");
   const [statusFilter, setStatusFilter] = useState("All");
 
-  const { data, isLoading, refetch } = useQuery({
+  const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["/api/admin/attendance"],
     queryFn: () => api.admin.getAttendance(),
     refetchInterval: 30000,
+    retry: 2,
   });
 
-  const attendance: any[] = data?.attendance || [];
+  // Debug: log errors to console in development
+  if (__DEV__ && isError) {
+    console.error("[AdminAttendance] fetch error:", error);
+  }
+  if (__DEV__ && data) {
+    console.log("[AdminAttendance] fetched records:", data?.attendance?.length ?? 0);
+  }
+
+  const attendance: any[] = Array.isArray(data?.attendance) ? data.attendance : [];
 
   const agentNames = useMemo(() => {
     const names = Array.from(
@@ -122,7 +131,26 @@ export default function AdminAttendanceScreen() {
               {attendance.length} Records
             </Text>
           </View>
+
+          {/* Refresh button */}
+          <Pressable
+            style={[styles.chip, { backgroundColor: Colors.primary + "18" }]}
+            onPress={() => refetch()}
+          >
+            <Ionicons name="refresh-outline" size={14} color={Colors.primary} />
+            <Text style={[styles.chipText, { color: Colors.primary }]}>Refresh</Text>
+          </Pressable>
         </View>
+
+        {/* Error banner */}
+        {isError && (
+          <View style={styles.errorBanner}>
+            <Ionicons name="alert-circle-outline" size={14} color="#fff" />
+            <Text style={styles.errorBannerText}>
+              Failed to load — check your login session
+            </Text>
+          </View>
+        )}
 
         {/* Status filter */}
         <ScrollView horizontal showsHorizontalScrollIndicator={false}>
@@ -185,6 +213,9 @@ export default function AdminAttendanceScreen() {
       {isLoading ? (
         <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
           <ActivityIndicator color={Colors.primary} size="large" />
+          <Text style={{ color: Colors.textMuted, marginTop: 12, fontSize: 13 }}>
+            Loading attendance...
+          </Text>
         </View>
       ) : (
         <FlatList
@@ -322,10 +353,17 @@ export default function AdminAttendanceScreen() {
               <Ionicons name="calendar-outline" size={52} color={Colors.textMuted} />
               <Text style={styles.emptyTitle}>No Records Found</Text>
               <Text style={styles.emptyText}>
-                {agentFilter !== "All" || statusFilter !== "All"
+                {isError
+                  ? "Error loading data — tap Refresh above"
+                  : agentFilter !== "All" || statusFilter !== "All"
                   ? "Try changing the filters"
                   : "No attendance records yet"}
               </Text>
+              {isError && (
+                <Pressable style={styles.retryBtn} onPress={() => refetch()}>
+                  <Text style={styles.retryBtnText}>Retry</Text>
+                </Pressable>
+              )}
             </View>
           }
         />
@@ -352,6 +390,16 @@ const styles = StyleSheet.create({
     borderRadius: 20,
   },
   chipText: { fontSize: 12, fontWeight: "700" },
+  errorBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: Colors.danger,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  errorBannerText: { color: "#fff", fontSize: 12, fontWeight: "600", flex: 1 },
   filterRow: { flexDirection: "row", gap: 8 },
   filterChip: {
     paddingHorizontal: 14,
@@ -469,5 +517,13 @@ const styles = StyleSheet.create({
     paddingVertical: 60,
   },
   emptyTitle: { fontSize: 16, fontWeight: "700", color: Colors.textMuted },
-  emptyText: { fontSize: 13, color: Colors.textMuted, textAlign: "center" },
+  emptyText: { fontSize: 13, color: Colors.textMuted, textAlign: "center", paddingHorizontal: 32 },
+  retryBtn: {
+    marginTop: 8,
+    paddingHorizontal: 24,
+    paddingVertical: 10,
+    backgroundColor: Colors.primary,
+    borderRadius: 20,
+  },
+  retryBtnText: { color: "#fff", fontWeight: "700", fontSize: 14 },
 });
