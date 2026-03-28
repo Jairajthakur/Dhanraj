@@ -403,7 +403,7 @@ export default function AllCasesScreen() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
   const [selectedCase, setSelectedCase] = useState<any>(null);
-  const [selectedTableType, setSelectedTableType] = useState<"loan" | "bkt">("loan");
+  const [selectedTableType] = useState<"loan" | "bkt">("loan");
   const [resettingAgent, setResettingAgent] = useState<number | null>(null);
   const [agentCasesModal, setAgentCasesModal] = useState<{
     agentId: number;
@@ -411,13 +411,13 @@ export default function AllCasesScreen() {
     cases: any[];
   } | null>(null);
   const [resettingCaseId, setResettingCaseId] = useState<number | null>(null);
-  const [tableType, setTableType] = useState<"loan" | "bkt">("loan");
 
-  const queryKey = tableType === "loan" ? ["/api/admin/cases"] : ["/api/admin/bkt-cases"];
+  const tableType = "loan";
+  const queryKey = ["/api/admin/cases"];
 
   const { data, isLoading } = useQuery({
     queryKey,
-    queryFn: () => tableType === "loan" ? api.admin.getCases() : api.admin.getBktCases(),
+    queryFn: () => api.admin.getCases(),
     refetchInterval: 15000,
   });
 
@@ -535,24 +535,6 @@ export default function AllCasesScreen() {
   return (
     <View style={{ flex: 1, backgroundColor: Colors.background }}>
       <View style={[styles.filterBar, { paddingTop: Platform.OS === "web" ? 67 : 12 }]}>
-        <View style={styles.tableSwitcher}>
-          <Pressable
-            style={[styles.switchBtn, tableType === "loan" && styles.switchBtnActive]}
-            onPress={() => setTableType("loan")}
-          >
-            <Text style={[styles.switchBtnText, tableType === "loan" && styles.switchBtnTextActive]}>
-              Loan Cases
-            </Text>
-          </Pressable>
-          <Pressable
-            style={[styles.switchBtn, tableType === "bkt" && styles.switchBtnActive]}
-            onPress={() => setTableType("bkt")}
-          >
-            <Text style={[styles.switchBtnText, tableType === "bkt" && styles.switchBtnTextActive]}>
-              BKT Cases
-            </Text>
-          </Pressable>
-        </View>
 
         <View style={styles.summaryRow}>
           <View style={[styles.summaryChip, { backgroundColor: Colors.success + "18" }]}>
@@ -717,15 +699,12 @@ export default function AllCasesScreen() {
                 </View>
               ) : null}
 
-              <StatusActionBar item={item} tableType={tableType} onUpdated={invalidateAll} />
+              <StatusActionBar item={item} tableType="loan" onUpdated={invalidateAll} />
 
               <View style={styles.cardActions}>
                 <Pressable
                   style={styles.viewDetail}
-                  onPress={() => {
-                    setSelectedCase(item);
-                    setSelectedTableType(tableType);
-                  }}
+                  onPress={() => setSelectedCase(item)}
                 >
                   <Ionicons name="eye-outline" size={14} color={Colors.primary} />
                   <Text style={styles.viewDetailText}>View Details</Text>
@@ -803,7 +782,7 @@ export default function AllCasesScreen() {
                       )}
                       <StatusActionBar
                         item={item}
-                        tableType={tableType}
+                        tableType="loan"
                         onUpdated={() => { invalidateAll(); setAgentCasesModal((prev) => prev ? { ...prev } : null); }}
                       />
                     </View>
