@@ -79,23 +79,27 @@ function DRRWidget({ rows }: { rows: any[] }) {
     { key: "bkt3" as const, label: "BKT 3", color: Colors.danger },
   ];
 
+  // On the milestone day itself (daysLeft=0), treat as 1 day — collect everything today
+  const effectiveDays = Math.max(1, daysLeft);
+  const isMilestoneDay = daysLeft === 0;
+
   const requiredRows = bktMeta
     .map(({ key, label, color }) => {
       const d = bktMap[key];
       if (!d || d.total === 0) return null;
-      const targetPct    = next.targets[key];                        // e.g. 85
-      const targetAmount = (targetPct / 100) * d.total;             // rupee target
-      const remaining    = Math.max(0, targetAmount - d.paid);       // still needed
-      const dailyNeeded  = daysLeft > 0 ? remaining / daysLeft : remaining;
+      const targetPct    = next.targets[key];
+      const targetAmount = (targetPct / 100) * d.total;
+      const remaining    = Math.max(0, targetAmount - d.paid);
+      const dailyNeeded  = remaining / effectiveDays;
       const currentPct   = (d.paid / d.total) * 100;
       const achieved     = currentPct >= targetPct;
       return { key, label, color, dailyNeeded, remaining, achieved, currentPct, targetPct, targetAmount };
     })
-    .filter(Boolean) as NonNullable<ReturnType<typeof bktMeta[0]["key"] extends string ? any : never>>[];
+    .filter(Boolean) as any[];
 
   // Overall daily needed across all BKTs
   const totalRemaining   = requiredRows.reduce((s: number, r: any) => s + r.remaining, 0);
-  const overallDailyNeed = daysLeft > 0 ? totalRemaining / daysLeft : totalRemaining;
+  const overallDailyNeed = totalRemaining / effectiveDays;
 
   return (
     <Pressable style={drrW.card} onPress={() => router.push("/(app)/drr" as any)}>
@@ -147,16 +151,20 @@ function DRRWidget({ rows }: { rows: any[] }) {
       </View>
 
       {/* ─── Day-wise Required POS Section ─────────────────────────────── */}
-      {daysLeft > 0 && requiredRows.length > 0 && (
+      {requiredRows.length > 0 && (
         <View style={drrW.reqSection}>
           {/* Section header */}
           <View style={drrW.reqHeader}>
             <Ionicons name="flash" size={13} color={Colors.warning} />
             <Text style={drrW.reqHeaderText}>
-              Daily POS Required to reach {next.label}
+              {isMilestoneDay
+                ? `Collect today to reach ${next.label}`
+                : `Daily POS Required to reach ${next.label}`}
             </Text>
             <View style={drrW.reqDaysBadge}>
-              <Text style={drrW.reqDaysBadgeText}>{daysLeft}d left</Text>
+              <Text style={drrW.reqDaysBadgeText}>
+                {isMilestoneDay ? "Today!" : `${daysLeft}d left`}
+              </Text>
             </View>
           </View>
 
@@ -187,16 +195,6 @@ function DRRWidget({ rows }: { rows: any[] }) {
               <Text style={drrW.reqTotalAmt}>{fmt(overallDailyNeed)}</Text>
             </View>
           )}
-        </View>
-      )}
-
-      {/* Already past milestone day */}
-      {daysLeft === 0 && (
-        <View style={drrW.reqSection}>
-          <View style={drrW.reqHeader}>
-            <Ionicons name="flag" size={13} color={Colors.accent} />
-            <Text style={drrW.reqHeaderText}>Milestone day reached — final push!</Text>
-          </View>
         </View>
       )}
 
