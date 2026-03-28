@@ -11,6 +11,7 @@ const ADMIN_MENU = [
   { key: "dashboard",   label: "Dashboard",        icon: "home"             as const, screen: "/(admin)"                },
   { key: "cases",       label: "All Cases",         icon: "list"             as const, screen: "/(admin)/all-cases"      },
   { key: "bkt",         label: "BKT Performance",   icon: "layers"           as const, screen: "/(admin)/bkt-cases"      },
+  { key: "drr",         label: "DRR / Targets",     icon: "trending-up"      as const, screen: "/(admin)/drr"            },
   { key: "agency",      label: "Agency Target",     icon: "trophy"           as const, screen: "/(admin)/agency-target"  },
   { key: "salary",      label: "Salary Management", icon: "wallet"           as const, screen: "/(admin)/salary"         },
   { key: "depositions", label: "Depositions",       icon: "cash"             as const, screen: "/(admin)/depositions"    },
@@ -56,10 +57,18 @@ function AdminDrawer({ visible, onClose }: { visible: boolean; onClose: () => vo
                   style={({ pressed }) => [styles.drawerItem, pressed && styles.drawerItemPressed]}
                   onPress={() => handleNav(item.screen)}
                 >
-                  <View style={styles.drawerIconWrap}>
+                  <View style={[
+                    styles.drawerIconWrap,
+                    item.key === "drr" && { backgroundColor: Colors.primary + "25" },
+                  ]}>
                     <Ionicons name={item.icon} size={18} color={Colors.primary} />
                   </View>
                   <Text style={styles.drawerItemText}>{item.label}</Text>
+                  {item.key === "drr" && (
+                    <View style={styles.newBadge}>
+                      <Text style={styles.newBadgeText}>NEW</Text>
+                    </View>
+                  )}
                   <Ionicons name="chevron-forward" size={14} color={Colors.textMuted} />
                 </Pressable>
               ))}
@@ -112,6 +121,7 @@ export default function AdminLayout() {
         <Stack.Screen name="index" />
         <Stack.Screen name="all-cases" />
         <Stack.Screen name="bkt-cases" />
+        <Stack.Screen name="drr" options={{ title: "DRR / Targets" }} />
         <Stack.Screen name="agency-target" />
         <Stack.Screen name="salary" />
         <Stack.Screen name="depositions" />
@@ -125,93 +135,27 @@ export default function AdminLayout() {
 
 const styles = StyleSheet.create({
   headerMenuBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: Colors.surfaceAlt,
-    marginLeft: -4,
+    width: 36, height: 36, borderRadius: 10, alignItems: "center", justifyContent: "center",
+    backgroundColor: Colors.surfaceAlt, marginLeft: -4,
   },
   headerIconWrap: {
-    width: 28,
-    height: 28,
-    borderRadius: 8,
-    backgroundColor: Colors.primary + "18",
-    alignItems: "center",
-    justifyContent: "center",
+    width: 28, height: 28, borderRadius: 8, backgroundColor: Colors.primary + "18",
+    alignItems: "center", justifyContent: "center",
   },
   drawerOverlay:    { flex: 1, flexDirection: "row" },
   drawerBackdrop:   { flex: 1, backgroundColor: "rgba(0,0,0,0.65)" },
-  drawerContainer: {
-    width: "82%",
-    maxWidth: 310,
-    backgroundColor: Colors.surface,
-    position: "absolute",
-    left: 0,
-    top: 0,
-    bottom: 0,
-    borderRightWidth: 1,
-    borderRightColor: Colors.borderLight,
-  },
-  drawerHeader: {
-    backgroundColor: Colors.primaryDeep,
-    paddingHorizontal: 20,
-    paddingBottom: 24,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 14,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.primary + "30",
-  },
-  drawerAvatarCircle: {
-    width: 54,
-    height: 54,
-    borderRadius: 27,
-    backgroundColor: Colors.primary,
-    alignItems: "center",
-    justifyContent: "center",
-    shadowColor: Colors.primary,
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.5,
-    shadowRadius: 8,
-    elevation: 6,
-  },
+  drawerContainer:  { width: "82%", maxWidth: 310, backgroundColor: Colors.surface, position: "absolute", left: 0, top: 0, bottom: 0, borderRightWidth: 1, borderRightColor: Colors.borderLight },
+  drawerHeader:     { backgroundColor: Colors.primaryDeep, paddingHorizontal: 20, paddingBottom: 24, flexDirection: "row", alignItems: "center", gap: 14, borderBottomWidth: 1, borderBottomColor: Colors.primary + "30" },
+  drawerAvatarCircle: { width: 54, height: 54, borderRadius: 27, backgroundColor: Colors.primary, alignItems: "center", justifyContent: "center", shadowColor: Colors.primary, shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.5, shadowRadius: 8, elevation: 6 },
   drawerHeaderInfo: { flex: 1, gap: 6 },
   drawerName:       { color: Colors.text, fontSize: 16, fontWeight: "800", letterSpacing: -0.2 },
-  drawerRoleBadge: {
-    backgroundColor: Colors.accent + "25",
-    borderRadius: 6,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    alignSelf: "flex-start",
-  },
-  drawerRoleText:  { color: Colors.accent, fontSize: 11, fontWeight: "700", letterSpacing: 0.5 },
-  menuSection: {
-    marginHorizontal: 12,
-    backgroundColor: Colors.surfaceAlt,
-    borderRadius: 14,
-    overflow: "hidden",
-    borderWidth: 1,
-    borderColor: Colors.border,
-  },
-  drawerItem: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 14,
-    paddingVertical: 14,
-    gap: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: Colors.border,
-  },
-  drawerItemPressed: { backgroundColor: Colors.border },
-  drawerIconWrap: {
-    width: 32,
-    height: 32,
-    borderRadius: 9,
-    backgroundColor: Colors.primary + "18",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  drawerItemText: { flex: 1, fontSize: 14, color: Colors.text, fontWeight: "600" },
+  drawerRoleBadge:  { backgroundColor: Colors.accent + "25", borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3, alignSelf: "flex-start" },
+  drawerRoleText:   { color: Colors.accent, fontSize: 11, fontWeight: "700", letterSpacing: 0.5 },
+  menuSection:      { marginHorizontal: 12, backgroundColor: Colors.surfaceAlt, borderRadius: 14, overflow: "hidden", borderWidth: 1, borderColor: Colors.border },
+  drawerItem:       { flexDirection: "row", alignItems: "center", paddingHorizontal: 14, paddingVertical: 14, gap: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: Colors.border },
+  drawerItemPressed:{ backgroundColor: Colors.border },
+  drawerIconWrap:   { width: 32, height: 32, borderRadius: 9, backgroundColor: Colors.primary + "18", alignItems: "center", justifyContent: "center" },
+  drawerItemText:   { flex: 1, fontSize: 14, color: Colors.text, fontWeight: "600" },
+  newBadge:         { backgroundColor: Colors.accent, borderRadius: 6, paddingHorizontal: 7, paddingVertical: 2 },
+  newBadgeText:     { fontSize: 9, fontWeight: "800", color: "#fff", letterSpacing: 0.5 },
 });
