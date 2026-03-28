@@ -469,8 +469,8 @@ function CaseCard({ item, onFeedback }: { item: any; onFeedback: (item: any) => 
   };
 
   // ── Only lock when monthly_feedback is saved ──────────────────────────────
-  const isLocked = !!item.monthly_feedback;
-
+const isLocked = !!item.feedback_code;
+  
   const statusColor  = STATUS_COLORS[item.status] || Colors.textMuted;
   const rollbackRaw  = (item.rollback  !== null && item.rollback  !== undefined && item.rollback  !== "" && item.rollback  !== "0" && Number(item.rollback)  !== 0) ? "RollBack"  : "—";
   const clearanceRaw = (item.clearance !== null && item.clearance !== undefined && item.clearance !== "" && item.clearance !== "0" && Number(item.clearance) !== 0) ? "Clearance" : "—";
@@ -668,7 +668,7 @@ export default function AllocationScreen() {
   }), [allCases]);
 
   // ── Only lock when monthly_feedback is saved ──────────────────────────────
-  const feedbackItemLocked = feedbackItem ? !!feedbackItem.monthly_feedback : false;
+const feedbackItemLocked = feedbackItem ? !!feedbackItem.feedback_code : false;
 
   return (
     <View style={{ flex: 1, backgroundColor: Colors.background }}>
