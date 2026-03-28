@@ -13,6 +13,7 @@ import { api } from "@/lib/api";
 const MENU_ITEMS = [
   { key: "dashboard",       label: "Dashboard",       icon: "home"             as const, screen: "/(app)/dashboard" },
   { key: "allocation",      label: "My Cases",        icon: "list"             as const, screen: "/(app)/allocation" },
+  { key: "drr",             label: "DRR / Targets",   icon: "trending-up"      as const, screen: "/(app)/drr" },
   { key: "ready-payment",   label: "Ready Payment",   icon: "phone-portrait"   as const, screen: "/(app)/ready-payment" },
   { key: "deposition",      label: "Deposition",      icon: "cash"             as const, screen: "/(app)/deposition" },
   { key: "performance",     label: "Performance",     icon: "stats-chart"      as const, screen: "/(app)/performance" },
@@ -72,7 +73,6 @@ function Drawer({ visible, onClose, agentName }: { visible: boolean; onClose: ()
     else { router.push(item.screen as any); }
   };
 
-  // ✅ FIX: logout redirects to /(app)/login, not /login (which doesn't exist)
   const handleLogout = async () => {
     try {
       await logout();
@@ -103,10 +103,15 @@ function Drawer({ visible, onClose, agentName }: { visible: boolean; onClose: ()
               <View style={styles.menuSection}>
                 {MENU_ITEMS.map((item) => (
                   <Pressable key={item.key} style={({ pressed }) => [styles.drawerItem, pressed && styles.drawerItemPressed]} onPress={() => handleNav(item)}>
-                    <View style={styles.drawerIconWrap}>
-                      <Ionicons name={item.icon} size={18} color={Colors.primary} />
+                    <View style={[styles.drawerIconWrap, item.key === "drr" && { backgroundColor: Colors.primary + "25" }]}>
+                      <Ionicons name={item.icon} size={18} color={item.key === "drr" ? Colors.primary : Colors.primary} />
                     </View>
                     <Text style={styles.drawerItemText}>{item.label}</Text>
+                    {item.key === "drr" && (
+                      <View style={styles.newBadge}>
+                        <Text style={styles.newBadgeText}>NEW</Text>
+                      </View>
+                    )}
                     <Ionicons name="chevron-forward" size={14} color={Colors.textMuted} />
                   </Pressable>
                 ))}
@@ -157,10 +162,10 @@ export default function AppLayout() {
           ),
         }}
       >
-        {/* ✅ FIX: login screen must be declared here since it lives in (app)/ */}
         <Stack.Screen name="login" options={{ headerShown: false }} />
         <Stack.Screen name="dashboard" />
         <Stack.Screen name="allocation" />
+        <Stack.Screen name="drr" options={{ title: "DRR & Targets" }} />
         <Stack.Screen name="customer/[id]" options={{ headerLeft: undefined, headerBackTitle: "Back" }} />
         <Stack.Screen name="performance" />
         <Stack.Screen name="salary" />
@@ -176,28 +181,30 @@ export default function AppLayout() {
 }
 
 const styles = StyleSheet.create({
-  headerMenuBtn: { width: 36, height: 36, borderRadius: 10, alignItems: "center", justifyContent: "center", backgroundColor: Colors.surfaceAlt, marginLeft: -4 },
-  headerLogo: { width: 32, height: 32, borderRadius: 10, alignItems: "center", justifyContent: "center", backgroundColor: Colors.primary + "18" },
-  drawerOverlay: { flex: 1, flexDirection: "row" },
-  drawerBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.65)" },
-  drawerContainer: { width: "82%", maxWidth: 310, backgroundColor: Colors.surface, position: "absolute", left: 0, top: 0, bottom: 0, borderRightWidth: 1, borderRightColor: Colors.borderLight },
-  drawerHeader: { backgroundColor: Colors.background, paddingHorizontal: 20, paddingBottom: 24, flexDirection: "row", alignItems: "center", gap: 14, borderBottomWidth: 1, borderBottomColor: Colors.border },
+  headerMenuBtn:      { width: 36, height: 36, borderRadius: 10, alignItems: "center", justifyContent: "center", backgroundColor: Colors.surfaceAlt, marginLeft: -4 },
+  headerLogo:         { width: 32, height: 32, borderRadius: 10, alignItems: "center", justifyContent: "center", backgroundColor: Colors.primary + "18" },
+  drawerOverlay:      { flex: 1, flexDirection: "row" },
+  drawerBackdrop:     { flex: 1, backgroundColor: "rgba(0,0,0,0.65)" },
+  drawerContainer:    { width: "82%", maxWidth: 310, backgroundColor: Colors.surface, position: "absolute", left: 0, top: 0, bottom: 0, borderRightWidth: 1, borderRightColor: Colors.borderLight },
+  drawerHeader:       { backgroundColor: Colors.background, paddingHorizontal: 20, paddingBottom: 24, flexDirection: "row", alignItems: "center", gap: 14, borderBottomWidth: 1, borderBottomColor: Colors.border },
   drawerAvatarCircle: { width: 54, height: 54, borderRadius: 27, backgroundColor: Colors.surfaceElevated, alignItems: "center", justifyContent: "center", borderWidth: 2, borderColor: Colors.border },
-  drawerAvatarText: { color: Colors.text, fontSize: 20, fontWeight: "800" },
-  drawerHeaderInfo: { flex: 1, gap: 6 },
-  drawerName: { color: Colors.text, fontSize: 16, fontWeight: "800", letterSpacing: -0.2 },
-  drawerRoleBadge: { backgroundColor: Colors.border, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3, alignSelf: "flex-start" },
-  drawerRoleText: { color: Colors.textSecondary, fontSize: 11, fontWeight: "700", letterSpacing: 0.5 },
-  drawerMenu: { flex: 1, paddingTop: 8 },
-  menuSection: { marginHorizontal: 12, backgroundColor: Colors.surfaceAlt, borderRadius: 14, overflow: "hidden", borderWidth: 1, borderColor: Colors.border },
-  drawerItem: { flexDirection: "row", alignItems: "center", paddingHorizontal: 14, paddingVertical: 14, gap: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: Colors.border },
-  drawerItemPressed: { backgroundColor: Colors.border },
-  drawerIconWrap: { width: 32, height: 32, borderRadius: 9, backgroundColor: Colors.primary + "18", alignItems: "center", justifyContent: "center" },
-  drawerItemText: { flex: 1, fontSize: 14, color: Colors.text, fontWeight: "600" },
-  modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.65)", justifyContent: "center", alignItems: "center" },
-  attendanceCard: { width: 300, backgroundColor: Colors.surface, borderRadius: 20, overflow: "hidden", borderWidth: 1, borderColor: Colors.borderLight },
-  attHeader: { flexDirection: "row", alignItems: "center", gap: 10, padding: 20, paddingBottom: 18 },
-  attTitle: { fontSize: 17, fontWeight: "700", color: Colors.text },
-  attBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 10, paddingVertical: 18 },
-  attBtnText: { fontSize: 14, fontWeight: "800", letterSpacing: 1 },
+  drawerAvatarText:   { color: Colors.text, fontSize: 20, fontWeight: "800" },
+  drawerHeaderInfo:   { flex: 1, gap: 6 },
+  drawerName:         { color: Colors.text, fontSize: 16, fontWeight: "800", letterSpacing: -0.2 },
+  drawerRoleBadge:    { backgroundColor: Colors.border, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3, alignSelf: "flex-start" },
+  drawerRoleText:     { color: Colors.textSecondary, fontSize: 11, fontWeight: "700", letterSpacing: 0.5 },
+  drawerMenu:         { flex: 1, paddingTop: 8 },
+  menuSection:        { marginHorizontal: 12, backgroundColor: Colors.surfaceAlt, borderRadius: 14, overflow: "hidden", borderWidth: 1, borderColor: Colors.border },
+  drawerItem:         { flexDirection: "row", alignItems: "center", paddingHorizontal: 14, paddingVertical: 14, gap: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: Colors.border },
+  drawerItemPressed:  { backgroundColor: Colors.border },
+  drawerIconWrap:     { width: 32, height: 32, borderRadius: 9, backgroundColor: Colors.primary + "18", alignItems: "center", justifyContent: "center" },
+  drawerItemText:     { flex: 1, fontSize: 14, color: Colors.text, fontWeight: "600" },
+  newBadge:           { backgroundColor: Colors.accent, borderRadius: 6, paddingHorizontal: 7, paddingVertical: 2 },
+  newBadgeText:       { fontSize: 9, fontWeight: "800", color: "#fff", letterSpacing: 0.5 },
+  modalOverlay:       { flex: 1, backgroundColor: "rgba(0,0,0,0.65)", justifyContent: "center", alignItems: "center" },
+  attendanceCard:     { width: 300, backgroundColor: Colors.surface, borderRadius: 20, overflow: "hidden", borderWidth: 1, borderColor: Colors.borderLight },
+  attHeader:          { flexDirection: "row", alignItems: "center", gap: 10, padding: 20, paddingBottom: 18 },
+  attTitle:           { fontSize: 17, fontWeight: "700", color: Colors.text },
+  attBtn:             { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 10, paddingVertical: 18 },
+  attBtnText:         { fontSize: 14, fontWeight: "800", letterSpacing: 1 },
 });
