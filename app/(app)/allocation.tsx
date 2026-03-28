@@ -82,7 +82,7 @@ function YNToggle({ label, value, onChange }: {
   );
 }
 
-// ─── Locked view shown inside modal when feedback already exists ──────────────
+// ─── Locked view shown inside modal when monthly feedback already exists ──────
 function LockedFeedbackView({ item, onClose }: { item: any; onClose: () => void }) {
   const rows = [
     item.status           && { label: "Status",          value: item.status,            color: STATUS_COLORS[item.status] || Colors.text },
@@ -268,7 +268,7 @@ function FeedbackModal({ visible, caseItem, onClose, isLocked = false }: any) {
             )}
           </View>
 
-          {/* ── LOCKED STATE ─────────────────────────────────────────────── */}
+          {/* ── LOCKED STATE (only when monthly_feedback exists) ──────────── */}
           {isLocked ? (
             <LockedFeedbackView item={caseItem} onClose={onClose} />
           ) : (
@@ -295,7 +295,7 @@ function FeedbackModal({ visible, caseItem, onClose, isLocked = false }: any) {
 
               <ScrollView showsVerticalScrollIndicator={false} style={{ flexGrow: 1, flexShrink: 1 }}>
 
-                {/* ====== UNPAID (no rollback) ====== */}
+                {/* ====== UNPAID ====== */}
                 {activeTab === "Unpaid" && (
                   <>
                     <Text style={fbStyles.sectionLabel}>Detail Feedback</Text>
@@ -313,7 +313,7 @@ function FeedbackModal({ visible, caseItem, onClose, isLocked = false }: any) {
                   </>
                 )}
 
-                {/* ====== MONTHLY FEEDBACK (no rollback) ====== */}
+                {/* ====== MONTHLY FEEDBACK ====== */}
                 {activeTab === "Monthly Feedback" && (
                   <>
                     <View style={fbStyles.divider} />
@@ -408,7 +408,7 @@ function FeedbackModal({ visible, caseItem, onClose, isLocked = false }: any) {
                   </>
                 )}
 
-                {/* ====== PTP (no rollback) ====== */}
+                {/* ====== PTP ====== */}
                 {activeTab === "PTP" && (
                   <>
                     <Text style={fbStyles.sectionLabel}>Detail Feedback</Text>
@@ -417,7 +417,7 @@ function FeedbackModal({ visible, caseItem, onClose, isLocked = false }: any) {
                     <TextInput style={[fbStyles.commentInput, { minHeight: 44, marginBottom: 12 }]} placeholder="DD-MM-YYYY" placeholderTextColor={Colors.textMuted} value={ptpDate} onChangeText={setPtpDate} keyboardType="numeric" />
                     {/* NOTE: Rollback REMOVED from PTP */}
                     <Text style={fbStyles.sectionLabel}>Comments (Optional)</Text>
-                    <TextInput style={fbStyles.commentInput} placeholder="Add comments..." placeholderTextColor={Colors.textMuted} value={paidDetailFeedback.length > 0 ? comments : comments} onChangeText={setComments} multiline numberOfLines={3} />
+                    <TextInput style={fbStyles.commentInput} placeholder="Add comments..." placeholderTextColor={Colors.textMuted} value={comments} onChangeText={setComments} multiline numberOfLines={3} />
                   </>
                 )}
 
@@ -468,14 +468,8 @@ function CaseCard({ item, onFeedback }: { item: any; onFeedback: (item: any) => 
     Linking.openURL(`tel:${num}`);
   };
 
-  // ── Determine if feedback is locked ──────────────────────────────────────
-  const isLocked = !!(
-    item.feedback_code    ||
-    item.latest_feedback  ||
-    item.monthly_feedback ||
-    item.status === "Paid"||
-    item.status === "PTP"
-  );
+  // ── Only lock when monthly_feedback is saved ──────────────────────────────
+  const isLocked = !!item.monthly_feedback;
 
   const statusColor  = STATUS_COLORS[item.status] || Colors.textMuted;
   const rollbackRaw  = (item.rollback  !== null && item.rollback  !== undefined && item.rollback  !== "" && item.rollback  !== "0" && Number(item.rollback)  !== 0) ? "RollBack"  : "—";
@@ -618,7 +612,7 @@ function CaseCard({ item, onFeedback }: { item: any; onFeedback: (item: any) => 
           <Ionicons name="eye" size={16} color={Colors.textSecondary} />
           <Text style={[styles.actionBtnText, { color: Colors.textSecondary }]}>Details</Text>
         </Pressable>
-        {/* ── Feedback button: locked look when isLocked ── */}
+        {/* ── Feedback button: locked look only when monthly_feedback exists ── */}
         <Pressable
           style={[
             styles.actionBtn,
@@ -673,14 +667,8 @@ export default function AllocationScreen() {
     Paid:   allCases.filter((c: any) => c.status === "Paid").length,
   }), [allCases]);
 
-  // Determine isLocked for the currently selected feedbackItem
-  const feedbackItemLocked = feedbackItem ? !!(
-    feedbackItem.feedback_code    ||
-    feedbackItem.latest_feedback  ||
-    feedbackItem.monthly_feedback ||
-    feedbackItem.status === "Paid"||
-    feedbackItem.status === "PTP"
-  ) : false;
+  // ── Only lock when monthly_feedback is saved ──────────────────────────────
+  const feedbackItemLocked = feedbackItem ? !!feedbackItem.monthly_feedback : false;
 
   return (
     <View style={{ flex: 1, backgroundColor: Colors.background }}>
