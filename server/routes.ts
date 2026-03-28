@@ -1,4 +1,3 @@
-
 import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "node:http";
 import { randomBytes, createHmac } from "node:crypto";
@@ -83,7 +82,20 @@ async function sendPush(playerId: string, title: string, body: string, data: Rec
     const res = await fetch("https://onesignal.com/api/v1/notifications", {
       method: "POST",
       headers: { "Content-Type": "application/json", "Authorization": `Basic ${apiKey}` },
-      body: JSON.stringify({ app_id: appId, target_channel: "push", include_aliases: { onesignal_id: [playerId] }, headings: { en: title }, contents: { en: body }, data, priority: 10, ttl: 259200, android_visibility: 1 }),
+      body: JSON.stringify({
+        app_id: appId,
+        target_channel: "push",
+        include_aliases: { onesignal_id: [playerId] },
+        headings: { en: title },
+        contents: { en: body },
+        data,
+        priority: 10,
+        ttl: 259200,
+        android_visibility: 1,
+        large_icon: "ic_onesignal_large_icon_default",
+        small_icon: "ic_stat_onesignal_default",
+        android_accent_color: "FFFF6B00",
+      }),
     });
     const json: any = await res.json().catch(() => ({}));
     if (!res.ok || json.errors) { const err = Array.isArray(json.errors) ? json.errors[0] : JSON.stringify(json.errors); return { ok: false, error: err }; }
@@ -98,7 +110,20 @@ async function sendPushToMany(playerIds: string[], title: string, body: string, 
     const res = await fetch("https://onesignal.com/api/v1/notifications", {
       method: "POST",
       headers: { "Content-Type": "application/json", "Authorization": `Basic ${apiKey}` },
-      body: JSON.stringify({ app_id: appId, target_channel: "push", include_aliases: { onesignal_id: playerIds }, headings: { en: title }, contents: { en: body }, data, priority: 10, ttl: 259200, android_visibility: 1 }),
+      body: JSON.stringify({
+        app_id: appId,
+        target_channel: "push",
+        include_aliases: { onesignal_id: playerIds },
+        headings: { en: title },
+        contents: { en: body },
+        data,
+        priority: 10,
+        ttl: 259200,
+        android_visibility: 1,
+        large_icon: "ic_onesignal_large_icon_default",
+        small_icon: "ic_stat_onesignal_default",
+        android_accent_color: "FFFF6B00",
+      }),
     });
     const json: any = await res.json().catch(() => ({}));
     return { sent: json.recipients ?? playerIds.length, total: playerIds.length };
@@ -158,21 +183,15 @@ function parseDate(val: any): string | null {
   if (ddmmyyyy) return `${ddmmyyyy[3]}-${ddmmyyyy[2].padStart(2, "0")}-${ddmmyyyy[1].padStart(2, "0")}`;
   const d = new Date(s); if (isNaN(d.getTime())) return null; return s;
 }
-
-// Detect text like "RollBack", "ROLLBACK", "RB" in the rollback column
 function isRollbackText(val: any): boolean {
   if (val === null || val === undefined || val === "") return false;
   const s = String(val).trim().toLowerCase().replace(/[\s_\-]/g, "");
   return s === "rollback" || s === "rb" || s === "yes" || s === "y" || s === "true" || s === "1";
 }
-
-// Returns true if rollback column has text marker, false if numeric/empty
 function parseRollbackYn(val: any): boolean | null {
   if (val === null || val === undefined || val === "") return null;
   const s = String(val).trim();
-  // If it's a text marker like "RollBack"
   if (isNaN(Number(s.replace(/,/g, ""))) || isRollbackText(s)) return isRollbackText(s) ? true : null;
-  // If it's a number > 0, treat as rollback
   const n = parseFloat(s.replace(/,/g, ""));
   return n > 0 ? true : null;
 }
@@ -212,7 +231,6 @@ const COLUMN_MAP: Record<string, string> = {
 
 declare module "express-session" { interface SessionData { agentId?: number; role?: string; } }
 
-// ✅ Auto-recalculate BKT performance from allocation data
 async function recalcBktPerfFromAllocation(): Promise<void> {
   const result = await storage.query(`
     SELECT lc.agent_id, fa.name AS fos_name,
@@ -269,6 +287,7 @@ async function safeDeleteAgent(agentId: number, context: string): Promise<void> 
     { sql: `DELETE FROM fos_depositions WHERE agent_id = $1`, name: "fos_depositions" },
     { sql: `DELETE FROM salary WHERE agent_id = $1`, name: "salary" },
     { sql: `DELETE FROM depositions WHERE agent_id = $1`, name: "depositions" },
+    { sql: `DELETE FROM call_recordings WHERE agent_id = $1`, name: "call_recordings" },
     { sql: `DELETE FROM user_sessions WHERE sess::text LIKE $1`, name: "user_sessions", param: `%"agentId":${agentId}%` },
     { sql: `DELETE FROM fos_agents WHERE id = $1`, name: "fos_agents" },
   ];
@@ -284,10 +303,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/health", (_req, res) => res.json({ status: "ok" }));
   await storage.initBktPerfSummaryTable();
 
+  // ── DB migrations ─────────────────────────────────────────────────────────────
   try {
     await storage.query(`ALTER TABLE required_deposits ADD COLUMN IF NOT EXISTS cash_collected BOOLEAN DEFAULT FALSE, ADD COLUMN IF NOT EXISTS cash_collected_at TIMESTAMP`);
     console.log("[DB] cash_collected columns ready ✅");
   } catch (e: any) { console.error("[DB] Migration error:", e.message); }
+
+  try {
+    await storage.query(`ALTER TABLE fos_agents ADD COLUMN IF NOT EXISTS phone TEXT`);
+    console.log("[DB] fos_agents.phone column ready ✅");
+  } catch (e: any) { console.error("[DB] fos_agents.phone migration:", e.message); }
 
   try {
     await storage.query(`CREATE TABLE IF NOT EXISTS fos_depositions (
@@ -309,8 +334,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
     console.log("[DB] salary table ready ✅");
   } catch (e: any) { console.error("[DB] salary table error:", e.message); }
 
+  try {
+    await storage.query(`CREATE TABLE IF NOT EXISTS call_recordings (
+      id SERIAL PRIMARY KEY, agent_id INTEGER REFERENCES fos_agents(id),
+      case_id INTEGER, loan_no TEXT, recording_sid TEXT UNIQUE, call_sid TEXT,
+      drive_file_id TEXT, drive_link TEXT, duration_seconds INTEGER DEFAULT 0,
+      recorded_at TIMESTAMP DEFAULT NOW()
+    )`);
+    console.log("[DB] call_recordings table ready ✅");
+  } catch (e: any) { console.error("[DB] call_recordings error:", e.message); }
+
   app.use("/uploads/screenshots", express.static(path.join(process.cwd(), "server/uploads/screenshots")));
 
+  // ── Session ───────────────────────────────────────────────────────────────────
   const PgStore = connectPgSimple(session);
   app.use(session({
     store: new PgStore({ conString: process.env.DATABASE_URL, tableName: "user_sessions", createTableIfMissing: true }),
@@ -319,6 +355,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     cookie: { secure: false, httpOnly: true, sameSite: "lax", maxAge: 7 * 24 * 60 * 60 * 1000 },
   }));
 
+  // ── Auth middleware ────────────────────────────────────────────────────────────
   function requireAuth(req: Request, res: Response, next: any) {
     if (req.session.agentId) return next();
     const authHeader = req.headers.authorization;
@@ -349,11 +386,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
     return res.status(403).json({ message: "Forbidden" });
   }
 
+  // ── Repo ──────────────────────────────────────────────────────────────────────
   app.get("/api/repo/cases", requireRepo, async (req, res) => {
     try { res.json({ cases: await storage.getAllLoanCases() }); }
     catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
+  // ── Auth ──────────────────────────────────────────────────────────────────────
   app.post("/api/auth/login", async (req, res) => {
     try {
       const { username, password } = req.body;
@@ -378,6 +417,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
+  // ── Cases ─────────────────────────────────────────────────────────────────────
   app.get("/api/cases", requireAuth, async (req, res) => {
     try { res.json({ cases: await storage.getLoanCasesByAgent(req.session.agentId!) }); }
     catch (e: any) { res.status(500).json({ message: e.message }); }
@@ -391,16 +431,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
-  // ✅ UPDATED: monthly_feedback passed to storage
   app.put("/api/cases/:id/feedback", requireAuth, async (req, res) => {
     try {
-      const {
-        status, feedback, comments, ptp_date, rollback_yn,
-        customer_available, vehicle_available, third_party,
-        third_party_name, third_party_number, feedback_code,
-        projection, non_starter, kyc_purchase, workable,
-        monthly_feedback, // ✅ NEW
-      } = req.body;
+      const { status, feedback, comments, ptp_date, rollback_yn, customer_available, vehicle_available, third_party, third_party_name, third_party_number, feedback_code, projection, non_starter, kyc_purchase, workable, monthly_feedback } = req.body;
       const ynVal = rollback_yn === true || rollback_yn === "true" ? true : rollback_yn === false || rollback_yn === "false" ? false : null;
       const toBool = (v: any) => v === true || v === "true" ? true : v === false || v === "false" ? false : null;
       const caseId = Number(req.params.id);
@@ -417,7 +450,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ...(non_starter !== undefined && { nonStarter: toBool(non_starter) }),
         ...(kyc_purchase !== undefined && { kycPurchase: toBool(kyc_purchase) }),
         ...(workable !== undefined && { workable: toBool(workable) }),
-        monthlyFeedback: monthly_feedback || null, // ✅ NEW
+        monthlyFeedback: monthly_feedback || null,
       };
       await storage.updateLoanCaseFeedback(caseId, status, feedback, comments, ptp_date, ynVal, extraFields);
       if (old && old.bkt && old.agent_id && !["UC","RUC"].includes((old.pro || "").toUpperCase())) {
@@ -460,6 +493,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
+  // ── Attendance ────────────────────────────────────────────────────────────────
   app.get("/api/attendance/today", requireAuth, async (req, res) => {
     try { res.json({ attendance: await storage.getTodayAttendance(req.session.agentId!) }); }
     catch (e: any) { res.status(500).json({ message: e.message }); }
@@ -473,6 +507,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
+  // ── Salary / Depositions ──────────────────────────────────────────────────────
   app.get("/api/salary", requireAuth, async (req, res) => {
     try { res.json({ salary: await storage.getSalaryDetails(req.session.agentId!) }); }
     catch (e: any) { res.status(500).json({ message: e.message }); }
@@ -496,6 +531,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
+  // ── Admin: agents / stats / cases ─────────────────────────────────────────────
   app.get("/api/admin/agents", requireAdmin, async (req, res) => {
     try { res.json({ agents: await storage.getAllAgents() }); }
     catch (e: any) { res.status(500).json({ message: e.message }); }
@@ -525,6 +561,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
+  // ── Required deposits ─────────────────────────────────────────────────────────
   app.get("/api/admin/required-deposits", requireAdmin, async (req, res) => {
     try { res.json({ deposits: await storage.getAllRequiredDeposits() }); }
     catch (e: any) { res.status(500).json({ message: e.message }); }
@@ -559,6 +596,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
+  // ── FOS Depositions ───────────────────────────────────────────────────────────
   app.get("/api/admin/fos-depositions", requireAdmin, async (req, res) => {
     try {
       const result = await storage.query(`SELECT fd.*, fa.name AS agent_name, fa.id AS fos_id FROM fos_depositions fd LEFT JOIN fos_agents fa ON fa.id=fd.agent_id WHERE fd.payment_method='pending' OR fd.deposition_date=CURRENT_DATE ORDER BY fd.deposition_date DESC, fa.name, fd.created_at DESC`);
@@ -677,6 +715,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
+  // ── FOS Depositions Export ────────────────────────────────────────────────────
   app.get("/api/admin/fos-depositions-export", requireAdmin, async (req, res) => {
     try {
       const result = await storage.query(`SELECT TO_CHAR(fd.deposition_date,'DD-Mon-YYYY') AS "Date", COALESCE(fa.name,'Unknown') AS "FOS Name", COALESCE(fd.customer_name,'') AS "Customer Name", COALESCE(fd.loan_no,'') AS "Loan No", ROUND(fd.cash_amount::numeric,2) AS "Cash Amount", ROUND(fd.online_amount::numeric,2) AS "Online Amount", ROUND(fd.amount::numeric,2) AS "Total Amount", fd.payment_method AS "Payment Method", COALESCE(fd.notes,'') AS "Notes" FROM fos_depositions fd LEFT JOIN fos_agents fa ON fa.id=fd.agent_id ORDER BY fd.deposition_date DESC, fa.name, fd.created_at DESC`);
@@ -693,6 +732,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
+  // ── Import depositions ─────────────────────────────────────────────────────────
   app.post("/api/admin/import-depositions", requireAdmin, upload.single("file"), async (req, res) => {
     try {
       if (!req.file) return res.status(400).json({ message: "No file uploaded" });
@@ -736,6 +776,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
+  // ── Push tokens ────────────────────────────────────────────────────────────────
   app.post("/api/push-token", requireAuth, async (req, res) => {
     try {
       const { token } = req.body;
@@ -769,6 +810,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
+  // ── Profile ────────────────────────────────────────────────────────────────────
   app.post("/api/profile-photo", requireAuth, async (req, res) => {
     try { await storage.query("UPDATE fos_agents SET photo_url=$1 WHERE id=$2", [req.body.photoUrl, req.session.agentId!]); res.json({ success: true }); }
     catch (e: any) { res.status(500).json({ message: e.message }); }
@@ -778,6 +820,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
+  // ── Screenshots / deposit verify ──────────────────────────────────────────────
   app.post("/api/required-deposits/:id/screenshot", requireAuth, screenshotUpload.single("screenshot"), async (req, res) => {
     try {
       const depositId = Number(req.params.id);
@@ -802,6 +845,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
+  // ── Admin: attendance / cases / bkt ───────────────────────────────────────────
   app.get("/api/admin/attendance", requireAdmin, async (req, res) => {
     try { res.json({ attendance: await storage.getAllAttendance() }); }
     catch (e: any) { res.status(500).json({ message: e.message }); }
@@ -823,16 +867,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
-  // ✅ UPDATED: monthly_feedback passed to storage
   app.put("/api/bkt-cases/:id/feedback", requireAuth, async (req, res) => {
     try {
-      const {
-        status, feedback, comments, ptp_date, rollback_yn,
-        customer_available, vehicle_available, third_party,
-        third_party_name, third_party_number, feedback_code,
-        projection, non_starter, kyc_purchase, workable,
-        monthly_feedback, // ✅ NEW
-      } = req.body;
+      const { status, feedback, comments, ptp_date, rollback_yn, customer_available, vehicle_available, third_party, third_party_name, third_party_number, feedback_code, projection, non_starter, kyc_purchase, workable, monthly_feedback } = req.body;
       const ynVal = rollback_yn === true || rollback_yn === "true" ? true : rollback_yn === false || rollback_yn === "false" ? false : null;
       const toBool = (v: any) => v === true || v === "true" ? true : v === false || v === "false" ? false : null;
       const caseId = Number(req.params.id);
@@ -849,7 +886,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ...(non_starter !== undefined && { nonStarter: toBool(non_starter) }),
         ...(kyc_purchase !== undefined && { kycPurchase: toBool(kyc_purchase) }),
         ...(workable !== undefined && { workable: toBool(workable) }),
-        monthlyFeedback: monthly_feedback || null, // ✅ NEW
+        monthlyFeedback: monthly_feedback || null,
       };
       await storage.updateBktCaseFeedback(caseId, status, feedback, comments, ptp_date, ynVal, bktExtraFields);
       if (old && old.case_category && old.agent_id && !["UC","RUC"].includes((old.pro || "").toUpperCase())) {
@@ -866,7 +903,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
-  // ✅ Allocation Import — auto-recalcs BKT perf after import
+  // ── Allocation import ──────────────────────────────────────────────────────────
   app.post("/api/admin/import", requireAdmin, upload.single("file"), async (req, res) => {
     try {
       if (!req.file) return res.status(400).json({ message: "No file uploaded" });
@@ -905,12 +942,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         } catch (e: any) { errors.push(`Row ${i + headerRowIdx + 2}: ${e.message}`); skipped++; }
       }
       for (const [loanNo, ptpData] of ptpLoanMap) { await storage.query(`UPDATE loan_cases SET status='PTP', ptp_date=$1, telecaller_ptp_date=$2 WHERE loan_no=$3`, [ptpData.ptpDate, ptpData.telecallerPtpDate, loanNo]); }
-      // ✅ Auto-recalculate BKT performance
       try { await recalcBktPerfFromAllocation(); } catch (e: any) { console.warn("[import] BKT recalc warning:", e.message); }
       res.json({ imported, updated: 0, skipped, agentsCreated, agentsRemoved, total: rawRows.slice(headerRowIdx + 1).length, errors: errors.slice(0, 20) });
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
+  // ── BKT import ─────────────────────────────────────────────────────────────────
   app.post("/api/admin/import-bkt", requireAdmin, upload.single("file"), async (req, res) => {
     try {
       if (!req.file) return res.status(400).json({ message: "No file uploaded" });
@@ -950,6 +987,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
+  // ── PTP export ─────────────────────────────────────────────────────────────────
   app.get("/api/admin/ptp-export", requireAdmin, async (req, res) => {
     try {
       const result = await storage.query(`SELECT fa.name AS fos_name, lc.customer_name, lc.loan_no, lc.mobile_no, lc.address, lc.ptp_date, lc.telecaller_ptp_date, lc.pos, lc.bkt::text AS bkt, lc.status FROM loan_cases lc LEFT JOIN fos_agents fa ON lc.agent_id=fa.id WHERE lc.status='PTP' OR lc.telecaller_ptp_date IS NOT NULL UNION ALL SELECT fa.name AS fos_name, bc.customer_name, bc.loan_no, bc.mobile_no, bc.address, bc.ptp_date, bc.telecaller_ptp_date, bc.pos, bc.case_category AS bkt, bc.status FROM bkt_cases bc LEFT JOIN fos_agents fa ON bc.agent_id=fa.id WHERE bc.status='PTP' OR bc.telecaller_ptp_date IS NOT NULL ORDER BY fos_name NULLS LAST, telecaller_ptp_date NULLS LAST`);
@@ -965,6 +1003,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
+  // ── Feedback export ────────────────────────────────────────────────────────────
   app.get("/api/admin/feedback-export", requireAdmin, async (req, res) => {
     try {
       const result = await storage.query(`
@@ -986,7 +1025,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         "Third Party Number": r.third_party === true || r.third_party === "true" || r.third_party === "t" ? r.third_party_number || "" : "",
         "FEEDBACK CODE": r.feedback_code != null ? String(r.feedback_code) : "",
         "Details FEEDBACK": r.latest_feedback != null ? String(r.latest_feedback) : "",
-        "Monthly Feedback": r.monthly_feedback != null ? String(r.monthly_feedback) : "", // ✅ NEW column in export
+        "Monthly Feedback": r.monthly_feedback != null ? String(r.monthly_feedback) : "",
         "PTP DATE": r.ptp_date ? (r.ptp_date instanceof Date ? r.ptp_date.toISOString().slice(0, 10) : String(r.ptp_date).slice(0, 10)) : "",
         "Projection": r.projection != null ? String(r.projection) : "",
         "NON_STARTER (Y/N)": yn(r.non_starter), "KYC PURCHASE (Y/N)": yn(r.kyc_purchase),
@@ -1017,6 +1056,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
+  // ── BKT perf summary ──────────────────────────────────────────────────────────
   app.get("/api/admin/bkt-perf-summary", requireAdmin, async (req, res) => {
     try {
       const result = await storage.query(`WITH norm AS (SELECT *, CASE LOWER(REPLACE(bkt,' ','')) WHEN '1' THEN 'bkt1' WHEN '2' THEN 'bkt2' WHEN '3' THEN 'bkt3' WHEN 'bkt1' THEN 'bkt1' WHEN 'bkt2' THEN 'bkt2' WHEN 'bkt3' THEN 'bkt3' ELSE LOWER(REPLACE(bkt,' ','')) END AS bkt_norm FROM bkt_perf_summary), latest AS (SELECT DISTINCT ON (fos_name, bkt_norm) * FROM norm ORDER BY fos_name, bkt_norm, uploaded_at DESC) SELECT fos_name, bkt_norm AS bkt, COALESCE(pos_paid,0) AS pos_paid, COALESCE(pos_unpaid,0) AS pos_unpaid, COALESCE(pos_grand_total,0) AS pos_grand_total, COALESCE(pos_percentage,0) AS pos_percentage, COALESCE(count_paid,0) AS count_paid, COALESCE(count_unpaid,0) AS count_unpaid, COALESCE(count_total,0) AS count_total, COALESCE(rollback_paid,0) AS rollback_paid, COALESCE(rollback_unpaid,0) AS rollback_unpaid, COALESCE(rollback_grand_total,0) AS rollback_grand_total, COALESCE(rollback_percentage,0) AS rollback_percentage FROM latest ORDER BY fos_name, bkt_norm`);
@@ -1043,7 +1083,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
-  // ✅ Penal-only import
+  // ── BKT perf import ────────────────────────────────────────────────────────────
   app.post("/api/admin/import-bkt-perf", requireAdmin, upload.single("file"), async (req, res) => {
     try {
       if (!req.file) return res.status(400).json({ message: "No file uploaded" });
@@ -1101,6 +1141,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
+  // ── Reset feedback ─────────────────────────────────────────────────────────────
   app.post("/api/admin/reset-feedback/agent/:agentId", requireAdmin, async (req, res) => {
     try {
       const agentId = Number(req.params.agentId);
@@ -1149,7 +1190,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
-  // ─── Background Jobs ───────────────────────────────────────────────────────
+  // ── Background Jobs ────────────────────────────────────────────────────────────
   const ptpReminderSentDates = new Set<string>();
   async function runPtpPushJob() {
     try {
