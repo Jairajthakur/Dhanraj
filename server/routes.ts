@@ -326,11 +326,42 @@ export async function registerRoutes(app: Express): Promise<Server> {
     console.log("[DB] fos_depositions table ready ✅");
   } catch (e: any) { console.error("[DB] fos_depositions error:", e.message); }
 
+  // ── Salary table — full schema with all columns ───────────────────────────────
   try {
     await storage.query(`CREATE TABLE IF NOT EXISTS salary (
-      id SERIAL PRIMARY KEY, agent_id INTEGER REFERENCES fos_agents(id),
-      amount NUMERIC(12,2), month TEXT, created_at TIMESTAMP DEFAULT NOW()
+      id SERIAL PRIMARY KEY,
+      agent_id INTEGER REFERENCES fos_agents(id),
+      month TEXT,
+      year INTEGER DEFAULT ${new Date().getFullYear()},
+      present_days INTEGER DEFAULT 0,
+      payment_amount NUMERIC(12,2) DEFAULT 0,
+      incentive_amount NUMERIC(12,2) DEFAULT 0,
+      petrol_expense NUMERIC(12,2) DEFAULT 0,
+      mobile_expense NUMERIC(12,2) DEFAULT 0,
+      gross_payment NUMERIC(12,2) DEFAULT 0,
+      advance NUMERIC(12,2) DEFAULT 0,
+      other_deductions NUMERIC(12,2) DEFAULT 0,
+      net_salary NUMERIC(12,2) DEFAULT 0,
+      amount NUMERIC(12,2) DEFAULT 0,
+      created_at TIMESTAMP DEFAULT NOW()
     )`);
+    // Migrate any existing salary table that was created with fewer columns
+    const salaryAlters = [
+      `ALTER TABLE salary ADD COLUMN IF NOT EXISTS year INTEGER DEFAULT ${new Date().getFullYear()}`,
+      `ALTER TABLE salary ADD COLUMN IF NOT EXISTS present_days INTEGER DEFAULT 0`,
+      `ALTER TABLE salary ADD COLUMN IF NOT EXISTS payment_amount NUMERIC(12,2) DEFAULT 0`,
+      `ALTER TABLE salary ADD COLUMN IF NOT EXISTS incentive_amount NUMERIC(12,2) DEFAULT 0`,
+      `ALTER TABLE salary ADD COLUMN IF NOT EXISTS petrol_expense NUMERIC(12,2) DEFAULT 0`,
+      `ALTER TABLE salary ADD COLUMN IF NOT EXISTS mobile_expense NUMERIC(12,2) DEFAULT 0`,
+      `ALTER TABLE salary ADD COLUMN IF NOT EXISTS gross_payment NUMERIC(12,2) DEFAULT 0`,
+      `ALTER TABLE salary ADD COLUMN IF NOT EXISTS advance NUMERIC(12,2) DEFAULT 0`,
+      `ALTER TABLE salary ADD COLUMN IF NOT EXISTS other_deductions NUMERIC(12,2) DEFAULT 0`,
+      `ALTER TABLE salary ADD COLUMN IF NOT EXISTS net_salary NUMERIC(12,2) DEFAULT 0`,
+      `ALTER TABLE salary ADD COLUMN IF NOT EXISTS amount NUMERIC(12,2) DEFAULT 0`,
+    ];
+    for (const sql of salaryAlters) {
+      try { await storage.query(sql); } catch {}
+    }
     console.log("[DB] salary table ready ✅");
   } catch (e: any) { console.error("[DB] salary table error:", e.message); }
 
@@ -548,17 +579,77 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try { res.json({ cases: await storage.getLoanCasesByAgent(Number(req.params.agentId)) }); }
     catch (e: any) { res.status(500).json({ message: e.message }); }
   });
+
+  // ── Admin: Salary — FIXED with all columns ────────────────────────────────────
   app.get("/api/admin/salary", requireAdmin, async (req, res) => {
-    try { res.json({ salary: await storage.getAllSalaryDetails() }); }
-    catch (e: any) { res.status(500).json({ message: e.message }); }
+    try {
+      const result = await storage.query(
+        `SELECT s.*, fa.name AS agent_name
+         FROM salary s
+         LEFT JOIN fos_agents fa ON fa.id = s.agent_id
+         ORDER BY s.year DESC, s.month DESC, fa.name`
+      );
+      res.json({ salary: result.rows });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
+
   app.post("/api/admin/salary", requireAdmin, async (req, res) => {
-    try { await storage.createSalary(req.body); res.json({ success: true }); }
-    catch (e: any) { res.status(500).json({ message: e.message }); }
+    try {
+      const {
+        agentId, month, year, presentDays,
+        paymentAmount, incentiveAmount, petrolExpense,
+        mobileExpense, grossPayment, advance,
+        otherDeductions, netSalary,
+      } = req.body;
+      if (!agentId) return res.status(400).json({ message: "agentId is required" });
+      await storage.query(
+        `INSERT INTO salary
+           (agent_id, month, year, present_days, payment_amount, incentive_amount,
+            petrol_expense, mobile_expense, gross_payment, advance, other_deductions,
+            net_salary, amount)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$12)`,
+        [
+          agentId,
+          month || "January",
+          year ?? new Date().getFullYear(),
+          presentDays ?? 0,
+          paymentAmount ?? 0,
+          incentiveAmount ?? 0,
+          petrolExpense ?? 0,
+          mobileExpense ?? 0,
+          grossPayment ?? 0,
+          advance ?? 0,
+          otherDeductions ?? 0,
+          netSalary ?? 0,
+        ]
+      );
+      res.json({ success: true });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
+
+  app.delete("/api/admin/salary/:id", requireAdmin, async (req, res) => {
+    try {
+      await storage.query(`DELETE FROM salary WHERE id = $1`, [Number(req.params.id)]);
+      res.json({ success: true });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
   app.get("/api/admin/depositions", requireAdmin, async (req, res) => {
     try { res.json({ depositions: await storage.getAllDepositions() }); }
     catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  // ── Admin: Attendance — FIXED with agent name join ────────────────────────────
+  app.get("/api/admin/attendance", requireAdmin, async (req, res) => {
+    try {
+      const result = await storage.query(
+        `SELECT a.*, fa.name AS agent_name
+         FROM attendance a
+         LEFT JOIN fos_agents fa ON fa.id = a.agent_id
+         ORDER BY a.check_in DESC NULLS LAST, fa.name`
+      );
+      res.json({ attendance: result.rows });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
   // ── Required deposits ─────────────────────────────────────────────────────────
@@ -845,11 +936,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
-  // ── Admin: attendance / cases / bkt ───────────────────────────────────────────
-  app.get("/api/admin/attendance", requireAdmin, async (req, res) => {
-    try { res.json({ attendance: await storage.getAllAttendance() }); }
-    catch (e: any) { res.status(500).json({ message: e.message }); }
-  });
+  // ── Admin: bkt cases ───────────────────────────────────────────────────────────
   app.post("/api/admin/cases", requireAdmin, async (req, res) => {
     try { await storage.createLoanCase(req.body); res.json({ success: true }); }
     catch (e: any) { res.status(500).json({ message: e.message }); }
