@@ -107,11 +107,6 @@ function Drawer({ visible, onClose, agentName }: { visible: boolean; onClose: ()
                       <Ionicons name={item.icon} size={18} color={item.key === "drr" ? Colors.primary : Colors.primary} />
                     </View>
                     <Text style={styles.drawerItemText}>{item.label}</Text>
-                    {item.key === "drr" && (
-                      <View style={styles.newBadge}>
-                        <Text style={styles.newBadgeText}></Text>
-                      </View>
-                    )}
                     <Ionicons name="chevron-forward" size={14} color={Colors.textMuted} />
                   </Pressable>
                 ))}
