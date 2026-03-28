@@ -88,18 +88,17 @@ function LockedFeedbackView({ item, onClose }: { item: any; onClose: () => void 
     item.status           && { label: "Status",          value: item.status,            color: STATUS_COLORS[item.status] || Colors.text },
     item.feedback_code    && { label: "Feedback Code",   value: item.feedback_code,      color: Colors.accent },
     item.latest_feedback  && { label: "Detail Feedback", value: item.latest_feedback,    color: Colors.text },
-    item.monthly_feedback && { label: "Monthly",         value: item.monthly_feedback,   color: Colors.primary },
+    item.monthly_feedback && item.monthly_feedback !== "SUBMITTED" && { label: "Monthly", value: item.monthly_feedback, color: Colors.primary },
     item.ptp_date         && { label: "PTP Date",        value: String(item.ptp_date).slice(0, 10), color: Colors.statusPTP },
     item.feedback_comments&& { label: "Comments",        value: item.feedback_comments,  color: Colors.textSecondary },
   ].filter(Boolean) as { label: string; value: string; color: string }[];
 
   return (
     <>
-      {/* Lock banner */}
       <View style={fbStyles.lockBanner}>
         <Ionicons name="lock-closed" size={16} color={Colors.warning} />
         <Text style={fbStyles.lockBannerText}>
-          Feedback locked — contact admin to reset before editing
+          Monthly feedback locked — contact admin to reset before editing
         </Text>
       </View>
 
@@ -140,7 +139,6 @@ function FeedbackModal({ visible, caseItem, onClose, isLocked = false }: any) {
   // Paid-only fields
   const [paidDetailFeedback, setPaidDetailFeedback] = useState(caseItem?.latest_feedback   || "");
   const [paidComments,       setPaidComments]       = useState(caseItem?.feedback_comments || "");
-  // ── Rollback only kept for Paid ───────────────────────────────────────────
   const [paidRollbackYn, setPaidRollbackYn] = useState<boolean | null>(
     caseItem?.rollback_yn != null ? Boolean(caseItem.rollback_yn) : null
   );
@@ -176,32 +174,41 @@ function FeedbackModal({ visible, caseItem, onClose, isLocked = false }: any) {
     }
 
     let finalStatus = "Unpaid";
-    if (activeTab === "Paid")             finalStatus = "Paid";
-    else if (activeTab === "PTP")         finalStatus = "PTP";
-    else if (activeTab === "Unpaid")      finalStatus = "Unpaid";
+    if (activeTab === "Paid")                  finalStatus = "Paid";
+    else if (activeTab === "PTP")              finalStatus = "PTP";
+    else if (activeTab === "Unpaid")           finalStatus = "Unpaid";
     else if (activeTab === "Monthly Feedback") finalStatus = "Unpaid";
 
     setLoading(true);
     try {
-      await api.updateFeedback(caseItem.id, {
+      // ── KEY FIX: Only send feedback_code, monthly_feedback, projection,
+      // ── non_starter, kyc_purchase, workable when saving Monthly Feedback.
+      // ── For Paid/PTP/Unpaid tabs, we do NOT include these fields at all
+      // ── so the backend won't overwrite/null them out.
+      const payload: Record<string, any> = {
         status:   finalStatus,
         feedback: activeTab === "Paid" ? paidDetailFeedback : detailFeedback,
         comments: activeTab === "Paid" ? paidComments       : comments,
-        ptp_date: activeTab === "PTP"  ? toIsoDate(ptpDate)  : null,
-        // ── Rollback only sent for Paid ──────────────────────────────────
-        rollback_yn:       activeTab === "Paid" ? paidRollbackYn : null,
+        ptp_date: activeTab === "PTP"  ? toIsoDate(ptpDate) : null,
+        rollback_yn:        activeTab === "Paid" ? paidRollbackYn : null,
         customer_available: customerAvailable,
         vehicle_available:  vehicleAvailable,
         third_party:        thirdParty,
         third_party_name:   thirdParty ? thirdPartyName   : null,
         third_party_number: thirdParty ? thirdPartyNumber : null,
-        feedback_code:  activeTab === "Monthly Feedback" ? feedbackCode : null,
-        projection:     activeTab === "Monthly Feedback" ? projection   : null,
-        non_starter:    activeTab === "Monthly Feedback" ? nonStarter   : null,
-        kyc_purchase:   activeTab === "Monthly Feedback" ? kycPurchase  : null,
-        workable:       activeTab === "Monthly Feedback" ? workable      : null,
-        ...(activeTab === "Monthly Feedback" && { monthly_feedback: monthlyFeedback || "SUBMITTED" }),
-      });
+      };
+
+      // Only Monthly Feedback tab writes these fields
+      if (activeTab === "Monthly Feedback") {
+        payload.feedback_code    = feedbackCode;
+        payload.projection       = projection;
+        payload.non_starter      = nonStarter;
+        payload.kyc_purchase     = kycPurchase;
+        payload.workable         = workable;
+        payload.monthly_feedback = monthlyFeedback || "SUBMITTED";
+      }
+
+      await api.updateFeedback(caseItem.id, payload);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       qc.invalidateQueries({ queryKey: ["/api/cases"] });
       qc.invalidateQueries({ queryKey: ["/api/stats"] });
@@ -268,7 +275,7 @@ function FeedbackModal({ visible, caseItem, onClose, isLocked = false }: any) {
             )}
           </View>
 
-          {/* ── LOCKED STATE (only when monthly_feedback exists) ──────────── */}
+          {/* ── LOCKED STATE: only when monthly_feedback is set ──────────── */}
           {isLocked ? (
             <LockedFeedbackView item={caseItem} onClose={onClose} />
           ) : (
@@ -389,19 +396,16 @@ function FeedbackModal({ visible, caseItem, onClose, isLocked = false }: any) {
                       })}
                     </View>
 
-                    {/* NOTE: Rollback REMOVED from Monthly Feedback */}
-
                     <Text style={fbStyles.sectionLabel}>Comments (Optional)</Text>
                     <TextInput style={fbStyles.commentInput} placeholder="Add comments..." placeholderTextColor={Colors.textMuted} value={comments} onChangeText={setComments} multiline numberOfLines={3} />
                   </>
                 )}
 
-                {/* ====== PAID (rollback KEPT here only) ====== */}
+                {/* ====== PAID ====== */}
                 {activeTab === "Paid" && (
                   <>
                     <Text style={fbStyles.sectionLabel}>Detail Feedback</Text>
                     {renderDetailOptions(PAID_DETAIL_OPTIONS, paidDetailFeedback, setPaidDetailFeedback, Colors.success)}
-                    {/* ✅ Rollback retained only for Paid */}
                     <YNToggle label="Rollback" value={paidRollbackYn} onChange={setPaidRollbackYn} />
                     <Text style={fbStyles.sectionLabel}>Comments (Optional)</Text>
                     <TextInput style={fbStyles.commentInput} placeholder="Add comments..." placeholderTextColor={Colors.textMuted} value={paidComments} onChangeText={setPaidComments} multiline numberOfLines={3} />
@@ -415,7 +419,6 @@ function FeedbackModal({ visible, caseItem, onClose, isLocked = false }: any) {
                     {renderDetailOptions(PTP_DETAIL_OPTIONS, paidDetailFeedback, setPaidDetailFeedback, Colors.statusPTP)}
                     <Text style={fbStyles.sectionLabel}>PTP Date</Text>
                     <TextInput style={[fbStyles.commentInput, { minHeight: 44, marginBottom: 12 }]} placeholder="DD-MM-YYYY" placeholderTextColor={Colors.textMuted} value={ptpDate} onChangeText={setPtpDate} keyboardType="numeric" />
-                    {/* NOTE: Rollback REMOVED from PTP */}
                     <Text style={fbStyles.sectionLabel}>Comments (Optional)</Text>
                     <TextInput style={fbStyles.commentInput} placeholder="Add comments..." placeholderTextColor={Colors.textMuted} value={comments} onChangeText={setComments} multiline numberOfLines={3} />
                   </>
@@ -468,9 +471,9 @@ function CaseCard({ item, onFeedback }: { item: any; onFeedback: (item: any) => 
     Linking.openURL(`tel:${num}`);
   };
 
-  // ── Only lock when monthly_feedback is saved ──────────────────────────────
-const isLocked = !!item.feedback_code;
-  
+  // ── Lock ONLY when monthly_feedback is present in DB ─────────────────────
+  const isLocked = !!item.monthly_feedback;
+
   const statusColor  = STATUS_COLORS[item.status] || Colors.textMuted;
   const rollbackRaw  = (item.rollback  !== null && item.rollback  !== undefined && item.rollback  !== "" && item.rollback  !== "0" && Number(item.rollback)  !== 0) ? "RollBack"  : "—";
   const clearanceRaw = (item.clearance !== null && item.clearance !== undefined && item.clearance !== "" && item.clearance !== "0" && Number(item.clearance) !== 0) ? "Clearance" : "—";
@@ -580,7 +583,8 @@ const isLocked = !!item.feedback_code;
         </View>
       )}
 
-      {item.monthly_feedback && (
+      {/* Hide "SUBMITTED" placeholder — only show real monthly feedback values */}
+      {item.monthly_feedback && item.monthly_feedback !== "SUBMITTED" && (
         <View style={styles.monthlyFeedbackRow}>
           <Ionicons name="calendar-outline" size={13} color={Colors.primary} />
           <Text style={styles.monthlyFeedbackText}>{item.monthly_feedback}</Text>
@@ -612,7 +616,6 @@ const isLocked = !!item.feedback_code;
           <Ionicons name="eye" size={16} color={Colors.textSecondary} />
           <Text style={[styles.actionBtnText, { color: Colors.textSecondary }]}>Details</Text>
         </Pressable>
-        {/* ── Feedback button: locked look only when monthly_feedback exists ── */}
         <Pressable
           style={[
             styles.actionBtn,
@@ -667,12 +670,11 @@ export default function AllocationScreen() {
     Paid:   allCases.filter((c: any) => c.status === "Paid").length,
   }), [allCases]);
 
-  // ── Only lock when monthly_feedback is saved ──────────────────────────────
-const feedbackItemLocked = feedbackItem ? !!feedbackItem.feedback_code : false;
+  // ── Lock ONLY when monthly_feedback is present in DB ─────────────────────
+  const feedbackItemLocked = feedbackItem ? !!feedbackItem.monthly_feedback : false;
 
   return (
     <View style={{ flex: 1, backgroundColor: Colors.background }}>
-      {/* ── Status tabs with All ───────────────────────────────────────────── */}
       <View style={[styles.tabsContainer, { paddingTop: Platform.OS === "web" ? 67 : 12 }]}>
         {STATUS_TABS.map((tab) => (
           <Pressable
@@ -696,7 +698,6 @@ const feedbackItemLocked = feedbackItem ? !!feedbackItem.feedback_code : false;
         ))}
       </View>
 
-      {/* ── Search ──────────────────────────────────────────────────────────── */}
       <View style={styles.searchContainer}>
         <Ionicons name="search" size={18} color={Colors.textMuted} style={{ marginRight: 8 }} />
         <TextInput
@@ -835,8 +836,6 @@ const fbStyles = StyleSheet.create({
   caseInfoChip:   { flex: 1, borderRadius: 10, padding: 10, gap: 2 },
   caseInfoLabel:  { fontSize: 9,  fontWeight: "700", color: Colors.textMuted, textTransform: "uppercase" },
   caseInfoValue:  { fontSize: 13, fontWeight: "800" },
-
-  // ── Lock styles ───────────────────────────────────────────────────────────
   lockBanner: {
     flexDirection: "row",
     alignItems: "center",
@@ -854,7 +853,6 @@ const fbStyles = StyleSheet.create({
   lockedRow:      { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingVertical: 10, paddingHorizontal: 12, backgroundColor: Colors.surfaceAlt, borderRadius: 10, marginBottom: 4 },
   lockedRowLabel: { fontSize: 12, color: Colors.textSecondary, fontWeight: "600" },
   lockedRowValue: { fontSize: 13, fontWeight: "700", flex: 1, textAlign: "right" },
-
   tabRow:         { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 16 },
   chipWrapRow:    { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 12 },
   tabChip:        { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, backgroundColor: Colors.surfaceElevated, borderWidth: 1, borderColor: Colors.border },
