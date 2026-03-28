@@ -74,10 +74,12 @@ function getISTHour(): { hour: number; todayKey: string } {
   return { hour: ist.getUTCHours(), todayKey: ist.toISOString().slice(0, 10) };
 }
 
+// ── EDIT 1: sendPush — fixed icon + better logging ────────────────────────────
 async function sendPush(playerId: string, title: string, body: string, data: Record<string, any> = {}): Promise<{ ok: boolean; error?: string }> {
-  const appId = process.env.ONESIGNAL_APP_ID; const apiKey = process.env.ONESIGNAL_API_KEY;
+  const appId = process.env.ONESIGNAL_APP_ID;
+  const apiKey = process.env.ONESIGNAL_API_KEY;
   if (!appId || !apiKey) { console.warn("[push] ⚠️ ONESIGNAL not configured"); return { ok: false, error: "not_configured" }; }
-  if (!playerId?.trim()) return { ok: false, error: "no_player_id" };
+  if (!playerId?.trim()) { console.warn("[push] ⚠️ No playerId provided for:", title); return { ok: false, error: "no_player_id" }; }
   try {
     const res = await fetch("https://onesignal.com/api/v1/notifications", {
       method: "POST",
@@ -85,27 +87,39 @@ async function sendPush(playerId: string, title: string, body: string, data: Rec
       body: JSON.stringify({
         app_id: appId,
         target_channel: "push",
-        include_aliases: { onesignal_id: [playerId] },
+        include_aliases: { onesignal_id: [playerId.trim()] },
         headings: { en: title },
         contents: { en: body },
         data,
         priority: 10,
         ttl: 259200,
         android_visibility: 1,
-        large_icon: "ic_onesignal_large_icon_default",
+        large_icon: "ic_launcher",
         small_icon: "ic_stat_onesignal_default",
         android_accent_color: "FFFF6B00",
       }),
     });
     const json: any = await res.json().catch(() => ({}));
-    if (!res.ok || json.errors) { const err = Array.isArray(json.errors) ? json.errors[0] : JSON.stringify(json.errors); return { ok: false, error: err }; }
-    console.log("[push] ✅ Sent to:", playerId.slice(0, 20)); return { ok: true };
-  } catch (e: any) { return { ok: false, error: e.message }; }
+    if (!res.ok || json.errors) {
+      const err = Array.isArray(json.errors) ? json.errors[0] : JSON.stringify(json.errors);
+      console.error("[push] ❌ Failed:", err, "| title:", title, "| player:", playerId.slice(0, 20));
+      return { ok: false, error: err };
+    }
+    console.log(`[push] ✅ Sent "${title}" → ${playerId.slice(0, 20)}... | recipients: ${json.recipients ?? "?"}`);
+    return { ok: true };
+  } catch (e: any) {
+    console.error("[push] ❌ Exception:", e.message);
+    return { ok: false, error: e.message };
+  }
 }
 
+// ── EDIT 2: sendPushToMany — fixed icon + logging ─────────────────────────────
 async function sendPushToMany(playerIds: string[], title: string, body: string, data: Record<string, any> = {}): Promise<{ sent: number; total: number }> {
-  const appId = process.env.ONESIGNAL_APP_ID; const apiKey = process.env.ONESIGNAL_API_KEY;
-  if (!appId || !apiKey || playerIds.length === 0) return { sent: 0, total: 0 };
+  const appId = process.env.ONESIGNAL_APP_ID;
+  const apiKey = process.env.ONESIGNAL_API_KEY;
+  if (!appId || !apiKey || playerIds.length === 0) { console.warn("[push-many] ⚠️ OneSignal not configured or no playerIds for:", title); return { sent: 0, total: 0 }; }
+  const validIds = playerIds.filter((id) => id?.trim());
+  console.log(`[push-many] Sending "${title}" to ${validIds.length} devices`);
   try {
     const res = await fetch("https://onesignal.com/api/v1/notifications", {
       method: "POST",
@@ -113,21 +127,26 @@ async function sendPushToMany(playerIds: string[], title: string, body: string, 
       body: JSON.stringify({
         app_id: appId,
         target_channel: "push",
-        include_aliases: { onesignal_id: playerIds },
+        include_aliases: { onesignal_id: validIds },
         headings: { en: title },
         contents: { en: body },
         data,
         priority: 10,
         ttl: 259200,
         android_visibility: 1,
-        large_icon: "ic_onesignal_large_icon_default",
+        large_icon: "ic_launcher",
         small_icon: "ic_stat_onesignal_default",
         android_accent_color: "FFFF6B00",
       }),
     });
     const json: any = await res.json().catch(() => ({}));
-    return { sent: json.recipients ?? playerIds.length, total: playerIds.length };
-  } catch (e: any) { return { sent: 0, total: playerIds.length }; }
+    const sent = json.recipients ?? validIds.length;
+    console.log(`[push-many] ✅ Sent to ${sent}/${validIds.length} | errors: ${JSON.stringify(json.errors ?? "none")}`);
+    return { sent, total: validIds.length };
+  } catch (e: any) {
+    console.error("[push-many] ❌ Exception:", e.message);
+    return { sent: 0, total: playerIds.length };
+  }
 }
 
 async function extractAmountFromScreenshot(imagePath: string): Promise<number | null> {
@@ -229,7 +248,6 @@ const COLUMN_MAP: Record<string, string> = {
   promisetopaydatdate: "telecaller_ptp_date", promisetopaydate: "telecaller_ptp_date",
 };
 
-// Month name → number helper
 const MONTH_NAMES = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 function monthToNumber(val: any): number {
   if (!val) return new Date().getMonth() + 1;
@@ -313,7 +331,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/health", (_req, res) => res.json({ status: "ok" }));
   await storage.initBktPerfSummaryTable();
 
-  // ── DB migrations ─────────────────────────────────────────────────────────────
   try {
     await storage.query(`ALTER TABLE required_deposits ADD COLUMN IF NOT EXISTS cash_collected BOOLEAN DEFAULT FALSE, ADD COLUMN IF NOT EXISTS cash_collected_at TIMESTAMP`);
     console.log("[DB] cash_collected columns ready ✅");
@@ -336,7 +353,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     console.log("[DB] fos_depositions table ready ✅");
   } catch (e: any) { console.error("[DB] fos_depositions error:", e.message); }
 
-  // ── salary_details column migrations (ensure all columns exist) ───────────────
   try {
     const salaryDetailAlters = [
       `ALTER TABLE salary_details ADD COLUMN IF NOT EXISTS present_days INTEGER DEFAULT 0`,
@@ -350,9 +366,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       `ALTER TABLE salary_details ADD COLUMN IF NOT EXISTS total NUMERIC DEFAULT 0`,
       `ALTER TABLE salary_details ADD COLUMN IF NOT EXISTS net_salary NUMERIC DEFAULT 0`,
     ];
-    for (const sql of salaryDetailAlters) {
-      try { await storage.query(sql); } catch {}
-    }
+    for (const sql of salaryDetailAlters) { try { await storage.query(sql); } catch {} }
     console.log("[DB] salary_details columns ready ✅");
   } catch (e: any) { console.error("[DB] salary_details migration:", e.message); }
 
@@ -368,7 +382,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.use("/uploads/screenshots", express.static(path.join(process.cwd(), "server/uploads/screenshots")));
 
-  // ── Session ───────────────────────────────────────────────────────────────────
   const PgStore = connectPgSimple(session);
   app.use(session({
     store: new PgStore({ conString: process.env.DATABASE_URL, tableName: "user_sessions", createTableIfMissing: true }),
@@ -377,7 +390,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     cookie: { secure: false, httpOnly: true, sameSite: "lax", maxAge: 7 * 24 * 60 * 60 * 1000 },
   }));
 
-  // ── Auth middleware ────────────────────────────────────────────────────────────
   function requireAuth(req: Request, res: Response, next: any) {
     if (req.session.agentId) return next();
     const authHeader = req.headers.authorization;
@@ -408,13 +420,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
     return res.status(403).json({ message: "Forbidden" });
   }
 
-  // ── Repo ──────────────────────────────────────────────────────────────────────
   app.get("/api/repo/cases", requireRepo, async (req, res) => {
     try { res.json({ cases: await storage.getAllLoanCases() }); }
     catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
-  // ── Auth ──────────────────────────────────────────────────────────────────────
   app.post("/api/auth/login", async (req, res) => {
     try {
       const { username, password } = req.body;
@@ -439,7 +449,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
-  // ── Cases ─────────────────────────────────────────────────────────────────────
   app.get("/api/cases", requireAuth, async (req, res) => {
     try { res.json({ cases: await storage.getLoanCasesByAgent(req.session.agentId!) }); }
     catch (e: any) { res.status(500).json({ message: e.message }); }
@@ -515,7 +524,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
-  // ── Attendance ────────────────────────────────────────────────────────────────
   app.get("/api/attendance/today", requireAuth, async (req, res) => {
     try { res.json({ attendance: await storage.getTodayAttendance(req.session.agentId!) }); }
     catch (e: any) { res.status(500).json({ message: e.message }); }
@@ -529,7 +537,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
-  // ── Salary / Depositions ──────────────────────────────────────────────────────
   app.get("/api/salary", requireAuth, async (req, res) => {
     try { res.json({ salary: await storage.getSalaryDetails(req.session.agentId!) }); }
     catch (e: any) { res.status(500).json({ message: e.message }); }
@@ -553,7 +560,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
-  // ── Admin: agents / stats / cases ─────────────────────────────────────────────
   app.get("/api/admin/agents", requireAdmin, async (req, res) => {
     try { res.json({ agents: await storage.getAllAgents() }); }
     catch (e: any) { res.status(500).json({ message: e.message }); }
@@ -571,14 +577,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
-  // ── Admin: Salary — uses salary_details table ─────────────────────────────────
   app.get("/api/admin/salary", requireAdmin, async (req, res) => {
     try {
       const result = await storage.query(
-        `SELECT sd.*, fa.name AS agent_name
-         FROM salary_details sd
-         LEFT JOIN fos_agents fa ON fa.id = sd.agent_id
-         ORDER BY sd.year DESC, sd.month DESC, fa.name`
+        `SELECT sd.*, fa.name AS agent_name FROM salary_details sd LEFT JOIN fos_agents fa ON fa.id = sd.agent_id ORDER BY sd.year DESC, sd.month DESC, fa.name`
       );
       res.json({ salary: result.rows });
     } catch (e: any) { res.status(500).json({ message: e.message }); }
@@ -586,44 +588,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/admin/salary", requireAdmin, async (req, res) => {
     try {
-      const {
-        agentId, month, year, presentDays,
-        paymentAmount, incentiveAmount, petrolExpense,
-        mobileExpense, grossPayment, advance,
-        otherDeductions, netSalary,
-      } = req.body;
+      const { agentId, month, year, presentDays, paymentAmount, incentiveAmount, petrolExpense, mobileExpense, grossPayment, advance, otherDeductions, netSalary } = req.body;
       if (!agentId) return res.status(400).json({ message: "agentId is required" });
-
       const gross = parseFloat(grossPayment ?? 0);
       const adv   = parseFloat(advance ?? 0);
       const other = parseFloat(otherDeductions ?? 0);
       const net   = parseFloat(netSalary ?? (gross - adv - other).toString());
       const total = gross - adv - other;
-
-      // Convert month name to number (e.g. "January" → 1) if needed
       const monthNum = monthToNumber(month);
-
       await storage.query(
-        `INSERT INTO salary_details
-           (agent_id, month, year, present_days, payment_amount, incentive_amount,
-            petrol_expense, mobile_expense, gross_payment, advance, other_deductions,
-            total, net_salary)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
-        [
-          agentId,
-          monthNum,
-          year ?? new Date().getFullYear(),
-          presentDays ?? 0,
-          paymentAmount ?? 0,
-          incentiveAmount ?? 0,
-          petrolExpense ?? 0,
-          mobileExpense ?? 0,
-          gross,
-          adv,
-          other,
-          total,
-          net,
-        ]
+        `INSERT INTO salary_details (agent_id, month, year, present_days, payment_amount, incentive_amount, petrol_expense, mobile_expense, gross_payment, advance, other_deductions, total, net_salary) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+        [agentId, monthNum, year ?? new Date().getFullYear(), presentDays ?? 0, paymentAmount ?? 0, incentiveAmount ?? 0, petrolExpense ?? 0, mobileExpense ?? 0, gross, adv, other, total, net]
       );
       res.json({ success: true });
     } catch (e: any) { res.status(500).json({ message: e.message }); }
@@ -641,35 +616,42 @@ export async function registerRoutes(app: Express): Promise<Server> {
     catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
-  // ── Admin: Attendance ─────────────────────────────────────────────────────────
   app.get("/api/admin/attendance", requireAdmin, async (req, res) => {
     try {
-      const result = await storage.query(
-        `SELECT a.*, fa.name AS agent_name
-         FROM attendance a
-         LEFT JOIN fos_agents fa ON fa.id = a.agent_id
-         ORDER BY a.check_in DESC NULLS LAST, fa.name`
-      );
+      const result = await storage.query(`SELECT a.*, fa.name AS agent_name FROM attendance a LEFT JOIN fos_agents fa ON fa.id = a.agent_id ORDER BY a.check_in DESC NULLS LAST, fa.name`);
       res.json({ attendance: result.rows });
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
-  // ── Required deposits ─────────────────────────────────────────────────────────
   app.get("/api/admin/required-deposits", requireAdmin, async (req, res) => {
     try { res.json({ deposits: await storage.getAllRequiredDeposits() }); }
     catch (e: any) { res.status(500).json({ message: e.message }); }
   });
+
+  // ── EDIT 3: Fixed deposit assignment push ─────────────────────────────────────
   app.post("/api/admin/required-deposits", requireAdmin, async (req, res) => {
     try {
       const { agentId, amount, description, dueDate } = req.body;
       if (!agentId || !amount) return res.status(400).json({ message: "agentId and amount are required" });
       const deposit = await storage.createRequiredDeposit({ agentId: Number(agentId), amount: Number(amount), description, dueDate });
-      const agentRow = await storage.query("SELECT push_token FROM fos_agents WHERE id = $1", [Number(agentId)]);
-      const playerId = agentRow.rows[0]?.push_token;
-      if (playerId) await sendPush(playerId, "💰 Deposit Assigned", `Admin assigned you a deposit of ₹${Number(amount).toLocaleString("en-IN")}. Upload screenshot within 2 hours.`, { screen: "deposition" });
+      const agentRow = await storage.query("SELECT id, name, push_token FROM fos_agents WHERE id = $1", [Number(agentId)]);
+      const agent = agentRow.rows[0];
+      console.log(`[deposit-assign] agent=${agent?.name} token=${agent?.push_token?.slice(0, 20) ?? "NONE"}`);
+      if (agent?.push_token?.trim()) {
+        const pushResult = await sendPush(
+          agent.push_token.trim(),
+          "💰 Deposit Assigned",
+          `Admin assigned you a deposit of ₹${Number(amount).toLocaleString("en-IN")}. Upload screenshot within 2 hours.`,
+          { screen: "deposition" }
+        );
+        console.log("[deposit-assign] push result:", JSON.stringify(pushResult));
+      } else {
+        console.warn(`[deposit-assign] ⚠️  No push token for agentId=${agentId}`);
+      }
       res.json({ deposit });
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
+
   app.delete("/api/admin/required-deposits/:id", requireAdmin, async (req, res) => {
     try { await storage.deleteRequiredDeposit(Number(req.params.id)); res.json({ success: true }); }
     catch (e: any) { res.status(500).json({ message: e.message }); }
@@ -689,7 +671,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
-  // ── FOS Depositions ───────────────────────────────────────────────────────────
   app.get("/api/admin/fos-depositions", requireAdmin, async (req, res) => {
     try {
       const result = await storage.query(`SELECT fd.*, fa.name AS agent_name, fa.id AS fos_id FROM fos_depositions fd LEFT JOIN fos_agents fa ON fa.id=fd.agent_id WHERE fd.payment_method='pending' OR fd.deposition_date=CURRENT_DATE ORDER BY fd.deposition_date DESC, fa.name, fd.created_at DESC`);
@@ -722,10 +703,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const result = await storage.query(`INSERT INTO fos_depositions (agent_id,loan_no,customer_name,bkt,source,amount,cash_amount,online_amount,payment_method,notes,deposition_date) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
         [agentId, loanNo || null, customerName || null, bkt || null, source || "loan", totalAmt, cashAmt, onlineAmt, method, notes || null, depositionDate || new Date().toISOString().slice(0, 10)]);
       try {
-        const agentRow = await storage.query("SELECT push_token FROM fos_agents WHERE id=$1", [agentId]);
-        const playerId = agentRow.rows[0]?.push_token;
-        if (playerId) await sendPush(playerId, "💰 New Deposition Assigned", `Admin assigned you ₹${totalAmt.toLocaleString("en-IN")}${customerName ? ` for ${customerName}` : ""}. Mark as paid.`, { screen: "fos-depositions" });
-      } catch {}
+        const agentRow = await storage.query("SELECT id, name, push_token FROM fos_agents WHERE id=$1", [agentId]);
+        const agent = agentRow.rows[0];
+        console.log(`[fos-dep-assign] agent=${agent?.name} token=${agent?.push_token?.slice(0, 20) ?? "NONE"}`);
+        if (agent?.push_token?.trim()) {
+          const pushResult = await sendPush(
+            agent.push_token.trim(),
+            "💰 New Deposition Assigned",
+            `Admin assigned you ₹${totalAmt.toLocaleString("en-IN")}${customerName ? ` for ${customerName}` : ""}. Mark as paid.`,
+            { screen: "fos-depositions" }
+          );
+          console.log("[fos-dep-assign] push result:", JSON.stringify(pushResult));
+        } else {
+          console.warn(`[fos-dep-assign] ⚠️  No push token for agentId=${agentId}`);
+        }
+      } catch (pushErr: any) { console.error("[fos-dep-assign] push error:", pushErr.message); }
       res.json({ deposition: result.rows[0] });
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
@@ -808,7 +800,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
-  // ── FOS Depositions Export ────────────────────────────────────────────────────
   app.get("/api/admin/fos-depositions-export", requireAdmin, async (req, res) => {
     try {
       const result = await storage.query(`SELECT TO_CHAR(fd.deposition_date,'DD-Mon-YYYY') AS "Date", COALESCE(fa.name,'Unknown') AS "FOS Name", COALESCE(fd.customer_name,'') AS "Customer Name", COALESCE(fd.loan_no,'') AS "Loan No", ROUND(fd.cash_amount::numeric,2) AS "Cash Amount", ROUND(fd.online_amount::numeric,2) AS "Online Amount", ROUND(fd.amount::numeric,2) AS "Total Amount", fd.payment_method AS "Payment Method", COALESCE(fd.notes,'') AS "Notes" FROM fos_depositions fd LEFT JOIN fos_agents fa ON fa.id=fd.agent_id ORDER BY fd.deposition_date DESC, fa.name, fd.created_at DESC`);
@@ -825,7 +816,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
-  // ── Import depositions ─────────────────────────────────────────────────────────
+  // ── EDIT 4: Fixed bulk import push ───────────────────────────────────────────
   app.post("/api/admin/import-depositions", requireAdmin, upload.single("file"), async (req, res) => {
     try {
       if (!req.file) return res.status(400).json({ message: "No file uploaded" });
@@ -860,16 +851,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       if (imported > 0) {
         try {
-          const fosAgents = await storage.query(`SELECT push_token FROM fos_agents WHERE role='fos' AND push_token IS NOT NULL AND push_token!=''`);
-          const playerIds = fosAgents.rows.map((r: any) => r.push_token).filter(Boolean);
-          if (playerIds.length > 0) await sendPushToMany(playerIds, "📋 New Deposits Assigned", `Admin uploaded ${imported} new deposit record${imported > 1 ? "s" : ""}. Open app to mark payments.`, { screen: "fos-depositions", type: "bulk_import" });
-        } catch {}
+          const fosAgents = await storage.query(
+            `SELECT id, name, push_token FROM fos_agents WHERE role='fos' AND push_token IS NOT NULL AND push_token != ''`
+          );
+          const playerIds = fosAgents.rows.map((r: any) => r.push_token?.trim()).filter(Boolean);
+          console.log(`[import-dep] Notifying ${playerIds.length} FOS agents about ${imported} new records`);
+          if (playerIds.length > 0) {
+            const pushResult = await sendPushToMany(
+              playerIds,
+              "📋 New Deposits Assigned",
+              `Admin uploaded ${imported} new deposit record${imported > 1 ? "s" : ""}. Open app to mark payments.`,
+              { screen: "fos-depositions", type: "bulk_import" }
+            );
+            console.log("[import-dep] push result:", JSON.stringify(pushResult));
+          } else {
+            console.warn("[import-dep] ⚠️  No FOS agents have push tokens registered");
+          }
+        } catch (pushErr: any) {
+          console.error("[import-dep] Push failed:", pushErr.message);
+        }
       }
       res.json({ imported, skipped, total: rawRows.slice(headerIdx + 1).length, errors: errors.slice(0, 20) });
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
-  // ── Push tokens ────────────────────────────────────────────────────────────────
   app.post("/api/push-token", requireAuth, async (req, res) => {
     try {
       const { token } = req.body;
@@ -903,7 +908,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
-  // ── Profile ────────────────────────────────────────────────────────────────────
   app.post("/api/profile-photo", requireAuth, async (req, res) => {
     try { await storage.query("UPDATE fos_agents SET photo_url=$1 WHERE id=$2", [req.body.photoUrl, req.session.agentId!]); res.json({ success: true }); }
     catch (e: any) { res.status(500).json({ message: e.message }); }
@@ -913,7 +917,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
-  // ── Screenshots / deposit verify ──────────────────────────────────────────────
   app.post("/api/required-deposits/:id/screenshot", requireAuth, screenshotUpload.single("screenshot"), async (req, res) => {
     try {
       const depositId = Number(req.params.id);
@@ -938,7 +941,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
-  // ── Admin: bkt cases ───────────────────────────────────────────────────────────
   app.post("/api/admin/cases", requireAdmin, async (req, res) => {
     try { await storage.createLoanCase(req.body); res.json({ success: true }); }
     catch (e: any) { res.status(500).json({ message: e.message }); }
@@ -992,7 +994,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
-  // ── Allocation import ──────────────────────────────────────────────────────────
   app.post("/api/admin/import", requireAdmin, upload.single("file"), async (req, res) => {
     try {
       if (!req.file) return res.status(400).json({ message: "No file uploaded" });
@@ -1036,7 +1037,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
-  // ── BKT import ─────────────────────────────────────────────────────────────────
   app.post("/api/admin/import-bkt", requireAdmin, upload.single("file"), async (req, res) => {
     try {
       if (!req.file) return res.status(400).json({ message: "No file uploaded" });
@@ -1076,7 +1076,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
-  // ── PTP export ─────────────────────────────────────────────────────────────────
   app.get("/api/admin/ptp-export", requireAdmin, async (req, res) => {
     try {
       const result = await storage.query(`SELECT fa.name AS fos_name, lc.customer_name, lc.loan_no, lc.mobile_no, lc.address, lc.ptp_date, lc.telecaller_ptp_date, lc.pos, lc.bkt::text AS bkt, lc.status FROM loan_cases lc LEFT JOIN fos_agents fa ON lc.agent_id=fa.id WHERE lc.status='PTP' OR lc.telecaller_ptp_date IS NOT NULL UNION ALL SELECT fa.name AS fos_name, bc.customer_name, bc.loan_no, bc.mobile_no, bc.address, bc.ptp_date, bc.telecaller_ptp_date, bc.pos, bc.case_category AS bkt, bc.status FROM bkt_cases bc LEFT JOIN fos_agents fa ON bc.agent_id=fa.id WHERE bc.status='PTP' OR bc.telecaller_ptp_date IS NOT NULL ORDER BY fos_name NULLS LAST, telecaller_ptp_date NULLS LAST`);
@@ -1092,7 +1091,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
-  // ── Feedback export ────────────────────────────────────────────────────────────
   app.get("/api/admin/feedback-export", requireAdmin, async (req, res) => {
     try {
       const result = await storage.query(`
@@ -1145,7 +1143,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
-  // ── BKT perf summary ──────────────────────────────────────────────────────────
   app.get("/api/admin/bkt-perf-summary", requireAdmin, async (req, res) => {
     try {
       const result = await storage.query(`WITH norm AS (SELECT *, CASE LOWER(REPLACE(bkt,' ','')) WHEN '1' THEN 'bkt1' WHEN '2' THEN 'bkt2' WHEN '3' THEN 'bkt3' WHEN 'bkt1' THEN 'bkt1' WHEN 'bkt2' THEN 'bkt2' WHEN 'bkt3' THEN 'bkt3' ELSE LOWER(REPLACE(bkt,' ','')) END AS bkt_norm FROM bkt_perf_summary), latest AS (SELECT DISTINCT ON (fos_name, bkt_norm) * FROM norm ORDER BY fos_name, bkt_norm, uploaded_at DESC) SELECT fos_name, bkt_norm AS bkt, COALESCE(pos_paid,0) AS pos_paid, COALESCE(pos_unpaid,0) AS pos_unpaid, COALESCE(pos_grand_total,0) AS pos_grand_total, COALESCE(pos_percentage,0) AS pos_percentage, COALESCE(count_paid,0) AS count_paid, COALESCE(count_unpaid,0) AS count_unpaid, COALESCE(count_total,0) AS count_total, COALESCE(rollback_paid,0) AS rollback_paid, COALESCE(rollback_unpaid,0) AS rollback_unpaid, COALESCE(rollback_grand_total,0) AS rollback_grand_total, COALESCE(rollback_percentage,0) AS rollback_percentage FROM latest ORDER BY fos_name, bkt_norm`);
@@ -1172,7 +1169,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
-  // ── BKT perf import ────────────────────────────────────────────────────────────
   app.post("/api/admin/import-bkt-perf", requireAdmin, upload.single("file"), async (req, res) => {
     try {
       if (!req.file) return res.status(400).json({ message: "No file uploaded" });
@@ -1230,7 +1226,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
-  // ── Reset feedback ─────────────────────────────────────────────────────────────
   app.post("/api/admin/reset-feedback/agent/:agentId", requireAdmin, async (req, res) => {
     try {
       const agentId = Number(req.params.agentId);
@@ -1358,6 +1353,112 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (e: any) { console.error("[monthly-cleanup]", e.message); }
   }
   runMonthlyCleanupJob(); setInterval(runMonthlyCleanupJob, 60 * 60 * 1000);
+
+  // ── EDIT 5: NEW — DRR Daily Push at 10 AM IST ────────────────────────────────
+  const drrPushSentDates = new Set<string>();
+
+  async function runDrrDailyPushJob() {
+    try {
+      const { hour, todayKey } = getISTHour();
+      if (hour !== 10) return;
+
+      const slotKey = `${todayKey}-drr-10`;
+      if (drrPushSentDates.has(slotKey)) return;
+
+      const istDate = new Date(new Date().getTime() + 5.5 * 60 * 60 * 1000);
+      const dayOfMonth = istDate.getUTCDate();
+
+      const MILESTONES = [
+        { day: 10, label: "1st Milestone", targets: { bkt1: 28, bkt2: 22, bkt3: 18 } },
+        { day: 15, label: "2nd Milestone", targets: { bkt1: 60, bkt2: 48, bkt3: 40 } },
+        { day: 20, label: "3rd Milestone", targets: { bkt1: 80, bkt2: 65, bkt3: 45 } },
+        { day: 25, label: "4th Milestone", targets: { bkt1: 85, bkt2: 68, bkt3: 60 } },
+      ];
+      const nextMilestone = MILESTONES.find((m) => m.day >= dayOfMonth) ?? MILESTONES[MILESTONES.length - 1];
+      const daysLeft = Math.max(0, nextMilestone.day - dayOfMonth);
+      const effectiveDays = Math.max(1, daysLeft);
+
+      const agents = await storage.query(
+        `SELECT id, name, push_token FROM fos_agents WHERE role='fos' AND push_token IS NOT NULL AND push_token != ''`
+      );
+      console.log(`[drr-push] Day ${dayOfMonth} | ${daysLeft}d to ${nextMilestone.label} | ${agents.rows.length} agents`);
+
+      const fmtAmt = (v: number) =>
+        v >= 100000 ? `₹${(v / 100000).toFixed(1)}L`
+        : v >= 1000  ? `₹${(v / 1000).toFixed(1)}K`
+        : `₹${Math.round(v)}`;
+
+      let sent = 0;
+      for (const agent of agents.rows) {
+        try {
+          const perfResult = await storage.query(
+            `SELECT bkt,
+                    COALESCE(pos_paid::numeric, 0)        AS pos_paid,
+                    COALESCE(pos_grand_total::numeric, 0) AS pos_grand_total
+             FROM bkt_perf_summary
+             WHERE agent_id = $1 AND bkt IN ('bkt1','bkt2','bkt3')`,
+            [agent.id]
+          );
+
+          const bktMap: Record<string, { paid: number; total: number }> = {
+            bkt1: { paid: 0, total: 0 },
+            bkt2: { paid: 0, total: 0 },
+            bkt3: { paid: 0, total: 0 },
+          };
+          for (const row of perfResult.rows) {
+            const key = (row.bkt || "").toLowerCase();
+            if (bktMap[key]) {
+              bktMap[key].paid  = parseFloat(row.pos_paid) || 0;
+              bktMap[key].total = parseFloat(row.pos_grand_total) || 0;
+            }
+          }
+
+          const totalPaid = Object.values(bktMap).reduce((s, b) => s + b.paid,  0);
+          const totalPos  = Object.values(bktMap).reduce((s, b) => s + b.total, 0);
+          if (totalPos === 0) continue;
+
+          const overallPct = (totalPaid / totalPos) * 100;
+
+          const bktLines: string[] = [];
+          let totalRemaining = 0;
+
+          for (const bkt of ["bkt1", "bkt2", "bkt3"] as const) {
+            const d = bktMap[bkt];
+            if (!d || d.total === 0) continue;
+            const targetPct    = nextMilestone.targets[bkt];
+            const targetAmount = (targetPct / 100) * d.total;
+            const remaining    = Math.max(0, targetAmount - d.paid);
+            totalRemaining    += remaining;
+            const currentPct   = d.total > 0 ? (d.paid / d.total) * 100 : 0;
+            const label        = bkt === "bkt1" ? "B1" : bkt === "bkt2" ? "B2" : "B3";
+            bktLines.push(currentPct >= targetPct ? `${label}:✅` : `${label}:${fmtAmt(remaining / effectiveDays)}/d`);
+          }
+
+          const overallDailyNeed = totalRemaining / effectiveDays;
+          const daysText = daysLeft === 0 ? "Milestone day TODAY!" : `${daysLeft}d left`;
+          const title = `📊 Daily DRR — Day ${dayOfMonth}`;
+          const body  = totalRemaining <= 0
+            ? `🎉 All targets met! Overall: ${overallPct.toFixed(1)}% ✅`
+            : `${overallPct.toFixed(1)}% done | Need ${fmtAmt(overallDailyNeed)}/day\n${daysText} | ${bktLines.join("  ")}`;
+
+          const r = await sendPush(agent.push_token, title, body, { screen: "drr", type: "drr_daily" });
+          if (r.ok) sent++;
+        } catch (agentErr: any) {
+          console.error(`[drr-push] Error for agent ${agent.id}:`, agentErr.message);
+        }
+      }
+
+      drrPushSentDates.add(slotKey);
+      if (drrPushSentDates.size > 14) drrPushSentDates.delete(drrPushSentDates.values().next().value);
+      console.log(`[drr-push] ✅ Done — sent to ${sent}/${agents.rows.length} agents`);
+    } catch (e: any) {
+      console.error("[drr-push] Job error:", e.message);
+    }
+  }
+
+  runDrrDailyPushJob();
+  setInterval(runDrrDailyPushJob, 10 * 60 * 1000);
+  // ── END DRR push job ──────────────────────────────────────────────────────────
 
   const httpServer = createServer(app);
   return httpServer;
