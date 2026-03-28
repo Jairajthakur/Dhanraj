@@ -12,17 +12,18 @@ import Colors from "@/constants/colors";
 import { api } from "@/lib/api";
 import { caseStore } from "@/lib/caseStore";
 
+// ─── All tab added ────────────────────────────────────────────────────────────
+const STATUS_TABS = ["All", "Unpaid", "PTP", "Paid"];
 const TABS = ["Unpaid", "PTP", "Paid", "Monthly Feedback"];
 
 const STATUS_COLORS: Record<string, string> = {
+  All:    Colors.primary,
   Unpaid: Colors.statusUnpaid,
-  PTP: Colors.statusPTP,
-  Paid: Colors.statusPaid,
+  PTP:    Colors.statusPTP,
+  Paid:   Colors.statusPaid,
 };
 
-const STATUS_TABS = ["Unpaid", "PTP", "Paid"];
-
-const PAID_DETAIL_OPTIONS = ["PAID", "PART PAYMENT", "SETTLED"];
+const PAID_DETAIL_OPTIONS   = ["PAID", "PART PAYMENT", "SETTLED"];
 const UNPAID_DETAIL_OPTIONS = [
   "CUSTOMER ALREADY PAID",
   "CUSTOMER & VEHICLE SKIP",
@@ -31,25 +32,13 @@ const UNPAID_DETAIL_OPTIONS = [
   "CUSTOMER VEHICLE SOMEONE MORTGAGE & CUSTOMER SKIP",
 ];
 const PTP_DETAIL_OPTIONS = ["PTP DATE SET", "WILL PAY TOMORROW", "WILL ARRANGE FUNDS", "CALL LATER"];
-
 const MONTHLY_FEEDBACK_OPTIONS = [
-  "SWITCH OFF",
-  "NOT AVAILABLE",
-  "DISCONNECTED",
-  "REFUSED TO PAY",
-  "DISPUTED",
-  "NOT AT HOME",
-  "CUSTOMER MET - WILL PAY",
-  "CUSTOMER MET - REFUSED",
-  "PARTIAL PAYMENT DONE",
-  "RESCHEDULED",
-  "SKIP TRACE",
-  "LEGAL ACTION INITIATED",
+  "SWITCH OFF", "NOT AVAILABLE", "DISCONNECTED", "REFUSED TO PAY",
+  "DISPUTED", "NOT AT HOME", "CUSTOMER MET - WILL PAY", "CUSTOMER MET - REFUSED",
+  "PARTIAL PAYMENT DONE", "RESCHEDULED", "SKIP TRACE", "LEGAL ACTION INITIATED",
 ];
-
-const FEEDBACK_CODES = ["PAID", "RTP", "SKIP", "PTP", "CAVNA", "ANF", "EXP", "SFT", "VSL"];
+const FEEDBACK_CODES     = ["PAID", "RTP", "SKIP", "PTP", "CAVNA", "ANF", "EXP", "SFT", "VSL"];
 const PROJECTION_OPTIONS = ["ST", "RF", "RB"];
-const CURRENT_MONTH = new Date().toLocaleString("en-IN", { month: "long", year: "numeric" });
 
 function fmt(v: any, prefix = "") {
   if (v === null || v === undefined || v === "") return "—";
@@ -93,39 +82,83 @@ function YNToggle({ label, value, onChange }: {
   );
 }
 
-function FeedbackModal({ visible, caseItem, onClose, onSave, isLocked = false }: any) {
+// ─── Locked view shown inside modal when feedback already exists ──────────────
+function LockedFeedbackView({ item, onClose }: { item: any; onClose: () => void }) {
+  const rows = [
+    item.status           && { label: "Status",          value: item.status,            color: STATUS_COLORS[item.status] || Colors.text },
+    item.feedback_code    && { label: "Feedback Code",   value: item.feedback_code,      color: Colors.accent },
+    item.latest_feedback  && { label: "Detail Feedback", value: item.latest_feedback,    color: Colors.text },
+    item.monthly_feedback && { label: "Monthly",         value: item.monthly_feedback,   color: Colors.primary },
+    item.ptp_date         && { label: "PTP Date",        value: String(item.ptp_date).slice(0, 10), color: Colors.statusPTP },
+    item.feedback_comments&& { label: "Comments",        value: item.feedback_comments,  color: Colors.textSecondary },
+  ].filter(Boolean) as { label: string; value: string; color: string }[];
+
+  return (
+    <>
+      {/* Lock banner */}
+      <View style={fbStyles.lockBanner}>
+        <Ionicons name="lock-closed" size={16} color={Colors.warning} />
+        <Text style={fbStyles.lockBannerText}>
+          Feedback locked — contact admin to reset before editing
+        </Text>
+      </View>
+
+      {rows.length > 0 ? (
+        <View style={fbStyles.lockedRows}>
+          {rows.map((r) => (
+            <View key={r.label} style={fbStyles.lockedRow}>
+              <Text style={fbStyles.lockedRowLabel}>{r.label}</Text>
+              <Text style={[fbStyles.lockedRowValue, { color: r.color }]}>{r.value}</Text>
+            </View>
+          ))}
+        </View>
+      ) : (
+        <Text style={{ color: Colors.textMuted, textAlign: "center", marginVertical: 24 }}>
+          No feedback details saved yet.
+        </Text>
+      )}
+
+      <Pressable style={[fbStyles.saveBtn, { backgroundColor: Colors.surfaceAlt, marginTop: 16 }]} onPress={onClose}>
+        <Text style={[fbStyles.saveText, { color: Colors.textSecondary }]}>Close</Text>
+      </Pressable>
+      <View style={{ height: 24 }} />
+    </>
+  );
+}
+
+function FeedbackModal({ visible, caseItem, onClose, isLocked = false }: any) {
   const [activeTab, setActiveTab] = useState("Unpaid");
-  const [status, setStatus] = useState(caseItem?.status || "Unpaid");
 
-  const [comments, setComments] = useState(caseItem?.feedback_comments || "");
-
-  const [monthlyFeedback, setMonthlyFeedback] = useState<string>(caseItem?.monthly_feedback || "");
-  const [showMonthlyOptions, setShowMonthlyOptions] = useState(false);
-  const [detailFeedback, setDetailFeedback] = useState(caseItem?.latest_feedback || "");
-  const [feedbackCode, setFeedbackCode] = useState(caseItem?.feedback_code || "");
-  const [ptpDate, setPtpDate] = useState(
+  const [detailFeedback,    setDetailFeedback]    = useState(caseItem?.latest_feedback   || "");
+  const [monthlyFeedback,   setMonthlyFeedback]   = useState(caseItem?.monthly_feedback  || "");
+  const [feedbackCode,      setFeedbackCode]      = useState(caseItem?.feedback_code     || "");
+  const [comments,          setComments]          = useState(caseItem?.feedback_comments || "");
+  const [ptpDate,           setPtpDate]           = useState(
     caseItem?.ptp_date ? String(caseItem.ptp_date).slice(0, 10) : ""
   );
-  const [rollbackYn, setRollbackYn] = useState<boolean | null>(
-    caseItem?.rollback_yn != null ? Boolean(caseItem.rollback_yn) : null
-  );
-  const [customerAvailable, setCustomerAvailable] = useState<boolean | null>(caseItem?.customer_available ?? null);
-  const [vehicleAvailable, setVehicleAvailable] = useState<boolean | null>(caseItem?.vehicle_available ?? null);
-  const [thirdParty, setThirdParty] = useState<boolean | null>(caseItem?.third_party ?? null);
-  const [thirdPartyName, setThirdPartyName] = useState(caseItem?.third_party_name || "");
-  const [thirdPartyNumber, setThirdPartyNumber] = useState(caseItem?.third_party_number || "");
-  const [projection, setProjection] = useState(caseItem?.projection || "");
-  const [nonStarter, setNonStarter] = useState<boolean | null>(caseItem?.non_starter ?? null);
-  const [kycPurchase, setKycPurchase] = useState<boolean | null>(caseItem?.kyc_purchase ?? null);
-  const [workable, setWorkable] = useState<boolean | null>(caseItem?.workable ?? null);
 
-  const [paidDetailFeedback, setPaidDetailFeedback] = useState(caseItem?.latest_feedback || "");
-  const [paidComments, setPaidComments] = useState(caseItem?.feedback_comments || "");
+  // Paid-only fields
+  const [paidDetailFeedback, setPaidDetailFeedback] = useState(caseItem?.latest_feedback   || "");
+  const [paidComments,       setPaidComments]       = useState(caseItem?.feedback_comments || "");
+  // ── Rollback only kept for Paid ───────────────────────────────────────────
   const [paidRollbackYn, setPaidRollbackYn] = useState<boolean | null>(
     caseItem?.rollback_yn != null ? Boolean(caseItem.rollback_yn) : null
   );
 
+  // Monthly Feedback extra fields
+  const [customerAvailable, setCustomerAvailable] = useState<boolean | null>(caseItem?.customer_available ?? null);
+  const [vehicleAvailable,  setVehicleAvailable]  = useState<boolean | null>(caseItem?.vehicle_available  ?? null);
+  const [thirdParty,        setThirdParty]        = useState<boolean | null>(caseItem?.third_party        ?? null);
+  const [thirdPartyName,    setThirdPartyName]    = useState(caseItem?.third_party_name   || "");
+  const [thirdPartyNumber,  setThirdPartyNumber]  = useState(caseItem?.third_party_number || "");
+  const [projection,        setProjection]        = useState(caseItem?.projection || "");
+  const [nonStarter,        setNonStarter]        = useState<boolean | null>(caseItem?.non_starter  ?? null);
+  const [kycPurchase,       setKycPurchase]       = useState<boolean | null>(caseItem?.kyc_purchase  ?? null);
+  const [workable,          setWorkable]          = useState<boolean | null>(caseItem?.workable      ?? null);
+
   const [loading, setLoading] = useState(false);
+
+  const qc = useQueryClient();
 
   const toIsoDate = (val: string) => {
     const parts = val.trim().split(/[-\/]/);
@@ -136,42 +169,43 @@ function FeedbackModal({ visible, caseItem, onClose, onSave, isLocked = false }:
 
   const save = async () => {
     if (activeTab === "Monthly Feedback" && !feedbackCode) {
-      Alert.alert("Error", "Please select a Feedback Code");
-      return;
+      Alert.alert("Error", "Please select a Feedback Code"); return;
     }
     if (activeTab === "PTP" && !ptpDate) {
-      Alert.alert("Error", "Please enter a PTP date");
-      return;
+      Alert.alert("Error", "Please enter a PTP date"); return;
     }
 
-    let finalStatus = status;
-    if (activeTab === "Paid") finalStatus = "Paid";
-    else if (activeTab === "PTP") finalStatus = "PTP";
-    else if (activeTab === "Unpaid") finalStatus = "Unpaid";
+    let finalStatus = "Unpaid";
+    if (activeTab === "Paid")             finalStatus = "Paid";
+    else if (activeTab === "PTP")         finalStatus = "PTP";
+    else if (activeTab === "Unpaid")      finalStatus = "Unpaid";
     else if (activeTab === "Monthly Feedback") finalStatus = "Unpaid";
 
     setLoading(true);
     try {
       await api.updateFeedback(caseItem.id, {
-        status: finalStatus,
-        feedback: (activeTab === "Monthly Feedback" || activeTab === "Unpaid") ? detailFeedback : paidDetailFeedback,
-        comments: (activeTab === "Unpaid" || activeTab === "Monthly Feedback") ? comments : paidComments,
-        ptp_date: activeTab === "PTP" ? toIsoDate(ptpDate) : null,
-        rollback_yn: (activeTab === "Monthly Feedback" || activeTab === "Unpaid") ? rollbackYn : paidRollbackYn,
+        status:   finalStatus,
+        feedback: activeTab === "Paid" ? paidDetailFeedback : detailFeedback,
+        comments: activeTab === "Paid" ? paidComments       : comments,
+        ptp_date: activeTab === "PTP"  ? toIsoDate(ptpDate)  : null,
+        // ── Rollback only sent for Paid ──────────────────────────────────
+        rollback_yn:       activeTab === "Paid" ? paidRollbackYn : null,
         customer_available: customerAvailable,
-        vehicle_available: vehicleAvailable,
-        third_party: thirdParty,
-        third_party_name: thirdParty ? thirdPartyName : null,
+        vehicle_available:  vehicleAvailable,
+        third_party:        thirdParty,
+        third_party_name:   thirdParty ? thirdPartyName   : null,
         third_party_number: thirdParty ? thirdPartyNumber : null,
-        feedback_code: activeTab === "Monthly Feedback" ? feedbackCode : null,
-        projection: activeTab === "Monthly Feedback" ? projection : null,
-        non_starter: activeTab === "Monthly Feedback" ? nonStarter : null,
-        kyc_purchase: activeTab === "Monthly Feedback" ? kycPurchase : null,
-        workable: activeTab === "Monthly Feedback" ? workable : null,
+        feedback_code:  activeTab === "Monthly Feedback" ? feedbackCode : null,
+        projection:     activeTab === "Monthly Feedback" ? projection   : null,
+        non_starter:    activeTab === "Monthly Feedback" ? nonStarter   : null,
+        kyc_purchase:   activeTab === "Monthly Feedback" ? kycPurchase  : null,
+        workable:       activeTab === "Monthly Feedback" ? workable      : null,
         monthly_feedback: monthlyFeedback || null,
       });
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      onSave();
+      qc.invalidateQueries({ queryKey: ["/api/cases"] });
+      qc.invalidateQueries({ queryKey: ["/api/stats"] });
+      qc.invalidateQueries({ queryKey: ["/api/bkt-perf-summary"] });
       onClose();
     } catch (e: any) {
       Alert.alert("Error", e.message);
@@ -180,7 +214,10 @@ function FeedbackModal({ visible, caseItem, onClose, onSave, isLocked = false }:
     }
   };
 
-  const renderDetailOptions = (options: string[], val: string, setVal: (v: string) => void, activeColor: string) => (
+  const renderDetailOptions = (
+    options: string[], val: string,
+    setVal: (v: string) => void, activeColor: string
+  ) => (
     <View style={{ gap: 8, marginBottom: 12 }}>
       {options.map((opt) => (
         <Pressable
@@ -208,7 +245,9 @@ function FeedbackModal({ visible, caseItem, onClose, onSave, isLocked = false }:
       <View style={fbStyles.overlay}>
         <View style={fbStyles.sheet}>
           <View style={fbStyles.handle} />
-          <Text style={fbStyles.title}>Update Feedback</Text>
+          <Text style={fbStyles.title}>
+            {isLocked ? "Feedback (Locked)" : "Update Feedback"}
+          </Text>
           <Text style={fbStyles.customerName}>
             {caseItem?.customer_name} · {caseItem?.loan_no}
           </Text>
@@ -229,257 +268,186 @@ function FeedbackModal({ visible, caseItem, onClose, onSave, isLocked = false }:
             )}
           </View>
 
-          {/* ✅ FIX: replaced horizontal ScrollView with flexWrap View to fix Android font rendering bug */}
-          <View style={fbStyles.tabRow}>
-            {TABS.map((t) => {
-              const isActive = activeTab === t;
-              const color = t === "Paid" ? Colors.success
-                : t === "PTP" ? Colors.statusPTP
-                : t === "Monthly Feedback" ? Colors.primary
-                : Colors.statusUnpaid;
-              return (
-                <Pressable
-                  key={t}
-                  style={[
-                    fbStyles.tabChip,
-                    isActive && { backgroundColor: color, borderColor: color },
-                  ]}
-                  onPress={() => setActiveTab(t)}
-                >
-                  <Text style={[fbStyles.tabChipText, isActive && { color: "#fff" }]}>{t}</Text>
-                </Pressable>
-              );
-            })}
-          </View>
-
-          <ScrollView showsVerticalScrollIndicator={false} style={{ flexGrow: 1, flexShrink: 1 }}>
-
-            {/* ====== UNPAID ====== */}
-            {activeTab === "Unpaid" && (
-              <>
-                <Text style={fbStyles.sectionLabel}>Detail Feedback</Text>
-                {renderDetailOptions(MONTHLY_FEEDBACK_OPTIONS, detailFeedback, setDetailFeedback, Colors.statusUnpaid)}
-                <YNToggle label="Rollback" value={rollbackYn} onChange={setRollbackYn} />
-                <Text style={fbStyles.sectionLabel}>Comments (Optional)</Text>
-                <TextInput
-                  style={fbStyles.commentInput}
-                  placeholder="Add comments..."
-                  placeholderTextColor={Colors.textMuted}
-                  value={comments}
-                  onChangeText={setComments}
-                  multiline
-                  numberOfLines={4}
-                />
-              </>
-            )}
-
-            {/* ====== MONTHLY FEEDBACK ====== */}
-            {activeTab === "Monthly Feedback" && (
-              <>
-                <View style={fbStyles.divider} />
-
-                <YNToggle label="Customer Available" value={customerAvailable} onChange={setCustomerAvailable} />
-                <YNToggle label="Vehicle Available" value={vehicleAvailable} onChange={setVehicleAvailable} />
-                <YNToggle label="Third Party" value={thirdParty} onChange={setThirdParty} />
-
-                {thirdParty === true && (
-                  <>
-                    <Text style={fbStyles.sectionLabel}>Third Party Name</Text>
-                    <TextInput
-                      style={[fbStyles.commentInput, { minHeight: 44, marginBottom: 8 }]}
-                      placeholder="Enter name"
-                      placeholderTextColor={Colors.textMuted}
-                      value={thirdPartyName}
-                      onChangeText={setThirdPartyName}
-                    />
-                    <Text style={fbStyles.sectionLabel}>Third Party Number</Text>
-                    <TextInput
-                      style={[fbStyles.commentInput, { minHeight: 44, marginBottom: 8 }]}
-                      placeholder="Enter number"
-                      placeholderTextColor={Colors.textMuted}
-                      value={thirdPartyNumber}
-                      onChangeText={setThirdPartyNumber}
-                      keyboardType="phone-pad"
-                    />
-                  </>
-                )}
-
-                <Text style={fbStyles.sectionLabel}>Feedback Code</Text>
-                {/* ✅ FIX: flexWrap instead of horizontal ScrollView */}
-                <View style={fbStyles.chipWrapRow}>
-                  {FEEDBACK_CODES.map((f) => (
+          {/* ── LOCKED STATE ─────────────────────────────────────────────── */}
+          {isLocked ? (
+            <LockedFeedbackView item={caseItem} onClose={onClose} />
+          ) : (
+            <>
+              {/* Tab row */}
+              <View style={fbStyles.tabRow}>
+                {TABS.map((t) => {
+                  const isActive = activeTab === t;
+                  const color = t === "Paid" ? Colors.success
+                    : t === "PTP"             ? Colors.statusPTP
+                    : t === "Monthly Feedback"? Colors.primary
+                    : Colors.statusUnpaid;
+                  return (
                     <Pressable
-                      key={f}
-                      style={[
-                        fbStyles.tabChip,
-                        feedbackCode === f && { backgroundColor: Colors.accent, borderColor: Colors.accent },
-                      ]}
-                      onPress={() => setFeedbackCode(f)}
+                      key={t}
+                      style={[fbStyles.tabChip, isActive && { backgroundColor: color, borderColor: color }]}
+                      onPress={() => setActiveTab(t)}
                     >
-                      <Text style={[fbStyles.tabChipText, feedbackCode === f && { color: "#fff" }]}>{f}</Text>
+                      <Text style={[fbStyles.tabChipText, isActive && { color: "#fff" }]}>{t}</Text>
                     </Pressable>
-                  ))}
-                </View>
+                  );
+                })}
+              </View>
 
-                <Text style={fbStyles.sectionLabel}>Detail Feedback</Text>
-                {feedbackCode === "PTP" ? (
+              <ScrollView showsVerticalScrollIndicator={false} style={{ flexGrow: 1, flexShrink: 1 }}>
+
+                {/* ====== UNPAID (no rollback) ====== */}
+                {activeTab === "Unpaid" && (
                   <>
-                    {renderDetailOptions(PTP_DETAIL_OPTIONS, detailFeedback, setDetailFeedback, Colors.statusPTP)}
-                    <Text style={fbStyles.sectionLabel}>PTP Date</Text>
+                    <Text style={fbStyles.sectionLabel}>Detail Feedback</Text>
+                    {renderDetailOptions(MONTHLY_FEEDBACK_OPTIONS, detailFeedback, setDetailFeedback, Colors.statusUnpaid)}
+                    <Text style={fbStyles.sectionLabel}>Comments (Optional)</Text>
                     <TextInput
-                      style={[fbStyles.commentInput, { minHeight: 44, marginBottom: 12 }]}
-                      placeholder="DD-MM-YYYY"
+                      style={fbStyles.commentInput}
+                      placeholder="Add comments..."
                       placeholderTextColor={Colors.textMuted}
-                      value={ptpDate}
-                      onChangeText={setPtpDate}
-                      keyboardType="numeric"
-                    />
-                  </>
-                ) : (
-                  <>
-                    {renderDetailOptions(UNPAID_DETAIL_OPTIONS, detailFeedback, setDetailFeedback, Colors.statusUnpaid)}
-                    <TextInput
-                      style={[fbStyles.commentInput, { minHeight: 44 }]}
-                      placeholder="Or type custom feedback..."
-                      placeholderTextColor={Colors.textMuted}
-                      value={detailFeedback && !UNPAID_DETAIL_OPTIONS.includes(detailFeedback) ? detailFeedback : ""}
-                      onChangeText={(t) => setDetailFeedback(t)}
+                      value={comments}
+                      onChangeText={setComments}
                       multiline
-                      numberOfLines={2}
+                      numberOfLines={4}
                     />
                   </>
                 )}
 
-                <Text style={fbStyles.sectionLabel}>Projection</Text>
-                <View style={{ flexDirection: "row", gap: 8, marginBottom: 12 }}>
-                  {PROJECTION_OPTIONS.map((p) => (
-                    <Pressable
-                      key={p}
-                      style={[
-                        fbStyles.feedbackOption,
-                        { flex: 1, alignItems: "center" },
-                        projection === p && { backgroundColor: Colors.primary, borderColor: Colors.primary },
-                      ]}
-                      onPress={() => setProjection(projection === p ? "" : p)}
-                    >
-                      <Text style={[fbStyles.feedbackOptionText, projection === p && { color: "#fff" }]}>{p}</Text>
-                    </Pressable>
-                  ))}
-                </View>
+                {/* ====== MONTHLY FEEDBACK (no rollback) ====== */}
+                {activeTab === "Monthly Feedback" && (
+                  <>
+                    <View style={fbStyles.divider} />
+                    <YNToggle label="Customer Available" value={customerAvailable} onChange={setCustomerAvailable} />
+                    <YNToggle label="Vehicle Available"  value={vehicleAvailable}  onChange={setVehicleAvailable}  />
+                    <YNToggle label="Third Party"        value={thirdParty}        onChange={setThirdParty}        />
 
-                <YNToggle label="Non Starter" value={nonStarter} onChange={setNonStarter} />
-                <YNToggle label="KYC Purchase" value={kycPurchase} onChange={setKycPurchase} />
+                    {thirdParty === true && (
+                      <>
+                        <Text style={fbStyles.sectionLabel}>Third Party Name</Text>
+                        <TextInput style={[fbStyles.commentInput, { minHeight: 44, marginBottom: 8 }]} placeholder="Enter name" placeholderTextColor={Colors.textMuted} value={thirdPartyName} onChangeText={setThirdPartyName} />
+                        <Text style={fbStyles.sectionLabel}>Third Party Number</Text>
+                        <TextInput style={[fbStyles.commentInput, { minHeight: 44, marginBottom: 8 }]} placeholder="Enter number" placeholderTextColor={Colors.textMuted} value={thirdPartyNumber} onChangeText={setThirdPartyNumber} keyboardType="phone-pad" />
+                      </>
+                    )}
 
-                <Text style={fbStyles.sectionLabel}>Workable</Text>
-                <View style={{ flexDirection: "row", gap: 8, marginBottom: 12 }}>
-                  {(["Workable", "Non Workable"] as const).map((w) => {
-                    const val = w === "Workable";
-                    return (
-                      <Pressable
-                        key={w}
-                        style={[
-                          fbStyles.feedbackOption,
-                          { flex: 1, alignItems: "center" },
-                          workable === val && {
-                            backgroundColor: val ? Colors.success : Colors.danger,
-                            borderColor: val ? Colors.success : Colors.danger,
-                          },
-                        ]}
-                        onPress={() => setWorkable(workable === val ? null : val)}
-                      >
-                        <Text style={[fbStyles.feedbackOptionText, workable === val && { color: "#fff" }]}>{w}</Text>
-                      </Pressable>
-                    );
-                  })}
-                </View>
+                    <Text style={fbStyles.sectionLabel}>Feedback Code</Text>
+                    <View style={fbStyles.chipWrapRow}>
+                      {FEEDBACK_CODES.map((f) => (
+                        <Pressable
+                          key={f}
+                          style={[fbStyles.tabChip, feedbackCode === f && { backgroundColor: Colors.accent, borderColor: Colors.accent }]}
+                          onPress={() => setFeedbackCode(f)}
+                        >
+                          <Text style={[fbStyles.tabChipText, feedbackCode === f && { color: "#fff" }]}>{f}</Text>
+                        </Pressable>
+                      ))}
+                    </View>
 
-                <YNToggle label="Rollback" value={rollbackYn} onChange={setRollbackYn} />
+                    <Text style={fbStyles.sectionLabel}>Detail Feedback</Text>
+                    {feedbackCode === "PTP" ? (
+                      <>
+                        {renderDetailOptions(PTP_DETAIL_OPTIONS, detailFeedback, setDetailFeedback, Colors.statusPTP)}
+                        <Text style={fbStyles.sectionLabel}>PTP Date</Text>
+                        <TextInput style={[fbStyles.commentInput, { minHeight: 44, marginBottom: 12 }]} placeholder="DD-MM-YYYY" placeholderTextColor={Colors.textMuted} value={ptpDate} onChangeText={setPtpDate} keyboardType="numeric" />
+                      </>
+                    ) : (
+                      <>
+                        {renderDetailOptions(UNPAID_DETAIL_OPTIONS, detailFeedback, setDetailFeedback, Colors.statusUnpaid)}
+                        <TextInput style={[fbStyles.commentInput, { minHeight: 44 }]} placeholder="Or type custom feedback..." placeholderTextColor={Colors.textMuted} value={detailFeedback && !UNPAID_DETAIL_OPTIONS.includes(detailFeedback) ? detailFeedback : ""} onChangeText={(t) => setDetailFeedback(t)} multiline numberOfLines={2} />
+                      </>
+                    )}
 
-                <Text style={fbStyles.sectionLabel}>Comments (Optional)</Text>
-                <TextInput
-                  style={fbStyles.commentInput}
-                  placeholder="Add comments..."
-                  placeholderTextColor={Colors.textMuted}
-                  value={comments}
-                  onChangeText={setComments}
-                  multiline
-                  numberOfLines={3}
-                />
-              </>
-            )}
+                    <Text style={fbStyles.sectionLabel}>Projection</Text>
+                    <View style={{ flexDirection: "row", gap: 8, marginBottom: 12 }}>
+                      {PROJECTION_OPTIONS.map((p) => (
+                        <Pressable
+                          key={p}
+                          style={[fbStyles.feedbackOption, { flex: 1, alignItems: "center" }, projection === p && { backgroundColor: Colors.primary, borderColor: Colors.primary }]}
+                          onPress={() => setProjection(projection === p ? "" : p)}
+                        >
+                          <Text style={[fbStyles.feedbackOptionText, projection === p && { color: "#fff" }]}>{p}</Text>
+                        </Pressable>
+                      ))}
+                    </View>
 
-            {/* ====== PAID ====== */}
-            {activeTab === "Paid" && (
-              <>
-                <Text style={fbStyles.sectionLabel}>Detail Feedback</Text>
-                {renderDetailOptions(PAID_DETAIL_OPTIONS, paidDetailFeedback, setPaidDetailFeedback, Colors.success)}
-                <YNToggle label="Rollback" value={paidRollbackYn} onChange={setPaidRollbackYn} />
-                <Text style={fbStyles.sectionLabel}>Comments (Optional)</Text>
-                <TextInput
-                  style={fbStyles.commentInput}
-                  placeholder="Add comments..."
-                  placeholderTextColor={Colors.textMuted}
-                  value={paidComments}
-                  onChangeText={setPaidComments}
-                  multiline
-                  numberOfLines={3}
-                />
-              </>
-            )}
+                    <YNToggle label="Non Starter"  value={nonStarter}  onChange={setNonStarter}  />
+                    <YNToggle label="KYC Purchase"  value={kycPurchase}  onChange={setKycPurchase}  />
 
-            {/* ====== PTP ====== */}
-            {activeTab === "PTP" && (
-              <>
-                <Text style={fbStyles.sectionLabel}>Detail Feedback</Text>
-                {renderDetailOptions(PTP_DETAIL_OPTIONS, paidDetailFeedback, setPaidDetailFeedback, Colors.statusPTP)}
-                <Text style={fbStyles.sectionLabel}>PTP Date</Text>
-                <TextInput
-                  style={[fbStyles.commentInput, { minHeight: 44, marginBottom: 12 }]}
-                  placeholder="DD-MM-YYYY"
-                  placeholderTextColor={Colors.textMuted}
-                  value={ptpDate}
-                  onChangeText={setPtpDate}
-                  keyboardType="numeric"
-                />
-                <YNToggle label="Rollback" value={paidRollbackYn} onChange={setPaidRollbackYn} />
-                <Text style={fbStyles.sectionLabel}>Comments (Optional)</Text>
-                <TextInput
-                  style={fbStyles.commentInput}
-                  placeholder="Add comments..."
-                  placeholderTextColor={Colors.textMuted}
-                  value={paidComments}
-                  onChangeText={setPaidComments}
-                  multiline
-                  numberOfLines={3}
-                />
-              </>
-            )}
+                    <Text style={fbStyles.sectionLabel}>Workable</Text>
+                    <View style={{ flexDirection: "row", gap: 8, marginBottom: 12 }}>
+                      {(["Workable", "Non Workable"] as const).map((w) => {
+                        const val = w === "Workable";
+                        return (
+                          <Pressable
+                            key={w}
+                            style={[fbStyles.feedbackOption, { flex: 1, alignItems: "center" }, workable === val && { backgroundColor: val ? Colors.success : Colors.danger, borderColor: val ? Colors.success : Colors.danger }]}
+                            onPress={() => setWorkable(workable === val ? null : val)}
+                          >
+                            <Text style={[fbStyles.feedbackOptionText, workable === val && { color: "#fff" }]}>{w}</Text>
+                          </Pressable>
+                        );
+                      })}
+                    </View>
 
-            <View style={{ height: 16 }} />
-          </ScrollView>
+                    {/* NOTE: Rollback REMOVED from Monthly Feedback */}
 
-          {/* Action buttons */}
-          <View style={fbStyles.btnRow}>
-            <Pressable style={fbStyles.cancelBtn} onPress={onClose}>
-              <Text style={fbStyles.cancelText}>Cancel</Text>
-            </Pressable>
-            <Pressable
-              style={[fbStyles.saveBtn, {
-                backgroundColor: activeTab === "Paid" ? Colors.success
-                  : activeTab === "PTP" ? Colors.statusPTP
-                  : activeTab === "Monthly Feedback" ? Colors.primary
-                  : Colors.statusUnpaid
-              }]}
-              onPress={save}
-              disabled={loading}
-            >
-              {loading
-                ? <ActivityIndicator color="#fff" size="small" />
-                : <Text style={fbStyles.saveText}>Save</Text>
-              }
-            </Pressable>
-          </View>
-          <View style={{ height: 24 }} />
+                    <Text style={fbStyles.sectionLabel}>Comments (Optional)</Text>
+                    <TextInput style={fbStyles.commentInput} placeholder="Add comments..." placeholderTextColor={Colors.textMuted} value={comments} onChangeText={setComments} multiline numberOfLines={3} />
+                  </>
+                )}
+
+                {/* ====== PAID (rollback KEPT here only) ====== */}
+                {activeTab === "Paid" && (
+                  <>
+                    <Text style={fbStyles.sectionLabel}>Detail Feedback</Text>
+                    {renderDetailOptions(PAID_DETAIL_OPTIONS, paidDetailFeedback, setPaidDetailFeedback, Colors.success)}
+                    {/* ✅ Rollback retained only for Paid */}
+                    <YNToggle label="Rollback" value={paidRollbackYn} onChange={setPaidRollbackYn} />
+                    <Text style={fbStyles.sectionLabel}>Comments (Optional)</Text>
+                    <TextInput style={fbStyles.commentInput} placeholder="Add comments..." placeholderTextColor={Colors.textMuted} value={paidComments} onChangeText={setPaidComments} multiline numberOfLines={3} />
+                  </>
+                )}
+
+                {/* ====== PTP (no rollback) ====== */}
+                {activeTab === "PTP" && (
+                  <>
+                    <Text style={fbStyles.sectionLabel}>Detail Feedback</Text>
+                    {renderDetailOptions(PTP_DETAIL_OPTIONS, paidDetailFeedback, setPaidDetailFeedback, Colors.statusPTP)}
+                    <Text style={fbStyles.sectionLabel}>PTP Date</Text>
+                    <TextInput style={[fbStyles.commentInput, { minHeight: 44, marginBottom: 12 }]} placeholder="DD-MM-YYYY" placeholderTextColor={Colors.textMuted} value={ptpDate} onChangeText={setPtpDate} keyboardType="numeric" />
+                    {/* NOTE: Rollback REMOVED from PTP */}
+                    <Text style={fbStyles.sectionLabel}>Comments (Optional)</Text>
+                    <TextInput style={fbStyles.commentInput} placeholder="Add comments..." placeholderTextColor={Colors.textMuted} value={paidDetailFeedback.length > 0 ? comments : comments} onChangeText={setComments} multiline numberOfLines={3} />
+                  </>
+                )}
+
+                <View style={{ height: 16 }} />
+              </ScrollView>
+
+              {/* Action buttons */}
+              <View style={fbStyles.btnRow}>
+                <Pressable style={fbStyles.cancelBtn} onPress={onClose}>
+                  <Text style={fbStyles.cancelText}>Cancel</Text>
+                </Pressable>
+                <Pressable
+                  style={[fbStyles.saveBtn, {
+                    backgroundColor: activeTab === "Paid" ? Colors.success
+                      : activeTab === "PTP"              ? Colors.statusPTP
+                      : activeTab === "Monthly Feedback" ? Colors.primary
+                      : Colors.statusUnpaid,
+                  }]}
+                  onPress={save}
+                  disabled={loading}
+                >
+                  {loading
+                    ? <ActivityIndicator color="#fff" size="small" />
+                    : <Text style={fbStyles.saveText}>Save</Text>
+                  }
+                </Pressable>
+              </View>
+              <View style={{ height: 24 }} />
+            </>
+          )}
         </View>
       </View>
     </Modal>
@@ -488,10 +456,7 @@ function FeedbackModal({ visible, caseItem, onClose, onSave, isLocked = false }:
 
 function navigateToDetail(item: any) {
   caseStore.set(item);
-  router.push({
-    pathname: "/(app)/customer/[id]",
-    params: { id: String(item.id) },
-  });
+  router.push({ pathname: "/(app)/customer/[id]", params: { id: String(item.id) } });
 }
 
 function CaseCard({ item, onFeedback }: { item: any; onFeedback: (item: any) => void }) {
@@ -503,10 +468,19 @@ function CaseCard({ item, onFeedback }: { item: any; onFeedback: (item: any) => 
     Linking.openURL(`tel:${num}`);
   };
 
-  const statusColor = STATUS_COLORS[item.status] || Colors.textMuted;
-  const rollbackRaw = (item.rollback !== null && item.rollback !== undefined && item.rollback !== "" && item.rollback !== "0" && Number(item.rollback) !== 0) ? "RollBack" : "—";
+  // ── Determine if feedback is locked ──────────────────────────────────────
+  const isLocked = !!(
+    item.feedback_code    ||
+    item.latest_feedback  ||
+    item.monthly_feedback ||
+    item.status === "Paid"||
+    item.status === "PTP"
+  );
+
+  const statusColor  = STATUS_COLORS[item.status] || Colors.textMuted;
+  const rollbackRaw  = (item.rollback  !== null && item.rollback  !== undefined && item.rollback  !== "" && item.rollback  !== "0" && Number(item.rollback)  !== 0) ? "RollBack"  : "—";
   const clearanceRaw = (item.clearance !== null && item.clearance !== undefined && item.clearance !== "" && item.clearance !== "0" && Number(item.clearance) !== 0) ? "Clearance" : "—";
-  const hasRollback = rollbackRaw !== "—";
+  const hasRollback  = rollbackRaw  !== "—";
   const hasClearance = clearanceRaw !== "—";
 
   return (
@@ -517,8 +491,15 @@ function CaseCard({ item, onFeedback }: { item: any; onFeedback: (item: any) => 
             <Ionicons name="person-circle" size={20} color={Colors.primary} />
             <Text style={styles.cardName} numberOfLines={1}>{item.customer_name}</Text>
           </View>
-          <View style={[styles.statusBadge, { backgroundColor: statusColor + "22" }]}>
-            <Text style={[styles.statusText, { color: statusColor }]}>{item.status}</Text>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+            {isLocked && (
+              <View style={styles.lockBadge}>
+                <Ionicons name="lock-closed" size={10} color={Colors.warning} />
+              </View>
+            )}
+            <View style={[styles.statusBadge, { backgroundColor: statusColor + "22" }]}>
+              <Text style={[styles.statusText, { color: statusColor }]}>{item.status}</Text>
+            </View>
           </View>
         </View>
 
@@ -568,9 +549,9 @@ function CaseCard({ item, onFeedback }: { item: any; onFeedback: (item: any) => 
         </View>
 
         <View style={styles.infoRow}>
-          <View style={[styles.infoCell, hasRollback && { borderWidth: 1, borderColor: Colors.info + "60" }]}>
+          <View style={[styles.infoCell, hasRollback  && { borderWidth: 1, borderColor: Colors.info    + "60" }]}>
             <Text style={styles.infoLabel}>ROLLBACK</Text>
-            <Text style={[styles.infoValue, hasRollback && { color: Colors.info, fontWeight: "800" }]}>{rollbackRaw}</Text>
+            <Text style={[styles.infoValue, hasRollback  && { color: Colors.info,    fontWeight: "800" }]}>{rollbackRaw}</Text>
           </View>
           <View style={[styles.infoCell, hasClearance && { borderWidth: 1, borderColor: Colors.success + "60" }]}>
             <Text style={styles.infoLabel}>CLEARANCE</Text>
@@ -624,7 +605,7 @@ function CaseCard({ item, onFeedback }: { item: any; onFeedback: (item: any) => 
         <View style={[styles.ptpDateRow, { backgroundColor: Colors.info + "12" }]}>
           <Ionicons name="calendar-outline" size={13} color={Colors.info} />
           <Text style={[styles.ptpDateLabel, { color: Colors.info }]}>Telecaller PTP: </Text>
-          <Text style={[styles.ptpDateValue, { color: Colors.info }]}>{String(item.telecaller_ptp_date).slice(0, 10)}</Text>
+          <Text style={[styles.ptpDateValue,  { color: Colors.info }]}>{String(item.telecaller_ptp_date).slice(0, 10)}</Text>
         </View>
       )}
 
@@ -637,9 +618,22 @@ function CaseCard({ item, onFeedback }: { item: any; onFeedback: (item: any) => 
           <Ionicons name="eye" size={16} color={Colors.textSecondary} />
           <Text style={[styles.actionBtnText, { color: Colors.textSecondary }]}>Details</Text>
         </Pressable>
-        <Pressable style={[styles.actionBtn, styles.feedbackBtn]} onPress={() => onFeedback(item)}>
-          <Ionicons name="chatbox" size={16} color="#fff" />
-          <Text style={styles.actionBtnText}>Feedback</Text>
+        {/* ── Feedback button: locked look when isLocked ── */}
+        <Pressable
+          style={[
+            styles.actionBtn,
+            isLocked ? styles.feedbackBtnLocked : styles.feedbackBtn,
+          ]}
+          onPress={() => onFeedback(item)}
+        >
+          <Ionicons
+            name={isLocked ? "lock-closed" : "chatbox"}
+            size={16}
+            color={isLocked ? Colors.warning : "#fff"}
+          />
+          <Text style={[styles.actionBtnText, isLocked && { color: Colors.warning }]}>
+            {isLocked ? "Locked" : "Feedback"}
+          </Text>
         </Pressable>
       </View>
     </View>
@@ -647,48 +641,60 @@ function CaseCard({ item, onFeedback }: { item: any; onFeedback: (item: any) => 
 }
 
 export default function AllocationScreen() {
-  const insets = useSafeAreaInsets();
-  const qc = useQueryClient();
-  const [activeTab, setActiveTab] = useState("Unpaid");
-  const [search, setSearch] = useState("");
+  const insets     = useSafeAreaInsets();
+  const qc         = useQueryClient();
+  const [activeTab,    setActiveTab]    = useState("All");
+  const [search,       setSearch]       = useState("");
   const [feedbackItem, setFeedbackItem] = useState<any>(null);
 
   const { data, isLoading } = useQuery({
     queryKey: ["/api/cases"],
-    queryFn: () => api.getCases(),
+    queryFn:  () => api.getCases(),
   });
 
+  const allCases: any[] = data?.cases || [];
+
   const filtered = useMemo(() => {
-    const cases = data?.cases || [];
-    return cases
-      .filter((c: any) => c.status === activeTab)
+    return allCases
+      .filter((c: any) => activeTab === "All" || c.status === activeTab)
       .filter((c: any) =>
         !search ||
-        c.customer_name?.toLowerCase().includes(search.toLowerCase()) ||
-        c.loan_no?.toLowerCase().includes(search.toLowerCase()) ||
-        c.app_id?.toLowerCase().includes(search.toLowerCase()) ||
+        c.customer_name?.toLowerCase().includes(search.toLowerCase())  ||
+        c.loan_no?.toLowerCase().includes(search.toLowerCase())         ||
+        c.app_id?.toLowerCase().includes(search.toLowerCase())          ||
         c.registration_no?.toLowerCase().includes(search.toLowerCase())
       );
-  }, [data, activeTab, search]);
+  }, [allCases, activeTab, search]);
 
-  const counts = useMemo(() => {
-    const cases = data?.cases || [];
-    return {
-      Unpaid: cases.filter((c: any) => c.status === "Unpaid").length,
-      PTP: cases.filter((c: any) => c.status === "PTP").length,
-      Paid: cases.filter((c: any) => c.status === "Paid").length,
-    };
-  }, [data]);
+  const counts = useMemo(() => ({
+    All:    allCases.length,
+    Unpaid: allCases.filter((c: any) => c.status === "Unpaid").length,
+    PTP:    allCases.filter((c: any) => c.status === "PTP").length,
+    Paid:   allCases.filter((c: any) => c.status === "Paid").length,
+  }), [allCases]);
+
+  // Determine isLocked for the currently selected feedbackItem
+  const feedbackItemLocked = feedbackItem ? !!(
+    feedbackItem.feedback_code    ||
+    feedbackItem.latest_feedback  ||
+    feedbackItem.monthly_feedback ||
+    feedbackItem.status === "Paid"||
+    feedbackItem.status === "PTP"
+  ) : false;
 
   return (
     <View style={{ flex: 1, backgroundColor: Colors.background }}>
+      {/* ── Status tabs with All ───────────────────────────────────────────── */}
       <View style={[styles.tabsContainer, { paddingTop: Platform.OS === "web" ? 67 : 12 }]}>
         {STATUS_TABS.map((tab) => (
           <Pressable
             key={tab}
             style={[
               styles.tab,
-              activeTab === tab && [styles.tabActive, { backgroundColor: STATUS_COLORS[tab] }],
+              activeTab === tab && [
+                styles.tabActive,
+                { backgroundColor: STATUS_COLORS[tab] ?? Colors.primary },
+              ],
             ]}
             onPress={() => setActiveTab(tab)}
           >
@@ -702,6 +708,7 @@ export default function AllocationScreen() {
         ))}
       </View>
 
+      {/* ── Search ──────────────────────────────────────────────────────────── */}
       <View style={styles.searchContainer}>
         <Ionicons name="search" size={18} color={Colors.textMuted} style={{ marginRight: 8 }} />
         <TextInput
@@ -726,7 +733,9 @@ export default function AllocationScreen() {
         <FlatList
           data={filtered}
           keyExtractor={(item) => String(item.id)}
-          renderItem={({ item }) => <CaseCard item={item} onFeedback={setFeedbackItem} />}
+          renderItem={({ item }) => (
+            <CaseCard item={item} onFeedback={setFeedbackItem} />
+          )}
           contentContainerStyle={[
             styles.list,
             { paddingBottom: insets.bottom + 24 },
@@ -735,7 +744,9 @@ export default function AllocationScreen() {
           ListEmptyComponent={
             <View style={styles.empty}>
               <Ionicons name="document-text-outline" size={48} color={Colors.textMuted} />
-              <Text style={styles.emptyText}>No {activeTab} cases</Text>
+              <Text style={styles.emptyText}>
+                {activeTab === "All" ? "No cases" : `No ${activeTab} cases`}
+              </Text>
             </View>
           }
           scrollEnabled={!!filtered.length}
@@ -746,119 +757,129 @@ export default function AllocationScreen() {
         <FeedbackModal
           visible={!!feedbackItem}
           caseItem={feedbackItem}
-          isLocked={false}
+          isLocked={feedbackItemLocked}
           onClose={() => setFeedbackItem(null)}
-          onSave={() => {
-            qc.invalidateQueries({ queryKey: ["/api/cases"] });
-            qc.invalidateQueries({ queryKey: ["/api/stats"] });
-            qc.invalidateQueries({ queryKey: ["/api/bkt-perf-summary"] });
-          }}
         />
       )}
     </View>
   );
 }
 
+// ─── Styles ───────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  tabsContainer: { flexDirection: "row", backgroundColor: Colors.surface, paddingHorizontal: 12, paddingBottom: 12, gap: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: Colors.border },
-  tab: { flex: 1, alignItems: "center", paddingVertical: 10, paddingHorizontal: 4, borderRadius: 10, backgroundColor: Colors.surfaceAlt, gap: 4 },
-  tabActive: { shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.15, shadowRadius: 4, elevation: 3 },
-  tabText: { fontSize: 12, fontWeight: "600", color: Colors.textSecondary, textAlign: "center" },
-  tabTextActive: { color: "#fff" },
-  tabCount: { backgroundColor: Colors.border, borderRadius: 10, paddingHorizontal: 6, paddingVertical: 1, minWidth: 20, alignItems: "center" },
-  tabCountText: { fontSize: 11, fontWeight: "700", color: Colors.textSecondary },
-  searchContainer: { flexDirection: "row", alignItems: "center", margin: 12, backgroundColor: Colors.surface, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, borderWidth: 1, borderColor: Colors.border },
-  searchInput: { flex: 1, fontSize: 14, color: Colors.text },
-  list: { padding: 12, gap: 12 },
-  card: { backgroundColor: Colors.surface, borderRadius: 16, padding: 14, gap: 8, borderWidth: 1, borderColor: Colors.border, shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 4 },
-  cardTapArea: { gap: 8 },
-  cardHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  cardNameRow: { flex: 1, flexDirection: "row", alignItems: "center", gap: 8 },
-  cardName: { flex: 1, fontSize: 15, fontWeight: "700", color: Colors.text, textTransform: "uppercase" },
-  statusBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20 },
-  statusText: { fontSize: 11, fontWeight: "700" },
-  infoRow: { flexDirection: "row", gap: 6 },
-  infoCell: { flex: 1, backgroundColor: Colors.surfaceAlt, borderRadius: 8, padding: 8 },
-  infoCellSmall: { width: 52, backgroundColor: Colors.surfaceAlt, borderRadius: 8, padding: 8 },
-  infoLabel: { fontSize: 9, fontWeight: "700", color: Colors.textMuted, textTransform: "uppercase", marginBottom: 2 },
-  infoValue: { fontSize: 12, fontWeight: "700", color: Colors.text },
-  phoneRow: { flexDirection: "row", alignItems: "center", gap: 6, paddingVertical: 4 },
-  phoneText: { fontSize: 13, color: Colors.info, fontWeight: "500" },
-  feedbackRow: { flexDirection: "row", alignItems: "center", flexWrap: "wrap" },
-  feedbackLabel: { fontSize: 12, color: Colors.textSecondary, fontWeight: "600" },
-  feedbackValue: { fontSize: 12, color: Colors.text, fontWeight: "500" },
-  monthlyFeedbackRow: { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: Colors.primary + "12", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 5 },
+  tabsContainer: {
+    flexDirection: "row",
+    backgroundColor: Colors.surface,
+    paddingHorizontal: 8,
+    paddingBottom: 12,
+    gap: 6,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: Colors.border,
+  },
+  tab: {
+    flex: 1,
+    alignItems: "center",
+    paddingVertical: 10,
+    paddingHorizontal: 2,
+    borderRadius: 10,
+    backgroundColor: Colors.surfaceAlt,
+    gap: 4,
+  },
+  tabActive: {
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  tabText:        { fontSize: 11, fontWeight: "600", color: Colors.textSecondary, textAlign: "center" },
+  tabTextActive:  { color: "#fff" },
+  tabCount:       { backgroundColor: Colors.border, borderRadius: 10, paddingHorizontal: 5, paddingVertical: 1, minWidth: 18, alignItems: "center" },
+  tabCountText:   { fontSize: 10, fontWeight: "700", color: Colors.textSecondary },
+  searchContainer:{ flexDirection: "row", alignItems: "center", margin: 12, backgroundColor: Colors.surface, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, borderWidth: 1, borderColor: Colors.border },
+  searchInput:    { flex: 1, fontSize: 14, color: Colors.text },
+  list:           { padding: 12, gap: 12 },
+  card:           { backgroundColor: Colors.surface, borderRadius: 16, padding: 14, gap: 8, borderWidth: 1, borderColor: Colors.border, shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 4 },
+  cardTapArea:    { gap: 8 },
+  cardHeader:     { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  cardNameRow:    { flex: 1, flexDirection: "row", alignItems: "center", gap: 8 },
+  cardName:       { flex: 1, fontSize: 15, fontWeight: "700", color: Colors.text, textTransform: "uppercase" },
+  lockBadge:      { width: 18, height: 18, borderRadius: 9, backgroundColor: Colors.warning + "20", alignItems: "center", justifyContent: "center" },
+  statusBadge:    { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20 },
+  statusText:     { fontSize: 11, fontWeight: "700" },
+  infoRow:        { flexDirection: "row", gap: 6 },
+  infoCell:       { flex: 1, backgroundColor: Colors.surfaceAlt, borderRadius: 8, padding: 8 },
+  infoCellSmall:  { width: 52, backgroundColor: Colors.surfaceAlt, borderRadius: 8, padding: 8 },
+  infoLabel:      { fontSize: 9,  fontWeight: "700", color: Colors.textMuted, textTransform: "uppercase", marginBottom: 2 },
+  infoValue:      { fontSize: 12, fontWeight: "700", color: Colors.text },
+  phoneRow:       { flexDirection: "row", alignItems: "center", gap: 6, paddingVertical: 4 },
+  phoneText:      { fontSize: 13, color: Colors.info, fontWeight: "500" },
+  feedbackRow:    { flexDirection: "row", alignItems: "center", flexWrap: "wrap" },
+  feedbackLabel:  { fontSize: 12, color: Colors.textSecondary, fontWeight: "600" },
+  feedbackValue:  { fontSize: 12, color: Colors.text, fontWeight: "500" },
+  monthlyFeedbackRow:  { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: Colors.primary + "12", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 5 },
   monthlyFeedbackText: { fontSize: 12, color: Colors.primary, fontWeight: "600", flex: 1 },
-  rollbackYnBadge: { flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: Colors.info + "15", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 4, alignSelf: "flex-start" },
+  rollbackYnBadge:{ flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: Colors.info + "15", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 4, alignSelf: "flex-start" },
   rollbackYnText: { fontSize: 11, color: Colors.info, fontWeight: "700" },
-  ptpDateRow: { flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: Colors.statusPTP + "12", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
-  ptpDateLabel: { fontSize: 12, color: Colors.statusPTP, fontWeight: "600" },
-  ptpDateValue: { fontSize: 12, color: Colors.statusPTP, fontWeight: "700" },
-  cardActions: { flexDirection: "row", gap: 8, marginTop: 4 },
-  actionBtn: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", paddingVertical: 10, borderRadius: 10, gap: 5 },
-  callBtn: { backgroundColor: Colors.primary },
-  detailBtn: { backgroundColor: Colors.surfaceElevated, borderWidth: 1, borderColor: Colors.borderLight },
-  feedbackBtn: { backgroundColor: Colors.accent },
-  actionBtnText: { color: "#fff", fontSize: 13, fontWeight: "700" },
-  empty: { flex: 1, justifyContent: "center", alignItems: "center", gap: 12, paddingVertical: 60 },
-  emptyText: { fontSize: 16, color: Colors.textMuted },
+  ptpDateRow:     { flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: Colors.statusPTP + "12", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
+  ptpDateLabel:   { fontSize: 12, color: Colors.statusPTP, fontWeight: "600" },
+  ptpDateValue:   { fontSize: 12, color: Colors.statusPTP, fontWeight: "700" },
+  cardActions:    { flexDirection: "row", gap: 8, marginTop: 4 },
+  actionBtn:      { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", paddingVertical: 10, borderRadius: 10, gap: 5 },
+  callBtn:             { backgroundColor: Colors.primary },
+  detailBtn:           { backgroundColor: Colors.surfaceElevated, borderWidth: 1, borderColor: Colors.borderLight },
+  feedbackBtn:         { backgroundColor: Colors.accent },
+  feedbackBtnLocked:   { backgroundColor: Colors.warning + "18", borderWidth: 1, borderColor: Colors.warning + "50" },
+  actionBtnText:  { color: "#fff", fontSize: 13, fontWeight: "700" },
+  empty:          { flex: 1, justifyContent: "center", alignItems: "center", gap: 12, paddingVertical: 60 },
+  emptyText:      { fontSize: 16, color: Colors.textMuted },
 });
 
 const fbStyles = StyleSheet.create({
-  overlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" },
-  sheet: { backgroundColor: Colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, maxHeight: "92%", flexShrink: 1 },
-  handle: { width: 40, height: 4, backgroundColor: Colors.border, borderRadius: 2, alignSelf: "center", marginBottom: 12 },
-  title: { fontSize: 20, fontWeight: "700", color: Colors.text, marginBottom: 4 },
-  customerName: { fontSize: 13, color: Colors.textSecondary, marginBottom: 8, textTransform: "uppercase" },
-  sectionLabel: { fontSize: 13, fontWeight: "700", color: Colors.textSecondary, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 8 },
-  divider: { height: 1, backgroundColor: Colors.border, marginVertical: 12 },
-  caseInfoRow: { flexDirection: "row", gap: 8, marginBottom: 12 },
-  caseInfoChip: { flex: 1, borderRadius: 10, padding: 10, gap: 2 },
-  caseInfoLabel: { fontSize: 9, fontWeight: "700", color: Colors.textMuted, textTransform: "uppercase" },
-  caseInfoValue: { fontSize: 13, fontWeight: "800" },
-  // ✅ FIX: replaced horizontal ScrollView with flexWrap row
-  tabRow: {
+  overlay:        { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" },
+  sheet:          { backgroundColor: Colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, maxHeight: "92%", flexShrink: 1 },
+  handle:         { width: 40, height: 4, backgroundColor: Colors.border, borderRadius: 2, alignSelf: "center", marginBottom: 12 },
+  title:          { fontSize: 20, fontWeight: "700", color: Colors.text, marginBottom: 4 },
+  customerName:   { fontSize: 13, color: Colors.textSecondary, marginBottom: 8, textTransform: "uppercase" },
+  sectionLabel:   { fontSize: 13, fontWeight: "700", color: Colors.textSecondary, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 8 },
+  divider:        { height: 1, backgroundColor: Colors.border, marginVertical: 12 },
+  caseInfoRow:    { flexDirection: "row", gap: 8, marginBottom: 12 },
+  caseInfoChip:   { flex: 1, borderRadius: 10, padding: 10, gap: 2 },
+  caseInfoLabel:  { fontSize: 9,  fontWeight: "700", color: Colors.textMuted, textTransform: "uppercase" },
+  caseInfoValue:  { fontSize: 13, fontWeight: "800" },
+
+  // ── Lock styles ───────────────────────────────────────────────────────────
+  lockBanner: {
     flexDirection: "row",
-    flexWrap: "wrap",
+    alignItems: "center",
     gap: 8,
+    backgroundColor: Colors.warning + "18",
+    borderWidth: 1,
+    borderColor: Colors.warning + "40",
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
     marginBottom: 16,
   },
-  chipWrapRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-    marginBottom: 12,
-  },
-  tabChip: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 20,
-    backgroundColor: Colors.surfaceElevated,
-    borderWidth: 1,
-    borderColor: Colors.border,
-  },
-  // ✅ FIX: explicit color + fontFamily to prevent Android font rendering bug in Modal
-  tabChipText: {
-    fontSize: 13,
-    fontWeight: "600",
-    color: Colors.text,
-    fontFamily: Platform.OS === "android" ? "Roboto" : undefined,
-  },
+  lockBannerText: { flex: 1, fontSize: 13, color: Colors.warning, fontWeight: "600" },
+  lockedRows:     { gap: 2, marginBottom: 8 },
+  lockedRow:      { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingVertical: 10, paddingHorizontal: 12, backgroundColor: Colors.surfaceAlt, borderRadius: 10, marginBottom: 4 },
+  lockedRowLabel: { fontSize: 12, color: Colors.textSecondary, fontWeight: "600" },
+  lockedRowValue: { fontSize: 13, fontWeight: "700", flex: 1, textAlign: "right" },
+
+  tabRow:         { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 16 },
+  chipWrapRow:    { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 12 },
+  tabChip:        { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, backgroundColor: Colors.surfaceElevated, borderWidth: 1, borderColor: Colors.border },
+  tabChipText:    { fontSize: 13, fontWeight: "600", color: Colors.text, fontFamily: Platform.OS === "android" ? "Roboto" : undefined },
   feedbackOption: { paddingVertical: 12, paddingHorizontal: 16, borderRadius: 10, borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.surfaceAlt },
   feedbackOptionText: { fontSize: 14, fontWeight: "600", color: Colors.text },
-  detailOptionBtn: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 14, paddingHorizontal: 16, borderRadius: 12, borderWidth: 1.5, borderColor: Colors.border, backgroundColor: Colors.surfaceAlt, marginBottom: 4 },
-  detailOptionDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: Colors.border },
+  detailOptionBtn:{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 14, paddingHorizontal: 16, borderRadius: 12, borderWidth: 1.5, borderColor: Colors.border, backgroundColor: Colors.surfaceAlt, marginBottom: 4 },
+  detailOptionDot:{ width: 10, height: 10, borderRadius: 5, backgroundColor: Colors.border },
   detailOptionText: { fontSize: 14, fontWeight: "600", color: Colors.text, flex: 1 },
-  commentInput: { borderWidth: 1, borderColor: Colors.border, borderRadius: 12, padding: 12, fontSize: 14, color: Colors.text, minHeight: 80, textAlignVertical: "top", backgroundColor: Colors.surfaceAlt, marginBottom: 12 },
-  btnRow: { flexDirection: "row", gap: 12, marginTop: 8 },
-  cancelBtn: { flex: 1, paddingVertical: 14, borderRadius: 12, borderWidth: 1, borderColor: Colors.border, alignItems: "center" },
-  cancelText: { fontSize: 15, fontWeight: "600", color: Colors.textSecondary },
-  saveBtn: { flex: 2, paddingVertical: 14, borderRadius: 12, alignItems: "center" },
-  saveText: { fontSize: 15, fontWeight: "700", color: "#fff" },
-  simpleUnpaidBanner: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: Colors.surfaceAlt, borderRadius: 10, padding: 12, marginBottom: 16, borderWidth: 1, borderColor: Colors.border },
-  simpleUnpaidText: { flex: 1, fontSize: 12, color: Colors.textMuted, fontWeight: "500" },
-  monthlyDropdownBtn: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderWidth: 1, borderColor: Colors.border, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 14, backgroundColor: Colors.surfaceAlt, marginBottom: 8 },
-  monthlyDropdownText: { fontSize: 14, color: Colors.textMuted, flex: 1 },
-  clearBtn: { flexDirection: "row", alignItems: "center", gap: 4, alignSelf: "flex-end", marginBottom: 12 },
-  clearBtnText: { fontSize: 12, color: Colors.textMuted },
+  commentInput:   { borderWidth: 1, borderColor: Colors.border, borderRadius: 12, padding: 12, fontSize: 14, color: Colors.text, minHeight: 80, textAlignVertical: "top", backgroundColor: Colors.surfaceAlt, marginBottom: 12 },
+  btnRow:         { flexDirection: "row", gap: 12, marginTop: 8 },
+  cancelBtn:      { flex: 1, paddingVertical: 14, borderRadius: 12, borderWidth: 1, borderColor: Colors.border, alignItems: "center" },
+  cancelText:     { fontSize: 15, fontWeight: "600", color: Colors.textSecondary },
+  saveBtn:        { flex: 2, paddingVertical: 14, borderRadius: 12, alignItems: "center" },
+  saveText:       { fontSize: 15, fontWeight: "700", color: "#fff" },
 });
