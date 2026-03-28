@@ -64,11 +64,6 @@ function AdminDrawer({ visible, onClose }: { visible: boolean; onClose: () => vo
                     <Ionicons name={item.icon} size={18} color={Colors.primary} />
                   </View>
                   <Text style={styles.drawerItemText}>{item.label}</Text>
-                  {item.key === "drr" && (
-                    <View style={styles.newBadge}>
-                      <Text style={styles.newBadgeText}>NEW</Text>
-                    </View>
-                  )}
                   <Ionicons name="chevron-forward" size={14} color={Colors.textMuted} />
                 </Pressable>
               ))}
