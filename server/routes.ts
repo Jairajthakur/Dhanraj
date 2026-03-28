@@ -229,6 +229,16 @@ const COLUMN_MAP: Record<string, string> = {
   promisetopaydatdate: "telecaller_ptp_date", promisetopaydate: "telecaller_ptp_date",
 };
 
+// Month name → number helper
+const MONTH_NAMES = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+function monthToNumber(val: any): number {
+  if (!val) return new Date().getMonth() + 1;
+  const n = parseInt(String(val));
+  if (!isNaN(n) && n >= 1 && n <= 12) return n;
+  const idx = MONTH_NAMES.findIndex(m => m.toLowerCase() === String(val).toLowerCase().trim());
+  return idx >= 0 ? idx + 1 : new Date().getMonth() + 1;
+}
+
 declare module "express-session" { interface SessionData { agentId?: number; role?: string; } }
 
 async function recalcBktPerfFromAllocation(): Promise<void> {
@@ -285,7 +295,7 @@ async function safeDeleteAgent(agentId: number, context: string): Promise<void> 
     { sql: `DELETE FROM attendance WHERE agent_id = $1`, name: "attendance" },
     { sql: `DELETE FROM required_deposits WHERE agent_id = $1`, name: "required_deposits" },
     { sql: `DELETE FROM fos_depositions WHERE agent_id = $1`, name: "fos_depositions" },
-    { sql: `DELETE FROM salary WHERE agent_id = $1`, name: "salary" },
+    { sql: `DELETE FROM salary_details WHERE agent_id = $1`, name: "salary_details" },
     { sql: `DELETE FROM depositions WHERE agent_id = $1`, name: "depositions" },
     { sql: `DELETE FROM call_recordings WHERE agent_id = $1`, name: "call_recordings" },
     { sql: `DELETE FROM user_sessions WHERE sess::text LIKE $1`, name: "user_sessions", param: `%"agentId":${agentId}%` },
@@ -326,44 +336,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
     console.log("[DB] fos_depositions table ready ✅");
   } catch (e: any) { console.error("[DB] fos_depositions error:", e.message); }
 
-  // ── Salary table — full schema with all columns ───────────────────────────────
+  // ── salary_details column migrations (ensure all columns exist) ───────────────
   try {
-    await storage.query(`CREATE TABLE IF NOT EXISTS salary (
-      id SERIAL PRIMARY KEY,
-      agent_id INTEGER REFERENCES fos_agents(id),
-      month TEXT,
-      year INTEGER DEFAULT ${new Date().getFullYear()},
-      present_days INTEGER DEFAULT 0,
-      payment_amount NUMERIC(12,2) DEFAULT 0,
-      incentive_amount NUMERIC(12,2) DEFAULT 0,
-      petrol_expense NUMERIC(12,2) DEFAULT 0,
-      mobile_expense NUMERIC(12,2) DEFAULT 0,
-      gross_payment NUMERIC(12,2) DEFAULT 0,
-      advance NUMERIC(12,2) DEFAULT 0,
-      other_deductions NUMERIC(12,2) DEFAULT 0,
-      net_salary NUMERIC(12,2) DEFAULT 0,
-      amount NUMERIC(12,2) DEFAULT 0,
-      created_at TIMESTAMP DEFAULT NOW()
-    )`);
-    // Migrate any existing salary table that was created with fewer columns
-    const salaryAlters = [
-      `ALTER TABLE salary ADD COLUMN IF NOT EXISTS year INTEGER DEFAULT ${new Date().getFullYear()}`,
-      `ALTER TABLE salary ADD COLUMN IF NOT EXISTS present_days INTEGER DEFAULT 0`,
-      `ALTER TABLE salary ADD COLUMN IF NOT EXISTS payment_amount NUMERIC(12,2) DEFAULT 0`,
-      `ALTER TABLE salary ADD COLUMN IF NOT EXISTS incentive_amount NUMERIC(12,2) DEFAULT 0`,
-      `ALTER TABLE salary ADD COLUMN IF NOT EXISTS petrol_expense NUMERIC(12,2) DEFAULT 0`,
-      `ALTER TABLE salary ADD COLUMN IF NOT EXISTS mobile_expense NUMERIC(12,2) DEFAULT 0`,
-      `ALTER TABLE salary ADD COLUMN IF NOT EXISTS gross_payment NUMERIC(12,2) DEFAULT 0`,
-      `ALTER TABLE salary ADD COLUMN IF NOT EXISTS advance NUMERIC(12,2) DEFAULT 0`,
-      `ALTER TABLE salary ADD COLUMN IF NOT EXISTS other_deductions NUMERIC(12,2) DEFAULT 0`,
-      `ALTER TABLE salary ADD COLUMN IF NOT EXISTS net_salary NUMERIC(12,2) DEFAULT 0`,
-      `ALTER TABLE salary ADD COLUMN IF NOT EXISTS amount NUMERIC(12,2) DEFAULT 0`,
+    const salaryDetailAlters = [
+      `ALTER TABLE salary_details ADD COLUMN IF NOT EXISTS present_days INTEGER DEFAULT 0`,
+      `ALTER TABLE salary_details ADD COLUMN IF NOT EXISTS payment_amount NUMERIC DEFAULT 0`,
+      `ALTER TABLE salary_details ADD COLUMN IF NOT EXISTS incentive_amount NUMERIC DEFAULT 0`,
+      `ALTER TABLE salary_details ADD COLUMN IF NOT EXISTS petrol_expense NUMERIC DEFAULT 0`,
+      `ALTER TABLE salary_details ADD COLUMN IF NOT EXISTS mobile_expense NUMERIC DEFAULT 0`,
+      `ALTER TABLE salary_details ADD COLUMN IF NOT EXISTS gross_payment NUMERIC DEFAULT 0`,
+      `ALTER TABLE salary_details ADD COLUMN IF NOT EXISTS advance NUMERIC DEFAULT 0`,
+      `ALTER TABLE salary_details ADD COLUMN IF NOT EXISTS other_deductions NUMERIC DEFAULT 0`,
+      `ALTER TABLE salary_details ADD COLUMN IF NOT EXISTS total NUMERIC DEFAULT 0`,
+      `ALTER TABLE salary_details ADD COLUMN IF NOT EXISTS net_salary NUMERIC DEFAULT 0`,
     ];
-    for (const sql of salaryAlters) {
+    for (const sql of salaryDetailAlters) {
       try { await storage.query(sql); } catch {}
     }
-    console.log("[DB] salary table ready ✅");
-  } catch (e: any) { console.error("[DB] salary table error:", e.message); }
+    console.log("[DB] salary_details columns ready ✅");
+  } catch (e: any) { console.error("[DB] salary_details migration:", e.message); }
 
   try {
     await storage.query(`CREATE TABLE IF NOT EXISTS call_recordings (
@@ -580,14 +571,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
     catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
-  // ── Admin: Salary — FIXED with all columns ────────────────────────────────────
+  // ── Admin: Salary — uses salary_details table ─────────────────────────────────
   app.get("/api/admin/salary", requireAdmin, async (req, res) => {
     try {
       const result = await storage.query(
-        `SELECT s.*, fa.name AS agent_name
-         FROM salary s
-         LEFT JOIN fos_agents fa ON fa.id = s.agent_id
-         ORDER BY s.year DESC, s.month DESC, fa.name`
+        `SELECT sd.*, fa.name AS agent_name
+         FROM salary_details sd
+         LEFT JOIN fos_agents fa ON fa.id = sd.agent_id
+         ORDER BY sd.year DESC, sd.month DESC, fa.name`
       );
       res.json({ salary: result.rows });
     } catch (e: any) { res.status(500).json({ message: e.message }); }
@@ -602,25 +593,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
         otherDeductions, netSalary,
       } = req.body;
       if (!agentId) return res.status(400).json({ message: "agentId is required" });
+
+      const gross = parseFloat(grossPayment ?? 0);
+      const adv   = parseFloat(advance ?? 0);
+      const other = parseFloat(otherDeductions ?? 0);
+      const net   = parseFloat(netSalary ?? (gross - adv - other).toString());
+      const total = gross - adv - other;
+
+      // Convert month name to number (e.g. "January" → 1) if needed
+      const monthNum = monthToNumber(month);
+
       await storage.query(
-        `INSERT INTO salary
+        `INSERT INTO salary_details
            (agent_id, month, year, present_days, payment_amount, incentive_amount,
             petrol_expense, mobile_expense, gross_payment, advance, other_deductions,
-            net_salary, amount)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$12)`,
+            total, net_salary)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
         [
           agentId,
-          month || "January",
+          monthNum,
           year ?? new Date().getFullYear(),
           presentDays ?? 0,
           paymentAmount ?? 0,
           incentiveAmount ?? 0,
           petrolExpense ?? 0,
           mobileExpense ?? 0,
-          grossPayment ?? 0,
-          advance ?? 0,
-          otherDeductions ?? 0,
-          netSalary ?? 0,
+          gross,
+          adv,
+          other,
+          total,
+          net,
         ]
       );
       res.json({ success: true });
@@ -629,7 +631,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.delete("/api/admin/salary/:id", requireAdmin, async (req, res) => {
     try {
-      await storage.query(`DELETE FROM salary WHERE id = $1`, [Number(req.params.id)]);
+      await storage.query(`DELETE FROM salary_details WHERE id = $1`, [Number(req.params.id)]);
       res.json({ success: true });
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
@@ -639,7 +641,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
-  // ── Admin: Attendance — FIXED with agent name join ────────────────────────────
+  // ── Admin: Attendance ─────────────────────────────────────────────────────────
   app.get("/api/admin/attendance", requireAdmin, async (req, res) => {
     try {
       const result = await storage.query(
