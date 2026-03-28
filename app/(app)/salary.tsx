@@ -8,7 +8,19 @@ import { api } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import { Platform } from "react-native";
 
-const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+const MONTH_NAMES = [
+  "January","February","March","April","May","June",
+  "July","August","September","October","November","December"
+];
+
+// Converts stored month (integer 1-12 OR string "January") to display name
+function getMonthName(month: any): string {
+  if (!month && month !== 0) return "—";
+  const n = parseInt(String(month));
+  if (!isNaN(n) && n >= 1 && n <= 12) return MONTH_NAMES[n - 1];
+  // fallback: already a string month name
+  return String(month);
+}
 
 export default function SalaryScreen() {
   const insets = useSafeAreaInsets();
@@ -31,15 +43,20 @@ export default function SalaryScreen() {
   );
 
   if (isLoading) {
-    return <View style={{ flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: Colors.background }}>
-      <ActivityIndicator color={Colors.primary} size="large" />
-    </View>;
+    return (
+      <View style={{ flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: Colors.background }}>
+        <ActivityIndicator color={Colors.primary} size="large" />
+      </View>
+    );
   }
 
   return (
     <ScrollView
       style={{ flex: 1, backgroundColor: Colors.background }}
-      contentContainerStyle={[styles.container, { paddingBottom: insets.bottom + 24, paddingTop: Platform.OS === "web" ? 67 : 0 }]}
+      contentContainerStyle={[
+        styles.container,
+        { paddingBottom: insets.bottom + 24, paddingTop: Platform.OS === "web" ? 67 : 0 },
+      ]}
     >
       {salaryList.length === 0 ? (
         <View style={styles.empty}>
@@ -56,7 +73,7 @@ export default function SalaryScreen() {
                 onPress={() => setSelectedIdx(i)}
               >
                 <Text style={[styles.monthChipText, i === selectedIdx && styles.monthChipTextActive]}>
-                  {s.month} {s.year}
+                  {getMonthName(s.month)} {s.year}
                 </Text>
               </Pressable>
             ))}
@@ -65,20 +82,54 @@ export default function SalaryScreen() {
           {selected && (
             <View style={styles.card}>
               <View style={styles.cardHeader}>
-                <Text style={styles.cardHeaderTitle}>{selected.month} {selected.year}</Text>
+                <Text style={styles.cardHeaderTitle}>
+                  {getMonthName(selected.month)} {selected.year}
+                </Text>
               </View>
-              <Row label="Salary for the month" value={`${selected.month} ${selected.year}`} />
+
+              <Row
+                label="Salary for the month"
+                value={`${getMonthName(selected.month)} ${selected.year}`}
+              />
               <Row label="Emp Name:" value={agent?.name || "—"} />
-              <Row label="Present Day:" value={String(selected.present_days)} />
-              <Row label="Payment Amount:" value={`₹${parseFloat(selected.payment_amount || 0).toFixed(2)}`} />
-              <Row label="Incentive Amount:" value={`₹${parseFloat(selected.incentive_amount || 0).toFixed(0)}`} />
-              <Row label="Petrol Expense:" value={`₹${parseFloat(selected.petrol_expense || 0).toFixed(0)}`} />
-              <Row label="Mobile Expense:" value={`₹${parseFloat(selected.mobile_expense || 0).toFixed(0)}`} />
-              <Row label="Gross Payment:" value={`₹${parseFloat(selected.gross_payment || 0).toFixed(0)}`} />
-              <Row label="Advance:" value={`₹${parseFloat(selected.advance || 0).toFixed(0)}`} />
-              <Row label="Other Deductions:" value={`₹${parseFloat(selected.other_deductions || 0).toFixed(0)}`} />
-              <Row label="Total:" value={`₹${parseFloat(selected.total || 0).toFixed(0)}`} />
-              <Row label="Net Salary:" value={`₹${parseFloat(selected.net_salary || 0).toFixed(0)}`} highlight />
+              <Row label="Present Day:" value={String(selected.present_days ?? 0)} />
+              <Row
+                label="Payment Amount:"
+                value={`₹${parseFloat(selected.payment_amount || 0).toFixed(2)}`}
+              />
+              <Row
+                label="Incentive Amount:"
+                value={`₹${parseFloat(selected.incentive_amount || 0).toFixed(0)}`}
+              />
+              <Row
+                label="Petrol Expense:"
+                value={`₹${parseFloat(selected.petrol_expense || 0).toFixed(0)}`}
+              />
+              <Row
+                label="Mobile Expense:"
+                value={`₹${parseFloat(selected.mobile_expense || 0).toFixed(0)}`}
+              />
+              <Row
+                label="Gross Payment:"
+                value={`₹${parseFloat(selected.gross_payment || 0).toFixed(0)}`}
+              />
+              <Row
+                label="Advance:"
+                value={`₹${parseFloat(selected.advance || 0).toFixed(0)}`}
+              />
+              <Row
+                label="Other Deductions:"
+                value={`₹${parseFloat(selected.other_deductions || 0).toFixed(0)}`}
+              />
+              <Row
+                label="Total:"
+                value={`₹${parseFloat(selected.total || 0).toFixed(0)}`}
+              />
+              <Row
+                label="Net Salary:"
+                value={`₹${parseFloat(selected.net_salary || 0).toFixed(0)}`}
+                highlight
+              />
             </View>
           )}
         </>
@@ -91,29 +142,59 @@ const styles = StyleSheet.create({
   container: { padding: 16, gap: 16 },
   monthPicker: { marginBottom: 4 },
   monthChip: {
-    paddingHorizontal: 16, paddingVertical: 10, borderRadius: 20,
-    backgroundColor: Colors.surface, marginRight: 8, borderWidth: 1, borderColor: Colors.border,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 20,
+    backgroundColor: Colors.surface,
+    marginRight: 8,
+    borderWidth: 1,
+    borderColor: Colors.border,
   },
   monthChipActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
   monthChipText: { fontSize: 13, fontWeight: "600", color: Colors.textSecondary },
   monthChipTextActive: { color: "#fff" },
   card: {
-    backgroundColor: Colors.surface, borderRadius: 16, overflow: "hidden",
-    shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 8, elevation: 2,
+    backgroundColor: Colors.surface,
+    borderRadius: 16,
+    overflow: "hidden",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+    elevation: 2,
   },
   cardHeader: {
-    backgroundColor: Colors.primaryDark, padding: 16,
+    backgroundColor: Colors.primaryDark,
+    padding: 16,
   },
   cardHeaderTitle: { color: "#fff", fontSize: 17, fontWeight: "700" },
-  row: { flexDirection: "row", borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: Colors.border },
+  row: {
+    flexDirection: "row",
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: Colors.border,
+  },
   rowHighlight: { backgroundColor: Colors.primary + "15" },
   rowLabel: {
-    width: "50%", fontSize: 13, fontWeight: "600", color: Colors.textSecondary,
-    padding: 14, backgroundColor: Colors.surfaceAlt,
+    width: "50%",
+    fontSize: 13,
+    fontWeight: "600",
+    color: Colors.textSecondary,
+    padding: 14,
+    backgroundColor: Colors.surfaceAlt,
   },
-  rowLabelHighlight: { backgroundColor: Colors.primary + "15", fontWeight: "700", color: Colors.primary },
+  rowLabelHighlight: {
+    backgroundColor: Colors.primary + "15",
+    fontWeight: "700",
+    color: Colors.primary,
+  },
   rowValue: { flex: 1, fontSize: 14, color: Colors.text, padding: 14, fontWeight: "500" },
   rowValueHighlight: { fontWeight: "800", color: Colors.primary, fontSize: 16 },
-  empty: { flex: 1, justifyContent: "center", alignItems: "center", gap: 12, paddingVertical: 80 },
+  empty: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    gap: 12,
+    paddingVertical: 80,
+  },
   emptyText: { fontSize: 16, color: Colors.textMuted },
 });
