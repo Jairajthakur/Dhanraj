@@ -72,7 +72,8 @@ function AddSalaryModal({ visible, agents, onClose, onSave }: any) {
       onSave();
       onClose();
     } catch (e: any) {
-      Alert.alert("Error", e.message);
+      console.error("[AddSalary] save error:", e);
+      Alert.alert("Error", e?.message || "Failed to save — check your connection");
     } finally {
       setLoading(false);
     }
@@ -101,21 +102,27 @@ function AddSalaryModal({ visible, agents, onClose, onSave }: any) {
 
           {/* Agent */}
           <Text style={styles.fieldLabel}>Select Agent</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 14 }}>
-            <View style={{ flexDirection: "row", gap: 8 }}>
-              {(agents || []).map((a: any) => (
-                <Pressable
-                  key={a.id}
-                  style={[styles.chip, agentId === String(a.id) && styles.chipActive]}
-                  onPress={() => setAgentId(String(a.id))}
-                >
-                  <Text style={[styles.chipText, agentId === String(a.id) && { color: "#fff" }]} numberOfLines={1}>
-                    {a.name}
-                  </Text>
-                </Pressable>
-              ))}
-            </View>
-          </ScrollView>
+          {(!agents || agents.length === 0) ? (
+            <Text style={{ color: Colors.danger, fontSize: 13, marginBottom: 14 }}>
+              No agents found — make sure agents are added first
+            </Text>
+          ) : (
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 14 }}>
+              <View style={{ flexDirection: "row", gap: 8 }}>
+                {agents.map((a: any) => (
+                  <Pressable
+                    key={a.id}
+                    style={[styles.chip, agentId === String(a.id) && styles.chipActive]}
+                    onPress={() => setAgentId(String(a.id))}
+                  >
+                    <Text style={[styles.chipText, agentId === String(a.id) && { color: "#fff" }]} numberOfLines={1}>
+                      {a.name}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+            </ScrollView>
+          )}
 
           {/* Month */}
           <Text style={styles.fieldLabel}>Month</Text>
@@ -273,17 +280,31 @@ export default function AdminSalaryScreen() {
   const [selectedItem, setSelectedItem] = useState<any>(null);
   const [agentFilter, setAgentFilter] = useState("All");
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["/api/admin/salary"],
     queryFn: () => api.admin.getSalary(),
-  });
-  const { data: agentsData } = useQuery({
-    queryKey: ["/api/admin/agents"],
-    queryFn: () => api.admin.getAgents(),
+    retry: 2,
   });
 
-  const salary: any[] = data?.salary || [];
-  const agents = agentsData?.agents || [];
+  const { data: agentsData, isError: agentsError } = useQuery({
+    queryKey: ["/api/admin/agents"],
+    queryFn: () => api.admin.getAgents(),
+    retry: 2,
+  });
+
+  // Debug logging in development
+  if (__DEV__ && isError) {
+    console.error("[AdminSalary] fetch error:", error);
+  }
+  if (__DEV__ && agentsError) {
+    console.error("[AdminSalary] agents fetch error:", agentsError);
+  }
+  if (__DEV__ && data) {
+    console.log("[AdminSalary] fetched records:", data?.salary?.length ?? 0);
+  }
+
+  const salary: any[] = Array.isArray(data?.salary) ? data.salary : [];
+  const agents = Array.isArray(agentsData?.agents) ? agentsData.agents : [];
 
   const agentNames = ["All", ...Array.from(new Set(salary.map((s: any) => s.agent_name).filter(Boolean))).sort()] as string[];
 
@@ -314,6 +335,19 @@ export default function AdminSalaryScreen() {
             <Text style={styles.headerSumLabel}>Records</Text>
           </View>
         </View>
+
+        {/* Error banner */}
+        {isError && (
+          <View style={styles.errorBanner}>
+            <Ionicons name="alert-circle-outline" size={14} color="#fff" />
+            <Text style={styles.errorBannerText}>
+              Failed to load salary data — check your login session
+            </Text>
+            <Pressable onPress={() => refetch()}>
+              <Text style={[styles.errorBannerText, { textDecorationLine: "underline" }]}>Retry</Text>
+            </Pressable>
+          </View>
+        )}
 
         {/* Agent filter */}
         <ScrollView horizontal showsHorizontalScrollIndicator={false}>
@@ -416,12 +450,26 @@ export default function AdminSalaryScreen() {
           isLoading ? (
             <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
               <ActivityIndicator color={Colors.primary} size="large" />
+              <Text style={{ color: Colors.textMuted, marginTop: 12, fontSize: 13 }}>
+                Loading salary records...
+              </Text>
             </View>
           ) : (
             <View style={styles.empty}>
               <Ionicons name="wallet-outline" size={52} color={Colors.textMuted} />
-              <Text style={styles.emptyTitle}>No Salary Records</Text>
-              <Text style={styles.emptyText}>Tap the button below to add one</Text>
+              <Text style={styles.emptyTitle}>
+                {isError ? "Failed to Load" : "No Salary Records"}
+              </Text>
+              <Text style={styles.emptyText}>
+                {isError
+                  ? "Could not fetch salary data — check your login session and network"
+                  : "Tap the button below to add one"}
+              </Text>
+              {isError && (
+                <Pressable style={styles.retryBtn} onPress={() => refetch()}>
+                  <Text style={styles.retryBtnText}>Retry</Text>
+                </Pressable>
+              )}
             </View>
           )
         }
@@ -471,6 +519,16 @@ const styles = StyleSheet.create({
   },
   headerSumNum: { fontSize: 14, fontWeight: "800", color: Colors.text },
   headerSumLabel: { fontSize: 10, color: Colors.textSecondary, fontWeight: "600" },
+  errorBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: Colors.danger,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  errorBannerText: { color: "#fff", fontSize: 12, fontWeight: "600", flex: 1 },
   list: { padding: 12, gap: 10 },
   count: { fontSize: 13, color: Colors.textSecondary, fontWeight: "600", marginBottom: 2 },
   salaryCard: {
@@ -645,5 +703,13 @@ const styles = StyleSheet.create({
     paddingVertical: 60,
   },
   emptyTitle: { fontSize: 16, fontWeight: "700", color: Colors.textMuted },
-  emptyText: { fontSize: 13, color: Colors.textMuted },
+  emptyText: { fontSize: 13, color: Colors.textMuted, textAlign: "center", paddingHorizontal: 32 },
+  retryBtn: {
+    marginTop: 8,
+    paddingHorizontal: 24,
+    paddingVertical: 10,
+    backgroundColor: Colors.primary,
+    borderRadius: 20,
+  },
+  retryBtnText: { color: "#fff", fontWeight: "700", fontSize: 14 },
 });
