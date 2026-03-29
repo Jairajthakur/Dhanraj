@@ -1,4 +1,3 @@
-
 import React, { useState, useMemo, useEffect } from "react";
 import {
   View,
@@ -34,52 +33,35 @@ function fmt(v: any, prefix = "") {
     return prefix + n.toLocaleString("en-IN", { maximumFractionDigits: 2 });
   return String(v);
 }
-
 function fmtDate(v: any): string {
   if (!v) return "";
   return String(v).slice(0, 10);
 }
-
 function fmtBool(v: any): string {
   if (v === true || v === "true" || v === "t") return "Yes";
   if (v === false || v === "false" || v === "f") return "No";
   return "";
 }
 
+// ── FIX: show "—" instead of hiding empty rows ────────────────────────────
 function TableRow({
-  label,
-  value,
-  phone,
-  even,
+  label, value, phone, even,
 }: {
-  label: string;
-  value?: any;
-  phone?: boolean;
-  even?: boolean;
+  label: string; value?: any; phone?: boolean; even?: boolean;
 }) {
   const display =
     value !== null && value !== undefined && value !== ""
       ? String(value)
-      : "";
-  if (!display) return null;
+      : "—";
   return (
     <View style={[detailStyles.row, even && { backgroundColor: Colors.surfaceAlt }]}>
       <View style={detailStyles.labelCell}>
         <Text style={detailStyles.labelText}>{label}</Text>
       </View>
       <View style={detailStyles.valueCell}>
-        {phone && display ? (
-          <Pressable
-            onPress={() =>
-              Linking.openURL(`tel:${display.split(",")[0].trim()}`)
-            }
-          >
-            <Text
-              style={[
-                detailStyles.valueText,
-                { color: Colors.info, textDecorationLine: "underline" },
-              ]}
-            >
+        {phone && display !== "—" ? (
+          <Pressable onPress={() => Linking.openURL(`tel:${display.split(",")[0].trim()}`)}>
+            <Text style={[detailStyles.valueText, { color: Colors.info, textDecorationLine: "underline" }]}>
               {display}
             </Text>
           </Pressable>
@@ -91,28 +73,199 @@ function TableRow({
   );
 }
 
+// ── Pre Intimation Modal ───────────────────────────────────────────────────
+function PreIntimationModal({ item, onClose }: { item: any; onClose: () => void }) {
+  const insets      = useSafeAreaInsets();
+  const [downloading, setDownloading] = useState(false);
+
+  if (!item) return null;
+
+  const today = new Date().toLocaleDateString("en-IN", {
+    day: "2-digit", month: "2-digit", year: "numeric",
+  });
+
+  const customerName   = item.customer_name   || "___________";
+  const address        = item.address         || "___________";
+  const appId          = item.app_id          || "___________";
+  const loanNo         = item.loan_no         || "___________";
+  const regNo          = item.registration_no || "___________";
+  const assetMake      = item.asset_make      || "___________";
+  const engineNo       = item.engine_no       || "___________";
+  const chassisNo      = item.chassis_no      || "___________";
+
+  // ── Download DOCX via backend ──────────────────────────────────────────
+  const handleDownload = async () => {
+    setDownloading(true);
+    try {
+      const token = await tokenStore.get();
+      const url   = new URL("/api/admin/generate-pre-intimation", getApiUrl()).toString();
+      const res   = await fetch(url, {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          customer_name:   customerName,
+          address,
+          app_id:          appId,
+          loan_no:         loanNo,
+          registration_no: regNo,
+          asset_make:      assetMake,
+          engine_no:       engineNo,
+          chassis_no:      chassisNo,
+          date:            today,
+        }),
+      });
+
+      if (!res.ok) throw new Error("Failed to generate document");
+
+      if (Platform.OS === "web") {
+        const blob = await res.blob();
+        const blobUrl = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = blobUrl;
+        a.download = `Pre_Intimation_${customerName.replace(/\s+/g, "_")}.docx`;
+        a.click();
+        URL.revokeObjectURL(blobUrl);
+      } else {
+        // For native: use expo-file-system + expo-sharing
+        const { FileSystem, Sharing } = await Promise.all([
+          import("expo-file-system"),
+          import("expo-sharing"),
+        ]).then(([fs, sh]) => ({ FileSystem: fs, Sharing: sh }));
+
+        const buffer  = await res.arrayBuffer();
+        const base64  = btoa(String.fromCharCode(...new Uint8Array(buffer)));
+        const fileUri = FileSystem.documentDirectory + `Pre_Intimation_${customerName.replace(/\s+/g, "_")}.docx`;
+        await FileSystem.writeAsStringAsync(fileUri, base64, { encoding: FileSystem.EncodingType.Base64 });
+        await Sharing.shareAsync(fileUri, { mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" });
+      }
+    } catch (e: any) {
+      Alert.alert("Error", e.message || "Could not generate document");
+    } finally {
+      setDownloading(false);
+    }
+  };
+
+  return (
+    <Modal visible={!!item} transparent={false} animationType="slide" onRequestClose={onClose}>
+      <View style={[intimStyles.screen, { paddingTop: insets.top }]}>
+
+        {/* Header */}
+        <View style={intimStyles.header}>
+          <Pressable onPress={onClose} style={{ padding: 6 }}>
+            <Ionicons name="arrow-back" size={22} color="#fff" />
+          </Pressable>
+          <Text style={intimStyles.headerTitle} numberOfLines={1}>Pre Intimation</Text>
+          <Pressable
+            style={[intimStyles.downloadBtn, downloading && { opacity: 0.6 }]}
+            onPress={handleDownload}
+            disabled={downloading}
+          >
+            {downloading
+              ? <ActivityIndicator size="small" color="#fff" />
+              : <Ionicons name="download-outline" size={18} color="#fff" />}
+            <Text style={intimStyles.downloadBtnText}>{downloading ? "Generating…" : "Download DOCX"}</Text>
+          </Pressable>
+        </View>
+
+        <ScrollView style={{ flex: 1 }} contentContainerStyle={intimStyles.letterContainer} showsVerticalScrollIndicator={false}>
+          <View style={intimStyles.letterCard}>
+
+            {/* Title */}
+            <Text style={intimStyles.letterTitle}>Pre Repossession Intimation to Police Station</Text>
+            <View style={intimStyles.divider} />
+
+            {/* Date */}
+            <Text style={intimStyles.letterDate}>Date :- {today}</Text>
+
+            {/* To block */}
+            <View style={intimStyles.toBlock}>
+              <Text style={intimStyles.letterBodyText}>To,</Text>
+              <Text style={intimStyles.letterBodyText}>The Senior Inspector,</Text>
+              <Text style={intimStyles.letterBodyText}>________________________________,</Text>
+              <Text style={intimStyles.letterBodyText}>TQ._________________ Dist. Nanded</Text>
+            </View>
+
+            {/* Subject */}
+            <View style={intimStyles.subjectBlock}>
+              <Text style={intimStyles.letterBodyText}>
+                <Text style={intimStyles.boldText}>Sub : </Text>
+                Pre intimation of repossession of the vehicle from{" "}
+                <Text style={intimStyles.boldText}>{customerName}</Text>
+              </Text>
+              <Text style={intimStyles.letterBodyText}>
+                (Borrower) residing{" "}
+                <Text style={intimStyles.boldText}>{address}</Text>
+              </Text>
+            </View>
+
+            <Text style={[intimStyles.letterBodyText, { marginBottom: 10 }]}>Respected Sir,</Text>
+
+            <Text style={[intimStyles.letterBodyText, { marginBottom: 14, lineHeight: 22 }]}>
+              The afore mentioned borrower has taken a loan from Hero Fin-Corp Limited ("Company") for the purchase of the Vehicle having the below mentioned details and further the Borrower hypothecated the said vehicle to the Company in terms of loan-cum-hypothecation agreement executed between the borrower and the Company.
+            </Text>
+
+            {/* Details table */}
+            <View style={intimStyles.detailsTable}>
+              {[
+                ["Name of the Borrower",         customerName,   true],
+                ["Address of Borrower",          address,        true],
+                ["App ID",                       appId,          true],
+                ["Loan cum Hypothecation No.",   loanNo,         true],
+                ["Date",                         today,          true],
+                ["Vehicle Registration No.",     regNo,          true],
+                ["Model Make",                   assetMake,      true],
+                ["Engine No.",                   engineNo,       true],
+                ["Chassis No.",                  chassisNo,      true],
+              ].map(([label, value, isBold], i) => (
+                <View key={String(label)} style={[intimStyles.detailRow, i % 2 === 1 && { backgroundColor: "#f8f8f8" }]}>
+                  <Text style={intimStyles.detailLabel}>{label}</Text>
+                  <Text style={intimStyles.detailColon}>:</Text>
+                  <Text style={[intimStyles.detailValue, isBold && { fontWeight: "700" }]}>{String(value)}</Text>
+                </View>
+              ))}
+            </View>
+
+            <Text style={[intimStyles.letterBodyText, { marginVertical: 14, lineHeight: 22 }]}>
+              The Borrower has committed default on the scheduled payment of the Monthly Payments and/or other charges payable on the loan obtained by the Borrower from the Company in terms of the provisions of the aforesaid loan-cum-hypothecation agreement. In spite of Company's requests and reminders, the Borrower has not remitted the outstanding dues; as a result of which the company was left with no option but to enforce the terms and conditions of the said agreement. Under the said agreement, the said Borrower has specifically authorized Company or any of its authorized persons to take charge/repossession of the vehicle, in the event he fails to pay the loan amount when due to the Company. Pursuant to our right therein we are taking steps to recover possession of the said vehicle. This communication is for your record and to prevent confusion that may arise from any complaint that the borrower may lodge with respect to the aforesaid vehicle.
+            </Text>
+
+            <Text style={intimStyles.letterBodyText}>Thanking you,</Text>
+            <Text style={intimStyles.letterBodyText}>Yours Sincerely,</Text>
+            <View style={{ height: 40 }} />
+            <Text style={[intimStyles.boldText, { marginBottom: 4 }]}>For, Hero Fin-Corp Limited</Text>
+            <View style={intimStyles.divider} />
+            <Text style={[intimStyles.letterBodyText, { textAlign: "center", fontSize: 11 }]}>
+              Hero Fincorp Ltd. Corporate Office: 09, Basant Lok, Vasant Vihar, New Delhi-110057 India
+            </Text>
+          </View>
+          <View style={{ height: insets.bottom + 24 }} />
+        </ScrollView>
+      </View>
+    </Modal>
+  );
+}
+
+// ── Status Action Bar ──────────────────────────────────────────────────────
 function StatusActionBar({
-  item,
-  tableType,
-  onUpdated,
+  item, tableType, onUpdated, onPreIntimation,
 }: {
   item: any;
   tableType: "loan" | "bkt";
   onUpdated: () => void;
+  onPreIntimation?: (item: any) => void;
 }) {
   const [loading, setLoading] = useState<string | null>(null);
 
-  const handleStatus = async (
-    status: "Paid" | "Unpaid",
-    rollback_yn?: boolean
-  ) => {
+  const handleStatus = async (status: "Paid" | "Unpaid", rollback_yn?: boolean) => {
     const key = status + (rollback_yn !== undefined ? "_rb" : "");
     setLoading(key);
     try {
       await api.admin.updateCaseStatus(item.id, {
-        status,
-        rollback_yn: rollback_yn ?? null,
-        table: tableType,
+        status, rollback_yn: rollback_yn ?? null, table: tableType,
       });
       onUpdated();
     } catch (e: any) {
@@ -127,44 +280,27 @@ function StatusActionBar({
 
   return (
     <View style={actionStyles.bar}>
+      {/* Mark Paid */}
       <Pressable
-        style={[
-          actionStyles.btn,
-          isPaid ? actionStyles.btnActivePaid : actionStyles.btnInactive,
-          loading === "Paid" && { opacity: 0.6 },
-        ]}
+        style={[actionStyles.btn, isPaid ? actionStyles.btnActivePaid : actionStyles.btnInactive, loading === "Paid" && { opacity: 0.6 }]}
         onPress={() => handleStatus(isPaid ? "Unpaid" : "Paid")}
         disabled={!!loading}
       >
-        {loading === "Paid" ? (
-          <ActivityIndicator size="small" color="#fff" />
-        ) : (
+        {loading === "Paid" ? <ActivityIndicator size="small" color="#fff" /> : (
           <>
-            <Ionicons
-              name={isPaid ? "checkmark-circle" : "checkmark-circle-outline"}
-              size={15}
-              color={isPaid ? "#fff" : Colors.success}
-            />
-            <Text style={[actionStyles.btnText, isPaid && { color: "#fff" }]}>
-              {isPaid ? "Paid ✓" : "Mark Paid"}
-            </Text>
+            <Ionicons name={isPaid ? "checkmark-circle" : "checkmark-circle-outline"} size={15} color={isPaid ? "#fff" : Colors.success} />
+            <Text style={[actionStyles.btnText, isPaid && { color: "#fff" }]}>{isPaid ? "Paid ✓" : "Mark Paid"}</Text>
           </>
         )}
       </Pressable>
 
       {isPaid && (
         <Pressable
-          style={[
-            actionStyles.btn,
-            actionStyles.btnUnpaid,
-            loading === "Unpaid" && { opacity: 0.6 },
-          ]}
+          style={[actionStyles.btn, actionStyles.btnUnpaid, loading === "Unpaid" && { opacity: 0.6 }]}
           onPress={() => handleStatus("Unpaid")}
           disabled={!!loading}
         >
-          {loading === "Unpaid" ? (
-            <ActivityIndicator size="small" color="#fff" />
-          ) : (
+          {loading === "Unpaid" ? <ActivityIndicator size="small" color="#fff" /> : (
             <>
               <Ionicons name="close-circle-outline" size={15} color="#fff" />
               <Text style={[actionStyles.btnText, { color: "#fff" }]}>Unpaid</Text>
@@ -173,58 +309,53 @@ function StatusActionBar({
         </Pressable>
       )}
 
+      {/* Rollback */}
       <Pressable
-        style={[
-          actionStyles.btn,
-          isRollback ? actionStyles.btnActiveRollback : actionStyles.btnInactive,
-          loading === "Paid_rb" && { opacity: 0.6 },
-        ]}
+        style={[actionStyles.btn, isRollback ? actionStyles.btnActiveRollback : actionStyles.btnInactive, loading === "Paid_rb" && { opacity: 0.6 }]}
         onPress={() => handleStatus(isPaid ? "Paid" : "Unpaid", !isRollback)}
         disabled={!!loading}
       >
-        {loading === "Paid_rb" ? (
-          <ActivityIndicator size="small" color="#fff" />
-        ) : (
+        {loading === "Paid_rb" ? <ActivityIndicator size="small" color="#fff" /> : (
           <>
-            <Ionicons
-              name={isRollback ? "refresh-circle" : "refresh-circle-outline"}
-              size={15}
-              color={isRollback ? "#fff" : Colors.info}
-            />
-            <Text style={[actionStyles.btnText, isRollback && { color: "#fff" }]}>
-              {isRollback ? "Rollback ✓" : "Rollback"}
-            </Text>
+            <Ionicons name={isRollback ? "refresh-circle" : "refresh-circle-outline"} size={15} color={isRollback ? "#fff" : Colors.info} />
+            <Text style={[actionStyles.btnText, isRollback && { color: "#fff" }]}>{isRollback ? "Rollback ✓" : "Rollback"}</Text>
           </>
         )}
       </Pressable>
+
+      {/* Pre Intimation */}
+      {onPreIntimation && (
+        <Pressable
+          style={[actionStyles.btn, actionStyles.btnPreIntimation]}
+          onPress={() => onPreIntimation(item)}
+          disabled={!!loading}
+        >
+          <Ionicons name="notifications-outline" size={15} color="#f59e0b" />
+          <Text style={[actionStyles.btnText, { color: "#f59e0b" }]}>Pre Intimation</Text>
+        </Pressable>
+      )}
     </View>
   );
 }
 
+// ── Case Detail Modal ──────────────────────────────────────────────────────
 function CaseDetailModal({
-  item,
-  tableType,
-  onClose,
-  onResetCase,
-  onStatusUpdated,
+  item, tableType, onClose, onResetCase, onStatusUpdated, onPreIntimation,
 }: {
   item: any;
   tableType: "loan" | "bkt";
   onClose: () => void;
   onResetCase: (id: number) => void;
   onStatusUpdated: () => Promise<void>;
+  onPreIntimation: (item: any) => void;
 }) {
   const insets = useSafeAreaInsets();
   const [resetting, setResetting] = useState(false);
   const [localItem, setLocalItem] = useState(item);
 
-  useEffect(() => {
-    if (item) setLocalItem(item);
-  }, [item]);
+  useEffect(() => { if (item) setLocalItem(item); }, [item]);
 
-  const statusColor = localItem
-    ? STATUS_COLORS[localItem.status] || Colors.primary
-    : Colors.primary;
+  const statusColor = localItem ? STATUS_COLORS[localItem.status] || Colors.primary : Colors.primary;
 
   const rows = localItem ? [
     { section: "Feedback" },
@@ -239,8 +370,7 @@ function CaseDetailModal({
       ? [
           { label: "Third Party Name",   value: localItem.third_party_name },
           { label: "Third Party Number", value: localItem.third_party_number, phone: true },
-        ]
-      : []),
+        ] : []),
     { label: "Projection",        value: localItem.projection },
     { label: "Non Starter",       value: fmtBool(localItem.non_starter) },
     { label: "KYC Purchase",      value: fmtBool(localItem.kyc_purchase) },
@@ -300,16 +430,11 @@ function CaseDetailModal({
       [
         { text: "Cancel", style: "cancel" },
         {
-          text: "Reset",
-          style: "destructive",
+          text: "Reset", style: "destructive",
           onPress: async () => {
             setResetting(true);
-            try {
-              await onResetCase(localItem.id);
-              onClose();
-            } finally {
-              setResetting(false);
-            }
+            try { await onResetCase(localItem.id); onClose(); }
+            finally { setResetting(false); }
           },
         },
       ]
@@ -317,12 +442,7 @@ function CaseDetailModal({
   };
 
   return (
-    <Modal
-      visible={!!item}
-      transparent={false}
-      animationType="slide"
-      onRequestClose={onClose}
-    >
+    <Modal visible={!!item} transparent={false} animationType="slide" onRequestClose={onClose}>
       <View style={[detailStyles.screen, { paddingTop: insets.top }]}>
         {localItem && (
           <>
@@ -330,13 +450,9 @@ function CaseDetailModal({
               <Pressable onPress={onClose} style={detailStyles.backBtn}>
                 <Ionicons name="arrow-back" size={22} color="#fff" />
               </Pressable>
-              <Text style={detailStyles.headerTitle} numberOfLines={1}>
-                {localItem.customer_name}
-              </Text>
+              <Text style={detailStyles.headerTitle} numberOfLines={1}>{localItem.customer_name}</Text>
               <View style={detailStyles.statusPill}>
-                <Text style={[detailStyles.statusPillText, { color: statusColor }]}>
-                  {localItem.status}
-                </Text>
+                <Text style={[detailStyles.statusPillText, { color: statusColor }]}>{localItem.status}</Text>
               </View>
             </View>
 
@@ -345,6 +461,7 @@ function CaseDetailModal({
                 item={localItem}
                 tableType={tableType}
                 onUpdated={() => { onStatusUpdated(); }}
+                onPreIntimation={onPreIntimation}
               />
             </View>
 
@@ -354,11 +471,9 @@ function CaseDetailModal({
                 onPress={handleResetCase}
                 disabled={resetting}
               >
-                {resetting ? (
-                  <ActivityIndicator size="small" color={Colors.danger} />
-                ) : (
-                  <Ionicons name="refresh" size={16} color={Colors.danger} />
-                )}
+                {resetting
+                  ? <ActivityIndicator size="small" color={Colors.danger} />
+                  : <Ionicons name="refresh" size={16} color={Colors.danger} />}
                 <Text style={detailStyles.resetCaseBtnText}>
                   {resetting ? "Resetting..." : "Reset Feedback — Allow FOS to re-submit"}
                 </Text>
@@ -398,23 +513,23 @@ function CaseDetailModal({
   );
 }
 
+// ── Main Screen ────────────────────────────────────────────────────────────
 export default function AllCasesScreen() {
   const insets = useSafeAreaInsets();
   const qc = useQueryClient();
-  const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState("All");
-  const [selectedCase, setSelectedCase] = useState<any>(null);
-  const [selectedTableType] = useState<"loan" | "bkt">("loan");
+  const [search, setSearch]               = useState("");
+  const [statusFilter, setStatusFilter]   = useState("All");
+  const [selectedCase, setSelectedCase]   = useState<any>(null);
+  const [intimationCase, setIntimationCase] = useState<any>(null);  // ← Pre Intimation
+  const [selectedTableType]               = useState<"loan" | "bkt">("loan");
   const [resettingAgent, setResettingAgent] = useState<number | null>(null);
   const [agentCasesModal, setAgentCasesModal] = useState<{
-    agentId: number;
-    agentName: string;
-    cases: any[];
+    agentId: number; agentName: string; cases: any[];
   } | null>(null);
   const [resettingCaseId, setResettingCaseId] = useState<number | null>(null);
 
   const tableType = "loan";
-  const queryKey = ["/api/admin/cases"];
+  const queryKey  = ["/api/admin/cases"];
 
   const { data, isLoading } = useQuery({
     queryKey,
@@ -478,16 +593,14 @@ export default function AllCasesScreen() {
       [
         { text: "Cancel", style: "cancel" },
         {
-          text: "Reset All",
-          style: "destructive",
+          text: "Reset All", style: "destructive",
           onPress: async () => {
             setResettingAgent(agentId);
             try {
               const token = await tokenStore.get();
               const url = new URL(`/api/admin/reset-feedback/agent/${agentId}`, getApiUrl()).toString();
               const res = await fetch(url, {
-                method: "POST",
-                credentials: "include",
+                method: "POST", credentials: "include",
                 headers: token ? { Authorization: `Bearer ${token}` } : {},
               });
               const json: any = await res.json();
@@ -510,8 +623,7 @@ export default function AllCasesScreen() {
       const token = await tokenStore.get();
       const url = new URL(`/api/admin/reset-feedback/case/${caseId}`, getApiUrl()).toString();
       const res = await fetch(url, {
-        method: "POST",
-        credentials: "include",
+        method: "POST", credentials: "include",
         headers: {
           "Content-Type": "application/json",
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -528,7 +640,6 @@ export default function AllCasesScreen() {
   };
 
   const FILTERS = ["All", "Unpaid", "PTP", "Paid"];
-
   const paidCount   = (data?.cases || []).filter((c: any) => c.status === "Paid").length;
   const unpaidCount = (data?.cases || []).filter((c: any) => c.status !== "Paid" && c.status !== "PTP").length;
   const ptpCount    = (data?.cases || []).filter((c: any) => c.status === "PTP").length;
@@ -536,7 +647,6 @@ export default function AllCasesScreen() {
   return (
     <View style={{ flex: 1, backgroundColor: Colors.background }}>
       <View style={[styles.filterBar, { paddingTop: Platform.OS === "web" ? 67 : 12 }]}>
-
         <View style={styles.summaryRow}>
           <View style={[styles.summaryChip, { backgroundColor: Colors.success + "18" }]}>
             <Text style={[styles.summaryChipText, { color: Colors.success }]}>✓ {paidCount} Paid</Text>
@@ -571,13 +681,10 @@ export default function AllCasesScreen() {
             {FILTERS.map((f) => (
               <Pressable
                 key={f}
-                style={[
-                  styles.filterChip,
-                  statusFilter === f && {
-                    backgroundColor: f === "All" ? Colors.primary : STATUS_COLORS[f],
-                    borderColor: "transparent",
-                  },
-                ]}
+                style={[styles.filterChip, statusFilter === f && {
+                  backgroundColor: f === "All" ? Colors.primary : STATUS_COLORS[f],
+                  borderColor: "transparent",
+                }]}
                 onPress={() => setStatusFilter(f)}
               >
                 <Text style={[styles.filterChipText, statusFilter === f && { color: "#fff" }]}>{f}</Text>
@@ -625,14 +732,9 @@ export default function AllCasesScreen() {
                           onPress={(e) => { e.stopPropagation?.(); handleResetAgentFeedback(ag.agentId, ag.agentName); }}
                           disabled={resettingAgent === ag.agentId}
                         >
-                          {resettingAgent === ag.agentId ? (
-                            <ActivityIndicator size="small" color="#fff" />
-                          ) : (
-                            <>
-                              <Ionicons name="refresh" size={13} color="#fff" />
-                              <Text style={styles.resetBtnText}>Reset All</Text>
-                            </>
-                          )}
+                          {resettingAgent === ag.agentId
+                            ? <ActivityIndicator size="small" color="#fff" />
+                            : (<><Ionicons name="refresh" size={13} color="#fff" /><Text style={styles.resetBtnText}>Reset All</Text></>)}
                         </Pressable>
                       ) : (
                         <View style={styles.noFeedbackBadge}>
@@ -700,13 +802,15 @@ export default function AllCasesScreen() {
                 </View>
               ) : null}
 
-              <StatusActionBar item={item} tableType="loan" onUpdated={invalidateAll} />
+              <StatusActionBar
+                item={item}
+                tableType="loan"
+                onUpdated={invalidateAll}
+                onPreIntimation={setIntimationCase}
+              />
 
               <View style={styles.cardActions}>
-                <Pressable
-                  style={styles.viewDetail}
-                  onPress={() => setSelectedCase(item)}
-                >
+                <Pressable style={styles.viewDetail} onPress={() => setSelectedCase(item)}>
                   <Ionicons name="eye-outline" size={14} color={Colors.primary} />
                   <Text style={styles.viewDetailText}>View Details</Text>
                 </Pressable>
@@ -722,14 +826,23 @@ export default function AllCasesScreen() {
         />
       )}
 
+      {/* Case Detail Modal */}
       <CaseDetailModal
         item={selectedCase}
         tableType={selectedTableType}
         onClose={() => setSelectedCase(null)}
         onResetCase={handleResetCase}
         onStatusUpdated={invalidateAndSyncSelected}
+        onPreIntimation={setIntimationCase}
       />
 
+      {/* Pre Intimation Modal */}
+      <PreIntimationModal
+        item={intimationCase}
+        onClose={() => setIntimationCase(null)}
+      />
+
+      {/* Agent Cases Modal */}
       {agentCasesModal && (
         <Modal
           visible={true}
@@ -751,11 +864,9 @@ export default function AllCasesScreen() {
                 onPress={() => handleResetAgentFeedback(agentCasesModal.agentId, agentCasesModal.agentName)}
                 disabled={resettingAgent === agentCasesModal.agentId}
               >
-                {resettingAgent === agentCasesModal.agentId ? (
-                  <ActivityIndicator size="small" color="#fff" />
-                ) : (
-                  <Text style={agentModalStyles.resetAllBtnText}>Reset All</Text>
-                )}
+                {resettingAgent === agentCasesModal.agentId
+                  ? <ActivityIndicator size="small" color="#fff" />
+                  : <Text style={agentModalStyles.resetAllBtnText}>Reset All</Text>}
               </Pressable>
             </View>
 
@@ -785,6 +896,7 @@ export default function AllCasesScreen() {
                         item={item}
                         tableType="loan"
                         onUpdated={() => { invalidateAll(); setAgentCasesModal((prev) => prev ? { ...prev } : null); }}
+                        onPreIntimation={setIntimationCase}
                       />
                     </View>
                     {hasFeedback ? (
@@ -795,8 +907,7 @@ export default function AllCasesScreen() {
                           Alert.alert("Reset Feedback", `Reset feedback for ${item.customer_name}?`, [
                             { text: "Cancel", style: "cancel" },
                             {
-                              text: "Reset",
-                              style: "destructive",
+                              text: "Reset", style: "destructive",
                               onPress: async () => {
                                 setResettingCaseId(item.id);
                                 try {
@@ -807,21 +918,15 @@ export default function AllCasesScreen() {
                                       : null
                                   );
                                 } finally {
-                                  setResettingCaseId(null);
-                                }
+                                  setResettingCaseId(null); }
                               },
                             },
                           ]);
                         }}
                       >
-                        {resettingCaseId === item.id ? (
-                          <ActivityIndicator size="small" color="#fff" />
-                        ) : (
-                          <>
-                            <Ionicons name="refresh" size={13} color="#fff" />
-                            <Text style={agentModalStyles.resetCaseBtnText}>Reset</Text>
-                          </>
-                        )}
+                        {resettingCaseId === item.id
+                          ? <ActivityIndicator size="small" color="#fff" />
+                          : (<><Ionicons name="refresh" size={13} color="#fff" /><Text style={agentModalStyles.resetCaseBtnText}>Reset</Text></>)}
                       </Pressable>
                     ) : (
                       <View style={agentModalStyles.noFeedbackTag}>
@@ -844,6 +949,7 @@ export default function AllCasesScreen() {
   );
 }
 
+// ── Styles ──────────────────────────────────────────────────────────────────
 const actionStyles = StyleSheet.create({
   bar:               { flexDirection: "row", gap: 6, marginTop: 4, flexWrap: "wrap" },
   btn:               { flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 10, paddingVertical: 7, borderRadius: 8, borderWidth: 1, borderColor: Colors.border },
@@ -852,15 +958,11 @@ const actionStyles = StyleSheet.create({
   btnActivePaid:     { backgroundColor: Colors.success, borderColor: Colors.success },
   btnUnpaid:         { backgroundColor: Colors.danger, borderColor: Colors.danger },
   btnActiveRollback: { backgroundColor: Colors.info, borderColor: Colors.info },
+  btnPreIntimation:  { backgroundColor: "#fff7ed", borderColor: "#f59e0b" },
 });
 
 const styles = StyleSheet.create({
   filterBar:           { backgroundColor: Colors.surface, padding: 12, gap: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: Colors.border },
-  tableSwitcher:       { flexDirection: "row", backgroundColor: Colors.surfaceAlt, borderRadius: 10, padding: 3 },
-  switchBtn:           { flex: 1, paddingVertical: 8, alignItems: "center", borderRadius: 8 },
-  switchBtnActive:     { backgroundColor: Colors.primary },
-  switchBtnText:       { fontSize: 13, fontWeight: "700", color: Colors.textSecondary },
-  switchBtnTextActive: { color: "#fff" },
   summaryRow:          { flexDirection: "row", gap: 8 },
   summaryChip:         { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8 },
   summaryChipText:     { fontSize: 12, fontWeight: "700" },
@@ -906,22 +1008,22 @@ const styles = StyleSheet.create({
 });
 
 const agentModalStyles = StyleSheet.create({
-  header:           { flexDirection: "row", alignItems: "center", gap: 12, padding: 16, backgroundColor: Colors.surface, borderBottomWidth: 1, borderBottomColor: Colors.border, paddingTop: 52 },
-  headerTitle:      { fontSize: 16, fontWeight: "700", color: Colors.text },
-  headerSub:        { fontSize: 11, color: Colors.textSecondary, marginTop: 2 },
-  resetAllBtn:      { backgroundColor: Colors.danger, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8 },
-  resetAllBtnText:  { fontSize: 12, fontWeight: "700", color: "#fff" },
-  caseRow:          { flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: Colors.surface, borderRadius: 12, padding: 14, borderWidth: 1, borderColor: Colors.border },
-  caseInfo:         { flex: 1 },
-  caseName:         { fontSize: 13, fontWeight: "700", color: Colors.text, textTransform: "uppercase", flex: 1 },
-  caseLoan:         { fontSize: 11, color: Colors.textSecondary, marginBottom: 2 },
-  caseFeedback:     { fontSize: 11, color: Colors.accent, fontStyle: "italic", marginBottom: 4 },
-  statusBadge:      { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10 },
-  statusText:       { fontSize: 10, fontWeight: "700" },
-  resetCaseBtn:     { flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: Colors.danger, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, minWidth: 70, justifyContent: "center", alignSelf: "flex-start" },
-  resetCaseBtnText: { fontSize: 12, fontWeight: "700", color: "#fff" },
-  noFeedbackTag:    { backgroundColor: Colors.surfaceAlt, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, alignSelf: "flex-start" },
-  noFeedbackTagText:{ fontSize: 11, color: Colors.textMuted, fontWeight: "600" },
+  header:            { flexDirection: "row", alignItems: "center", gap: 12, padding: 16, backgroundColor: Colors.surface, borderBottomWidth: 1, borderBottomColor: Colors.border, paddingTop: 52 },
+  headerTitle:       { fontSize: 16, fontWeight: "700", color: Colors.text },
+  headerSub:         { fontSize: 11, color: Colors.textSecondary, marginTop: 2 },
+  resetAllBtn:       { backgroundColor: Colors.danger, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8 },
+  resetAllBtnText:   { fontSize: 12, fontWeight: "700", color: "#fff" },
+  caseRow:           { flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: Colors.surface, borderRadius: 12, padding: 14, borderWidth: 1, borderColor: Colors.border },
+  caseInfo:          { flex: 1 },
+  caseName:          { fontSize: 13, fontWeight: "700", color: Colors.text, textTransform: "uppercase", flex: 1 },
+  caseLoan:          { fontSize: 11, color: Colors.textSecondary, marginBottom: 2 },
+  caseFeedback:      { fontSize: 11, color: Colors.accent, fontStyle: "italic", marginBottom: 4 },
+  statusBadge:       { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10 },
+  statusText:        { fontSize: 10, fontWeight: "700" },
+  resetCaseBtn:      { flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: Colors.danger, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, minWidth: 70, justifyContent: "center", alignSelf: "flex-start" },
+  resetCaseBtnText:  { fontSize: 12, fontWeight: "700", color: "#fff" },
+  noFeedbackTag:     { backgroundColor: Colors.surfaceAlt, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, alignSelf: "flex-start" },
+  noFeedbackTagText: { fontSize: 11, color: Colors.textMuted, fontWeight: "600" },
 });
 
 const detailStyles = StyleSheet.create({
@@ -942,4 +1044,26 @@ const detailStyles = StyleSheet.create({
   labelText:         { fontSize: 13, fontWeight: "700", color: Colors.primary },
   valueCell:         { flex: 1, padding: 12, justifyContent: "center" },
   valueText:         { fontSize: 13, color: Colors.text, fontWeight: "400" },
+});
+
+const intimStyles = StyleSheet.create({
+  screen:          { flex: 1, backgroundColor: Colors.background },
+  header:          { flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 12, paddingVertical: 12, backgroundColor: "#92400e" },
+  headerTitle:     { flex: 1, fontSize: 16, fontWeight: "700", color: "#fff" },
+  downloadBtn:     { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: "rgba(255,255,255,0.2)", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 7 },
+  downloadBtnText: { fontSize: 12, fontWeight: "700", color: "#fff" },
+  letterContainer: { padding: 16 },
+  letterCard:      { backgroundColor: "#fff", borderRadius: 12, padding: 20, shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.08, shadowRadius: 8, elevation: 3 },
+  letterTitle:     { fontSize: 16, fontWeight: "800", color: "#1a1a1a", textAlign: "center", marginBottom: 8 },
+  divider:         { height: 1, backgroundColor: "#e0e0e0", marginBottom: 14 },
+  letterDate:      { fontSize: 13, fontWeight: "700", color: "#1a1a1a", marginBottom: 16 },
+  toBlock:         { marginBottom: 14, paddingLeft: 16 },
+  subjectBlock:    { marginBottom: 14 },
+  letterBodyText:  { fontSize: 13, color: "#333", lineHeight: 20, marginBottom: 4 },
+  boldText:        { fontWeight: "700", color: "#1a1a1a" },
+  detailsTable:    { borderWidth: 1, borderColor: "#ddd", borderRadius: 8, overflow: "hidden", marginVertical: 8 },
+  detailRow:       { flexDirection: "row", paddingHorizontal: 12, paddingVertical: 8, backgroundColor: "#fff", borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "#e5e5e5" },
+  detailLabel:     { width: "40%", fontSize: 12, color: "#555", fontWeight: "600" },
+  detailColon:     { width: 16, fontSize: 12, color: "#555", textAlign: "center" },
+  detailValue:     { flex: 1, fontSize: 12, color: "#1a1a1a" },
 });
