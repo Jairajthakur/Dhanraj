@@ -396,7 +396,7 @@ function PostIntimationModal({ item, onClose }: { item: any; onClose: () => void
         }
 const base64 = btoa(binary);
         const fileUri = FileSystem.documentDirectory + fileName;
-        await FileSystem.writeAsStringAsync(fileUri, base64, { encoding: FileSystem.EncodingType.Base64 });
+        await FileSystem.writeAsStringAsync(fileUri, base64, { encoding: "base64" });
         await Sharing.shareAsync(fileUri, { mimeType });
       }
     } catch (e: any) {
