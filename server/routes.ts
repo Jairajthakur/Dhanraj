@@ -541,21 +541,18 @@ async function buildIntimationDocx(
   const children: any[] = [];
  
   // ── Logo (top-right) ───────────────────────────────────────────────────────
-  if (logoData) {
-    children.push(
-      new Paragraph({
-        alignment: AlignmentType.RIGHT,
-        spacing: { before: 0, after: 60 },
-        children: [
-          new ImageRun({
-            data: logoData,
-            transformation: { width: 120, height: 70 },
-            type: "png",
-          }),
-        ],
-      })
-    );
+ // ── Logo top-right ─────────────────────────────────────────────────────────
+if (logoData) {
+  try {
+    children.push(new Paragraph({
+      alignment: AlignmentType.RIGHT,
+      spacing: { before: 0, after: 80 },
+      children: [new ImageRun({ data: logoData, transformation: { width: 120, height: 65 }, type: "png" })],
+    }));
+  } catch (imgErr: any) {
+    console.warn("[docx] Logo skipped — ImageRun error:", imgErr?.message ?? imgErr);
   }
+}
  
   // ── Title ──────────────────────────────────────────────────────────────────
   children.push(
@@ -2201,8 +2198,7 @@ async function buildIntimationDocx(
   } = require("docx");
   const fsNode = require("fs");
 
-  const logoData: Buffer | null = fsNode.existsSync(logoPath) ? fsNode.readFileSync(logoPath) : null;
-
+const logoData: Uint8Array | null = fsNode.existsSync(logoPath) ? new Uint8Array(fsNode.readFileSync(logoPath)) : null;
   const body11 = { size: 22, font: "Arial" };
   const body10 = { size: 20, font: "Arial" };
   const sp     = (n: number) => ({ before: n, after: n });
