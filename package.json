@@ -48,6 +48,8 @@
     "expo-image-picker": "~17.0.9",
     "expo-linear-gradient": "~15.0.8",
     "tesseract.js": "^5.0.0",
+    "pdfkit": "^0.15.x",
+    "docx": "^9.x.x",
     "expo-linking": "~8.0.10",
     "expo-location": "~19.0.8",
     "expo-router": "~6.0.17",
