@@ -325,6 +325,369 @@ async function safeDeleteAgent(agentId: number, context: string): Promise<void> 
   }
 }
 
+function buildIntimationParams(body: Record<string, any>, isPost = false) {
+  const today = new Date().toLocaleDateString("en-IN", {
+    day: "2-digit", month: "2-digit", year: "numeric",
+  });
+  return {
+    customer_name:   body.customer_name   || "___________",
+    address:         body.address         || "___________",
+    app_id:          body.app_id          || "___________",
+    loan_no:         body.loan_no         || "___________",
+    registration_no: body.registration_no || "___________",
+    asset_make:      body.asset_make      || "___________",
+    engine_no:       body.engine_no       || "___________",
+    chassis_no:      body.chassis_no      || "___________",
+    date:            body.date            || today,
+    police_station:  body.police_station  || "________________________________",
+    tq:              body.tq              || "_____________",
+    // post-only fields
+    repossession_date:    body.repossession_date    || body.date || today,
+    repossession_address: body.repossession_address || body.address || "___________",
+    reference_no:         body.reference_no         || body.loan_no || "___________",
+  };
+}
+ 
+// ─── HTML builders ────────────────────────────────────────────────────────────
+function buildPreIntimationHtml(p: ReturnType<typeof buildIntimationParams>): string {
+  return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: Arial, sans-serif; font-size: 13px; color: #000; padding: 40px 50px; line-height: 1.6; }
+    .title { text-align: center; font-size: 16px; font-weight: bold; margin-bottom: 6px; }
+    .divider { border: none; border-top: 1px solid #ccc; margin: 10px 0; }
+    .date { font-weight: bold; margin-bottom: 16px; }
+    .to-block { margin-left: 24px; margin-bottom: 14px; }
+    .to-block p { margin-bottom: 2px; }
+    .subject { margin-bottom: 14px; }
+    .body-text { margin-bottom: 10px; text-align: justify; }
+    .details-table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 12px; }
+    .details-table tr:nth-child(even) { background-color: #f8f8f8; }
+    .details-table td { padding: 6px 10px; border: 1px solid #ddd; }
+    .details-table td:first-child { width: 45%; color: #333; }
+    .details-table td:last-child { font-weight: bold; }
+    .footer { margin-top: 20px; text-align: center; font-size: 11px; border-top: 1px solid #ccc; padding-top: 8px; font-weight: bold; }
+    .signature { margin-top: 40px; }
+  </style>
+</head>
+<body>
+  <p class="title">Pre Repossession Intimation to Police Station</p>
+  <hr class="divider">
+  <p class="date">Date :- ${p.date}</p>
+  <div class="to-block">
+    <p>To,</p>
+    <p>The Senior Inspector,</p>
+    <p><strong>${p.police_station},</strong></p>
+    <p>TQ. ${p.tq}&nbsp;&nbsp;&nbsp;Dist. Nanded</p>
+  </div>
+  <div class="subject">
+    <p><strong>Sub :</strong> Pre intimation of repossession of the vehicle from <strong>${p.customer_name}</strong></p>
+    <p>(Borrower) residing <strong>${p.address}</strong></p>
+  </div>
+  <p class="body-text"><strong>Respected Sir,</strong></p>
+  <p class="body-text">The afore mentioned borrower has taken a loan from Hero Fin-Corp Limited ("Company") for the purchase of the Vehicle having the below mentioned details and further the Borrower hypothecated the said vehicle to the Company in terms of loan-cum-hypothecation agreement executed between the borrower and the Company.</p>
+  <table class="details-table">
+    <tr><td>Name of the Borrower</td><td>${p.customer_name}</td></tr>
+    <tr><td>Address of Borrower</td><td>${p.address}</td></tr>
+    <tr><td>App ID</td><td>${p.app_id}</td></tr>
+    <tr><td>Loan cum Hypothecation Agreement No.</td><td>${p.loan_no}</td></tr>
+    <tr><td>Date</td><td>${p.date}</td></tr>
+    <tr><td>Vehicle Registration No.</td><td>${p.registration_no}</td></tr>
+    <tr><td>Model Make</td><td>${p.asset_make}</td></tr>
+    <tr><td>Engine No.</td><td>${p.engine_no}</td></tr>
+    <tr><td>Chassis No.</td><td>${p.chassis_no}</td></tr>
+  </table>
+  <p class="body-text">The Borrower has committed default on the scheduled payment of the Monthly Payments and/or other charges payable on the loan obtained by the Borrower from the Company in terms of the provisions of the aforesaid loan-cum-hypothecation agreement. In spite of Company's requests and reminders, the Borrower has not remitted the outstanding dues; as a result of which the company was left with no option but to enforce the terms and conditions of the said agreement. Under the said agreement, the said Borrower has specifically authorized Company or any of its authorized persons to take charge/repossession of the vehicle, in the event he fails to pay the loan amount when due to the Company. Pursuant to our right therein we are taking steps to recover possession of the said vehicle. This communication is for your record and to prevent confusion that may arise from any complaint that the borrower may lodge with respect to the aforesaid vehicle.</p>
+  <p class="body-text">Thanking you,</p>
+  <p class="body-text">Yours Sincerely,</p>
+  <div class="signature"><p><strong>For, Hero Fin-Corp Limited</strong></p></div>
+  <div class="footer">Hero Fincorp Ltd. Corporate Office: 09, Basant Lok, Vasant Vihar, New Delhi-110057 India</div>
+</body>
+</html>`;
+}
+ 
+function buildPostIntimationHtml(p: ReturnType<typeof buildIntimationParams>): string {
+  return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: Arial, sans-serif; font-size: 13px; color: #000; padding: 40px 50px; line-height: 1.6; }
+    .title { text-align: center; font-size: 16px; font-weight: bold; text-decoration: underline; margin-bottom: 6px; }
+    .divider { border: none; border-top: 1px solid #ccc; margin: 10px 0; }
+    .date { font-weight: bold; margin-bottom: 16px; }
+    .to-block { margin-left: 24px; margin-bottom: 14px; }
+    .to-block p { margin-bottom: 2px; }
+    .subject { margin-bottom: 14px; }
+    .body-text { margin-bottom: 10px; text-align: justify; }
+    .details-table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 12px; }
+    .details-table tr:nth-child(even) { background-color: #f8f8f8; }
+    .details-table td { padding: 6px 10px; border: 1px solid #ddd; }
+    .details-table td:first-child { width: 45%; color: #333; }
+    .details-table td:last-child { font-weight: bold; }
+    .footer { margin-top: 20px; text-align: center; font-size: 11px; border-top: 1px solid #ccc; padding-top: 8px; font-weight: bold; }
+    .signature { margin-top: 40px; }
+  </style>
+</head>
+<body>
+  <p class="title">Post Repossession Intimation to Police Station</p>
+  <hr class="divider">
+  <p class="date">Date: ${p.date}</p>
+  <div class="to-block">
+    <p>To,</p>
+    <p>The Senior Inspector,</p>
+    <p><strong>${p.police_station},</strong></p>
+    <p>TQ. ${p.tq}&nbsp;&nbsp;&nbsp;Dist. Nanded</p>
+  </div>
+  <div class="subject">
+    <p><strong>Sub :</strong> Intimation after repossession of the vehicle No <strong>${p.registration_no}</strong> From Mr. <strong>${p.customer_name}</strong></p>
+    <p>(Borrower) residing <strong>${p.address}</strong></p>
+  </div>
+  <p class="body-text"><strong>Respected Sir,</strong></p>
+  <p class="body-text">This is in furtherance to our letter dated bearing reference number <strong>${p.reference_no}</strong> whereby it was intimated to you that despite our repeated requests, reminders and personal visits the above said borrower has defaulted in repaying the above TW Loan as expressly agreed by him/her under the Loan (cum Hypothecation) Agreement and guarantee entered between the said borrower and the company.</p>
+  <p class="body-text">Pursuant to our right under the said Agreement we have taken peaceful repossession of the said vehicle.</p>
+  <p class="body-text">We have taken peaceful repossession of the said vehicle on <strong>${p.repossession_date}</strong> at from <strong>${p.repossession_address}</strong></p>
+  <p class="body-text"><strong>DETAILS OF THE VEHICLE REPOSSESSED:-</strong></p>
+  <table class="details-table">
+    <tr><td>Name of the Borrower</td><td>${p.customer_name}</td></tr>
+    <tr><td>Address of Borrower</td><td>${p.address}</td></tr>
+    <tr><td>Loan Agreement No.</td><td>${p.loan_no}</td></tr>
+    <tr><td>App ID</td><td>${p.app_id}</td></tr>
+    <tr><td>Vehicle Registration Number</td><td>${p.registration_no}</td></tr>
+    <tr><td>Model Make</td><td>${p.asset_make}</td></tr>
+    <tr><td>Engine No.</td><td>${p.engine_no}</td></tr>
+    <tr><td>Chassis No.</td><td>${p.chassis_no}</td></tr>
+  </table>
+  <p class="body-text">This communication is for your records and to prevent any confusion that may arise for any complaint that the Borrower may lodge with respect to the said vehicle.</p>
+  <p class="body-text">Thanking You,</p>
+  <p class="body-text">Yours Sincerely,</p>
+  <div class="signature"><p><strong>For, Hero Fin Corp Limited</strong></p></div>
+  <div class="footer">Hero Fincorp Ltd. Corporate Office: 09, Basant Lok, Vasant Vihar, New Delhi-110057 India</div>
+</body>
+</html>`;
+}
+ 
+// ─── DOCX builder (shared, isPost flag switches content) ──────────────────────
+async function buildIntimationDocx(
+  p: ReturnType<typeof buildIntimationParams>,
+  isPost: boolean,
+  logoPath: string
+): Promise<Buffer> {
+  const {
+    Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell,
+    AlignmentType, BorderStyle, WidthType, ShadingType, VerticalAlign, ImageRun,
+  } = require("docx");
+  const fs = require("fs");
+ 
+  const logoData = fs.existsSync(logoPath) ? fs.readFileSync(logoPath) : null;
+ 
+  const border = { style: BorderStyle.SINGLE, size: 1, color: "CCCCCC" };
+  const borders = { top: border, bottom: border, left: border, right: border };
+  const noBorder = { style: BorderStyle.NONE, size: 0, color: "FFFFFF" };
+  const noBorders = { top: noBorder, bottom: noBorder, left: noBorder, right: noBorder };
+ 
+  const cellMargins = { top: 80, bottom: 80, left: 120, right: 120 };
+  const tW = 9026; // A4 content width in DXA (1" margins)
+ 
+  const makeRow = (label: string, value: string, shade = false) =>
+    new TableRow({
+      children: [
+        new TableCell({
+          borders, width: { size: Math.floor(tW * 0.45), type: WidthType.DXA },
+          shading: shade ? { fill: "F8F8F8", type: ShadingType.CLEAR } : undefined,
+          margins: cellMargins,
+          children: [new Paragraph({ children: [new TextRun({ text: label, size: 22, font: "Arial" })] })],
+        }),
+        new TableCell({
+          borders, width: { size: Math.floor(tW * 0.55), type: WidthType.DXA },
+          shading: shade ? { fill: "F8F8F8", type: ShadingType.CLEAR } : undefined,
+          margins: cellMargins,
+          children: [new Paragraph({ children: [new TextRun({ text: value, bold: true, size: 22, font: "Arial" })] })],
+        }),
+      ],
+    });
+ 
+  const sp = (n: number) => ({ before: n, after: n });
+ 
+  const preRows = [
+    makeRow("Name of the Borrower", p.customer_name, false),
+    makeRow("Address of Borrower", p.address, true),
+    makeRow("App ID", p.app_id, false),
+    makeRow("Loan cum Hypothecation Agreement No.", p.loan_no, true),
+    makeRow("Date", p.date, false),
+    makeRow("Vehicle Registration No.", p.registration_no, true),
+    makeRow("Model Make", p.asset_make, false),
+    makeRow("Engine No.", p.engine_no, true),
+    makeRow("Chassis No.", p.chassis_no, false),
+  ];
+ 
+  const postRows = [
+    makeRow("Name of the Borrower", p.customer_name, false),
+    makeRow("Address of Borrower", p.address, true),
+    makeRow("Loan Agreement No.", p.loan_no, false),
+    makeRow("App ID", p.app_id, true),
+    makeRow("Vehicle Registration Number", p.registration_no, false),
+    makeRow("Model Make", p.asset_make, true),
+    makeRow("Engine No.", p.engine_no, false),
+    makeRow("Chassis No.", p.chassis_no, true),
+  ];
+ 
+  const preBodyText =
+    "The Borrower has committed default on the scheduled payment of the Monthly Payments and/or other charges payable on the loan obtained by the Borrower from the Company in terms of the provisions of the aforesaid loan-cum-hypothecation agreement. In spite of Company's requests and reminders, the Borrower has not remitted the outstanding dues; as a result of which the company was left with no option but to enforce the terms and conditions of the said agreement. Under the said agreement, the said Borrower has specifically authorized Company or any of its authorized persons to take charge/repossession of the vehicle, in the event he fails to pay the loan amount when due to the Company. Pursuant to our right therein we are taking steps to recover possession of the said vehicle. This communication is for your record and to prevent confusion that may arise from any complaint that the borrower may lodge with respect to the aforesaid vehicle.";
+ 
+  const children: any[] = [
+    // Title
+    new Paragraph({
+      alignment: AlignmentType.CENTER,
+      spacing: sp(80),
+      children: [new TextRun({
+        text: isPost ? "Post Repossession Intimation to Police Station" : "Pre Repossession Intimation to Police Station",
+        bold: true, size: 28, font: "Arial",
+        underline: isPost ? { type: "single" } : undefined,
+      })],
+    }),
+ 
+    // Date
+    new Paragraph({
+      spacing: sp(60),
+      children: [new TextRun({ text: `Date :- ${p.date}`, bold: true, size: 24, font: "Arial" })],
+    }),
+ 
+    // To block
+    new Paragraph({ spacing: { before: 40, after: 20 }, children: [new TextRun({ text: "To,", size: 24, font: "Arial" })] }),
+    new Paragraph({ spacing: { before: 0, after: 20 }, children: [new TextRun({ text: "The Senior Inspector,", size: 24, font: "Arial" })] }),
+    new Paragraph({ spacing: { before: 0, after: 20 }, children: [new TextRun({ text: `${p.police_station},`, bold: true, size: 24, font: "Arial" })] }),
+    new Paragraph({ spacing: { before: 0, after: 80 }, children: [new TextRun({ text: `TQ. ${p.tq}     Dist. Nanded`, size: 24, font: "Arial" })] }),
+ 
+    // Subject
+    new Paragraph({
+      spacing: sp(60),
+      children: isPost ? [
+        new TextRun({ text: "Sub : ", bold: true, size: 24, font: "Arial" }),
+        new TextRun({ text: "Intimation after repossession of the vehicle No ", size: 24, font: "Arial" }),
+        new TextRun({ text: p.registration_no, bold: true, size: 24, font: "Arial" }),
+        new TextRun({ text: " From Mr. ", size: 24, font: "Arial" }),
+        new TextRun({ text: p.customer_name, bold: true, size: 24, font: "Arial" }),
+      ] : [
+        new TextRun({ text: "Sub : ", bold: true, size: 24, font: "Arial" }),
+        new TextRun({ text: "Pre intimation of repossession of the vehicle from ", size: 24, font: "Arial" }),
+        new TextRun({ text: p.customer_name, bold: true, size: 24, font: "Arial" }),
+      ],
+    }),
+    new Paragraph({
+      spacing: { before: 0, after: 80 },
+      children: [
+        new TextRun({ text: "(Borrower) residing ", size: 24, font: "Arial" }),
+        new TextRun({ text: p.address, bold: true, size: 24, font: "Arial" }),
+      ],
+    }),
+ 
+    // Respected Sir
+    new Paragraph({
+      spacing: sp(60),
+      children: [new TextRun({ text: "Respected Sir,", bold: true, size: 24, font: "Arial" })],
+    }),
+  ];
+ 
+  if (isPost) {
+    children.push(
+      new Paragraph({
+        spacing: sp(60),
+        alignment: AlignmentType.JUSTIFIED,
+        children: [
+          new TextRun({ text: "This is in furtherance to our letter dated bearing reference number ", size: 24, font: "Arial" }),
+          new TextRun({ text: p.reference_no, bold: true, size: 24, font: "Arial" }),
+          new TextRun({ text: " whereby it was intimated to you that despite our repeated requests, reminders and personal visits the above said borrower has defaulted in repaying the above TW Loan as expressly agreed by him/her under the Loan (cum Hypothecation) Agreement and guarantee entered between the said borrower and the company.", size: 24, font: "Arial" }),
+        ],
+      }),
+      new Paragraph({
+        spacing: sp(60),
+        alignment: AlignmentType.JUSTIFIED,
+        children: [new TextRun({ text: "Pursuant to our right under the said Agreement we have taken peaceful repossession of the said vehicle.", size: 24, font: "Arial" })],
+      }),
+      new Paragraph({
+        spacing: sp(60),
+        alignment: AlignmentType.JUSTIFIED,
+        children: [
+          new TextRun({ text: "We have taken peaceful repossession of the said vehicle on ", size: 24, font: "Arial" }),
+          new TextRun({ text: p.repossession_date, bold: true, size: 24, font: "Arial" }),
+          new TextRun({ text: " at from ", size: 24, font: "Arial" }),
+          new TextRun({ text: p.repossession_address, bold: true, size: 24, font: "Arial" }),
+        ],
+      }),
+      new Paragraph({
+        spacing: sp(60),
+        children: [new TextRun({ text: "DETAILS OF THE VEHICLE REPOSSESSED:-", bold: true, size: 24, font: "Arial" })],
+      }),
+      new Table({ width: { size: tW, type: WidthType.DXA }, columnWidths: [Math.floor(tW * 0.45), Math.floor(tW * 0.55)], rows: postRows }),
+      new Paragraph({
+        spacing: sp(80),
+        alignment: AlignmentType.JUSTIFIED,
+        children: [new TextRun({ text: "This communication is for your records and to prevent any confusion that may arise for any complaint that the Borrower may lodge with respect to the said vehicle.", size: 24, font: "Arial" })],
+      }),
+    );
+  } else {
+    children.push(
+      new Paragraph({
+        spacing: sp(60),
+        alignment: AlignmentType.JUSTIFIED,
+        children: [new TextRun({ text: "The afore mentioned borrower has taken a loan from Hero Fin-Corp Limited (\"Company\") for the purchase of the Vehicle having the below mentioned details and further the Borrower hypothecated the said vehicle to the Company in terms of loan-cum-hypothecation agreement executed between the borrower and the Company.", size: 24, font: "Arial" })],
+      }),
+      new Table({ width: { size: tW, type: WidthType.DXA }, columnWidths: [Math.floor(tW * 0.45), Math.floor(tW * 0.55)], rows: preRows }),
+      new Paragraph({
+        spacing: sp(80),
+        alignment: AlignmentType.JUSTIFIED,
+        children: [new TextRun({ text: preBodyText, size: 24, font: "Arial" })],
+      }),
+    );
+  }
+ 
+  // Closing
+  children.push(
+    new Paragraph({ spacing: sp(60), children: [new TextRun({ text: "Thanking you,", size: 24, font: "Arial" })] }),
+    new Paragraph({ spacing: sp(60), children: [new TextRun({ text: "Yours Sincerely,", size: 24, font: "Arial" })] }),
+    new Paragraph({ spacing: { before: 400, after: 60 }, children: [new TextRun({ text: `For, Hero Fin${isPost ? " " : "-"}Corp Limited`, bold: true, size: 24, font: "Arial" })] }),
+  );
+ 
+  // Logo
+  if (logoData) {
+    children.push(
+      new Paragraph({
+        spacing: sp(80),
+        children: [new ImageRun({ data: logoData, transformation: { width: 106, height: 62 }, type: "png" })],
+      }),
+    );
+  }
+ 
+  // Footer
+  children.push(
+    new Paragraph({
+      alignment: AlignmentType.CENTER,
+      spacing: { before: 200, after: 0 },
+      border: { top: { style: BorderStyle.SINGLE, size: 6, color: "CCCCCC" } },
+      children: [new TextRun({ text: "Hero Fincorp Ltd. Corporate Office: 09, Basant Lok, Vasant Vihar, New Delhi-110057 India", bold: true, size: 20, font: "Arial" })],
+    }),
+  );
+ 
+  const doc = new Document({
+    sections: [{
+      properties: {
+        page: {
+          size: { width: 11906, height: 16838 },
+          margin: { top: 720, right: 720, bottom: 720, left: 720 },
+        },
+      },
+      children,
+    }],
+  });
+ 
+  return await Packer.toBuffer(doc);
+}
+
 export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/health", (_req, res) => res.json({ status: "ok" }));
   await storage.initBktPerfSummaryTable();
@@ -1482,132 +1845,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   runDrrDailyPushJob();
   setInterval(runDrrDailyPushJob, 10 * 60 * 1000);
 // ── Pre Repossession Intimation Letter ────────────────────────────────────────
-app.post("/api/admin/generate-pre-intimation", requireAdmin, async (req, res) => {
-  try {
 
- const {
-      customer_name   = "___________",
-      address         = "___________",
-      app_id          = "___________",
-      loan_no         = "___________",
-      registration_no = "___________",
-      asset_make      = "___________",
-      engine_no       = "___________",
-      chassis_no      = "___________",
-      date            = new Date().toLocaleDateString("en-IN"),
-      police_station  = "________________________________",
-      tq              = "_____________",
-    } = req.body;
-
-    const htmlContent = `
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="UTF-8">
-  <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body {
-      font-family: Arial, sans-serif;
-      font-size: 13px;
-      color: #000;
-      padding: 40px 50px;
-      line-height: 1.6;
-    }
-    .title {
-      text-align: center;
-      font-size: 16px;
-      font-weight: bold;
-      margin-bottom: 6px;
-    }
-    .divider { border: none; border-top: 1px solid #ccc; margin: 10px 0; }
-    .date { font-weight: bold; margin-bottom: 16px; }
-    .to-block { margin-left: 24px; margin-bottom: 14px; }
-    .to-block p { margin-bottom: 2px; }
-    .subject { margin-bottom: 14px; }
-    .body-text { margin-bottom: 10px; text-align: justify; }
-    .details-table {
-      width: 100%;
-      border-collapse: collapse;
-      margin: 12px 0;
-      font-size: 12px;
-    }
-    .details-table tr:nth-child(even) { background-color: #f8f8f8; }
-    .details-table td { padding: 6px 10px; border: 1px solid #ddd; }
-    .details-table td:first-child { width: 45%; color: #333; }
-    .details-table td:last-child { font-weight: bold; }
-    .footer {
-      margin-top: 20px;
-      text-align: center;
-      font-size: 11px;
-      border-top: 1px solid #ccc;
-      padding-top: 8px;
-      font-weight: bold;
-    }
-    .signature { margin-top: 40px; }
-  </style>
-</head>
-<body>
-  <p class="title">Pre Repossession Intimation to Police Station</p>
-  <hr class="divider">
-  <p class="date">Date :- ${date}</p>
-  <div class="to-block">
-    <p>To,</p>
-    <p>The Senior Inspector,</p>
-    <p><strong>${police_station},</strong></p>
-    <p>TQ. ${tq}&nbsp;&nbsp;&nbsp;Dist. Nanded</p>
-  </div>
-  <div class="subject">
-    <p><strong>Sub :</strong> Pre intimation of repossession of the vehicle from <strong>${customer_name}</strong></p>
-    <p>(Borrower) residing <strong>${address}</strong></p>
-  </div>
-  <p class="body-text"><strong>Respected Sir,</strong></p>
-  <p class="body-text">
-    The afore mentioned borrower has taken a loan from Hero Fin-Corp Limited ("Company") for the purchase of the Vehicle having the below mentioned details and further the Borrower hypothecated the said vehicle to the Company in terms of loan-cum-hypothecation agreement executed between the borrower and the Company.
-  </p>
-  <table class="details-table">
-    <tr><td>Name of the Borrower</td><td>${customer_name}</td></tr>
-    <tr><td>Address of Borrower</td><td>${address}</td></tr>
-    <tr><td>App ID</td><td>${app_id}</td></tr>
-    <tr><td>Loan cum Hypothecation Agreement No.</td><td>${loan_no}</td></tr>
-    <tr><td>Date</td><td>${date}</td></tr>
-    <tr><td>Vehicle Registration No.</td><td>${registration_no}</td></tr>
-    <tr><td>Model Make</td><td>${asset_make}</td></tr>
-    <tr><td>Engine No.</td><td>${engine_no}</td></tr>
-    <tr><td>Chassis No.</td><td>${chassis_no}</td></tr>
-  </table>
-  <p class="body-text">
-    The Borrower has committed default on the scheduled payment of the Monthly Payments and/or other charges payable on the loan obtained by the Borrower from the Company in terms of the provisions of the aforesaid loan-cum-hypothecation agreement. In spite of Company's requests and reminders, the Borrower has not remitted the outstanding dues; as a result of which the company was left with no option but to enforce the terms and conditions of the said agreement. Under the said agreement, the said Borrower has specifically authorized Company or any of its authorized persons to take charge/repossession of the vehicle, in the event he fails to pay the loan amount when due to the Company. Pursuant to our right therein we are taking steps to recover possession of the said vehicle. This communication is for your record and to prevent confusion that may arise from any complaint that the borrower may lodge with respect to the aforesaid vehicle.
-  </p>
-  <p class="body-text">Thanking you,</p>
-  <p class="body-text">Yours Sincerely,</p>
-  <div class="signature">
-    <p><strong>For, Hero Fin-Corp Limited</strong></p>
-  </div>
-  <div class="footer">
-    Hero Fincorp Ltd. Corporate Office: 09, Basant Lok, Vasant Vihar, New Delhi-110057 India
-  </div>
-</body>
-</html>`;
-
-    const htmlPdf = require("html-pdf-node");
-    const file    = { content: htmlContent };
-    const options = {
-      format: "A4",
-      margin: { top: "20mm", right: "15mm", bottom: "20mm", left: "15mm" },
-      printBackground: true,
-    };
-
-    const pdfBuffer = await htmlPdf.generatePdf(file, options);
-    const filename  = `Pre_Intimation_${customer_name.replace(/\s+/g, "_")}.pdf`;
-
-    res.setHeader("Content-Type", "application/pdf");
-    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
-    res.send(pdfBuffer);
-  } catch (err: any) {
-    console.error("generate-pre-intimation error:", err);
-    res.status(500).json({ message: err.message || "Failed to generate document" });
-  }
-});
   const httpServer = createServer(app);
   return httpServer;
 }
