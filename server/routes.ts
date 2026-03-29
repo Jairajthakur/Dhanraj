@@ -74,7 +74,6 @@ function getISTHour(): { hour: number; todayKey: string } {
   return { hour: ist.getUTCHours(), todayKey: ist.toISOString().slice(0, 10) };
 }
 
-// ── EDIT 1: sendPush — fixed icon + better logging ────────────────────────────
 async function sendPush(playerId: string, title: string, body: string, data: Record<string, any> = {}): Promise<{ ok: boolean; error?: string }> {
   const appId = process.env.ONESIGNAL_APP_ID;
   const apiKey = process.env.ONESIGNAL_API_KEY;
@@ -113,7 +112,6 @@ async function sendPush(playerId: string, title: string, body: string, data: Rec
   }
 }
 
-// ── EDIT 2: sendPushToMany — fixed icon + logging ─────────────────────────────
 async function sendPushToMany(playerIds: string[], title: string, body: string, data: Record<string, any> = {}): Promise<{ sent: number; total: number }> {
   const appId = process.env.ONESIGNAL_APP_ID;
   const apiKey = process.env.ONESIGNAL_API_KEY;
@@ -572,9 +570,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try { res.json({ cases: await storage.getAllLoanCases() }); }
     catch (e: any) { res.status(500).json({ message: e.message }); }
   });
+
+  // CHANGE 1: Updated to combine loan_cases + bkt_cases for a given agent
   app.get("/api/admin/cases/agent/:agentId", requireAdmin, async (req, res) => {
-    try { res.json({ cases: await storage.getLoanCasesByAgent(Number(req.params.agentId)) }); }
-    catch (e: any) { res.status(500).json({ message: e.message }); }
+    try {
+      const agentId = Number(req.params.agentId);
+      const result = await storage.query(
+        `SELECT id, loan_no, app_id, customer_name, status, pos::numeric AS pos, bkt::text AS bkt,
+                mobile_no, address, latest_feedback, feedback_code, feedback_comments,
+                ptp_date, telecaller_ptp_date, rollback_yn, agent_id,
+                registration_no, pro, 'loan' AS case_type
+         FROM loan_cases WHERE agent_id = $1
+         UNION ALL
+         SELECT id, loan_no, app_id, customer_name, status, pos::numeric AS pos,
+                COALESCE(bkt::text, case_category) AS bkt,
+                mobile_no, address, latest_feedback, feedback_code, feedback_comments,
+                ptp_date, telecaller_ptp_date, rollback_yn, agent_id,
+                registration_no, pro, 'bkt' AS case_type
+         FROM bkt_cases WHERE agent_id = $1
+         ORDER BY customer_name`,
+        [agentId]
+      );
+      res.json({ cases: result.rows });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
   app.get("/api/admin/salary", requireAdmin, async (req, res) => {
@@ -628,7 +646,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
-  // ── EDIT 3: Fixed deposit assignment push ─────────────────────────────────────
   app.post("/api/admin/required-deposits", requireAdmin, async (req, res) => {
     try {
       const { agentId, amount, description, dueDate } = req.body;
@@ -816,7 +833,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
-  // ── EDIT 4: Fixed bulk import push ───────────────────────────────────────────
   app.post("/api/admin/import-depositions", requireAdmin, upload.single("file"), async (req, res) => {
     try {
       if (!req.file) return res.status(400).json({ message: "No file uploaded" });
@@ -1354,7 +1370,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
   }
   runMonthlyCleanupJob(); setInterval(runMonthlyCleanupJob, 60 * 60 * 1000);
 
-  // ── EDIT 5: NEW — DRR Daily Push at 10 AM IST ────────────────────────────────
   const drrPushSentDates = new Set<string>();
 
   async function runDrrDailyPushJob() {
@@ -1458,7 +1473,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   runDrrDailyPushJob();
   setInterval(runDrrDailyPushJob, 10 * 60 * 1000);
-  // ── END DRR push job ──────────────────────────────────────────────────────────
 
   const httpServer = createServer(app);
   return httpServer;
