@@ -1878,35 +1878,30 @@ function pdfHeader(doc: any, title: string, underline: boolean, p: any) {
   const rm        = doc.page.width - doc.page.margins.right;
   const pageWidth = rm - lm;
 
-  doc.font("Helvetica-Bold").fontSize(14).text(title, lm, doc.y, {
+  doc.font("Helvetica").fontSize(14).text(title, lm, doc.y, {
     align: "center", width: pageWidth,
   });
   if (underline) {
     const tw = doc.widthOfString(title);
     const tx = lm + (pageWidth - tw) / 2;
-    const ty = doc.y;                       // y AFTER text() has advanced
+    const ty = doc.y;
     doc.moveTo(tx, ty).lineTo(tx + tw, ty).strokeColor("#000000").stroke();
   }
   doc.moveDown(0.4);
-  doc
-    .moveTo(lm, doc.y)
-    .lineTo(rm, doc.y)
-    .strokeColor("#cccccc")
-    .lineWidth(0.5)
-    .stroke();
+  doc.moveTo(lm, doc.y).lineTo(rm, doc.y).strokeColor("#cccccc").lineWidth(0.5).stroke();
   doc.strokeColor("#000000").lineWidth(1);
   doc.moveDown(0.5);
 
   // Date
-  doc.font("Helvetica-Bold").fontSize(11).text(`Date :- ${p.date}`, lm, doc.y);
+  doc.font("Helvetica").fontSize(11).text(`Date :- ${p.date}`, lm, doc.y);
   doc.moveDown(0.8);
 
   // To block
   doc.font("Helvetica").fontSize(11);
   doc.text("To,", lm);
   doc.text("The Senior Inspector,", lm);
-  doc.font("Helvetica-Bold").text(`${p.police_station},`, lm);
-  doc.font("Helvetica").text(`TQ. ${p.tq}     Dist. Nanded`, lm);
+  doc.text(`${p.police_station},`, lm);
+  doc.text(`TQ. ${p.tq}     Dist. Nanded`, lm);
   doc.moveDown(0.8);
 }
 
