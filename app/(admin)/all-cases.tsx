@@ -256,7 +256,6 @@ function CaseDetailModal({
     { section: "Case Info" },
     { label: "Status",            value: localItem.status },
     { label: "FOS Agent",         value: localItem.agent_name },
-    { label: "Company",           value: localItem.company_name },
     { label: "Customer Name",     value: localItem.customer_name },
     { label: "Loan No",           value: localItem.loan_no },
     { label: "APP ID",            value: localItem.app_id },
@@ -268,7 +267,6 @@ function CaseDetailModal({
     { label: "Ref 1 Mobile",      value: localItem.ref1_mobile, phone: true },
     { label: "Ref 2 Name",        value: localItem.ref2_name },
     { label: "Ref 2 Mobile",      value: localItem.ref2_mobile, phone: true },
-    { label: "Ref Number",        value: localItem.ref_number },
 
     { section: "Financial" },
     { label: "POS",               value: fmt(localItem.pos, "₹") },
@@ -281,7 +279,6 @@ function CaseDetailModal({
     { label: "Clearance",         value: fmt(localItem.clearance, "₹") },
 
     { section: "Vehicle" },
-    { label: "Asset Name",        value: localItem.asset_name },
     { label: "Asset Make",        value: localItem.asset_make },
     { label: "Reg No",            value: localItem.registration_no },
     { label: "Engine No",         value: localItem.engine_no },
@@ -397,78 +394,350 @@ function CaseDetailModal({
   );
 }
 
+// ─── FOS Agent Cases Modal ────────────────────────────────────────────────────
+function FosAgentCasesModal({
+  agentId,
+  agentName,
+  cases,
+  onClose,
+  onUpdated,
+  onResetCase,
+  onResetAgent,
+}: {
+  agentId: number;
+  agentName: string;
+  cases: any[];
+  onClose: () => void;
+  onUpdated: () => void;
+  // CHANGE 7: Updated prop type to accept optional caseType
+  onResetCase: (id: number, caseType?: string) => Promise<void>;
+  onResetAgent: (id: number, name: string) => void;
+}) {
+  const insets = useSafeAreaInsets();
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("All");
+  const [selectedCase, setSelectedCase] = useState<any>(null);
+  const [resettingCaseId, setResettingCaseId] = useState<number | null>(null);
+
+  const filtered = useMemo(() => {
+    const q = search.toLowerCase().trim();
+    return cases.filter((c) => {
+      const matchStatus = statusFilter === "All" || c.status === statusFilter;
+      const matchSearch =
+        !q ||
+        c.loan_no?.toLowerCase().includes(q) ||
+        c.customer_name?.toLowerCase().includes(q) ||
+        c.app_id?.toLowerCase().includes(q) ||
+        c.registration_no?.toLowerCase().includes(q);
+      return matchStatus && matchSearch;
+    });
+  }, [cases, search, statusFilter]);
+
+  const paidCount   = cases.filter((c) => c.status === "Paid").length;
+  const unpaidCount = cases.filter((c) => c.status !== "Paid" && c.status !== "PTP").length;
+  const ptpCount    = cases.filter((c) => c.status === "PTP").length;
+  const totalPos    = cases.reduce((s, c) => s + (parseFloat(c.pos) || 0), 0);
+
+  return (
+    <>
+      <Modal visible transparent={false} animationType="slide" onRequestClose={onClose}>
+        <View style={{ flex: 1, backgroundColor: Colors.background, paddingTop: insets.top }}>
+          {/* Header */}
+          <View style={fosModal.header}>
+            <Pressable onPress={onClose} style={{ padding: 8 }}>
+              <Ionicons name="arrow-back" size={22} color={Colors.text} />
+            </Pressable>
+            <View style={{ flex: 1 }}>
+              <Text style={fosModal.headerTitle}>{agentName}</Text>
+              <Text style={fosModal.headerSub}>{cases.length} cases · ₹{totalPos.toLocaleString("en-IN", { maximumFractionDigits: 0 })} POS</Text>
+            </View>
+            <Pressable
+              style={fosModal.resetAllBtn}
+              onPress={() => onResetAgent(agentId, agentName)}
+            >
+              <Ionicons name="refresh" size={14} color="#fff" />
+              <Text style={fosModal.resetAllBtnText}>Reset All</Text>
+            </Pressable>
+          </View>
+
+          {/* Stats Row */}
+          <View style={fosModal.statsRow}>
+            <View style={[fosModal.statCard, { borderTopColor: Colors.success }]}>
+              <Text style={[fosModal.statNum, { color: Colors.success }]}>{paidCount}</Text>
+              <Text style={fosModal.statLabel}>Paid</Text>
+            </View>
+            <View style={[fosModal.statCard, { borderTopColor: Colors.statusUnpaid }]}>
+              <Text style={[fosModal.statNum, { color: Colors.statusUnpaid }]}>{unpaidCount}</Text>
+              <Text style={fosModal.statLabel}>Unpaid</Text>
+            </View>
+            <View style={[fosModal.statCard, { borderTopColor: Colors.statusPTP }]}>
+              <Text style={[fosModal.statNum, { color: Colors.statusPTP }]}>{ptpCount}</Text>
+              <Text style={fosModal.statLabel}>PTP</Text>
+            </View>
+            <View style={[fosModal.statCard, { borderTopColor: Colors.primary }]}>
+              <Text style={fosModal.statNum}>
+                {paidCount > 0 ? Math.round((paidCount / cases.length) * 100) : 0}%
+              </Text>
+              <Text style={fosModal.statLabel}>Collection</Text>
+            </View>
+          </View>
+
+          {/* Search */}
+          <View style={fosModal.searchWrap}>
+            <View style={fosModal.searchBox}>
+              <Ionicons name="search" size={16} color={Colors.textMuted} />
+              <TextInput
+                style={fosModal.searchInput}
+                placeholder="Search loan, customer, reg no..."
+                placeholderTextColor={Colors.textMuted}
+                value={search}
+                onChangeText={setSearch}
+                autoCapitalize="none"
+              />
+              {search ? (
+                <Pressable onPress={() => setSearch("")}>
+                  <Ionicons name="close-circle" size={16} color={Colors.textMuted} />
+                </Pressable>
+              ) : null}
+            </View>
+            {/* Status filter pills */}
+            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+              <View style={{ flexDirection: "row", gap: 8 }}>
+                {["All", "Unpaid", "PTP", "Paid"].map((f) => (
+                  <Pressable
+                    key={f}
+                    style={[
+                      fosModal.filterPill,
+                      statusFilter === f && {
+                        backgroundColor: f === "All" ? Colors.primary : STATUS_COLORS[f],
+                        borderColor: "transparent",
+                      },
+                    ]}
+                    onPress={() => setStatusFilter(f)}
+                  >
+                    <Text style={[fosModal.filterPillText, statusFilter === f && { color: "#fff" }]}>{f}</Text>
+                  </Pressable>
+                ))}
+              </View>
+            </ScrollView>
+          </View>
+
+          {/* Cases List */}
+          <FlatList
+            data={filtered}
+            keyExtractor={(item) => String(item.id)}
+            contentContainerStyle={{ padding: 12, gap: 10, paddingBottom: insets.bottom + 24 }}
+            renderItem={({ item }) => {
+              const hasFeedback = !!(item.latest_feedback || item.feedback_code);
+              const statusColor = STATUS_COLORS[item.status] || Colors.textMuted;
+              return (
+                <View style={[fosModal.caseCard, { borderLeftColor: statusColor }]}>
+                  <View style={fosModal.caseCardTop}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={fosModal.caseName} numberOfLines={1}>{item.customer_name}</Text>
+                      <View style={fosModal.caseTagRow}>
+                        {item.loan_no && (
+                          <View style={fosModal.tag}>
+                            <Text style={fosModal.tagLabel}>LOAN</Text>
+                            <Text style={fosModal.tagValue}>{item.loan_no}</Text>
+                          </View>
+                        )}
+                        {item.bkt != null && (
+                          <View style={[fosModal.tag, { backgroundColor: Colors.primary + "15" }]}>
+                            <Text style={fosModal.tagLabel}>BKT</Text>
+                            <Text style={[fosModal.tagValue, { color: Colors.primary }]}>{item.bkt}</Text>
+                          </View>
+                        )}
+                        {item.pos && (
+                          <View style={[fosModal.tag, { backgroundColor: Colors.info + "15" }]}>
+                            <Text style={fosModal.tagLabel}>POS</Text>
+                            <Text style={[fosModal.tagValue, { color: Colors.info }]}>
+                              ₹{parseFloat(item.pos).toLocaleString("en-IN", { maximumFractionDigits: 0 })}
+                            </Text>
+                          </View>
+                        )}
+                      </View>
+                      {item.mobile_no && (
+                        <Text style={fosModal.caseMobile}>{item.mobile_no}</Text>
+                      )}
+                    </View>
+                    <View style={{ alignItems: "flex-end", gap: 6 }}>
+                      <View style={[fosModal.statusBadge, { backgroundColor: statusColor + "22" }]}>
+                        <Text style={[fosModal.statusText, { color: statusColor }]}>{item.status}</Text>
+                      </View>
+                      <Pressable
+                        onPress={() => setSelectedCase(item)}
+                        style={fosModal.detailBtn}
+                      >
+                        <Ionicons name="eye-outline" size={13} color={Colors.primary} />
+                        <Text style={fosModal.detailBtnText}>Details</Text>
+                      </Pressable>
+                    </View>
+                  </View>
+
+                  {hasFeedback && (
+                    <View style={fosModal.feedbackRow}>
+                      {item.feedback_code && (
+                        <View style={fosModal.fbCodeBadge}>
+                          <Text style={fosModal.fbCodeText}>{item.feedback_code}</Text>
+                        </View>
+                      )}
+                      {item.latest_feedback && (
+                        <Text style={fosModal.fbText} numberOfLines={1}>{item.latest_feedback}</Text>
+                      )}
+                    </View>
+                  )}
+
+                  {/* CHANGE 5: Use correct tableType based on case_type */}
+                  <StatusActionBar
+                    item={item}
+                    tableType={item.case_type === "bkt" ? "bkt" : "loan"}
+                    onUpdated={onUpdated}
+                  />
+
+                  {hasFeedback && (
+                    <Pressable
+                      style={[fosModal.resetCaseBtn, resettingCaseId === item.id && { opacity: 0.5 }]}
+                      disabled={resettingCaseId === item.id}
+                      onPress={() => {
+                        Alert.alert("Reset Feedback", `Reset feedback for ${item.customer_name}?`, [
+                          { text: "Cancel", style: "cancel" },
+                          {
+                            text: "Reset",
+                            style: "destructive",
+                            onPress: async () => {
+                              setResettingCaseId(item.id);
+                              // CHANGE 8a: Pass item.case_type to onResetCase
+                              try { await onResetCase(item.id, item.case_type); }
+                              finally { setResettingCaseId(null); }
+                            },
+                          },
+                        ]);
+                      }}
+                    >
+                      {resettingCaseId === item.id ? (
+                        <ActivityIndicator size="small" color={Colors.danger} />
+                      ) : (
+                        <>
+                          <Ionicons name="refresh" size={12} color={Colors.danger} />
+                          <Text style={fosModal.resetCaseBtnText}>Reset Feedback</Text>
+                        </>
+                      )}
+                    </Pressable>
+                  )}
+                </View>
+              );
+            }}
+            ListEmptyComponent={
+              <View style={{ alignItems: "center", paddingTop: 60, gap: 8 }}>
+                <Ionicons name="document-text-outline" size={40} color={Colors.textMuted} />
+                <Text style={{ color: Colors.textMuted, fontSize: 14 }}>
+                  {search ? `No cases matching "${search}"` : "No cases"}
+                </Text>
+              </View>
+            }
+          />
+        </View>
+      </Modal>
+
+      {selectedCase && (
+        <CaseDetailModal
+          item={selectedCase}
+          tableType={selectedCase.case_type === "bkt" ? "bkt" : "loan"}
+          onClose={() => setSelectedCase(null)}
+          // CHANGE 8b: Pass selectedCase?.case_type to onResetCase
+          onResetCase={async (id) => { await onResetCase(id, selectedCase?.case_type); setSelectedCase(null); }}
+          onStatusUpdated={async () => { onUpdated(); }}
+        />
+      )}
+    </>
+  );
+}
+
+// ─── Main Screen ──────────────────────────────────────────────────────────────
 export default function AllCasesScreen() {
   const insets = useSafeAreaInsets();
   const qc = useQueryClient();
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState("All");
-  const [selectedCase, setSelectedCase] = useState<any>(null);
-  const [selectedTableType] = useState<"loan" | "bkt">("loan");
-  const [resettingAgent, setResettingAgent] = useState<number | null>(null);
-  const [agentCasesModal, setAgentCasesModal] = useState<{
+  const [selectedFos, setSelectedFos] = useState<{
     agentId: number;
     agentName: string;
     cases: any[];
   } | null>(null);
-  const [resettingCaseId, setResettingCaseId] = useState<number | null>(null);
+  const [resettingAgent, setResettingAgent] = useState<number | null>(null);
 
   const tableType = "loan";
-  const queryKey = ["/api/admin/cases"];
+  // CHANGE 4: Updated queryKey to "/api/admin/cases/all"
+  const queryKey = ["/api/admin/cases/all"];
 
-  const { data, isLoading } = useQuery({
+  // CHANGE 2: Fetch both loan and bkt cases and combine them
+  const { data, isLoading, refetch } = useQuery({
     queryKey,
-    queryFn: () => api.admin.getCases(),
+    queryFn: async () => {
+      const [loanData, bktData] = await Promise.all([
+        api.admin.getCases(),
+        api.admin.getBktCases(),
+      ]);
+      const loanCases = (loanData?.cases || []).map((c: any) => ({ ...c, case_type: "loan" }));
+      const bktCases  = (bktData?.cases  || []).map((c: any) => ({
+        ...c,
+        case_type: "bkt",
+        bkt: c.case_category || c.bkt,
+      }));
+      return { cases: [...loanCases, ...bktCases] };
+    },
     refetchInterval: 15000,
   });
 
+  // CHANGE 3: Invalidate the new queryKey as well
   const invalidateAll = () => {
+    qc.invalidateQueries({ queryKey: ["/api/admin/cases/all"] });
     qc.invalidateQueries({ queryKey: ["/api/admin/cases"] });
     qc.invalidateQueries({ queryKey: ["/api/admin/bkt-cases"] });
     qc.invalidateQueries({ queryKey: ["/api/admin/bkt-performance"] });
     qc.invalidateQueries({ queryKey: ["/api/bkt-perf-summary"] });
     qc.invalidateQueries({ queryKey: ["/api/admin/stats"] });
+    refetch();
   };
 
-  const invalidateAndSyncSelected = async () => {
-    invalidateAll();
-    if (selectedCase) {
-      try {
-        await qc.refetchQueries({ queryKey });
-        const freshData = qc.getQueryData<any>(queryKey);
-        const freshItem = freshData?.cases?.find((c: any) => c.id === selectedCase.id);
-        if (freshItem) setSelectedCase(freshItem);
-      } catch (_) {}
-    }
-  };
+  const allCases = data?.cases || [];
 
-  const filtered = useMemo(() => {
-    const cases = data?.cases || [];
+  // Group cases by FOS agent
+  const fosGroups = useMemo(() => {
     const q = search.toLowerCase().trim();
-    return cases.filter((c: any) => {
-      const matchStatus = statusFilter === "All" || c.status === statusFilter;
-      const matchSearch =
-        !q ||
-        c.registration_no?.toLowerCase().includes(q) ||
-        c.app_id?.toLowerCase().includes(q) ||
-        c.loan_no?.toLowerCase().includes(q) ||
-        c.customer_name?.toLowerCase().includes(q) ||
-        c.agent_name?.toLowerCase().includes(q);
-      return matchStatus && matchSearch;
-    });
-  }, [data, search, statusFilter]);
+    const groups: Record<string, {
+      agentId: number;
+      agentName: string;
+      cases: any[];
+      paidCount: number;
+      unpaidCount: number;
+      ptpCount: number;
+      totalPos: number;
+      feedbackCount: number;
+    }> = {};
 
-  const agentGroups = useMemo(() => {
-    const cases = data?.cases || [];
-    const groups: Record<string, { agentId: number; agentName: string; count: number; feedbackCount: number }> = {};
-    for (const c of cases) {
+    for (const c of allCases) {
       const name = c.agent_name || "Unassigned";
       const id = c.agent_id || 0;
-      if (!groups[name]) groups[name] = { agentId: id, agentName: name, count: 0, feedbackCount: 0 };
-      groups[name].count++;
+      if (!groups[name]) {
+        groups[name] = { agentId: id, agentName: name, cases: [], paidCount: 0, unpaidCount: 0, ptpCount: 0, totalPos: 0, feedbackCount: 0 };
+      }
+      groups[name].cases.push(c);
+      if (c.status === "Paid") groups[name].paidCount++;
+      else if (c.status === "PTP") groups[name].ptpCount++;
+      else groups[name].unpaidCount++;
+      groups[name].totalPos += parseFloat(c.pos) || 0;
       if (c.latest_feedback || c.feedback_code) groups[name].feedbackCount++;
     }
-    return Object.values(groups).sort((a, b) => a.agentName.localeCompare(b.agentName));
-  }, [data]);
+
+    return Object.values(groups)
+      .filter((g) => !q || g.agentName.toLowerCase().includes(q))
+      .sort((a, b) => a.agentName.localeCompare(b.agentName));
+  }, [allCases, search]);
+
+  const totalPaid   = allCases.filter((c: any) => c.status === "Paid").length;
+  const totalUnpaid = allCases.filter((c: any) => c.status !== "Paid" && c.status !== "PTP").length;
+  const totalPtp    = allCases.filter((c: any) => c.status === "PTP").length;
 
   const handleResetAgentFeedback = (agentId: number, agentName: string) => {
     Alert.alert(
@@ -504,55 +773,50 @@ export default function AllCasesScreen() {
     );
   };
 
-  const handleResetCase = async (caseId: number) => {
-    try {
-      const token = await tokenStore.get();
-      const url = new URL(`/api/admin/reset-feedback/case/${caseId}`, getApiUrl()).toString();
-      const res = await fetch(url, {
-        method: "POST",
-        credentials: "include",
-        headers: {
-          "Content-Type": "application/json",
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        body: JSON.stringify({ table: tableType }),
-      });
-      const json: any = await res.json();
-      if (!res.ok) throw new Error(json.message || "Reset failed");
-      invalidateAll();
-      Alert.alert("Done", "Feedback reset. FOS can now re-submit.");
-    } catch (e: any) {
-      Alert.alert("Error", e.message);
-    }
+  // CHANGE 6: Updated handleResetCase to accept and use caseType
+  const handleResetCase = async (caseId: number, caseType?: string) => {
+    const token = await tokenStore.get();
+    const url = new URL(`/api/admin/reset-feedback/case/${caseId}`, getApiUrl()).toString();
+    const res = await fetch(url, {
+      method: "POST",
+      credentials: "include",
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({ table: caseType === "bkt" ? "bkt" : "loan" }),
+    });
+    const json: any = await res.json();
+    if (!res.ok) throw new Error(json.message || "Reset failed");
+    invalidateAll();
   };
-
-  const FILTERS = ["All", "Unpaid", "PTP", "Paid"];
-
-  const paidCount   = (data?.cases || []).filter((c: any) => c.status === "Paid").length;
-  const unpaidCount = (data?.cases || []).filter((c: any) => c.status !== "Paid" && c.status !== "PTP").length;
-  const ptpCount    = (data?.cases || []).filter((c: any) => c.status === "PTP").length;
 
   return (
     <View style={{ flex: 1, backgroundColor: Colors.background }}>
-      <View style={[styles.filterBar, { paddingTop: Platform.OS === "web" ? 67 : 12 }]}>
-
+      {/* Top bar */}
+      <View style={[styles.topBar, { paddingTop: Platform.OS === "web" ? 67 : 12 }]}>
+        {/* Global stats */}
         <View style={styles.summaryRow}>
           <View style={[styles.summaryChip, { backgroundColor: Colors.success + "18" }]}>
-            <Text style={[styles.summaryChipText, { color: Colors.success }]}>✓ {paidCount} Paid</Text>
+            <Text style={[styles.summaryChipText, { color: Colors.success }]}>✓ {totalPaid} Paid</Text>
           </View>
           <View style={[styles.summaryChip, { backgroundColor: Colors.danger + "18" }]}>
-            <Text style={[styles.summaryChipText, { color: Colors.danger }]}>✗ {unpaidCount} Unpaid</Text>
+            <Text style={[styles.summaryChipText, { color: Colors.danger }]}>✗ {totalUnpaid} Unpaid</Text>
           </View>
           <View style={[styles.summaryChip, { backgroundColor: Colors.statusPTP + "18" }]}>
-            <Text style={[styles.summaryChipText, { color: Colors.statusPTP }]}>◷ {ptpCount} PTP</Text>
+            <Text style={[styles.summaryChipText, { color: Colors.statusPTP }]}>◷ {totalPtp} PTP</Text>
+          </View>
+          <View style={[styles.summaryChip, { backgroundColor: Colors.primary + "18" }]}>
+            <Text style={[styles.summaryChipText, { color: Colors.primary }]}>{allCases.length} Total</Text>
           </View>
         </View>
 
+        {/* Search agents */}
         <View style={styles.searchBox}>
           <Ionicons name="search" size={18} color={Colors.textMuted} style={{ marginRight: 8 }} />
           <TextInput
             style={styles.searchInput}
-            placeholder="Search by Reg No, App ID, Loan No, Agent..."
+            placeholder="Search FOS agent name..."
             placeholderTextColor={Colors.textMuted}
             value={search}
             onChangeText={setSearch}
@@ -564,26 +828,6 @@ export default function AllCasesScreen() {
             </Pressable>
           ) : null}
         </View>
-
-        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-          <View style={styles.filters}>
-            {FILTERS.map((f) => (
-              <Pressable
-                key={f}
-                style={[
-                  styles.filterChip,
-                  statusFilter === f && {
-                    backgroundColor: f === "All" ? Colors.primary : STATUS_COLORS[f],
-                    borderColor: "transparent",
-                  },
-                ]}
-                onPress={() => setStatusFilter(f)}
-              >
-                <Text style={[styles.filterChipText, statusFilter === f && { color: "#fff" }]}>{f}</Text>
-              </Pressable>
-            ))}
-          </View>
-        </ScrollView>
       </View>
 
       {isLoading ? (
@@ -592,257 +836,117 @@ export default function AllCasesScreen() {
         </View>
       ) : (
         <FlatList
-          data={filtered}
-          keyExtractor={(item) => String(item.id)}
-          contentContainerStyle={[styles.list, { paddingBottom: insets.bottom + 24 }, !filtered.length && { flex: 1 }]}
+          data={fosGroups}
+          keyExtractor={(item) => String(item.agentId)}
+          contentContainerStyle={[styles.list, { paddingBottom: insets.bottom + 24 }, !fosGroups.length && { flex: 1 }]}
           ListHeaderComponent={
-            <View style={{ gap: 12, marginBottom: 4 }}>
-              <Text style={styles.count}>{filtered.length} case{filtered.length !== 1 ? "s" : ""}</Text>
-              {agentGroups.length > 0 && (
-                <View style={styles.resetPanel}>
-                  <View style={styles.resetPanelHeader}>
-                    <Ionicons name="refresh-circle" size={18} color={Colors.danger} />
-                    <Text style={styles.resetPanelTitle}>Reset FOS Feedback</Text>
-                  </View>
-                  <Text style={styles.resetPanelSub}>Tap an agent to view and reset their feedback</Text>
-                  {agentGroups.map((ag) => (
-                    <Pressable
-                      key={ag.agentId}
-                      style={styles.agentResetRow}
-                      onPress={() => {
-                        const agentCases = (data?.cases || []).filter((c: any) => c.agent_id === ag.agentId);
-                        setAgentCasesModal({ agentId: ag.agentId, agentName: ag.agentName, cases: agentCases });
-                      }}
-                    >
-                      <View style={styles.agentResetInfo}>
-                        <Text style={styles.agentResetName}>{ag.agentName}</Text>
-                        <Text style={styles.agentResetCount}>{ag.feedbackCount}/{ag.count} feedback given · tap to view</Text>
-                      </View>
-                      {ag.feedbackCount > 0 ? (
-                        <Pressable
-                          style={[styles.resetBtn, resettingAgent === ag.agentId && { opacity: 0.5 }]}
-                          onPress={(e) => { e.stopPropagation?.(); handleResetAgentFeedback(ag.agentId, ag.agentName); }}
-                          disabled={resettingAgent === ag.agentId}
-                        >
-                          {resettingAgent === ag.agentId ? (
-                            <ActivityIndicator size="small" color="#fff" />
-                          ) : (
-                            <>
-                              <Ionicons name="refresh" size={13} color="#fff" />
-                              <Text style={styles.resetBtnText}>Reset All</Text>
-                            </>
-                          )}
-                        </Pressable>
-                      ) : (
-                        <View style={styles.noFeedbackBadge}>
-                          <Text style={styles.noFeedbackBadgeText}>No feedback</Text>
-                        </View>
-                      )}
-                      <Ionicons name="chevron-forward" size={14} color={Colors.textMuted} style={{ marginLeft: 4 }} />
-                    </Pressable>
-                  ))}
-                </View>
-              )}
-            </View>
+            <Text style={styles.count}>{fosGroups.length} FOS agent{fosGroups.length !== 1 ? "s" : ""}</Text>
           }
-          renderItem={({ item }) => (
-            <View style={styles.card}>
-              <View style={styles.cardHeader}>
-                <Text style={styles.customerName} numberOfLines={1}>{item.customer_name}</Text>
-                <View style={[styles.statusBadge, { backgroundColor: (STATUS_COLORS[item.status] || Colors.textMuted) + "22" }]}>
-                  <Text style={[styles.statusText, { color: STATUS_COLORS[item.status] || Colors.textSecondary }]}>{item.status}</Text>
+          renderItem={({ item: group }) => {
+            const collectionPct = group.cases.length > 0
+              ? Math.round((group.paidCount / group.cases.length) * 100)
+              : 0;
+            const pctColor = collectionPct >= 70 ? Colors.success : collectionPct >= 40 ? Colors.warning : Colors.danger;
+
+            return (
+              <Pressable
+                style={styles.fosCard}
+                onPress={() => setSelectedFos({ agentId: group.agentId, agentName: group.agentName, cases: group.cases })}
+              >
+                {/* Avatar */}
+                <View style={styles.fosAvatar}>
+                  <Text style={styles.fosInitial}>
+                    {(group.agentName || "?").charAt(0).toUpperCase()}
+                  </Text>
                 </View>
-              </View>
 
-              <View style={styles.tagRow}>
-                {item.loan_no && (
-                  <View style={styles.tag}>
-                    <Text style={styles.tagLabel}>LOAN</Text>
-                    <Text style={styles.tagValue}>{item.loan_no}</Text>
+                <View style={{ flex: 1 }}>
+                  <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+                    <Text style={styles.fosName}>{group.agentName}</Text>
+                    <Text style={[styles.pctBadge, { color: pctColor }]}>{collectionPct}%</Text>
                   </View>
-                )}
-                {item.app_id && (
-                  <View style={styles.tag}>
-                    <Text style={styles.tagLabel}>APP ID</Text>
-                    <Text style={styles.tagValue}>{item.app_id}</Text>
-                  </View>
-                )}
-                {item.bkt != null && (
-                  <View style={[styles.tag, { backgroundColor: Colors.primary + "15" }]}>
-                    <Text style={styles.tagLabel}>BKT</Text>
-                    <Text style={[styles.tagValue, { color: Colors.primary }]}>{item.bkt}</Text>
-                  </View>
-                )}
-                {item.pos && (
-                  <View style={[styles.tag, { backgroundColor: Colors.info + "15" }]}>
-                    <Text style={styles.tagLabel}>POS</Text>
-                    <Text style={[styles.tagValue, { color: Colors.info }]}>
-                      ₹{parseFloat(item.pos).toLocaleString("en-IN", { maximumFractionDigits: 0 })}
-                    </Text>
-                  </View>
-                )}
-              </View>
 
-              {item.registration_no && <Text style={styles.regNo}>Reg: {item.registration_no}</Text>}
-              {item.agent_name && <Text style={styles.agentTagText}>{item.agent_name}</Text>}
-
-              {item.feedback_code || item.latest_feedback ? (
-                <View style={styles.feedbackRow}>
-                  {item.feedback_code && (
-                    <View style={styles.feedbackCodeBadge}>
-                      <Text style={styles.feedbackCodeText}>{item.feedback_code}</Text>
+                  {/* Case count row */}
+                  <View style={styles.statsRow}>
+                    <View style={styles.statPill}>
+                      <Text style={styles.statPillLabel}>Total</Text>
+                      <Text style={styles.statPillVal}>{group.cases.length}</Text>
                     </View>
-                  )}
-                  {item.latest_feedback && (
-                    <Text style={styles.feedback} numberOfLines={1}>{item.latest_feedback}</Text>
+                    <View style={[styles.statPill, { backgroundColor: Colors.success + "18" }]}>
+                      <Text style={[styles.statPillLabel, { color: Colors.success }]}>Paid</Text>
+                      <Text style={[styles.statPillVal, { color: Colors.success }]}>{group.paidCount}</Text>
+                    </View>
+                    <View style={[styles.statPill, { backgroundColor: Colors.danger + "18" }]}>
+                      <Text style={[styles.statPillLabel, { color: Colors.danger }]}>Unpaid</Text>
+                      <Text style={[styles.statPillVal, { color: Colors.danger }]}>{group.unpaidCount}</Text>
+                    </View>
+                    {group.ptpCount > 0 && (
+                      <View style={[styles.statPill, { backgroundColor: Colors.statusPTP + "18" }]}>
+                        <Text style={[styles.statPillLabel, { color: Colors.statusPTP }]}>PTP</Text>
+                        <Text style={[styles.statPillVal, { color: Colors.statusPTP }]}>{group.ptpCount}</Text>
+                      </View>
+                    )}
+                  </View>
+
+                  {/* POS */}
+                  <Text style={styles.posText}>
+                    POS: ₹{group.totalPos.toLocaleString("en-IN", { maximumFractionDigits: 0 })}
+                  </Text>
+
+                  {/* Progress bar */}
+                  <View style={styles.progressBg}>
+                    <View style={[styles.progressFill, { width: `${collectionPct}%` as any, backgroundColor: pctColor }]} />
+                  </View>
+
+                  {group.feedbackCount > 0 && (
+                    <Text style={styles.feedbackHint}>{group.feedbackCount} feedback given</Text>
                   )}
                 </View>
-              ) : null}
 
-              <StatusActionBar item={item} tableType="loan" onUpdated={invalidateAll} />
-
-              <View style={styles.cardActions}>
-                <Pressable
-                  style={styles.viewDetail}
-                  onPress={() => setSelectedCase(item)}
-                >
-                  <Ionicons name="eye-outline" size={14} color={Colors.primary} />
-                  <Text style={styles.viewDetailText}>View Details</Text>
-                </Pressable>
-              </View>
-            </View>
-          )}
+                <Ionicons name="chevron-forward" size={18} color={Colors.textMuted} />
+              </Pressable>
+            );
+          }}
           ListEmptyComponent={
             <View style={styles.empty}>
-              <Ionicons name="document-text-outline" size={48} color={Colors.textMuted} />
-              <Text style={styles.emptyText}>{search ? `No cases matching "${search}"` : "No cases found"}</Text>
+              <Ionicons name="people-outline" size={52} color={Colors.textMuted} />
+              <Text style={styles.emptyTitle}>
+                {search ? `No agents matching "${search}"` : "No allocation data"}
+              </Text>
+              <Text style={styles.emptyText}>Import an allocation file to see FOS agent cases</Text>
             </View>
           }
         />
       )}
 
-      <CaseDetailModal
-        item={selectedCase}
-        tableType={selectedTableType}
-        onClose={() => setSelectedCase(null)}
-        onResetCase={handleResetCase}
-        onStatusUpdated={invalidateAndSyncSelected}
-      />
-
-      {agentCasesModal && (
-        <Modal
-          visible={true}
-          transparent={false}
-          animationType="slide"
-          onRequestClose={() => setAgentCasesModal(null)}
-        >
-          <View style={{ flex: 1, backgroundColor: Colors.background }}>
-            <View style={agentModalStyles.header}>
-              <Pressable onPress={() => setAgentCasesModal(null)} style={{ padding: 8 }}>
-                <Ionicons name="arrow-back" size={22} color={Colors.text} />
-              </Pressable>
-              <View style={{ flex: 1 }}>
-                <Text style={agentModalStyles.headerTitle}>{agentCasesModal.agentName}</Text>
-                <Text style={agentModalStyles.headerSub}>{agentCasesModal.cases.length} cases</Text>
-              </View>
-              <Pressable
-                style={[agentModalStyles.resetAllBtn, resettingAgent === agentCasesModal.agentId && { opacity: 0.5 }]}
-                onPress={() => handleResetAgentFeedback(agentCasesModal.agentId, agentCasesModal.agentName)}
-                disabled={resettingAgent === agentCasesModal.agentId}
-              >
-                {resettingAgent === agentCasesModal.agentId ? (
-                  <ActivityIndicator size="small" color="#fff" />
-                ) : (
-                  <Text style={agentModalStyles.resetAllBtnText}>Reset All</Text>
-                )}
-              </Pressable>
-            </View>
-
-            <FlatList
-              data={agentCasesModal.cases}
-              keyExtractor={(item) => String(item.id)}
-              contentContainerStyle={{ padding: 12, gap: 10 }}
-              renderItem={({ item }) => {
-                const hasFeedback = !!(item.latest_feedback || item.feedback_code);
-                const statusColor = STATUS_COLORS[item.status] || Colors.textMuted;
-                return (
-                  <View style={agentModalStyles.caseRow}>
-                    <View style={agentModalStyles.caseInfo}>
-                      <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 4 }}>
-                        <Text style={agentModalStyles.caseName} numberOfLines={1}>{item.customer_name}</Text>
-                        <View style={[agentModalStyles.statusBadge, { backgroundColor: statusColor + "22" }]}>
-                          <Text style={[agentModalStyles.statusText, { color: statusColor }]}>{item.status}</Text>
-                        </View>
-                      </View>
-                      <Text style={agentModalStyles.caseLoan}>{item.loan_no}</Text>
-                      {hasFeedback && (
-                        <Text style={agentModalStyles.caseFeedback} numberOfLines={1}>
-                          {item.feedback_code ? item.feedback_code + " · " : ""}{item.latest_feedback || ""}
-                        </Text>
-                      )}
-                      <StatusActionBar
-                        item={item}
-                        tableType="loan"
-                        onUpdated={() => { invalidateAll(); setAgentCasesModal((prev) => prev ? { ...prev } : null); }}
-                      />
-                    </View>
-                    {hasFeedback ? (
-                      <Pressable
-                        style={[agentModalStyles.resetCaseBtn, resettingCaseId === item.id && { opacity: 0.5 }]}
-                        disabled={resettingCaseId === item.id}
-                        onPress={() => {
-                          Alert.alert("Reset Feedback", `Reset feedback for ${item.customer_name}?`, [
-                            { text: "Cancel", style: "cancel" },
-                            {
-                              text: "Reset",
-                              style: "destructive",
-                              onPress: async () => {
-                                setResettingCaseId(item.id);
-                                try {
-                                  await handleResetCase(item.id);
-                                  setAgentCasesModal((prev) =>
-                                    prev
-                                      ? { ...prev, cases: prev.cases.map((c) => c.id === item.id ? { ...c, latest_feedback: null, feedback_code: null, status: "Unpaid" } : c) }
-                                      : null
-                                  );
-                                } finally {
-                                  setResettingCaseId(null);
-                                }
-                              },
-                            },
-                          ]);
-                        }}
-                      >
-                        {resettingCaseId === item.id ? (
-                          <ActivityIndicator size="small" color="#fff" />
-                        ) : (
-                          <>
-                            <Ionicons name="refresh" size={13} color="#fff" />
-                            <Text style={agentModalStyles.resetCaseBtnText}>Reset</Text>
-                          </>
-                        )}
-                      </Pressable>
-                    ) : (
-                      <View style={agentModalStyles.noFeedbackTag}>
-                        <Text style={agentModalStyles.noFeedbackTagText}>No feedback</Text>
-                      </View>
-                    )}
-                  </View>
-                );
-              }}
-              ListEmptyComponent={
-                <View style={{ flex: 1, alignItems: "center", paddingTop: 60 }}>
-                  <Text style={{ color: Colors.textMuted }}>No cases found</Text>
-                </View>
-              }
-            />
-          </View>
-        </Modal>
+      {selectedFos && (
+        <FosAgentCasesModal
+          agentId={selectedFos.agentId}
+          agentName={selectedFos.agentName}
+          cases={selectedFos.cases}
+          onClose={() => setSelectedFos(null)}
+          onUpdated={() => {
+            invalidateAll();
+            // refresh selected modal cases from fresh data
+            const fresh = qc.getQueryData<any>(queryKey);
+            if (fresh?.cases && selectedFos) {
+              const freshCases = fresh.cases.filter((c: any) => c.agent_id === selectedFos.agentId);
+              setSelectedFos((prev) => prev ? { ...prev, cases: freshCases } : null);
+            }
+          }}
+          // CHANGE 9: Pass caseType through to handleResetCase
+          onResetCase={(id, caseType) => handleResetCase(id, caseType)}
+          onResetAgent={(id, name) => {
+            handleResetAgentFeedback(id, name);
+            setSelectedFos(null);
+          }}
+        />
       )}
     </View>
   );
 }
 
+// ─── Styles ───────────────────────────────────────────────────────────────────
 const actionStyles = StyleSheet.create({
   bar:               { flexDirection: "row", gap: 6, marginTop: 4, flexWrap: "wrap" },
   btn:               { flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 10, paddingVertical: 7, borderRadius: 8, borderWidth: 1, borderColor: Colors.border },
@@ -854,73 +958,69 @@ const actionStyles = StyleSheet.create({
 });
 
 const styles = StyleSheet.create({
-  filterBar:           { backgroundColor: Colors.surface, padding: 12, gap: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: Colors.border },
-  tableSwitcher:       { flexDirection: "row", backgroundColor: Colors.surfaceAlt, borderRadius: 10, padding: 3 },
-  switchBtn:           { flex: 1, paddingVertical: 8, alignItems: "center", borderRadius: 8 },
-  switchBtnActive:     { backgroundColor: Colors.primary },
-  switchBtnText:       { fontSize: 13, fontWeight: "700", color: Colors.textSecondary },
-  switchBtnTextActive: { color: "#fff" },
-  summaryRow:          { flexDirection: "row", gap: 8 },
-  summaryChip:         { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8 },
-  summaryChipText:     { fontSize: 12, fontWeight: "700" },
-  searchBox:           { flexDirection: "row", alignItems: "center", backgroundColor: Colors.surfaceAlt, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, borderWidth: 1, borderColor: Colors.border },
-  searchInput:         { flex: 1, fontSize: 14, color: Colors.text },
-  filters:             { flexDirection: "row", gap: 8 },
-  filterChip:          { paddingHorizontal: 14, paddingVertical: 7, borderRadius: 20, backgroundColor: Colors.surfaceAlt, borderWidth: 1, borderColor: Colors.border },
-  filterChipText:      { fontSize: 12, fontWeight: "600", color: Colors.textSecondary },
-  count:               { fontSize: 13, color: Colors.textSecondary, fontWeight: "600" },
-  list:                { padding: 12, gap: 10 },
-  resetPanel:          { backgroundColor: Colors.surface, borderRadius: 14, padding: 14, gap: 10, borderWidth: 1, borderColor: Colors.danger + "30" },
-  resetPanelHeader:    { flexDirection: "row", alignItems: "center", gap: 8 },
-  resetPanelTitle:     { fontSize: 14, fontWeight: "700", color: Colors.danger },
-  resetPanelSub:       { fontSize: 12, color: Colors.textSecondary },
-  agentResetRow:       { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 8, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: Colors.border },
-  agentResetInfo:      { flex: 1 },
-  agentResetName:      { fontSize: 13, fontWeight: "700", color: Colors.text },
-  agentResetCount:     { fontSize: 11, color: Colors.textSecondary, marginTop: 2 },
-  resetBtn:            { flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: Colors.danger, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 7 },
-  resetBtnText:        { fontSize: 12, fontWeight: "700", color: "#fff" },
-  noFeedbackBadge:     { backgroundColor: Colors.surfaceAlt, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
-  noFeedbackBadgeText: { fontSize: 11, color: Colors.textMuted, fontWeight: "600" },
-  card:                { backgroundColor: Colors.surface, borderRadius: 14, padding: 14, gap: 8, shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 6, elevation: 2 },
-  cardHeader:          { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
-  customerName:        { flex: 1, fontSize: 14, fontWeight: "700", color: Colors.text, textTransform: "uppercase", marginRight: 8 },
-  statusBadge:         { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20 },
-  statusText:          { fontSize: 11, fontWeight: "700" },
-  tagRow:              { flexDirection: "row", flexWrap: "wrap", gap: 6 },
-  tag:                 { flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: Colors.surfaceAlt, borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4 },
-  tagLabel:            { fontSize: 9, fontWeight: "700", color: Colors.textMuted, textTransform: "uppercase" },
-  tagValue:            { fontSize: 11, fontWeight: "700", color: Colors.text },
-  regNo:               { fontSize: 12, color: Colors.textSecondary },
-  agentTagText:        { fontSize: 12, fontWeight: "600", color: Colors.primary },
-  feedbackRow:         { flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap" },
-  feedbackCodeBadge:   { backgroundColor: Colors.accent + "20", borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 },
-  feedbackCodeText:    { fontSize: 11, fontWeight: "700", color: Colors.accent },
-  feedback:            { flex: 1, fontSize: 12, color: Colors.textSecondary, fontStyle: "italic" },
-  cardActions:         { flexDirection: "row", justifyContent: "flex-end", marginTop: 2 },
-  viewDetail:          { flexDirection: "row", alignItems: "center", gap: 4 },
-  viewDetailText:      { fontSize: 11, color: Colors.primary, fontWeight: "600" },
-  empty:               { flex: 1, justifyContent: "center", alignItems: "center", gap: 12, paddingVertical: 60 },
-  emptyText:           { fontSize: 15, color: Colors.textMuted, textAlign: "center" },
+  topBar:          { backgroundColor: Colors.surface, padding: 12, gap: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: Colors.border },
+  summaryRow:      { flexDirection: "row", gap: 8, flexWrap: "wrap" },
+  summaryChip:     { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8 },
+  summaryChipText: { fontSize: 12, fontWeight: "700" },
+  searchBox:       { flexDirection: "row", alignItems: "center", backgroundColor: Colors.surfaceAlt, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, borderWidth: 1, borderColor: Colors.border },
+  searchInput:     { flex: 1, fontSize: 14, color: Colors.text },
+  count:           { fontSize: 13, color: Colors.textSecondary, fontWeight: "600", marginBottom: 4 },
+  list:            { padding: 12, gap: 10 },
+  fosCard:         {
+    backgroundColor: Colors.surface, borderRadius: 16, padding: 16,
+    flexDirection: "row", alignItems: "center", gap: 12,
+    shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 8, elevation: 2,
+  },
+  fosAvatar:       { width: 48, height: 48, borderRadius: 24, backgroundColor: Colors.primary, alignItems: "center", justifyContent: "center" },
+  fosInitial:      { fontSize: 20, fontWeight: "800", color: "#fff" },
+  fosName:         { fontSize: 15, fontWeight: "700", color: Colors.text, flex: 1 },
+  pctBadge:        { fontSize: 16, fontWeight: "800" },
+  statsRow:        { flexDirection: "row", gap: 6, marginTop: 6, flexWrap: "wrap" },
+  statPill:        { flexDirection: "row", gap: 4, alignItems: "center", backgroundColor: Colors.surfaceAlt, borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3 },
+  statPillLabel:   { fontSize: 10, fontWeight: "600", color: Colors.textSecondary },
+  statPillVal:     { fontSize: 11, fontWeight: "800", color: Colors.text },
+  posText:         { fontSize: 12, color: Colors.textSecondary, marginTop: 6, fontWeight: "600" },
+  progressBg:      { height: 5, backgroundColor: Colors.border, borderRadius: 3, marginTop: 6, overflow: "hidden" },
+  progressFill:    { height: 5, borderRadius: 3 },
+  feedbackHint:    { fontSize: 11, color: Colors.textMuted, marginTop: 4 },
+  empty:           { flex: 1, justifyContent: "center", alignItems: "center", gap: 8, paddingVertical: 60 },
+  emptyTitle:      { fontSize: 16, fontWeight: "700", color: Colors.textMuted },
+  emptyText:       { fontSize: 13, color: Colors.textMuted, textAlign: "center" },
 });
 
-const agentModalStyles = StyleSheet.create({
-  header:           { flexDirection: "row", alignItems: "center", gap: 12, padding: 16, backgroundColor: Colors.surface, borderBottomWidth: 1, borderBottomColor: Colors.border, paddingTop: 52 },
-  headerTitle:      { fontSize: 16, fontWeight: "700", color: Colors.text },
-  headerSub:        { fontSize: 11, color: Colors.textSecondary, marginTop: 2 },
-  resetAllBtn:      { backgroundColor: Colors.danger, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8 },
+const fosModal = StyleSheet.create({
+  header:           { flexDirection: "row", alignItems: "center", gap: 12, padding: 16, backgroundColor: Colors.surface, borderBottomWidth: 1, borderBottomColor: Colors.border },
+  headerTitle:      { fontSize: 17, fontWeight: "800", color: Colors.text },
+  headerSub:        { fontSize: 12, color: Colors.textSecondary, marginTop: 2 },
+  resetAllBtn:      { flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: Colors.danger, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8 },
   resetAllBtnText:  { fontSize: 12, fontWeight: "700", color: "#fff" },
-  caseRow:          { flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: Colors.surface, borderRadius: 12, padding: 14, borderWidth: 1, borderColor: Colors.border },
-  caseInfo:         { flex: 1 },
-  caseName:         { fontSize: 13, fontWeight: "700", color: Colors.text, textTransform: "uppercase", flex: 1 },
-  caseLoan:         { fontSize: 11, color: Colors.textSecondary, marginBottom: 2 },
-  caseFeedback:     { fontSize: 11, color: Colors.accent, fontStyle: "italic", marginBottom: 4 },
-  statusBadge:      { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10 },
-  statusText:       { fontSize: 10, fontWeight: "700" },
-  resetCaseBtn:     { flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: Colors.danger, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, minWidth: 70, justifyContent: "center", alignSelf: "flex-start" },
-  resetCaseBtnText: { fontSize: 12, fontWeight: "700", color: "#fff" },
-  noFeedbackTag:    { backgroundColor: Colors.surfaceAlt, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, alignSelf: "flex-start" },
-  noFeedbackTagText:{ fontSize: 11, color: Colors.textMuted, fontWeight: "600" },
+  statsRow:         { flexDirection: "row", gap: 8, padding: 12, backgroundColor: Colors.surface, borderBottomWidth: 1, borderBottomColor: Colors.border },
+  statCard:         { flex: 1, backgroundColor: Colors.surfaceAlt, borderRadius: 10, padding: 10, borderTopWidth: 3, alignItems: "center", gap: 2 },
+  statNum:          { fontSize: 16, fontWeight: "800", color: Colors.text },
+  statLabel:        { fontSize: 9, color: Colors.textSecondary, fontWeight: "600" },
+  searchWrap:       { backgroundColor: Colors.surface, padding: 12, gap: 8, borderBottomWidth: 1, borderBottomColor: Colors.border },
+  searchBox:        { flexDirection: "row", alignItems: "center", backgroundColor: Colors.surfaceAlt, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8, gap: 8, borderWidth: 1, borderColor: Colors.border },
+  searchInput:      { flex: 1, fontSize: 14, color: Colors.text },
+  filterPill:       { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 20, backgroundColor: Colors.surfaceAlt, borderWidth: 1, borderColor: Colors.border },
+  filterPillText:   { fontSize: 12, fontWeight: "600", color: Colors.textSecondary },
+  caseCard:         { backgroundColor: Colors.surface, borderRadius: 14, padding: 14, gap: 8, borderLeftWidth: 4, shadowColor: "#000", shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.04, shadowRadius: 4, elevation: 1 },
+  caseCardTop:      { flexDirection: "row", justifyContent: "space-between", gap: 8 },
+  caseName:         { fontSize: 14, fontWeight: "700", color: Colors.text, textTransform: "uppercase" },
+  caseTagRow:       { flexDirection: "row", gap: 6, marginTop: 4, flexWrap: "wrap" },
+  tag:              { flexDirection: "row", gap: 4, alignItems: "center", backgroundColor: Colors.surfaceAlt, borderRadius: 8, paddingHorizontal: 7, paddingVertical: 3 },
+  tagLabel:         { fontSize: 9, fontWeight: "700", color: Colors.textMuted, textTransform: "uppercase" },
+  tagValue:         { fontSize: 11, fontWeight: "700", color: Colors.text },
+  caseMobile:       { fontSize: 12, color: Colors.textSecondary, marginTop: 4 },
+  statusBadge:      { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20 },
+  statusText:       { fontSize: 11, fontWeight: "700" },
+  detailBtn:        { flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: Colors.primary + "12", borderRadius: 8, paddingHorizontal: 8, paddingVertical: 5 },
+  detailBtnText:    { fontSize: 11, fontWeight: "700", color: Colors.primary },
+  feedbackRow:      { flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap" },
+  fbCodeBadge:      { backgroundColor: Colors.accent + "20", borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 },
+  fbCodeText:       { fontSize: 11, fontWeight: "700", color: Colors.accent },
+  fbText:           { flex: 1, fontSize: 12, color: Colors.textSecondary, fontStyle: "italic" },
+  resetCaseBtn:     { flexDirection: "row", alignItems: "center", gap: 6, alignSelf: "flex-start", backgroundColor: Colors.danger + "12", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
+  resetCaseBtnText: { fontSize: 11, fontWeight: "700", color: Colors.danger },
 });
 
 const detailStyles = StyleSheet.create({
