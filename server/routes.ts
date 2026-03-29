@@ -1473,7 +1473,96 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   runDrrDailyPushJob();
   setInterval(runDrrDailyPushJob, 10 * 60 * 1000);
+// ── Pre Repossession Intimation Letter ────────────────────────────────────────
+app.post("/api/admin/generate-pre-intimation", requireAdmin, async (req, res) => {
+  try {
+    const {
+      Document, Packer, Paragraph, TextRun, AlignmentType,
+    } = await import("docx");
 
+    const {
+      customer_name   = "___________",
+      address         = "___________",
+      app_id          = "___________",
+      loan_no         = "___________",
+      registration_no = "___________",
+      asset_make      = "___________",
+      engine_no       = "___________",
+      chassis_no      = "___________",
+      date            = new Date().toLocaleDateString("en-IN"),
+    } = req.body;
+
+    const bold   = (text: string, size = 22) => new TextRun({ text, bold: true,  size, font: "Arial" });
+    const normal = (text: string, size = 22) => new TextRun({ text, bold: false, size, font: "Arial" });
+    const para   = (children: TextRun[], opts: any = {}) =>
+      new Paragraph({ children, spacing: { after: 120 }, ...opts });
+    const blank  = () => new Paragraph({ children: [new TextRun("")], spacing: { after: 80 } });
+
+    const doc = new Document({
+      sections: [{
+        properties: {
+          page: {
+            size:   { width: 11906, height: 16838 },
+            margin: { top: 1000, right: 1000, bottom: 1000, left: 1000 },
+          },
+        },
+        children: [
+          para([bold("Pre Repossession Intimation to Police Station", 26)],
+            { alignment: AlignmentType.CENTER }),
+          blank(),
+          para([bold(`Date :- ${date}`)]),
+          blank(),
+          para([normal("To,")],                    { indent: { left: 360 } }),
+          para([normal("The Senior Inspector,")],   { indent: { left: 360 } }),
+          para([bold("________________________________,")]),
+          para([normal("TQ._________________ Dist. Nanded")]),
+          blank(),
+          para([bold("Sub : "), normal("Pre intimation of repossession of the vehicle from "), bold(customer_name)]),
+          para([normal("(Borrower) residing "), bold(address)]),
+          blank(),
+          para([bold("Respected Sir,")]),
+          blank(),
+          para([normal(
+            "The afore mentioned borrower has taken a loan from Hero Fin-Corp Limited (\"Company\") for the purchase of the Vehicle having the below mentioned details and further the Borrower hypothecated the said vehicle to the Company in terms of loan-cum-hypothecation agreement executed between the borrower and the Company."
+          )]),
+          blank(),
+          para([bold("Name of the Borrower.  :  "),  bold(customer_name)]),
+          para([bold("Address of Borrower.   :  "),  bold(address)]),
+          para([normal("App ID.                :  "), bold(app_id)]),
+          para([normal("Loan cum Hypothecation Agreement No.  :  "), bold(loan_no)]),
+          para([normal("Date.                  :  "), bold(date)]),
+          para([normal("Vehicle Registration No.  :  "), bold(registration_no)]),
+          para([normal("Model Make.            :  "), bold(asset_make)]),
+          para([normal("Engine No.             :  "), bold(engine_no)]),
+          para([normal("Chassis No.            :  "), bold(chassis_no)]),
+          blank(),
+          para([normal(
+            "The Borrower has committed default on the scheduled payment of the Monthly Payments and/or other charges payable on the loan obtained by the Borrower from the Company in terms of the provisions of the aforesaid loan-cum-hypothecation agreement. In spite of Company's requests and reminders, the Borrower has not remitted the outstanding dues; as a result of which the company was left with no option but to enforce the terms and conditions of the said agreement. Under the said agreement, the said Borrower has specifically authorized Company or any of its authorized persons to take charge/repossession of the vehicle, in the event he fails to pay the loan amount when due to the Company. Pursuant to our right therein we are taking steps to recover possession of the said vehicle. This communication is for your record and to prevent confusion that may arise from any complaint that the borrower may lodge with respect to the aforesaid vehicle."
+          )]),
+          blank(),
+          para([normal("Thanking you,")]),
+          blank(),
+          para([normal("Yours Sincerely,")]),
+          blank(),
+          blank(),
+          para([bold("For, Hero Fin-Corp Limited")]),
+          blank(),
+          para([bold("Hero Fincorp Ltd. Corporate Office: 09, Basant Lok, Vasant Vihar, New Delhi-110057 India")],
+            { alignment: AlignmentType.CENTER }),
+        ],
+      }],
+    });
+
+    const buffer = await Packer.toBuffer(doc);
+    const filename = `Pre_Intimation_${customer_name.replace(/\s+/g, "_")}.docx`;
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.send(buffer);
+  } catch (err: any) {
+    console.error("generate-pre-intimation error:", err);
+    res.status(500).json({ message: err.message || "Failed to generate document" });
+  }
+});
   const httpServer = createServer(app);
   return httpServer;
 }
