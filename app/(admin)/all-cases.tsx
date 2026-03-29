@@ -358,31 +358,38 @@ function CaseDetailModal({
   const statusColor = localItem ? STATUS_COLORS[localItem.status] || Colors.primary : Colors.primary;
 
   const rows = localItem ? [
-    { section: "Feedback" },
-    { label: "Feedback Code",     value: localItem.feedback_code },
-    { label: "Detail Feedback",   value: localItem.latest_feedback },
-    { label: "Comments",          value: localItem.feedback_comments },
-    { label: "Feedback Date",     value: fmtDate(localItem.feedback_date) },
-    { label: "Customer Avail.",   value: fmtBool(localItem.customer_available) },
-    { label: "Vehicle Avail.",    value: fmtBool(localItem.vehicle_available) },
-    { label: "Third Party",       value: fmtBool(localItem.third_party) },
-    ...(localItem.third_party === true || localItem.third_party === "true" || localItem.third_party === "t"
-      ? [
-          { label: "Third Party Name",   value: localItem.third_party_name },
-          { label: "Third Party Number", value: localItem.third_party_number, phone: true },
-        ] : []),
-    { label: "Projection",        value: localItem.projection },
-    { label: "Non Starter",       value: fmtBool(localItem.non_starter) },
-    { label: "KYC Purchase",      value: fmtBool(localItem.kyc_purchase) },
-    {
-      label: "Workable",
-      value: localItem.workable === true || localItem.workable === "true" || localItem.workable === "t"
-        ? "Workable"
-        : localItem.workable === false || localItem.workable === "false" || localItem.workable === "f"
-        ? "Non Workable" : "",
-    },
-    { label: "PTP Date",          value: fmtDate(localItem.ptp_date) },
-    { label: "Telecaller PTP",    value: fmtDate(localItem.telecaller_ptp_date) },
+    ...(localItem.feedback_code || localItem.latest_feedback || localItem.feedback_comments ||
+    localItem.feedback_date || localItem.customer_available != null ||
+    localItem.vehicle_available != null || localItem.third_party != null ||
+    localItem.projection || localItem.non_starter != null || localItem.kyc_purchase != null ||
+    localItem.workable != null || localItem.ptp_date || localItem.telecaller_ptp_date
+  ? [
+      { section: "Feedback" },
+      ...(localItem.feedback_code         ? [{ label: "Feedback Code",   value: localItem.feedback_code }] : []),
+      ...(localItem.latest_feedback       ? [{ label: "Detail Feedback", value: localItem.latest_feedback }] : []),
+      ...(localItem.feedback_comments     ? [{ label: "Comments",        value: localItem.feedback_comments }] : []),
+      ...(localItem.feedback_date         ? [{ label: "Feedback Date",   value: fmtDate(localItem.feedback_date) }] : []),
+      ...(localItem.customer_available != null ? [{ label: "Customer Avail.", value: fmtBool(localItem.customer_available) }] : []),
+      ...(localItem.vehicle_available  != null ? [{ label: "Vehicle Avail.",  value: fmtBool(localItem.vehicle_available) }] : []),
+      ...(localItem.third_party != null   ? [{ label: "Third Party",     value: fmtBool(localItem.third_party) }] : []),
+      ...(localItem.third_party === true || localItem.third_party === "true" || localItem.third_party === "t"
+        ? [
+            { label: "Third Party Name",   value: localItem.third_party_name },
+            { label: "Third Party Number", value: localItem.third_party_number, phone: true },
+          ] : []),
+      ...(localItem.projection            ? [{ label: "Projection",   value: localItem.projection }] : []),
+      ...(localItem.non_starter  != null  ? [{ label: "Non Starter",  value: fmtBool(localItem.non_starter) }] : []),
+      ...(localItem.kyc_purchase != null  ? [{ label: "KYC Purchase", value: fmtBool(localItem.kyc_purchase) }] : []),
+      ...(localItem.workable     != null  ? [{
+        label: "Workable",
+        value: localItem.workable === true || localItem.workable === "true" || localItem.workable === "t" ? "Workable"
+             : localItem.workable === false || localItem.workable === "false" || localItem.workable === "f" ? "Non Workable" : "",
+      }] : []),
+      ...(localItem.ptp_date            ? [{ label: "PTP Date",       value: fmtDate(localItem.ptp_date) }] : []),
+      ...(localItem.telecaller_ptp_date ? [{ label: "Telecaller PTP", value: fmtDate(localItem.telecaller_ptp_date) }] : []),
+    ]
+  : []
+),
 
     { section: "Case Info" },
     { label: "Status",            value: localItem.status },
