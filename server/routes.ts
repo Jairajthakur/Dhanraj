@@ -1845,6 +1845,77 @@ export async function registerRoutes(app: Express): Promise<Server> {
   runDrrDailyPushJob();
   setInterval(runDrrDailyPushJob, 10 * 60 * 1000);
 // ── Pre Repossession Intimation Letter ────────────────────────────────────────
+// ── Pre Repossession Intimation Letter ────────────────────────────────────────
+
+  // ── 1. Pre Intimation → PDF
+  app.post("/api/admin/generate-pre-intimation", requireAdmin, async (req, res) => {
+    try {
+      const p = buildIntimationParams(req.body);
+      const htmlPdf = require("html-pdf-node");
+      const pdfBuffer = await htmlPdf.generatePdf(
+        { content: buildPreIntimationHtml(p) },
+        { format: "A4", margin: { top: "20mm", right: "15mm", bottom: "20mm", left: "15mm" }, printBackground: true }
+      );
+      const filename = `Pre_Intimation_${p.customer_name.replace(/\s+/g, "_")}.pdf`;
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+      res.end(pdfBuffer);
+    } catch (err: any) {
+      console.error("generate-pre-intimation PDF error:", err);
+      res.status(500).json({ message: err.message || "Failed to generate PDF" });
+    }
+  });
+
+  // ── 2. Pre Intimation → DOCX
+  app.post("/api/admin/generate-pre-intimation-docx", requireAdmin, async (req, res) => {
+    try {
+      const p = buildIntimationParams(req.body);
+      const logoPath = path.join(process.cwd(), "server/assets/hero-logo.png");
+      const buf = await buildIntimationDocx(p, false, logoPath);
+      const filename = `Pre_Intimation_${p.customer_name.replace(/\s+/g, "_")}.docx`;
+      res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+      res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+      res.end(buf);
+    } catch (err: any) {
+      console.error("generate-pre-intimation DOCX error:", err);
+      res.status(500).json({ message: err.message || "Failed to generate DOCX" });
+    }
+  });
+
+  // ── 3. Post Intimation → PDF
+  app.post("/api/admin/generate-post-intimation", requireAdmin, async (req, res) => {
+    try {
+      const p = buildIntimationParams(req.body, true);
+      const htmlPdf = require("html-pdf-node");
+      const pdfBuffer = await htmlPdf.generatePdf(
+        { content: buildPostIntimationHtml(p) },
+        { format: "A4", margin: { top: "20mm", right: "15mm", bottom: "20mm", left: "15mm" }, printBackground: true }
+      );
+      const filename = `Post_Intimation_${p.customer_name.replace(/\s+/g, "_")}.pdf`;
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+      res.end(pdfBuffer);
+    } catch (err: any) {
+      console.error("generate-post-intimation PDF error:", err);
+      res.status(500).json({ message: err.message || "Failed to generate PDF" });
+    }
+  });
+
+  // ── 4. Post Intimation → DOCX
+  app.post("/api/admin/generate-post-intimation-docx", requireAdmin, async (req, res) => {
+    try {
+      const p = buildIntimationParams(req.body, true);
+      const logoPath = path.join(process.cwd(), "server/assets/hero-logo.png");
+      const buf = await buildIntimationDocx(p, true, logoPath);
+      const filename = `Post_Intimation_${p.customer_name.replace(/\s+/g, "_")}.docx`;
+      res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+      res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+      res.end(buf);
+    } catch (err: any) {
+      console.error("generate-post-intimation DOCX error:", err);
+      res.status(500).json({ message: err.message || "Failed to generate DOCX" });
+    }
+  });
 
   const httpServer = createServer(app);
   return httpServer;
