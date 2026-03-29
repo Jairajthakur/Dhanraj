@@ -43,7 +43,6 @@ function fmtBool(v: any): string {
   return "";
 }
 
-// ── FIX: show "—" instead of hiding empty rows ────────────────────────────
 function TableRow({
   label, value, phone, even,
 }: {
@@ -73,20 +72,19 @@ function TableRow({
   );
 }
 
+// ── Pre Intimation Modal ───────────────────────────────────────────────────
 function PreIntimationModal({ item, onClose }: { item: any; onClose: () => void }) {
   const insets = useSafeAreaInsets();
-  const [downloading, setDownloading] = useState(false);
+  const [downloading, setDownloading]       = useState(false);
   const [downloadingPdf, setDownloadingPdf] = useState(false);
 
   const today = new Date().toLocaleDateString("en-IN", {
     day: "2-digit", month: "2-digit", year: "numeric",
   });
 
-  // Editable fields
   const [policeStation, setPoliceStation] = useState("");
   const [tq, setTq]                       = useState("");
 
-  // Reset editable fields when item changes
   useEffect(() => {
     setPoliceStation("");
     setTq("");
@@ -110,9 +108,12 @@ function PreIntimationModal({ item, onClose }: { item: any; onClose: () => void 
     const setter = format === "pdf" ? setDownloadingPdf : setDownloading;
     setter(true);
     try {
-      const token = await tokenStore.get();
-      const url   = new URL("/api/admin/generate-pre-intimation", getApiUrl()).toString();
-      const res   = await fetch(url, {
+      const token    = await tokenStore.get();
+      const endpoint = format === "pdf"
+        ? "/api/admin/generate-pre-intimation"
+        : "/api/admin/generate-pre-intimation-docx";
+      const url = new URL(endpoint, getApiUrl()).toString();
+      const res = await fetch(url, {
         method: "POST",
         credentials: "include",
         headers: {
@@ -121,13 +122,16 @@ function PreIntimationModal({ item, onClose }: { item: any; onClose: () => void 
         },
         body: JSON.stringify({
           customer_name:   customerName,
-          address, app_id: appId, loan_no: loanNo,
-          registration_no: regNo, asset_make: assetMake,
-          engine_no: engineNo, chassis_no: chassisNo,
-          date: today,
-          police_station: policeStation.trim() || "________________________________",
-          tq: tq.trim() || "_____________",
-          format,
+          address,
+          app_id:          appId,
+          loan_no:         loanNo,
+          registration_no: regNo,
+          asset_make:      assetMake,
+          engine_no:       engineNo,
+          chassis_no:      chassisNo,
+          date:            today,
+          police_station:  policeStation.trim() || "________________________________",
+          tq:              tq.trim() || "_____________",
         }),
       });
 
@@ -148,8 +152,8 @@ function PreIntimationModal({ item, onClose }: { item: any; onClose: () => void 
         const { FileSystem, Sharing } = await Promise.all([
           import("expo-file-system"), import("expo-sharing"),
         ]).then(([fs, sh]) => ({ FileSystem: fs, Sharing: sh }));
-        const buffer = await res.arrayBuffer();
-        const base64 = btoa(String.fromCharCode(...new Uint8Array(buffer)));
+        const buffer  = await res.arrayBuffer();
+        const base64  = btoa(String.fromCharCode(...new Uint8Array(buffer)));
         const fileUri = FileSystem.documentDirectory + fileName;
         await FileSystem.writeAsStringAsync(fileUri, base64, { encoding: FileSystem.EncodingType.Base64 });
         await Sharing.shareAsync(fileUri, { mimeType });
@@ -288,14 +292,276 @@ function PreIntimationModal({ item, onClose }: { item: any; onClose: () => void 
   );
 }
 
+// ── Post Intimation Modal ──────────────────────────────────────────────────
+function PostIntimationModal({ item, onClose }: { item: any; onClose: () => void }) {
+  const insets = useSafeAreaInsets();
+  const [downloading, setDownloading]       = useState(false);
+  const [downloadingPdf, setDownloadingPdf] = useState(false);
+
+  const today = new Date().toLocaleDateString("en-IN", {
+    day: "2-digit", month: "2-digit", year: "numeric",
+  });
+
+  const [policeStation, setPoliceStation]               = useState("");
+  const [tq, setTq]                                     = useState("");
+  const [repossessionDate, setRepossessionDate]         = useState(today);
+  const [repossessionAddress, setRepossessionAddress]   = useState("");
+
+  useEffect(() => {
+    setPoliceStation("");
+    setTq("");
+    setRepossessionDate(today);
+    setRepossessionAddress(item?.address || "");
+  }, [item?.id]);
+
+  if (!item) return null;
+
+  const customerName = item.customer_name   || "___________";
+  const address      = item.address         || "___________";
+  const appId        = item.app_id          || "___________";
+  const loanNo       = item.loan_no         || "___________";
+  const regNo        = item.registration_no || "___________";
+  const assetMake    = item.asset_make      || "___________";
+  const engineNo     = item.engine_no       || "___________";
+  const chassisNo    = item.chassis_no      || "___________";
+
+  const stationDisplay  = policeStation.trim()       || "________________________________";
+  const tqDisplay       = tq.trim()                  || "_____________";
+  const repoDateDisplay = repossessionDate.trim()    || today;
+  const repoAddrDisplay = repossessionAddress.trim() || address;
+
+  const handleDownload = async (format: "docx" | "pdf") => {
+    const setter = format === "pdf" ? setDownloadingPdf : setDownloading;
+    setter(true);
+    try {
+      const token    = await tokenStore.get();
+      const endpoint = format === "pdf"
+        ? "/api/admin/generate-post-intimation"
+        : "/api/admin/generate-post-intimation-docx";
+      const url = new URL(endpoint, getApiUrl()).toString();
+      const res = await fetch(url, {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          customer_name:        customerName,
+          address,
+          app_id:               appId,
+          loan_no:              loanNo,
+          registration_no:      regNo,
+          asset_make:           assetMake,
+          engine_no:            engineNo,
+          chassis_no:           chassisNo,
+          date:                 today,
+          police_station:       policeStation.trim() || "________________________________",
+          tq:                   tq.trim() || "_____________",
+          repossession_date:    repoDateDisplay,
+          repossession_address: repoAddrDisplay,
+          reference_no:         loanNo,
+        }),
+      });
+
+      if (!res.ok) throw new Error("Failed to generate document");
+      const ext      = format === "pdf" ? "pdf" : "docx";
+      const mimeType = format === "pdf"
+        ? "application/pdf"
+        : "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+      const fileName = `Post_Intimation_${customerName.replace(/\s+/g, "_")}.${ext}`;
+
+      if (Platform.OS === "web") {
+        const blob    = await res.blob();
+        const blobUrl = URL.createObjectURL(blob);
+        const a       = document.createElement("a");
+        a.href = blobUrl; a.download = fileName; a.click();
+        URL.revokeObjectURL(blobUrl);
+      } else {
+        const { FileSystem, Sharing } = await Promise.all([
+          import("expo-file-system"), import("expo-sharing"),
+        ]).then(([fs, sh]) => ({ FileSystem: fs, Sharing: sh }));
+        const buffer  = await res.arrayBuffer();
+        const base64  = btoa(String.fromCharCode(...new Uint8Array(buffer)));
+        const fileUri = FileSystem.documentDirectory + fileName;
+        await FileSystem.writeAsStringAsync(fileUri, base64, { encoding: FileSystem.EncodingType.Base64 });
+        await Sharing.shareAsync(fileUri, { mimeType });
+      }
+    } catch (e: any) {
+      Alert.alert("Error", e.message || "Could not generate document");
+    } finally { setter(false); }
+  };
+
+  return (
+    <Modal visible={!!item} transparent={false} animationType="slide" onRequestClose={onClose}>
+      <View style={[intimStyles.screen, { paddingTop: insets.top }]}>
+
+        {/* Header */}
+        <View style={[intimStyles.header, { backgroundColor: "#1e40af" }]}>
+          <Pressable onPress={onClose} style={{ padding: 6 }}>
+            <Ionicons name="arrow-back" size={22} color="#fff" />
+          </Pressable>
+          <Text style={intimStyles.headerTitle} numberOfLines={1}>Post Intimation</Text>
+          <View style={{ flexDirection: "row", gap: 8 }}>
+            <Pressable
+              style={[intimStyles.downloadBtn, { backgroundColor: "rgba(255,255,255,0.25)" }, downloading && { opacity: 0.6 }]}
+              onPress={() => handleDownload("docx")} disabled={downloading || downloadingPdf}
+            >
+              {downloading
+                ? <ActivityIndicator size="small" color="#fff" />
+                : <Ionicons name="document-outline" size={16} color="#fff" />}
+              <Text style={intimStyles.downloadBtnText}>{downloading ? "…" : "DOCX"}</Text>
+            </Pressable>
+            <Pressable
+              style={[intimStyles.downloadBtn, { backgroundColor: "#dc2626" }, downloadingPdf && { opacity: 0.6 }]}
+              onPress={() => handleDownload("pdf")} disabled={downloading || downloadingPdf}
+            >
+              {downloadingPdf
+                ? <ActivityIndicator size="small" color="#fff" />
+                : <Ionicons name="document-text-outline" size={16} color="#fff" />}
+              <Text style={intimStyles.downloadBtnText}>{downloadingPdf ? "…" : "PDF"}</Text>
+            </Pressable>
+          </View>
+        </View>
+
+        <ScrollView style={{ flex: 1 }} contentContainerStyle={intimStyles.letterContainer} showsVerticalScrollIndicator={false}>
+
+          {/* Editable fields */}
+          <View style={intimStyles.editableCard}>
+            <Text style={intimStyles.editableTitle}>
+              <Ionicons name="create-outline" size={14} color={Colors.primary} /> Fill in Details
+            </Text>
+            <View style={intimStyles.editableRow}>
+              <Text style={intimStyles.editableLabel}>Police Station Name</Text>
+              <TextInput
+                style={intimStyles.editableInput}
+                placeholder="Enter police station name"
+                placeholderTextColor={Colors.textMuted}
+                value={policeStation}
+                onChangeText={setPoliceStation}
+              />
+            </View>
+            <View style={intimStyles.editableRow}>
+              <Text style={intimStyles.editableLabel}>TQ (Taluka)</Text>
+              <TextInput
+                style={intimStyles.editableInput}
+                placeholder="Enter taluka name"
+                placeholderTextColor={Colors.textMuted}
+                value={tq}
+                onChangeText={setTq}
+              />
+            </View>
+            <View style={intimStyles.editableRow}>
+              <Text style={intimStyles.editableLabel}>Date of Repossession</Text>
+              <TextInput
+                style={intimStyles.editableInput}
+                placeholder="DD/MM/YYYY"
+                placeholderTextColor={Colors.textMuted}
+                value={repossessionDate}
+                onChangeText={setRepossessionDate}
+              />
+            </View>
+            <View style={intimStyles.editableRow}>
+              <Text style={intimStyles.editableLabel}>Repossession Address</Text>
+              <TextInput
+                style={intimStyles.editableInput}
+                placeholder="Where vehicle was taken from"
+                placeholderTextColor={Colors.textMuted}
+                value={repossessionAddress}
+                onChangeText={setRepossessionAddress}
+              />
+            </View>
+          </View>
+
+          <View style={intimStyles.letterCard}>
+            <Text style={[intimStyles.letterTitle, { textDecorationLine: "underline" }]}>
+              Post Repossession Intimation to Police Station
+            </Text>
+            <View style={intimStyles.divider} />
+            <Text style={intimStyles.letterDate}>Date: {today}</Text>
+
+            <View style={intimStyles.toBlock}>
+              <Text style={intimStyles.letterBodyText}>To,</Text>
+              <Text style={intimStyles.letterBodyText}>The Senior Inspector,</Text>
+              <Text style={[intimStyles.letterBodyText, intimStyles.boldText]}>{stationDisplay},</Text>
+              <Text style={intimStyles.letterBodyText}>TQ. {tqDisplay}  Dist. Nanded</Text>
+            </View>
+
+            <View style={intimStyles.subjectBlock}>
+              <Text style={intimStyles.letterBodyText}>
+                <Text style={intimStyles.boldText}>Sub : </Text>
+                Intimation after repossession of the vehicle No{" "}
+                <Text style={intimStyles.boldText}>{regNo}</Text>
+                {" "}From Mr. <Text style={intimStyles.boldText}>{customerName}</Text>
+              </Text>
+              <Text style={intimStyles.letterBodyText}>
+                (Borrower) residing <Text style={intimStyles.boldText}>{address}</Text>
+              </Text>
+            </View>
+
+            <Text style={[intimStyles.letterBodyText, { marginBottom: 10 }]}>Respected Sir,</Text>
+            <Text style={[intimStyles.letterBodyText, { marginBottom: 10, lineHeight: 22 }]}>
+              This is in furtherance to our letter dated bearing reference number{" "}
+              <Text style={intimStyles.boldText}>{loanNo}</Text> whereby it was intimated to you that despite our repeated requests, reminders and personal visits the above said borrower has defaulted in repaying the above TW Loan as expressly agreed by him/her under the Loan (cum Hypothecation) Agreement and guarantee entered between the said borrower and the company.
+            </Text>
+            <Text style={[intimStyles.letterBodyText, { marginBottom: 10 }]}>
+              Pursuant to our right under the said Agreement we have taken peaceful repossession of the said vehicle.
+            </Text>
+            <Text style={[intimStyles.letterBodyText, { marginBottom: 14, lineHeight: 22 }]}>
+              We have taken peaceful repossession of the said vehicle on{" "}
+              <Text style={intimStyles.boldText}>{repoDateDisplay}</Text> at from{" "}
+              <Text style={intimStyles.boldText}>{repoAddrDisplay}</Text>
+            </Text>
+
+            <Text style={[intimStyles.boldText, { marginBottom: 8 }]}>DETAILS OF THE VEHICLE REPOSSESSED:-</Text>
+
+            <View style={intimStyles.detailsTable}>
+              {[
+                ["Name of the Borrower",        customerName],
+                ["Address of Borrower",         address],
+                ["Loan Agreement No.",          loanNo],
+                ["App ID",                      appId],
+                ["Vehicle Registration Number", regNo],
+                ["Model Make",                  assetMake],
+                ["Engine No.",                  engineNo],
+                ["Chassis No.",                 chassisNo],
+              ].map(([label, value], i) => (
+                <View key={String(label)} style={[intimStyles.detailRow, i % 2 === 1 && { backgroundColor: "#f8f8f8" }]}>
+                  <Text style={intimStyles.detailLabel}>{label}</Text>
+                  <Text style={intimStyles.detailColon}>:</Text>
+                  <Text style={[intimStyles.detailValue, { fontWeight: "700" }]}>{String(value)}</Text>
+                </View>
+              ))}
+            </View>
+
+            <Text style={[intimStyles.letterBodyText, { marginVertical: 14, lineHeight: 22 }]}>
+              This communication is for your records and to prevent any confusion that may arise for any complaint that the Borrower may lodge with respect to the said vehicle.
+            </Text>
+            <Text style={intimStyles.letterBodyText}>Thanking You,</Text>
+            <Text style={intimStyles.letterBodyText}>Yours Sincerely,</Text>
+            <View style={{ height: 40 }} />
+            <Text style={[intimStyles.boldText, { marginBottom: 4 }]}>For, Hero Fin Corp Limited</Text>
+            <View style={intimStyles.divider} />
+            <Text style={[intimStyles.letterBodyText, { textAlign: "center", fontSize: 11 }]}>
+              Hero Fincorp Ltd. Corporate Office: 09, Basant Lok, Vasant Vihar, New Delhi-110057 India
+            </Text>
+          </View>
+          <View style={{ height: insets.bottom + 24 }} />
+        </ScrollView>
+      </View>
+    </Modal>
+  );
+}
+
 // ── Status Action Bar ──────────────────────────────────────────────────────
 function StatusActionBar({
-  item, tableType, onUpdated, onPreIntimation,
+  item, tableType, onUpdated, onPreIntimation, onPostIntimation,
 }: {
   item: any;
   tableType: "loan" | "bkt";
   onUpdated: () => void;
   onPreIntimation?: (item: any) => void;
+  onPostIntimation?: (item: any) => void;
 }) {
   const [loading, setLoading] = useState<string | null>(null);
 
@@ -373,13 +639,25 @@ function StatusActionBar({
           <Text style={[actionStyles.btnText, { color: "#f59e0b" }]}>Pre Intimation</Text>
         </Pressable>
       )}
+
+      {/* Post Intimation */}
+      {onPostIntimation && (
+        <Pressable
+          style={[actionStyles.btn, actionStyles.btnPostIntimation]}
+          onPress={() => onPostIntimation(item)}
+          disabled={!!loading}
+        >
+          <Ionicons name="checkmark-done-outline" size={15} color="#3b82f6" />
+          <Text style={[actionStyles.btnText, { color: "#3b82f6" }]}>Post Intimation</Text>
+        </Pressable>
+      )}
     </View>
   );
 }
 
 // ── Case Detail Modal ──────────────────────────────────────────────────────
 function CaseDetailModal({
-  item, tableType, onClose, onResetCase, onStatusUpdated, onPreIntimation,
+  item, tableType, onClose, onResetCase, onStatusUpdated, onPreIntimation, onPostIntimation,
 }: {
   item: any;
   tableType: "loan" | "bkt";
@@ -387,6 +665,7 @@ function CaseDetailModal({
   onResetCase: (id: number) => void;
   onStatusUpdated: () => Promise<void>;
   onPreIntimation: (item: any) => void;
+  onPostIntimation: (item: any) => void;
 }) {
   const insets = useSafeAreaInsets();
   const [resetting, setResetting] = useState(false);
@@ -508,6 +787,7 @@ function CaseDetailModal({
                 tableType={tableType}
                 onUpdated={() => { onStatusUpdated(); }}
                 onPreIntimation={onPreIntimation}
+                onPostIntimation={onPostIntimation}
               />
             </View>
 
@@ -563,16 +843,17 @@ function CaseDetailModal({
 export default function AllCasesScreen() {
   const insets = useSafeAreaInsets();
   const qc = useQueryClient();
-  const [search, setSearch]               = useState("");
-  const [statusFilter, setStatusFilter]   = useState("All");
-  const [selectedCase, setSelectedCase]   = useState<any>(null);
-  const [intimationCase, setIntimationCase] = useState<any>(null);  // ← Pre Intimation
-  const [selectedTableType]               = useState<"loan" | "bkt">("loan");
-  const [resettingAgent, setResettingAgent] = useState<number | null>(null);
-  const [agentCasesModal, setAgentCasesModal] = useState<{
+  const [search, setSearch]                     = useState("");
+  const [statusFilter, setStatusFilter]         = useState("All");
+  const [selectedCase, setSelectedCase]         = useState<any>(null);
+  const [intimationCase, setIntimationCase]     = useState<any>(null);
+  const [postIntimationCase, setPostIntimationCase] = useState<any>(null);
+  const [selectedTableType]                     = useState<"loan" | "bkt">("loan");
+  const [resettingAgent, setResettingAgent]     = useState<number | null>(null);
+  const [agentCasesModal, setAgentCasesModal]   = useState<{
     agentId: number; agentName: string; cases: any[];
   } | null>(null);
-  const [resettingCaseId, setResettingCaseId] = useState<number | null>(null);
+  const [resettingCaseId, setResettingCaseId]   = useState<number | null>(null);
 
   const tableType = "loan";
   const queryKey  = ["/api/admin/cases"];
@@ -853,6 +1134,7 @@ export default function AllCasesScreen() {
                 tableType="loan"
                 onUpdated={invalidateAll}
                 onPreIntimation={setIntimationCase}
+                onPostIntimation={setPostIntimationCase}
               />
 
               <View style={styles.cardActions}>
@@ -880,12 +1162,19 @@ export default function AllCasesScreen() {
         onResetCase={handleResetCase}
         onStatusUpdated={invalidateAndSyncSelected}
         onPreIntimation={setIntimationCase}
+        onPostIntimation={setPostIntimationCase}
       />
 
       {/* Pre Intimation Modal */}
       <PreIntimationModal
         item={intimationCase}
         onClose={() => setIntimationCase(null)}
+      />
+
+      {/* Post Intimation Modal */}
+      <PostIntimationModal
+        item={postIntimationCase}
+        onClose={() => setPostIntimationCase(null)}
       />
 
       {/* Agent Cases Modal */}
@@ -943,6 +1232,7 @@ export default function AllCasesScreen() {
                         tableType="loan"
                         onUpdated={() => { invalidateAll(); setAgentCasesModal((prev) => prev ? { ...prev } : null); }}
                         onPreIntimation={setIntimationCase}
+                        onPostIntimation={setPostIntimationCase}
                       />
                     </View>
                     {hasFeedback ? (
@@ -964,7 +1254,8 @@ export default function AllCasesScreen() {
                                       : null
                                   );
                                 } finally {
-                                  setResettingCaseId(null); }
+                                  setResettingCaseId(null);
+                                }
                               },
                             },
                           ]);
@@ -997,14 +1288,15 @@ export default function AllCasesScreen() {
 
 // ── Styles ──────────────────────────────────────────────────────────────────
 const actionStyles = StyleSheet.create({
-  bar:               { flexDirection: "row", gap: 6, marginTop: 4, flexWrap: "wrap" },
-  btn:               { flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 10, paddingVertical: 7, borderRadius: 8, borderWidth: 1, borderColor: Colors.border },
-  btnText:           { fontSize: 12, fontWeight: "700", color: Colors.text },
-  btnInactive:       { backgroundColor: Colors.surfaceAlt, borderColor: Colors.border },
-  btnActivePaid:     { backgroundColor: Colors.success, borderColor: Colors.success },
-  btnUnpaid:         { backgroundColor: Colors.danger, borderColor: Colors.danger },
-  btnActiveRollback: { backgroundColor: Colors.info, borderColor: Colors.info },
-  btnPreIntimation:  { backgroundColor: "#fff7ed", borderColor: "#f59e0b" },
+  bar:                { flexDirection: "row", gap: 6, marginTop: 4, flexWrap: "wrap" },
+  btn:                { flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 10, paddingVertical: 7, borderRadius: 8, borderWidth: 1, borderColor: Colors.border },
+  btnText:            { fontSize: 12, fontWeight: "700", color: Colors.text },
+  btnInactive:        { backgroundColor: Colors.surfaceAlt, borderColor: Colors.border },
+  btnActivePaid:      { backgroundColor: Colors.success, borderColor: Colors.success },
+  btnUnpaid:          { backgroundColor: Colors.danger, borderColor: Colors.danger },
+  btnActiveRollback:  { backgroundColor: Colors.info, borderColor: Colors.info },
+  btnPreIntimation:   { backgroundColor: "#fff7ed", borderColor: "#f59e0b" },
+  btnPostIntimation:  { backgroundColor: "#eff6ff", borderColor: "#3b82f6" },
 });
 
 const styles = StyleSheet.create({
