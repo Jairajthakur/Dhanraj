@@ -73,29 +73,42 @@ function TableRow({
   );
 }
 
-// ── Pre Intimation Modal ───────────────────────────────────────────────────
 function PreIntimationModal({ item, onClose }: { item: any; onClose: () => void }) {
-  const insets      = useSafeAreaInsets();
+  const insets = useSafeAreaInsets();
   const [downloading, setDownloading] = useState(false);
-
-  if (!item) return null;
+  const [downloadingPdf, setDownloadingPdf] = useState(false);
 
   const today = new Date().toLocaleDateString("en-IN", {
     day: "2-digit", month: "2-digit", year: "numeric",
   });
 
-  const customerName   = item.customer_name   || "___________";
-  const address        = item.address         || "___________";
-  const appId          = item.app_id          || "___________";
-  const loanNo         = item.loan_no         || "___________";
-  const regNo          = item.registration_no || "___________";
-  const assetMake      = item.asset_make      || "___________";
-  const engineNo       = item.engine_no       || "___________";
-  const chassisNo      = item.chassis_no      || "___________";
+  // Editable fields
+  const [policeStation, setPoliceStation] = useState("");
+  const [tq, setTq]                       = useState("");
 
-  // ── Download DOCX via backend ──────────────────────────────────────────
-  const handleDownload = async () => {
-    setDownloading(true);
+  // Reset editable fields when item changes
+  useEffect(() => {
+    setPoliceStation("");
+    setTq("");
+  }, [item?.id]);
+
+  if (!item) return null;
+
+  const customerName = item.customer_name   || "___________";
+  const address      = item.address         || "___________";
+  const appId        = item.app_id          || "___________";
+  const loanNo       = item.loan_no         || "___________";
+  const regNo        = item.registration_no || "___________";
+  const assetMake    = item.asset_make      || "___________";
+  const engineNo     = item.engine_no       || "___________";
+  const chassisNo    = item.chassis_no      || "___________";
+
+  const stationDisplay = policeStation.trim() || "________________________________";
+  const tqDisplay      = tq.trim()            || "_____________";
+
+  const handleDownload = async (format: "docx" | "pdf") => {
+    const setter = format === "pdf" ? setDownloadingPdf : setDownloading;
+    setter(true);
     try {
       const token = await tokenStore.get();
       const url   = new URL("/api/admin/generate-pre-intimation", getApiUrl()).toString();
@@ -108,45 +121,42 @@ function PreIntimationModal({ item, onClose }: { item: any; onClose: () => void 
         },
         body: JSON.stringify({
           customer_name:   customerName,
-          address,
-          app_id:          appId,
-          loan_no:         loanNo,
-          registration_no: regNo,
-          asset_make:      assetMake,
-          engine_no:       engineNo,
-          chassis_no:      chassisNo,
-          date:            today,
+          address, app_id: appId, loan_no: loanNo,
+          registration_no: regNo, asset_make: assetMake,
+          engine_no: engineNo, chassis_no: chassisNo,
+          date: today,
+          police_station: policeStation.trim() || "________________________________",
+          tq: tq.trim() || "_____________",
+          format,
         }),
       });
 
       if (!res.ok) throw new Error("Failed to generate document");
+      const ext      = format === "pdf" ? "pdf" : "docx";
+      const mimeType = format === "pdf"
+        ? "application/pdf"
+        : "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+      const fileName = `Pre_Intimation_${customerName.replace(/\s+/g, "_")}.${ext}`;
 
       if (Platform.OS === "web") {
-        const blob = await res.blob();
+        const blob    = await res.blob();
         const blobUrl = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = blobUrl;
-        a.download = `Pre_Intimation_${customerName.replace(/\s+/g, "_")}.docx`;
-        a.click();
+        const a       = document.createElement("a");
+        a.href = blobUrl; a.download = fileName; a.click();
         URL.revokeObjectURL(blobUrl);
       } else {
-        // For native: use expo-file-system + expo-sharing
         const { FileSystem, Sharing } = await Promise.all([
-          import("expo-file-system"),
-          import("expo-sharing"),
+          import("expo-file-system"), import("expo-sharing"),
         ]).then(([fs, sh]) => ({ FileSystem: fs, Sharing: sh }));
-
-        const buffer  = await res.arrayBuffer();
-        const base64  = btoa(String.fromCharCode(...new Uint8Array(buffer)));
-        const fileUri = FileSystem.documentDirectory + `Pre_Intimation_${customerName.replace(/\s+/g, "_")}.docx`;
+        const buffer = await res.arrayBuffer();
+        const base64 = btoa(String.fromCharCode(...new Uint8Array(buffer)));
+        const fileUri = FileSystem.documentDirectory + fileName;
         await FileSystem.writeAsStringAsync(fileUri, base64, { encoding: FileSystem.EncodingType.Base64 });
-        await Sharing.shareAsync(fileUri, { mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" });
+        await Sharing.shareAsync(fileUri, { mimeType });
       }
     } catch (e: any) {
       Alert.alert("Error", e.message || "Could not generate document");
-    } finally {
-      setDownloading(false);
-    }
+    } finally { setter(false); }
   };
 
   return (
@@ -159,37 +169,69 @@ function PreIntimationModal({ item, onClose }: { item: any; onClose: () => void 
             <Ionicons name="arrow-back" size={22} color="#fff" />
           </Pressable>
           <Text style={intimStyles.headerTitle} numberOfLines={1}>Pre Intimation</Text>
-          <Pressable
-            style={[intimStyles.downloadBtn, downloading && { opacity: 0.6 }]}
-            onPress={handleDownload}
-            disabled={downloading}
-          >
-            {downloading
-              ? <ActivityIndicator size="small" color="#fff" />
-              : <Ionicons name="download-outline" size={18} color="#fff" />}
-            <Text style={intimStyles.downloadBtnText}>{downloading ? "Generating…" : "Download DOCX"}</Text>
-          </Pressable>
+          <View style={{ flexDirection: "row", gap: 8 }}>
+            <Pressable
+              style={[intimStyles.downloadBtn, { backgroundColor: "rgba(255,255,255,0.25)" }, downloading && { opacity: 0.6 }]}
+              onPress={() => handleDownload("docx")} disabled={downloading || downloadingPdf}
+            >
+              {downloading
+                ? <ActivityIndicator size="small" color="#fff" />
+                : <Ionicons name="document-outline" size={16} color="#fff" />}
+              <Text style={intimStyles.downloadBtnText}>{downloading ? "…" : "DOCX"}</Text>
+            </Pressable>
+            <Pressable
+              style={[intimStyles.downloadBtn, { backgroundColor: "#dc2626" }, downloadingPdf && { opacity: 0.6 }]}
+              onPress={() => handleDownload("pdf")} disabled={downloading || downloadingPdf}
+            >
+              {downloadingPdf
+                ? <ActivityIndicator size="small" color="#fff" />
+                : <Ionicons name="document-text-outline" size={16} color="#fff" />}
+              <Text style={intimStyles.downloadBtnText}>{downloadingPdf ? "…" : "PDF"}</Text>
+            </Pressable>
+          </View>
         </View>
 
         <ScrollView style={{ flex: 1 }} contentContainerStyle={intimStyles.letterContainer} showsVerticalScrollIndicator={false}>
-          <View style={intimStyles.letterCard}>
 
-            {/* Title */}
+          {/* Editable fields */}
+          <View style={intimStyles.editableCard}>
+            <Text style={intimStyles.editableTitle}>
+              <Ionicons name="create-outline" size={14} color={Colors.primary} /> Fill in Police Station Details
+            </Text>
+            <View style={intimStyles.editableRow}>
+              <Text style={intimStyles.editableLabel}>Police Station Name</Text>
+              <TextInput
+                style={intimStyles.editableInput}
+                placeholder="Enter police station name"
+                placeholderTextColor={Colors.textMuted}
+                value={policeStation}
+                onChangeText={setPoliceStation}
+              />
+            </View>
+            <View style={intimStyles.editableRow}>
+              <Text style={intimStyles.editableLabel}>TQ (Taluka)</Text>
+              <TextInput
+                style={intimStyles.editableInput}
+                placeholder="Enter taluka name"
+                placeholderTextColor={Colors.textMuted}
+                value={tq}
+                onChangeText={setTq}
+              />
+            </View>
+          </View>
+
+          <View style={intimStyles.letterCard}>
             <Text style={intimStyles.letterTitle}>Pre Repossession Intimation to Police Station</Text>
             <View style={intimStyles.divider} />
-
-            {/* Date */}
             <Text style={intimStyles.letterDate}>Date :- {today}</Text>
 
-            {/* To block */}
             <View style={intimStyles.toBlock}>
               <Text style={intimStyles.letterBodyText}>To,</Text>
               <Text style={intimStyles.letterBodyText}>The Senior Inspector,</Text>
-              <Text style={intimStyles.letterBodyText}>________________________________,</Text>
-              <Text style={intimStyles.letterBodyText}>TQ._________________ Dist. Nanded</Text>
+              <Text style={[intimStyles.letterBodyText, intimStyles.boldText]}>{stationDisplay},</Text>
+              <Text style={intimStyles.letterBodyText}>TQ. {tqDisplay}  Dist. Nanded</Text>
             </View>
 
-            {/* Subject */}
             <View style={intimStyles.subjectBlock}>
               <Text style={intimStyles.letterBodyText}>
                 <Text style={intimStyles.boldText}>Sub : </Text>
@@ -197,29 +239,26 @@ function PreIntimationModal({ item, onClose }: { item: any; onClose: () => void 
                 <Text style={intimStyles.boldText}>{customerName}</Text>
               </Text>
               <Text style={intimStyles.letterBodyText}>
-                (Borrower) residing{" "}
-                <Text style={intimStyles.boldText}>{address}</Text>
+                (Borrower) residing <Text style={intimStyles.boldText}>{address}</Text>
               </Text>
             </View>
 
             <Text style={[intimStyles.letterBodyText, { marginBottom: 10 }]}>Respected Sir,</Text>
-
             <Text style={[intimStyles.letterBodyText, { marginBottom: 14, lineHeight: 22 }]}>
               The afore mentioned borrower has taken a loan from Hero Fin-Corp Limited ("Company") for the purchase of the Vehicle having the below mentioned details and further the Borrower hypothecated the said vehicle to the Company in terms of loan-cum-hypothecation agreement executed between the borrower and the Company.
             </Text>
 
-            {/* Details table */}
             <View style={intimStyles.detailsTable}>
               {[
-                ["Name of the Borrower",         customerName,   true],
-                ["Address of Borrower",          address,        true],
-                ["App ID",                       appId,          true],
-                ["Loan cum Hypothecation No.",   loanNo,         true],
-                ["Date",                         today,          true],
-                ["Vehicle Registration No.",     regNo,          true],
-                ["Model Make",                   assetMake,      true],
-                ["Engine No.",                   engineNo,       true],
-                ["Chassis No.",                  chassisNo,      true],
+                ["Name of the Borrower",        customerName, true],
+                ["Address of Borrower",         address,      true],
+                ["App ID",                      appId,        true],
+                ["Loan cum Hypothecation No.",  loanNo,       true],
+                ["Date",                        today,        true],
+                ["Vehicle Registration No.",    regNo,        true],
+                ["Model Make",                  assetMake,    true],
+                ["Engine No.",                  engineNo,     true],
+                ["Chassis No.",                 chassisNo,    true],
               ].map(([label, value, isBold], i) => (
                 <View key={String(label)} style={[intimStyles.detailRow, i % 2 === 1 && { backgroundColor: "#f8f8f8" }]}>
                   <Text style={intimStyles.detailLabel}>{label}</Text>
@@ -1073,4 +1112,9 @@ const intimStyles = StyleSheet.create({
   detailLabel:     { width: "40%", fontSize: 12, color: "#555", fontWeight: "600" },
   detailColon:     { width: 16, fontSize: 12, color: "#555", textAlign: "center" },
   detailValue:     { flex: 1, fontSize: 12, color: "#1a1a1a" },
+  editableCard:    { backgroundColor: Colors.primary + "10", borderRadius: 12, padding: 14, marginBottom: 12, borderWidth: 1, borderColor: Colors.primary + "30", gap: 10 },
+  editableTitle:   { fontSize: 13, fontWeight: "700", color: Colors.primary, marginBottom: 4 },
+  editableRow:     { gap: 4 },
+  editableLabel:   { fontSize: 12, fontWeight: "600", color: Colors.textSecondary },
+  editableInput:   { backgroundColor: "#fff", borderRadius: 8, borderWidth: 1, borderColor: Colors.border, paddingHorizontal: 12, paddingVertical: 8, fontSize: 13, color: Colors.text },
 });
