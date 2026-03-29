@@ -478,95 +478,149 @@ async function buildIntimationDocx(
   logoPath: string
 ): Promise<Buffer> {
   const {
-    Document, Packer, Paragraph, TextRun, AlignmentType, BorderStyle, WidthType, ImageRun,
+    Document, Packer, Paragraph, TextRun, AlignmentType, BorderStyle,
+    WidthType, ImageRun, Table, TableRow, TableCell, ShadingType, VerticalAlign,
   } = require("docx");
   const fs = require("fs");
-
+ 
   const logoData: Buffer | null = fs.existsSync(logoPath) ? fs.readFileSync(logoPath) : null;
-
-  const body11 = { size: 22, font: "Arial" };
-  const body10 = { size: 20, font: "Arial" };
-  const sp = (n: number) => ({ before: n, after: n });
-
+ 
+  // Typography helpers
+  const body11 = { size: 22, font: "Arial" };   // 11 pt body
+  const body10 = { size: 20, font: "Arial" };   // 10 pt body
+  const sp     = (n: number) => ({ before: n, after: n });
+ 
+  // ── Table helpers ──────────────────────────────────────────────────────────
+  const noBorder = { style: BorderStyle.NONE, size: 0, color: "FFFFFF" };
+  const noBorders = { top: noBorder, bottom: noBorder, left: noBorder, right: noBorder };
+ 
+  /** Build a two-column label : value table row */
+  function detailRow(label: string, value: string): any {
+    return new TableRow({
+      children: [
+        new TableCell({
+          borders: noBorders,
+          width: { size: 4000, type: WidthType.DXA },
+          margins: { top: 60, bottom: 60, left: 0, right: 120 },
+          children: [
+            new Paragraph({
+              children: [new TextRun({ text: label, ...body10 })],
+            }),
+          ],
+        }),
+        new TableCell({
+          borders: noBorders,
+          width: { size: 5400, type: WidthType.DXA },
+          margins: { top: 60, bottom: 60, left: 0, right: 0 },
+          children: [
+            new Paragraph({
+              children: [
+                new TextRun({ text: ": ", ...body10 }),
+                new TextRun({ text: value || "—", ...body10 }),
+              ],
+            }),
+          ],
+        }),
+      ],
+    });
+  }
+ 
+  /** Wrap a list of [label, value] pairs into a borderless details table */
+  function detailsTable(rows: [string, string][]): any {
+    return new Table({
+      width: { size: 9400, type: WidthType.DXA },
+      columnWidths: [4000, 5400],
+      borders: {
+        top: noBorder, bottom: noBorder, left: noBorder, right: noBorder,
+        insideH: noBorder, insideV: noBorder,
+      },
+      rows: rows.map(([label, value]) => detailRow(label, value)),
+    });
+  }
+ 
   const children: any[] = [];
-
-  // Logo
+ 
+  // ── Logo (top-right) ───────────────────────────────────────────────────────
   if (logoData) {
     children.push(
       new Paragraph({
         alignment: AlignmentType.RIGHT,
-        spacing: { before: 0, after: 40 },
+        spacing: { before: 0, after: 60 },
         children: [
           new ImageRun({
             data: logoData,
-            transformation: { width: 110, height: 64 },
+            transformation: { width: 120, height: 70 },
             type: "png",
           }),
         ],
       })
     );
   }
-
-  // Title (no bold)
+ 
+  // ── Title ──────────────────────────────────────────────────────────────────
   children.push(
     new Paragraph({
       alignment: AlignmentType.CENTER,
-      spacing: sp(100),
+      spacing: sp(80),
       children: [
         new TextRun({
           text: isPost
-            ? "Post Repossession Intimation to Police Station"
+            ? "Post repossession Intimation to Police Station"
             : "Pre Repossession Intimation to Police Station",
-          size: 26,
+          size: 24,
           font: "Arial",
-          underline: isPost ? { type: "single" } : undefined,
+          underline: { type: "single" },
         }),
       ],
     })
   );
-
-  // Date
+ 
+  // ── Date (right-aligned, same area as title) ───────────────────────────────
   children.push(
     new Paragraph({
-      spacing: sp(60),
-      children: [new TextRun({ text: `Date :- ${p.date}`, ...body11 })],
+      alignment: AlignmentType.RIGHT,
+      spacing: { before: 0, after: 80 },
+      children: [new TextRun({ text: `Date: ${p.date}`, ...body11 })],
     })
   );
-
-  // To block
+ 
+  // ── To block ───────────────────────────────────────────────────────────────
+  const policeStation = p.police_station && p.police_station !== "________________________________"
+    ? `${p.police_station} Police Station,`
+    : "________________________________,";
+ 
   children.push(
     new Paragraph({ spacing: { before: 60, after: 20 }, children: [new TextRun({ text: "To,", ...body11 })] }),
     new Paragraph({ spacing: { before: 0, after: 20 }, children: [new TextRun({ text: "The Senior Inspector,", ...body11 })] }),
-    new Paragraph({ spacing: { before: 0, after: 20 }, children: [new TextRun({ text: `${p.police_station},`, ...body11 })] }),
-    new Paragraph({ spacing: { before: 0, after: 80 }, children: [new TextRun({ text: `TQ. ${p.tq}     Dist. Nanded`, ...body11 })] })
+    new Paragraph({ spacing: { before: 0, after: 20 }, children: [new TextRun({ text: policeStation, ...body11 })] }),
+    new Paragraph({ spacing: { before: 0, after: 80 }, children: [new TextRun({ text: `TQ. ${p.tq}   Dist. Nanded`, ...body11 })] })
   );
-
-  // Subject
+ 
+  // ── Sub line ───────────────────────────────────────────────────────────────
   if (isPost) {
     children.push(
       new Paragraph({
-        spacing: sp(60),
+        spacing: sp(40),
         children: [
-          new TextRun({
-            text: `Sub : Intimation after repossession of the vehicle No ${p.registration_no} From Mr. ${p.customer_name}`,
-            ...body11,
-          }),
+          new TextRun({ text: "Sub :- ", ...body11 }),
+          new TextRun({ text: `Intimation after repossession of `, ...body11 }),
+          new TextRun({ text: "the vehicle", ...body11, underline: { type: "single" } }),
+          new TextRun({ text: ` No ${p.registration_no} From Mr. `, ...body11 }),
+          new TextRun({ text: p.customer_name, ...body11 }),
         ],
       }),
       new Paragraph({
         spacing: { before: 0, after: 80 },
-        children: [new TextRun({ text: `(Borrower) residing ${p.address}`, ...body11 })],
+        children: [new TextRun({ text: `(Borrower) residing ${p.address}`, ...body11, underline: { type: "single" } })],
       })
     );
   } else {
     children.push(
       new Paragraph({
-        spacing: sp(60),
+        spacing: sp(40),
         children: [
-          new TextRun({
-            text: `Sub : Pre intimation of repossession of the vehicle from ${p.customer_name}`,
-            ...body11,
-          }),
+          new TextRun({ text: "Sub :- ", ...body11 }),
+          new TextRun({ text: `Pre intimation of repossession of the vehicle from ${p.customer_name}`, ...body11 }),
         ],
       }),
       new Paragraph({
@@ -575,24 +629,31 @@ async function buildIntimationDocx(
       })
     );
   }
-
-  // Respected Sir
+ 
+  // ── Respected Sir ─────────────────────────────────────────────────────────
   children.push(
-    new Paragraph({
-      spacing: sp(60),
-      children: [new TextRun({ text: "Respected Sir,", ...body11 })],
-    })
+    new Paragraph({ spacing: sp(60), children: [new TextRun({ text: "Respected Sir,", ...body11 })] })
   );
-
+ 
+  // ── Body paragraphs + details table ───────────────────────────────────────
   if (isPost) {
-    // Post body paragraphs
     children.push(
       new Paragraph({
         spacing: sp(60),
         alignment: AlignmentType.JUSTIFIED,
         children: [
           new TextRun({
-            text: `This is in furtherance to our letter dated bearing reference number ${p.reference_no} whereby it was intimated to you that despite our repeated requests, reminders and personal visits the above said borrower has defaulted in repaying the above TW Loan as expressly agreed by him/her under the Loan (cum Hypothecation) Agreement and guarantee entered between the said borrower and the company.`,
+            text: `This is in furtherance to our letter dated bearing reference number ${p.reference_no} whereby it was intimated to you that despite our repeated requests, reminders and personal visits the above said borrower has default`,
+            ...body10,
+          }),
+          new TextRun({ text: "ed", ...body10, underline: { type: "single" } }),
+          new TextRun({
+            text: " in repaying the above TW Loan as expressly agreed by him/he",
+            ...body10,
+          }),
+          new TextRun({ text: "r", ...body10, underline: { type: "single" } }),
+          new TextRun({
+            text: " under the Loan (cum Hypothecation) Agreement and guarantee entered between the said borrower and the company.",
             ...body10,
           }),
         ],
@@ -600,49 +661,43 @@ async function buildIntimationDocx(
       new Paragraph({
         spacing: sp(60),
         alignment: AlignmentType.JUSTIFIED,
-        children: [
-          new TextRun({
-            text: "Pursuant to our right under the said Agreement we have taken peaceful repossession of the said vehicle.",
-            ...body10,
-          }),
-        ],
+        children: [new TextRun({ text: "Pursuant to our right under the said Agreement we have taken peaceful repossession of the said vehicle.", ...body10 })],
       }),
       new Paragraph({
         spacing: sp(60),
         alignment: AlignmentType.JUSTIFIED,
         children: [
-          new TextRun({
-            text: `We have taken peaceful repossession of the said vehicle on ${p.repossession_date} at from ${p.repossession_address}`,
-            ...body10,
-          }),
+          new TextRun({ text: `We have taken peaceful repossession of the said vehicle on `, ...body10 }),
+          new TextRun({ text: p.repossession_date, ...body10, underline: { type: "single" } }),
+          new TextRun({ text: " at from ", ...body10 }),
+          new TextRun({ text: p.repossession_address, ...body10, underline: { type: "single" } }),
         ],
       }),
-      new Paragraph({
-        spacing: sp(60),
-        children: [new TextRun({ text: "DETAILS OF THE VEHICLE REPOSSESSED:-", ...body11 })],
-      }),
-      // Plain text details - no table
-      new Paragraph({ spacing: { before: 20, after: 10 }, children: [new TextRun({ text: `Name of the Borrower : ${p.customer_name}`, ...body10 })] }),
-      new Paragraph({ spacing: { before: 10, after: 10 }, children: [new TextRun({ text: `Address of Borrower : ${p.address}`, ...body10 })] }),
-      new Paragraph({ spacing: { before: 10, after: 10 }, children: [new TextRun({ text: `Loan Agreement No. : ${p.loan_no}`, ...body10 })] }),
-      new Paragraph({ spacing: { before: 10, after: 10 }, children: [new TextRun({ text: `App ID : ${p.app_id}`, ...body10 })] }),
-      new Paragraph({ spacing: { before: 10, after: 10 }, children: [new TextRun({ text: `Vehicle Registration Number : ${p.registration_no}`, ...body10 })] }),
-      new Paragraph({ spacing: { before: 10, after: 10 }, children: [new TextRun({ text: `Model Make : ${p.asset_make}`, ...body10 })] }),
-      new Paragraph({ spacing: { before: 10, after: 10 }, children: [new TextRun({ text: `Engine No. : ${p.engine_no}`, ...body10 })] }),
-      new Paragraph({ spacing: { before: 10, after: 40 }, children: [new TextRun({ text: `Chassis No. : ${p.chassis_no}`, ...body10 })] }),
+      new Paragraph({ spacing: sp(60), children: [new TextRun({ text: "DETAILS OF THE VEHICLE REPOSSESSED:-", size: 22, font: "Arial", underline: { type: "single" } })] }),
+ 
+      // ── Details table ────────────────────────────────────────────────────
+      detailsTable([
+        ["Name of the Borrower",        p.customer_name],
+        ["Address of Borrower",         p.address],
+        ["Loan Agreement No",           p.loan_no],
+        ["App ID",                      p.app_id],
+        ["Vehicle Registration Number", p.registration_no],
+        ["Model Make",                  p.asset_make],
+        ["Engine No.",                  p.engine_no],
+        ["Chassis No.",                 p.chassis_no],
+      ]),
+ 
       new Paragraph({
         spacing: sp(80),
         alignment: AlignmentType.JUSTIFIED,
         children: [
-          new TextRun({
-            text: "This communication is for your records and to prevent any confusion that may arise for any complaint that the Borrower may lodge with respect to the said vehicle.",
-            ...body10,
-          }),
+          new TextRun({ text: "This ", ...body10 }),
+          new TextRun({ text: "communicate", ...body10, underline: { type: "single" } }),
+          new TextRun({ text: " on is for your records and to prevent any confusion that may arise for any complaint that the Borrower may lodge with respect to the said vehicle.", ...body10 }),
         ],
       })
     );
   } else {
-    // Pre body paragraphs
     children.push(
       new Paragraph({
         spacing: sp(60),
@@ -654,16 +709,20 @@ async function buildIntimationDocx(
           }),
         ],
       }),
-      // Plain text details - no table
-      new Paragraph({ spacing: { before: 20, after: 10 }, children: [new TextRun({ text: `Name of the Borrower : ${p.customer_name}`, ...body10 })] }),
-      new Paragraph({ spacing: { before: 10, after: 10 }, children: [new TextRun({ text: `Address of Borrower : ${p.address}`, ...body10 })] }),
-      new Paragraph({ spacing: { before: 10, after: 10 }, children: [new TextRun({ text: `App ID : ${p.app_id}`, ...body10 })] }),
-      new Paragraph({ spacing: { before: 10, after: 10 }, children: [new TextRun({ text: `Loan cum Hypothecation Agreement No. : ${p.loan_no}`, ...body10 })] }),
-      new Paragraph({ spacing: { before: 10, after: 10 }, children: [new TextRun({ text: `Date : ${p.date}`, ...body10 })] }),
-      new Paragraph({ spacing: { before: 10, after: 10 }, children: [new TextRun({ text: `Vehicle Registration No. : ${p.registration_no}`, ...body10 })] }),
-      new Paragraph({ spacing: { before: 10, after: 10 }, children: [new TextRun({ text: `Model Make : ${p.asset_make}`, ...body10 })] }),
-      new Paragraph({ spacing: { before: 10, after: 10 }, children: [new TextRun({ text: `Engine No. : ${p.engine_no}`, ...body10 })] }),
-      new Paragraph({ spacing: { before: 10, after: 40 }, children: [new TextRun({ text: `Chassis No. : ${p.chassis_no}`, ...body10 })] }),
+ 
+      // ── Details table ────────────────────────────────────────────────────
+      detailsTable([
+        ["Name of the Borrower",                  p.customer_name],
+        ["Address of Borrower",                   p.address],
+        ["App ID",                                p.app_id],
+        ["Loan cum Hypothecation Agreement No.",  p.loan_no],
+        ["Date",                                  p.date],
+        ["Vehicle Registration No.",              p.registration_no],
+        ["Model Make",                            p.asset_make],
+        ["Engine No.",                            p.engine_no],
+        ["Chassis No.",                           p.chassis_no],
+      ]),
+ 
       new Paragraph({
         spacing: sp(80),
         alignment: AlignmentType.JUSTIFIED,
@@ -676,19 +735,19 @@ async function buildIntimationDocx(
       })
     );
   }
-
-  // Closing - no bold
+ 
+  // ── Closing ────────────────────────────────────────────────────────────────
   children.push(
-    new Paragraph({ spacing: sp(60), children: [new TextRun({ text: "Thanking you,", ...body11 })] }),
-    new Paragraph({ spacing: sp(60), children: [new TextRun({ text: "Yours Sincerely,", ...body11 })] }),
-    new Paragraph({ spacing: { before: 480, after: 60 }, children: [new TextRun({ text: `For, Hero Fin${isPost ? " " : "-"}Corp Limited`, ...body11 })] })
+    new Paragraph({ spacing: sp(60), children: [new TextRun({ text: "Thanking You,", ...body11 })] }),
+    new Paragraph({ spacing: sp(40), children: [new TextRun({ text: "Yours Sincerely,", ...body11 })] }),
+    new Paragraph({ spacing: { before: 480, after: 60 }, children: [new TextRun({ text: `For, Hero Fin Corp Limited`, ...body11 })] })
   );
-
-  // Footer
+ 
+  // ── Footer ─────────────────────────────────────────────────────────────────
   children.push(
     new Paragraph({
       alignment: AlignmentType.CENTER,
-      spacing: { before: 240, after: 0 },
+      spacing: { before: 300, after: 0 },
       border: { top: { style: BorderStyle.SINGLE, size: 6, color: "CCCCCC" } },
       children: [
         new TextRun({
@@ -699,7 +758,7 @@ async function buildIntimationDocx(
       ],
     })
   );
-
+ 
   const doc = new Document({
     sections: [{
       properties: {
@@ -2210,12 +2269,11 @@ app.post("/api/admin/generate-pre-intimation", requireAdmin, async (req, res) =>
 // 2. Pre Intimation → DOCX
 app.post("/api/admin/generate-pre-intimation-docx", requireAdmin, async (req, res) => {
   try {
-    const p = buildIntimationParams(req.body);
+    const p        = buildIntimationParams(req.body);
     const logoPath = path.join(process.cwd(), "assets/images/hero-logo.png");
-    console.log("[logo] cwd:", process.cwd());
-    console.log("[logo] path:", logoPath);
-    console.log("[logo] exists:", fs.existsSync(logoPath));
-    
+    const buf      = await buildIntimationDocx(p, false, logoPath);
+    const filename = `Pre_Intimation_${p.customer_name.replace(/\s+/g, "_")}.docx`;
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
     res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
     res.end(buf);
   } catch (err: any) {
