@@ -2,8 +2,7 @@ import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "node:http";
 import { randomBytes, createHmac } from "node:crypto";
 import session from "express-session";
-import connectPgSimple from "connect-pg-sim
-  ple";
+import connectPgSimple from "connect-pg-simple";
 import multer from "multer";
 import ExcelJS from "exceljs";
 import * as storage from "./storage";
