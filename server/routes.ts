@@ -1932,307 +1932,483 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
 // ── PDF helpers ───────────────────────────────────────────────────────────────
 
-function pdfHeader(doc: any, title: string, underline: boolean, p: any) {
+// ═══════════════════════════════════════════════════════════════════════════════
+// REPLACE everything between:
+//   "// ── PDF helpers ──────────────────────────────────────────────────────────────"
+// AND
+//   "  const httpServer = createServer(app);"
+//
+// with the content below.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// ── PDF helpers ───────────────────────────────────────────────────────────────
+
+function buildPreIntimationPdf(doc: any, p: ReturnType<typeof buildIntimationParams>, logoPath: string) {
   const lm        = doc.page.margins.left;
   const rm        = doc.page.width - doc.page.margins.right;
   const pageWidth = rm - lm;
 
-  doc.font("Helvetica").fontSize(14).text(title, lm, doc.y, {
-    align: "center", width: pageWidth,
-  });
-  if (underline) {
-    const tw = doc.widthOfString(title);
-    const tx = lm + (pageWidth - tw) / 2;
-    const ty = doc.y;
-    doc.moveTo(tx, ty).lineTo(tx + tw, ty).strokeColor("#000000").stroke();
-  }
-  doc.moveDown(0.4);
-  doc.moveTo(lm, doc.y).lineTo(rm, doc.y).strokeColor("#cccccc").lineWidth(0.5).stroke();
+  // ── Logo (top-right) ───────────────────────────────────────────────────────
+  try {
+    const fsNode = require("fs");
+    if (fsNode.existsSync(logoPath)) {
+      const logoImg = fsNode.readFileSync(logoPath);
+      const logoW = 110; const logoH = 55;
+      doc.image(logoImg, rm - logoW, doc.y, { width: logoW, height: logoH });
+      doc.moveDown(0.2);
+    }
+  } catch {}
+
+  // ── Title (centered, no underline for pre) ─────────────────────────────────
+  const titleY = doc.y;
+  doc.font("Helvetica-Bold").fontSize(13).text(
+    "Pre Repossession Intimation to Police Station",
+    lm, titleY, { align: "center", width: pageWidth }
+  );
+  doc.moveDown(0.3);
+  doc.moveTo(lm, doc.y).lineTo(rm, doc.y).strokeColor("#aaaaaa").lineWidth(0.5).stroke();
   doc.strokeColor("#000000").lineWidth(1);
   doc.moveDown(0.5);
 
-  // Date
+  // ── Date ──────────────────────────────────────────────────────────────────
   doc.font("Helvetica").fontSize(11).text(`Date :- ${p.date}`, lm, doc.y);
   doc.moveDown(0.8);
 
-  // To block
+  // ── To block ──────────────────────────────────────────────────────────────
+  const policeLabel = p.police_station && p.police_station !== "________________________________"
+    ? `${p.police_station} Police Station,`
+    : "________________________________,";
   doc.font("Helvetica").fontSize(11);
   doc.text("To,", lm);
   doc.text("The Senior Inspector,", lm);
-  doc.text(`${p.police_station},`, lm);
+  doc.text(policeLabel, lm);
   doc.text(`TQ. ${p.tq}     Dist. Nanded`, lm);
   doc.moveDown(0.8);
-}
 
-function pdfDetailsTable(
-  doc: any,
-  rows: [string, string][],
-  pageWidth: number,
-  lm: number
-) {
-  doc.font("Helvetica").fontSize(10).fillColor("#000000");
-  rows.forEach(([label, value]) => {
-    doc.text(`${label} : ${value || "—"}`, lm, doc.y, { width: pageWidth });
-  });
+  // ── Sub ───────────────────────────────────────────────────────────────────
+  doc.font("Helvetica").fontSize(11);
+  doc.text(`Sub :- Pre intimation of repossession of the vehicle from ${p.customer_name}`, lm, doc.y, { width: pageWidth });
+  doc.text(`(Borrower) residing ${p.address}`, lm, doc.y, { width: pageWidth });
+  doc.moveDown(0.8);
+
+  // ── Respected Sir ─────────────────────────────────────────────────────────
+  doc.font("Helvetica").fontSize(11).text("Respected Sir,", lm);
   doc.moveDown(0.5);
-}
- function pdfFooter(doc: any, isPost: boolean) {
-  const lm = doc.page.margins.left;
-  const rm = doc.page.width - doc.page.margins.right;
+
+  // ── Body paragraph ────────────────────────────────────────────────────────
+  doc.font("Helvetica").fontSize(10).text(
+    'The afore mentioned borrower has taken a loan from Hero Fin-Corp Limited ("Company") for the purchase of the Vehicle having the below mentioned details and further the Borrower hypothecated the said vehicle to the Company in terms of loan-cum-hypothecation agreement executed between the borrower and the Company.',
+    lm, doc.y, { align: "justify", width: pageWidth }
+  );
+  doc.moveDown(0.8);
+
+  // ── Details table ─────────────────────────────────────────────────────────
+  const labelW = pageWidth * 0.48;
+  const valueW = pageWidth * 0.52;
+  const rowH   = 18;
+  const rows: [string, string][] = [
+    ["Name of the Borrower",                  p.customer_name],
+    ["Address of Borrower",                   p.address],
+    ["App ID",                                p.app_id],
+    ["Loan cum Hypothecation Agreement No.",  p.loan_no],
+    ["Date",                                  p.date],
+    ["Vehicle Registration No.",              p.registration_no],
+    ["Model Make",                            p.asset_make],
+    ["Engine No.",                            p.engine_no],
+    ["Chassis No.",                           p.chassis_no],
+  ];
+
+  doc.font("Helvetica").fontSize(10);
+  rows.forEach(([label, value], i) => {
+    const rowY = doc.y;
+    if (i % 2 === 0) {
+      doc.rect(lm, rowY, pageWidth, rowH).fill("#f5f5f5").fillColor("#000000");
+    }
+    doc.fillColor("#555555").text(label, lm + 4, rowY + 4, { width: labelW - 8, lineBreak: false });
+    doc.fillColor("#000000").text(`: ${value || "—"}`, lm + labelW, rowY + 4, { width: valueW - 4, lineBreak: false });
+    doc.rect(lm, rowY, pageWidth, rowH).stroke("#dddddd");
+    doc.moveDown(0);
+    doc.y = rowY + rowH;
+  });
+  doc.moveDown(0.8);
+
+  // ── Closing paragraph ─────────────────────────────────────────────────────
+  doc.font("Helvetica").fontSize(10).text(
+    "The Borrower has committed default on the scheduled payment of the Monthly Payments and/or other charges payable on the loan obtained by the Borrower from the Company in terms of the provisions of the aforesaid loan-cum-hypothecation agreement. In spite of Company's requests and reminders, the Borrower has not remitted the outstanding dues; as a result of which the company was left with no option but to enforce the terms and conditions of the said agreement. Under the said agreement, the said Borrower has specifically authorized Company or any of its authorized persons to take charge/repossession of the vehicle, in the event he fails to pay the loan amount when due to the Company. Pursuant to our right therein we are taking steps to recover possession of the said vehicle. This communication is for your record and to prevent confusion that may arise from any complaint that the borrower may lodge with respect to the aforesaid vehicle.",
+    lm, doc.y, { align: "justify", width: pageWidth }
+  );
+
+  // ── Footer ────────────────────────────────────────────────────────────────
   doc.moveDown(0.8);
   doc.font("Helvetica").fontSize(11).text("Thanking you,", lm);
   doc.text("Yours Sincerely,", lm);
   doc.moveDown(2.5);
-  doc.text(`For, Hero Fin${isPost ? " " : "-"}Corp Limited`, lm);
+  doc.text("For, Hero Fin-Corp Limited", lm);
   doc.moveDown(1.5);
-  doc.moveTo(lm, doc.y).lineTo(rm, doc.y).strokeColor("#cccccc").lineWidth(0.5).stroke();
+  doc.moveTo(lm, doc.y).lineTo(rm, doc.y).strokeColor("#aaaaaa").lineWidth(0.5).stroke();
   doc.strokeColor("#000000").lineWidth(1);
   doc.moveDown(0.4);
-  doc.fontSize(8.5).text(
+  doc.font("Helvetica").fontSize(8.5).text(
     "Hero Fincorp Ltd. Corporate Office: 09, Basant Lok, Vasant Vihar, New Delhi-110057 India",
-    lm, doc.y, { align: "center", width: rm - lm }
+    lm, doc.y, { align: "center", width: pageWidth }
   );
 }
 
-function buildPreIntimationPdf(doc: any, p: ReturnType<typeof buildIntimationParams>) {
+function buildPostIntimationPdf(doc: any, p: ReturnType<typeof buildIntimationParams>, logoPath: string) {
   const lm        = doc.page.margins.left;
   const rm        = doc.page.width - doc.page.margins.right;
   const pageWidth = rm - lm;
 
-  pdfHeader(doc, "Pre Repossession Intimation to Police Station", false, p);
+  // ── Logo (top-right) ───────────────────────────────────────────────────────
+  try {
+    const fsNode = require("fs");
+    if (fsNode.existsSync(logoPath)) {
+      const logoImg = fsNode.readFileSync(logoPath);
+      const logoW = 110; const logoH = 55;
+      doc.image(logoImg, rm - logoW, doc.y, { width: logoW, height: logoH });
+      doc.moveDown(0.2);
+    }
+  } catch {}
 
-doc.font("Helvetica").fontSize(11);
-  doc.text(`Sub : Pre intimation of repossession of the vehicle from ${p.customer_name}`,
-    lm, doc.y, { width: pageWidth });
-  doc.text(`(Borrower) residing ${p.address}`, lm, doc.y, { width: pageWidth });
+  // ── Title (centered, underlined for post) ─────────────────────────────────
+  const title = "Post Repossession Intimation to Police Station";
+  doc.font("Helvetica-Bold").fontSize(13);
+  doc.text(title, lm, doc.y, { align: "center", width: pageWidth });
+  // Draw underline manually
+  const tw = doc.widthOfString(title);
+  const tx = lm + (pageWidth - tw) / 2;
+  doc.moveTo(tx, doc.y).lineTo(tx + tw, doc.y).strokeColor("#000000").lineWidth(0.8).stroke();
+  doc.strokeColor("#000000").lineWidth(1);
+  doc.moveDown(0.3);
 
+  // ── Date (right-aligned) ───────────────────────────────────────────────────
+  doc.font("Helvetica").fontSize(11).text(`Date: ${p.date}`, lm, doc.y, { align: "right", width: pageWidth });
+  doc.moveDown(0.6);
+
+  // ── To block ──────────────────────────────────────────────────────────────
+  const policeLabel = p.police_station && p.police_station !== "________________________________"
+    ? `${p.police_station} Police Station,`
+    : "________________________________,";
+  doc.font("Helvetica").fontSize(11);
+  doc.text("To,", lm);
+  doc.text("The Senior Inspector,", lm);
+  doc.text(policeLabel, lm);
+  doc.text(`TQ. ${p.tq}     Dist. Nanded`, lm);
   doc.moveDown(0.8);
-  doc.text("Respected Sir,", lm);
+
+  // ── Sub ───────────────────────────────────────────────────────────────────
+  doc.font("Helvetica").fontSize(11);
+  doc.text(`Sub :- Intimation after repossession of the vehicle No ${p.registration_no} From Mr. ${p.customer_name}`, lm, doc.y, { width: pageWidth });
+  doc.text(`(Borrower) residing ${p.address}`, lm, doc.y, { width: pageWidth });
+  doc.moveDown(0.8);
+
+  // ── Respected Sir ─────────────────────────────────────────────────────────
+  doc.font("Helvetica").fontSize(11).text("Respected Sir,", lm);
   doc.moveDown(0.5);
 
-  doc
-    .font("Helvetica")
-    .fontSize(10)
-    .text(
-      'The afore mentioned borrower has taken a loan from Hero Fin-Corp Limited ("Company") for the purchase of the Vehicle having the below mentioned details and further the Borrower hypothecated the said vehicle to the Company in terms of loan-cum-hypothecation agreement executed between the borrower and the Company.',
-      lm,
-      doc.y,
-      { align: "justify", width: pageWidth }
-    );
+  // ── Body paragraphs ───────────────────────────────────────────────────────
+  doc.font("Helvetica").fontSize(10);
+  doc.text(
+    `This is in furtherance to our letter dated bearing reference number ${p.reference_no} whereby it was intimated to you that despite our repeated requests, reminders and personal visits the above said borrower has defaulted in repaying the above TW Loan as expressly agreed by him/her under the Loan (cum Hypothecation) Agreement and guarantee entered between the said borrower and the company.`,
+    lm, doc.y, { align: "justify", width: pageWidth }
+  );
+  doc.moveDown(0.5);
+  doc.text(
+    "Pursuant to our right under the said Agreement we have taken peaceful repossession of the said vehicle.",
+    lm, doc.y, { align: "justify", width: pageWidth }
+  );
+  doc.moveDown(0.5);
+  doc.text(
+    `We have taken peaceful repossession of the said vehicle on ${p.repossession_date} at from ${p.repossession_address}`,
+    lm, doc.y, { align: "justify", width: pageWidth }
+  );
+  doc.moveDown(0.8);
+  doc.font("Helvetica-Bold").fontSize(11).text("DETAILS OF THE VEHICLE REPOSSESSED:-", lm);
+  doc.moveDown(0.5);
+
+  // ── Details table ─────────────────────────────────────────────────────────
+  const labelW = pageWidth * 0.44;
+  const valueW = pageWidth * 0.56;
+  const rowH   = 18;
+  const rows: [string, string][] = [
+    ["Name of the Borrower",        p.customer_name],
+    ["Address of Borrower",         p.address],
+    ["Loan Agreement No.",          p.loan_no],
+    ["App ID",                      p.app_id],
+    ["Vehicle Registration Number", p.registration_no],
+    ["Model Make",                  p.asset_make],
+    ["Engine No.",                  p.engine_no],
+    ["Chassis No.",                 p.chassis_no],
+  ];
+
+  doc.font("Helvetica").fontSize(10);
+  rows.forEach(([label, value], i) => {
+    const rowY = doc.y;
+    if (i % 2 === 0) {
+      doc.rect(lm, rowY, pageWidth, rowH).fill("#f5f5f5").fillColor("#000000");
+    }
+    doc.fillColor("#555555").text(label, lm + 4, rowY + 4, { width: labelW - 8, lineBreak: false });
+    doc.fillColor("#000000").text(`: ${value || "—"}`, lm + labelW, rowY + 4, { width: valueW - 4, lineBreak: false });
+    doc.rect(lm, rowY, pageWidth, rowH).stroke("#dddddd");
+    doc.y = rowY + rowH;
+  });
   doc.moveDown(0.8);
 
-  pdfDetailsTable(
-    doc,
-    [
-      ["Name of the Borrower",                p.customer_name],
-      ["Address of Borrower",                 p.address],
-      ["App ID",                              p.app_id],
-      ["Loan cum Hypothecation Agreement No.", p.loan_no],
-      ["Date",                                p.date],
-      ["Vehicle Registration No.",            p.registration_no],
-      ["Model Make",                          p.asset_make],
-      ["Engine No.",                          p.engine_no],
-      ["Chassis No.",                         p.chassis_no],
-    ],
-    pageWidth,
-    lm
+  // ── Closing paragraph ─────────────────────────────────────────────────────
+  doc.font("Helvetica").fontSize(10).text(
+    "This communication is for your records and to prevent any confusion that may arise for any complaint that the Borrower may lodge with respect to the said vehicle.",
+    lm, doc.y, { align: "justify", width: pageWidth }
   );
 
-  doc
-    .font("Helvetica")
-    .fontSize(10)
-    .text(
-      "The Borrower has committed default on the scheduled payment of the Monthly Payments and/or other charges payable on the loan obtained by the Borrower from the Company in terms of the provisions of the aforesaid loan-cum-hypothecation agreement. In spite of Company's requests and reminders, the Borrower has not remitted the outstanding dues; as a result of which the company was left with no option but to enforce the terms and conditions of the said agreement. Under the said agreement, the said Borrower has specifically authorized Company or any of its authorized persons to take charge/repossession of the vehicle, in the event he fails to pay the loan amount when due to the Company. Pursuant to our right therein we are taking steps to recover possession of the said vehicle. This communication is for your record and to prevent confusion that may arise from any complaint that the borrower may lodge with respect to the aforesaid vehicle.",
-      lm,
-      doc.y,
-      { align: "justify", width: pageWidth }
-    );
-
-  pdfFooter(doc, false);
-}
-
-function buildPostIntimationPdf(doc: any, p: ReturnType<typeof buildIntimationParams>) {
-  const lm        = doc.page.margins.left;
-  const rm        = doc.page.width - doc.page.margins.right;
-  const pageWidth = rm - lm;
-
-  pdfHeader(doc, "Post Repossession Intimation to Police Station", true, p);
-
-doc.font("Helvetica").fontSize(11);
-  doc.text(`Sub : Intimation after repossession of the vehicle No ${p.registration_no} From Mr. ${p.customer_name}`,
-    lm, doc.y, { width: pageWidth });
-  doc.text(`(Borrower) residing ${p.address}`, lm, doc.y, { width: pageWidth });
-
+  // ── Footer ────────────────────────────────────────────────────────────────
   doc.moveDown(0.8);
-  doc.text("Respected Sir,", lm);
-  doc.moveDown(0.5);
-
-  doc.fontSize(10)
-    .text(`This is in furtherance to our letter dated bearing reference number ${p.reference_no} whereby it was intimated to you that despite our repeated requests, reminders and personal visits the above said borrower has defaulted in repaying the above TW Loan as expressly agreed by him/her under the Loan (cum Hypothecation) Agreement and guarantee entered between the said borrower and the company.`,
-      lm, doc.y, { align: "justify", width: pageWidth });
-  doc.moveDown(0.5);
-
-  doc.text("Pursuant to our right under the said Agreement we have taken peaceful repossession of the said vehicle.",
-    lm, doc.y, { align: "justify", width: pageWidth });
-  doc.moveDown(0.5);
-
-  doc.text(`We have taken peaceful repossession of the said vehicle on ${p.repossession_date} at from ${p.repossession_address}`,
-    lm, doc.y, { align: "justify", width: pageWidth });
-
-  doc.moveDown(0.8);
-  doc.fontSize(11).text("DETAILS OF THE VEHICLE REPOSSESSED:-", lm);
-  doc.moveDown(0.5);
-
-  pdfDetailsTable(
-    doc,
-    [
-      ["Name of the Borrower",        p.customer_name],
-      ["Address of Borrower",         p.address],
-      ["Loan Agreement No.",          p.loan_no],
-      ["App ID",                      p.app_id],
-      ["Vehicle Registration Number", p.registration_no],
-      ["Model Make",                  p.asset_make],
-      ["Engine No.",                  p.engine_no],
-      ["Chassis No.",                 p.chassis_no],
-    ],
-    pageWidth,
-    lm
+  doc.font("Helvetica").fontSize(11).text("Thanking You,", lm);
+  doc.text("Yours Sincerely,", lm);
+  doc.moveDown(2.5);
+  doc.text("For, Hero Fin Corp Limited", lm);
+  doc.moveDown(1.5);
+  doc.moveTo(lm, doc.y).lineTo(rm, doc.y).strokeColor("#aaaaaa").lineWidth(0.5).stroke();
+  doc.strokeColor("#000000").lineWidth(1);
+  doc.moveDown(0.4);
+  doc.font("Helvetica").fontSize(8.5).text(
+    "Hero Fincorp Ltd. Corporate Office: 09, Basant Lok, Vasant Vihar, New Delhi-110057 India",
+    lm, doc.y, { align: "center", width: pageWidth }
   );
-
-  doc
-    .font("Helvetica")
-    .fontSize(10)
-    .text(
-      "This communication is for your records and to prevent any confusion that may arise for any complaint that the Borrower may lodge with respect to the said vehicle.",
-      lm,
-      doc.y,
-      { align: "justify", width: pageWidth }
-    );
-
-  pdfFooter(doc, true);
 }
 
-// ── DOCX builder ──────────────────────────────────────────────────────────────
-
-// ── DOCX builder ──────────────────────────────────────────────────────────────
-
+// ── DOCX builder (shared, isPost flag switches content) ──────────────────────
 async function buildIntimationDocx(
   p: ReturnType<typeof buildIntimationParams>,
   isPost: boolean,
   logoPath: string
 ): Promise<Buffer> {
   const {
-    Document, Packer, Paragraph, TextRun, AlignmentType, BorderStyle, ImageRun,
+    Document, Packer, Paragraph, TextRun, AlignmentType, BorderStyle,
+    WidthType, ImageRun, Table, TableRow, TableCell,
   } = require("docx");
-  const fs = require("fs");
+  const fsNode = require("fs");
 
-  const logoData: Buffer | null = fs.existsSync(logoPath) ? fs.readFileSync(logoPath) : null;
+  const logoData: Buffer | null = fsNode.existsSync(logoPath) ? fsNode.readFileSync(logoPath) : null;
+
   const body11 = { size: 22, font: "Arial" };
   const body10 = { size: 20, font: "Arial" };
-  const sp = (n: number) => ({ before: n, after: n });
+  const sp     = (n: number) => ({ before: n, after: n });
+
+  // ── Borderless table helpers ───────────────────────────────────────────────
+  const noBorder  = { style: BorderStyle.NONE, size: 0, color: "FFFFFF" };
+  const noBorders = { top: noBorder, bottom: noBorder, left: noBorder, right: noBorder };
+
+  function detailRow(label: string, value: string): any {
+    return new TableRow({
+      children: [
+        new TableCell({
+          borders: noBorders,
+          width: { size: 4200, type: WidthType.DXA },
+          margins: { top: 60, bottom: 60, left: 0, right: 80 },
+          children: [new Paragraph({ children: [new TextRun({ text: label, ...body10 })] })],
+        }),
+        new TableCell({
+          borders: noBorders,
+          width: { size: 200, type: WidthType.DXA },
+          margins: { top: 60, bottom: 60, left: 0, right: 0 },
+          children: [new Paragraph({ children: [new TextRun({ text: ":", ...body10 })] })],
+        }),
+        new TableCell({
+          borders: noBorders,
+          width: { size: 5000, type: WidthType.DXA },
+          margins: { top: 60, bottom: 60, left: 80, right: 0 },
+          children: [new Paragraph({ children: [new TextRun({ text: value || "—", ...body10 })] })],
+        }),
+      ],
+    });
+  }
+
+  function detailsTable(rows: [string, string][]): any {
+    return new Table({
+      width: { size: 9400, type: WidthType.DXA },
+      columnWidths: [4200, 200, 5000],
+      borders: {
+        top: noBorder, bottom: noBorder, left: noBorder, right: noBorder,
+        insideH: noBorder, insideV: noBorder,
+      },
+      rows: rows.map(([label, value]) => detailRow(label, value)),
+    });
+  }
+
   const children: any[] = [];
 
-  // Logo
+  // ── Logo (top-right) ───────────────────────────────────────────────────────
   if (logoData) {
     children.push(new Paragraph({
       alignment: AlignmentType.RIGHT,
-      spacing: { before: 0, after: 40 },
-      children: [new ImageRun({ data: logoData, transformation: { width: 110, height: 64 }, type: "png" })],
+      spacing: { before: 0, after: 80 },
+      children: [new ImageRun({ data: logoData, transformation: { width: 120, height: 65 }, type: "png" })],
     }));
   }
 
-  // Title - no bold
+  // ── Title ──────────────────────────────────────────────────────────────────
   children.push(new Paragraph({
     alignment: AlignmentType.CENTER,
-    spacing: sp(100),
+    spacing: sp(80),
     children: [new TextRun({
-      text: isPost ? "Post Repossession Intimation to Police Station" : "Pre Repossession Intimation to Police Station",
-      size: 26, font: "Arial",
-      underline: isPost ? { type: "single" } : undefined,
+      text: isPost
+        ? "Post Repossession Intimation to Police Station"
+        : "Pre Repossession Intimation to Police Station",
+      size: 26,
+      font: "Arial",
+      bold: true,
+      underline: { type: "single" },
     })],
   }));
 
-  // Date
+  // ── Date ──────────────────────────────────────────────────────────────────
   children.push(new Paragraph({
-    spacing: sp(60),
+    alignment: isPost ? AlignmentType.RIGHT : AlignmentType.LEFT,
+    spacing: { before: 40, after: 80 },
     children: [new TextRun({ text: `Date :- ${p.date}`, ...body11 })],
   }));
 
-  // To block
+  // ── To block ───────────────────────────────────────────────────────────────
+  const policeLabel = p.police_station && p.police_station !== "________________________________"
+    ? `${p.police_station} Police Station,`
+    : "________________________________,";
+
   children.push(
     new Paragraph({ spacing: { before: 60, after: 20 }, children: [new TextRun({ text: "To,", ...body11 })] }),
     new Paragraph({ spacing: { before: 0, after: 20 }, children: [new TextRun({ text: "The Senior Inspector,", ...body11 })] }),
-    new Paragraph({ spacing: { before: 0, after: 20 }, children: [new TextRun({ text: `${p.police_station},`, ...body11 })] }),
+    new Paragraph({ spacing: { before: 0, after: 20 }, children: [new TextRun({ text: policeLabel, ...body11 })] }),
     new Paragraph({ spacing: { before: 0, after: 80 }, children: [new TextRun({ text: `TQ. ${p.tq}     Dist. Nanded`, ...body11 })] })
   );
 
-  // Subject
+  // ── Sub line ───────────────────────────────────────────────────────────────
   if (isPost) {
     children.push(
-      new Paragraph({ spacing: sp(60), children: [new TextRun({ text: `Sub : Intimation after repossession of the vehicle No ${p.registration_no} From Mr. ${p.customer_name}`, ...body11 })] }),
-      new Paragraph({ spacing: { before: 0, after: 80 }, children: [new TextRun({ text: `(Borrower) residing ${p.address}`, ...body11 })] })
+      new Paragraph({
+        spacing: sp(40),
+        children: [new TextRun({ text: `Sub :- Intimation after repossession of the vehicle No ${p.registration_no} From Mr. ${p.customer_name}`, ...body11 })],
+      }),
+      new Paragraph({
+        spacing: { before: 0, after: 80 },
+        children: [new TextRun({ text: `(Borrower) residing ${p.address}`, ...body11 })],
+      })
     );
   } else {
     children.push(
-      new Paragraph({ spacing: sp(60), children: [new TextRun({ text: `Sub : Pre intimation of repossession of the vehicle from ${p.customer_name}`, ...body11 })] }),
-      new Paragraph({ spacing: { before: 0, after: 80 }, children: [new TextRun({ text: `(Borrower) residing ${p.address}`, ...body11 })] })
+      new Paragraph({
+        spacing: sp(40),
+        children: [new TextRun({ text: `Sub :- Pre intimation of repossession of the vehicle from ${p.customer_name}`, ...body11 })],
+      }),
+      new Paragraph({
+        spacing: { before: 0, after: 80 },
+        children: [new TextRun({ text: `(Borrower) residing ${p.address}`, ...body11 })],
+      })
     );
   }
 
-  // Respected Sir
+  // ── Respected Sir ─────────────────────────────────────────────────────────
   children.push(new Paragraph({ spacing: sp(60), children: [new TextRun({ text: "Respected Sir,", ...body11 })] }));
 
+  // ── Body + details table ───────────────────────────────────────────────────
   if (isPost) {
     children.push(
-      new Paragraph({ spacing: sp(60), alignment: AlignmentType.JUSTIFIED, children: [new TextRun({ text: `This is in furtherance to our letter dated bearing reference number ${p.reference_no} whereby it was intimated to you that despite our repeated requests, reminders and personal visits the above said borrower has defaulted in repaying the above TW Loan as expressly agreed by him/her under the Loan (cum Hypothecation) Agreement and guarantee entered between the said borrower and the company.`, ...body10 })] }),
-      new Paragraph({ spacing: sp(60), alignment: AlignmentType.JUSTIFIED, children: [new TextRun({ text: "Pursuant to our right under the said Agreement we have taken peaceful repossession of the said vehicle.", ...body10 })] }),
-      new Paragraph({ spacing: sp(60), alignment: AlignmentType.JUSTIFIED, children: [new TextRun({ text: `We have taken peaceful repossession of the said vehicle on ${p.repossession_date} at from ${p.repossession_address}`, ...body10 })] }),
-      new Paragraph({ spacing: sp(60), children: [new TextRun({ text: "DETAILS OF THE VEHICLE REPOSSESSED:-", ...body11 })] }),
-      // Plain text details - no table, no bold
-      new Paragraph({ spacing: { before: 20, after: 10 }, children: [new TextRun({ text: `Name of the Borrower : ${p.customer_name}`, ...body10 })] }),
-      new Paragraph({ spacing: { before: 10, after: 10 }, children: [new TextRun({ text: `Address of Borrower : ${p.address}`, ...body10 })] }),
-      new Paragraph({ spacing: { before: 10, after: 10 }, children: [new TextRun({ text: `Loan Agreement No. : ${p.loan_no}`, ...body10 })] }),
-      new Paragraph({ spacing: { before: 10, after: 10 }, children: [new TextRun({ text: `App ID : ${p.app_id}`, ...body10 })] }),
-      new Paragraph({ spacing: { before: 10, after: 10 }, children: [new TextRun({ text: `Vehicle Registration Number : ${p.registration_no}`, ...body10 })] }),
-      new Paragraph({ spacing: { before: 10, after: 10 }, children: [new TextRun({ text: `Model Make : ${p.asset_make}`, ...body10 })] }),
-      new Paragraph({ spacing: { before: 10, after: 10 }, children: [new TextRun({ text: `Engine No. : ${p.engine_no}`, ...body10 })] }),
-      new Paragraph({ spacing: { before: 10, after: 40 }, children: [new TextRun({ text: `Chassis No. : ${p.chassis_no}`, ...body10 })] }),
-      new Paragraph({ spacing: sp(80), alignment: AlignmentType.JUSTIFIED, children: [new TextRun({ text: "This communication is for your records and to prevent any confusion that may arise for any complaint that the Borrower may lodge with respect to the said vehicle.", ...body10 })] })
+      new Paragraph({
+        spacing: sp(60),
+        alignment: AlignmentType.JUSTIFIED,
+        children: [new TextRun({
+          text: `This is in furtherance to our letter dated bearing reference number ${p.reference_no} whereby it was intimated to you that despite our repeated requests, reminders and personal visits the above said borrower has defaulted in repaying the above TW Loan as expressly agreed by him/her under the Loan (cum Hypothecation) Agreement and guarantee entered between the said borrower and the company.`,
+          ...body10,
+        })],
+      }),
+      new Paragraph({
+        spacing: sp(60),
+        alignment: AlignmentType.JUSTIFIED,
+        children: [new TextRun({ text: "Pursuant to our right under the said Agreement we have taken peaceful repossession of the said vehicle.", ...body10 })],
+      }),
+      new Paragraph({
+        spacing: sp(60),
+        alignment: AlignmentType.JUSTIFIED,
+        children: [new TextRun({ text: `We have taken peaceful repossession of the said vehicle on ${p.repossession_date} at from ${p.repossession_address}`, ...body10 })],
+      }),
+      new Paragraph({
+        spacing: sp(60),
+        children: [new TextRun({ text: "DETAILS OF THE VEHICLE REPOSSESSED:-", size: 22, font: "Arial", bold: true })],
+      }),
+      detailsTable([
+        ["Name of the Borrower",        p.customer_name],
+        ["Address of Borrower",         p.address],
+        ["Loan Agreement No.",          p.loan_no],
+        ["App ID",                      p.app_id],
+        ["Vehicle Registration Number", p.registration_no],
+        ["Model Make",                  p.asset_make],
+        ["Engine No.",                  p.engine_no],
+        ["Chassis No.",                 p.chassis_no],
+      ]),
+      new Paragraph({
+        spacing: sp(80),
+        alignment: AlignmentType.JUSTIFIED,
+        children: [new TextRun({ text: "This communication is for your records and to prevent any confusion that may arise for any complaint that the Borrower may lodge with respect to the said vehicle.", ...body10 })],
+      })
     );
   } else {
     children.push(
-      new Paragraph({ spacing: sp(60), alignment: AlignmentType.JUSTIFIED, children: [new TextRun({ text: 'The afore mentioned borrower has taken a loan from Hero Fin-Corp Limited ("Company") for the purchase of the Vehicle having the below mentioned details and further the Borrower hypothecated the said vehicle to the Company in terms of loan-cum-hypothecation agreement executed between the borrower and the Company.', ...body10 })] }),
-      // Plain text details - no table, no bold
-      new Paragraph({ spacing: { before: 20, after: 10 }, children: [new TextRun({ text: `Name of the Borrower : ${p.customer_name}`, ...body10 })] }),
-      new Paragraph({ spacing: { before: 10, after: 10 }, children: [new TextRun({ text: `Address of Borrower : ${p.address}`, ...body10 })] }),
-      new Paragraph({ spacing: { before: 10, after: 10 }, children: [new TextRun({ text: `App ID : ${p.app_id}`, ...body10 })] }),
-      new Paragraph({ spacing: { before: 10, after: 10 }, children: [new TextRun({ text: `Loan cum Hypothecation Agreement No. : ${p.loan_no}`, ...body10 })] }),
-      new Paragraph({ spacing: { before: 10, after: 10 }, children: [new TextRun({ text: `Date : ${p.date}`, ...body10 })] }),
-      new Paragraph({ spacing: { before: 10, after: 10 }, children: [new TextRun({ text: `Vehicle Registration No. : ${p.registration_no}`, ...body10 })] }),
-      new Paragraph({ spacing: { before: 10, after: 10 }, children: [new TextRun({ text: `Model Make : ${p.asset_make}`, ...body10 })] }),
-      new Paragraph({ spacing: { before: 10, after: 10 }, children: [new TextRun({ text: `Engine No. : ${p.engine_no}`, ...body10 })] }),
-      new Paragraph({ spacing: { before: 10, after: 40 }, children: [new TextRun({ text: `Chassis No. : ${p.chassis_no}`, ...body10 })] }),
-      new Paragraph({ spacing: sp(80), alignment: AlignmentType.JUSTIFIED, children: [new TextRun({ text: "The Borrower has committed default on the scheduled payment of the Monthly Payments and/or other charges payable on the loan obtained by the Borrower from the Company in terms of the provisions of the aforesaid loan-cum-hypothecation agreement. In spite of Company's requests and reminders, the Borrower has not remitted the outstanding dues; as a result of which the company was left with no option but to enforce the terms and conditions of the said agreement. Under the said agreement, the said Borrower has specifically authorized Company or any of its authorized persons to take charge/repossession of the vehicle, in the event he fails to pay the loan amount when due to the Company. Pursuant to our right therein we are taking steps to recover possession of the said vehicle. This communication is for your record and to prevent confusion that may arise from any complaint that the borrower may lodge with respect to the aforesaid vehicle.", ...body10 })] })
+      new Paragraph({
+        spacing: sp(60),
+        alignment: AlignmentType.JUSTIFIED,
+        children: [new TextRun({
+          text: 'The afore mentioned borrower has taken a loan from Hero Fin-Corp Limited ("Company") for the purchase of the Vehicle having the below mentioned details and further the Borrower hypothecated the said vehicle to the Company in terms of loan-cum-hypothecation agreement executed between the borrower and the Company.',
+          ...body10,
+        })],
+      }),
+      detailsTable([
+        ["Name of the Borrower",                  p.customer_name],
+        ["Address of Borrower",                   p.address],
+        ["App ID",                                p.app_id],
+        ["Loan cum Hypothecation Agreement No.",  p.loan_no],
+        ["Date",                                  p.date],
+        ["Vehicle Registration No.",              p.registration_no],
+        ["Model Make",                            p.asset_make],
+        ["Engine No.",                            p.engine_no],
+        ["Chassis No.",                           p.chassis_no],
+      ]),
+      new Paragraph({
+        spacing: sp(80),
+        alignment: AlignmentType.JUSTIFIED,
+        children: [new TextRun({
+          text: "The Borrower has committed default on the scheduled payment of the Monthly Payments and/or other charges payable on the loan obtained by the Borrower from the Company in terms of the provisions of the aforesaid loan-cum-hypothecation agreement. In spite of Company's requests and reminders, the Borrower has not remitted the outstanding dues; as a result of which the company was left with no option but to enforce the terms and conditions of the said agreement. Under the said agreement, the said Borrower has specifically authorized Company or any of its authorized persons to take charge/repossession of the vehicle, in the event he fails to pay the loan amount when due to the Company. Pursuant to our right therein we are taking steps to recover possession of the said vehicle. This communication is for your record and to prevent confusion that may arise from any complaint that the borrower may lodge with respect to the aforesaid vehicle.",
+          ...body10,
+        })],
+      })
     );
   }
 
-  // Closing - no bold
+  // ── Closing ────────────────────────────────────────────────────────────────
   children.push(
-    new Paragraph({ spacing: sp(60), children: [new TextRun({ text: "Thanking you,", ...body11 })] }),
-    new Paragraph({ spacing: sp(60), children: [new TextRun({ text: "Yours Sincerely,", ...body11 })] }),
-    new Paragraph({ spacing: { before: 480, after: 60 }, children: [new TextRun({ text: `For, Hero Fin${isPost ? " " : "-"}Corp Limited`, ...body11 })] })
+    new Paragraph({ spacing: sp(60), children: [new TextRun({ text: "Thanking You,", ...body11 })] }),
+    new Paragraph({ spacing: sp(40), children: [new TextRun({ text: "Yours Sincerely,", ...body11 })] }),
+    new Paragraph({ spacing: { before: 520, after: 60 }, children: [new TextRun({ text: `For, Hero Fin${isPost ? " " : "-"}Corp Limited`, ...body11 })] })
   );
 
-  // Footer
+  // ── Footer ─────────────────────────────────────────────────────────────────
   children.push(new Paragraph({
     alignment: AlignmentType.CENTER,
-    spacing: { before: 240, after: 0 },
+    spacing: { before: 360, after: 0 },
     border: { top: { style: BorderStyle.SINGLE, size: 6, color: "CCCCCC" } },
-    children: [new TextRun({ text: "Hero Fincorp Ltd. Corporate Office: 09, Basant Lok, Vasant Vihar, New Delhi-110057 India", size: 18, font: "Arial" })],
+    children: [new TextRun({
+      text: "Hero Fincorp Ltd. Corporate Office: 09, Basant Lok, Vasant Vihar, New Delhi-110057 India",
+      size: 18, font: "Arial",
+    })],
   }));
 
   const doc = new Document({
-    sections: [{ properties: { page: { size: { width: 11906, height: 16838 }, margin: { top: 720, right: 720, bottom: 720, left: 720 } } }, children }],
+    sections: [{
+      properties: {
+        page: {
+          size: { width: 11906, height: 16838 },
+          margin: { top: 720, right: 720, bottom: 720, left: 720 },
+        },
+      },
+      children,
+    }],
   });
 
   return await Packer.toBuffer(doc);
@@ -2244,11 +2420,12 @@ async function buildIntimationDocx(
 app.post("/api/admin/generate-pre-intimation", requireAdmin, async (req, res) => {
   try {
     const p           = buildIntimationParams(req.body);
+    const logoPath    = path.join(process.cwd(), "assets/images/hero-logo.png");
     const PDFDocument = require("pdfkit");
     const doc         = new PDFDocument({
-      size:    "A4",
-      margins: { top: 55, bottom: 55, left: 65, right: 65 },
-      info:    { Title: "Pre Repossession Intimation" },
+      size: "A4",
+      margins: { top: 55, bottom: 55, left: 60, right: 60 },
+      info: { Title: "Pre Repossession Intimation" },
     });
     const chunks: Buffer[] = [];
     doc.on("data", (c: Buffer) => chunks.push(c));
@@ -2258,7 +2435,7 @@ app.post("/api/admin/generate-pre-intimation", requireAdmin, async (req, res) =>
       res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
       res.end(Buffer.concat(chunks));
     });
-    buildPreIntimationPdf(doc, p);
+    buildPreIntimationPdf(doc, p, logoPath);
     doc.end();
   } catch (err: any) {
     console.error("[pre-intimation PDF]", err);
@@ -2286,11 +2463,12 @@ app.post("/api/admin/generate-pre-intimation-docx", requireAdmin, async (req, re
 app.post("/api/admin/generate-post-intimation", requireAdmin, async (req, res) => {
   try {
     const p           = buildIntimationParams(req.body, true);
+    const logoPath    = path.join(process.cwd(), "assets/images/hero-logo.png");
     const PDFDocument = require("pdfkit");
     const doc         = new PDFDocument({
-      size:    "A4",
-      margins: { top: 55, bottom: 55, left: 65, right: 65 },
-      info:    { Title: "Post Repossession Intimation" },
+      size: "A4",
+      margins: { top: 55, bottom: 55, left: 60, right: 60 },
+      info: { Title: "Post Repossession Intimation" },
     });
     const chunks: Buffer[] = [];
     doc.on("data", (c: Buffer) => chunks.push(c));
@@ -2300,7 +2478,7 @@ app.post("/api/admin/generate-post-intimation", requireAdmin, async (req, res) =
       res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
       res.end(Buffer.concat(chunks));
     });
-    buildPostIntimationPdf(doc, p);
+    buildPostIntimationPdf(doc, p, logoPath);
     doc.end();
   } catch (err: any) {
     console.error("[post-intimation PDF]", err);
@@ -2315,10 +2493,7 @@ app.post("/api/admin/generate-post-intimation-docx", requireAdmin, async (req, r
     const logoPath = path.join(process.cwd(), "assets/images/hero-logo.png");
     const buf      = await buildIntimationDocx(p, true, logoPath);
     const filename = `Post_Intimation_${p.customer_name.replace(/\s+/g, "_")}.docx`;
-    res.setHeader(
-      "Content-Type",
-      "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-    );
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
     res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
     res.end(buf);
   } catch (err: any) {
@@ -2326,7 +2501,6 @@ app.post("/api/admin/generate-post-intimation-docx", requireAdmin, async (req, r
     res.status(500).json({ message: err.message || "Failed to generate DOCX" });
   }
 });
-
   const httpServer = createServer(app);
   return httpServer;
 }
