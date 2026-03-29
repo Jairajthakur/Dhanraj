@@ -1911,85 +1911,28 @@ function pdfDetailsTable(
   pageWidth: number,
   lm: number
 ) {
-  const ROW_H    = 24;
-  const colLabel = pageWidth * 0.44;
-  const colValue = pageWidth * 0.56;
-  let y = doc.y;
-
-  rows.forEach(([label, value], i) => {
-    const fill = i % 2 === 1 ? "#f5f5f5" : "#ffffff";
-    // Background
-    doc
-      .rect(lm, y, pageWidth, ROW_H)
-      .fill(fill);
-    // Border
-    doc
-      .rect(lm, y, pageWidth, ROW_H)
-      .strokeColor("#dddddd")
-      .lineWidth(0.5)
-      .stroke();
-    doc.lineWidth(1);
-
-    const textY = y + 7;
-
-    // Label column
-    doc
-      .fillColor("#444444")
-      .font("Helvetica")
-      .fontSize(9.5)
-      .text(label, lm + 6, textY, {
-        width:       colLabel - 10,
-        lineBreak:   false,
-        ellipsis:    true,
-      });
-
-    // Value column
-    doc
-      .fillColor("#111111")
-      .font("Helvetica-Bold")
-      .fontSize(9.5)
-      .text(value || "—", lm + colLabel + 6, textY, {
-        width:     colValue - 10,
-        lineBreak: false,
-        ellipsis:  true,
-      });
-
-    doc.fillColor("#000000");
-    y += ROW_H;
+  doc.font("Helvetica").fontSize(10).fillColor("#000000");
+  rows.forEach(([label, value]) => {
+    doc.text(`${label} : ${value || "—"}`, lm, doc.y, { width: pageWidth });
   });
-
-  doc.y = y + 8;
+  doc.moveDown(0.5);
 }
-
-function pdfFooter(doc: any, isPost: boolean) {
+ function pdfFooter(doc: any, isPost: boolean) {
   const lm = doc.page.margins.left;
   const rm = doc.page.width - doc.page.margins.right;
   doc.moveDown(0.8);
   doc.font("Helvetica").fontSize(11).text("Thanking you,", lm);
   doc.text("Yours Sincerely,", lm);
   doc.moveDown(2.5);
-  doc.font("Helvetica-Bold").text(
-    `For, Hero Fin${isPost ? " " : "-"}Corp Limited`,
-    lm
-  );
+  doc.text(`For, Hero Fin${isPost ? " " : "-"}Corp Limited`, lm);
   doc.moveDown(1.5);
-  doc
-    .moveTo(lm, doc.y)
-    .lineTo(rm, doc.y)
-    .strokeColor("#cccccc")
-    .lineWidth(0.5)
-    .stroke();
+  doc.moveTo(lm, doc.y).lineTo(rm, doc.y).strokeColor("#cccccc").lineWidth(0.5).stroke();
   doc.strokeColor("#000000").lineWidth(1);
   doc.moveDown(0.4);
-  doc
-    .font("Helvetica-Bold")
-    .fontSize(8.5)
-    .text(
-      "Hero Fincorp Ltd. Corporate Office: 09, Basant Lok, Vasant Vihar, New Delhi-110057 India",
-      lm,
-      doc.y,
-      { align: "center", width: rm - lm }
-    );
+  doc.fontSize(8.5).text(
+    "Hero Fincorp Ltd. Corporate Office: 09, Basant Lok, Vasant Vihar, New Delhi-110057 India",
+    lm, doc.y, { align: "center", width: rm - lm }
+  );
 }
 
 function buildPreIntimationPdf(doc: any, p: ReturnType<typeof buildIntimationParams>) {
@@ -1999,27 +1942,13 @@ function buildPreIntimationPdf(doc: any, p: ReturnType<typeof buildIntimationPar
 
   pdfHeader(doc, "Pre Repossession Intimation to Police Station", false, p);
 
-  doc.font("Helvetica").fontSize(11);
-  doc
-    .text("Sub : ", lm, doc.y, { continued: true })
-    .font("Helvetica-Bold")
-    .text(
-      `Pre intimation of repossession of the vehicle from ${p.customer_name}`,
-      { continued: false, width: pageWidth }
-    );
-  doc
-    .font("Helvetica")
-    .text(
-      `(Borrower) residing `,
-      lm,
-      doc.y,
-      { continued: true }
-    )
-    .font("Helvetica-Bold")
-    .text(p.address, { continued: false, width: pageWidth });
+doc.font("Helvetica").fontSize(11);
+  doc.text(`Sub : Pre intimation of repossession of the vehicle from ${p.customer_name}`,
+    lm, doc.y, { width: pageWidth });
+  doc.text(`(Borrower) residing ${p.address}`, lm, doc.y, { width: pageWidth });
 
   doc.moveDown(0.8);
-  doc.font("Helvetica-Bold").fontSize(11).text("Respected Sir,", lm);
+  doc.text("Respected Sir,", lm);
   doc.moveDown(0.5);
 
   doc
@@ -2070,63 +1999,29 @@ function buildPostIntimationPdf(doc: any, p: ReturnType<typeof buildIntimationPa
 
   pdfHeader(doc, "Post Repossession Intimation to Police Station", true, p);
 
-  doc.font("Helvetica").fontSize(11);
-  doc
-    .text("Sub : ", lm, doc.y, { continued: true })
-    .font("Helvetica-Bold")
-    .text(
-      `Intimation after repossession of the vehicle No ${p.registration_no} From Mr. ${p.customer_name}`,
-      { continued: false, width: pageWidth }
-    );
-  doc
-    .font("Helvetica")
-    .text("(Borrower) residing ", lm, doc.y, { continued: true })
-    .font("Helvetica-Bold")
-    .text(p.address, { continued: false, width: pageWidth });
+doc.font("Helvetica").fontSize(11);
+  doc.text(`Sub : Intimation after repossession of the vehicle No ${p.registration_no} From Mr. ${p.customer_name}`,
+    lm, doc.y, { width: pageWidth });
+  doc.text(`(Borrower) residing ${p.address}`, lm, doc.y, { width: pageWidth });
 
   doc.moveDown(0.8);
-  doc.font("Helvetica-Bold").fontSize(11).text("Respected Sir,", lm);
+  doc.text("Respected Sir,", lm);
   doc.moveDown(0.5);
 
-  doc
-    .font("Helvetica")
-    .fontSize(10)
-    .text("This is in furtherance to our letter dated bearing reference number ", lm, doc.y, {
-      continued: true,
-    })
-    .font("Helvetica-Bold")
-    .text(p.reference_no, { continued: true })
-    .font("Helvetica")
-    .text(
-      " whereby it was intimated to you that despite our repeated requests, reminders and personal visits the above said borrower has defaulted in repaying the above TW Loan as expressly agreed by him/her under the Loan (cum Hypothecation) Agreement and guarantee entered between the said borrower and the company.",
-      { align: "justify", width: pageWidth }
-    );
+  doc.fontSize(10)
+    .text(`This is in furtherance to our letter dated bearing reference number ${p.reference_no} whereby it was intimated to you that despite our repeated requests, reminders and personal visits the above said borrower has defaulted in repaying the above TW Loan as expressly agreed by him/her under the Loan (cum Hypothecation) Agreement and guarantee entered between the said borrower and the company.`,
+      lm, doc.y, { align: "justify", width: pageWidth });
   doc.moveDown(0.5);
 
-  doc
-    .font("Helvetica")
-    .fontSize(10)
-    .text(
-      "Pursuant to our right under the said Agreement we have taken peaceful repossession of the said vehicle.",
-      lm,
-      doc.y,
-      { align: "justify", width: pageWidth }
-    );
+  doc.text("Pursuant to our right under the said Agreement we have taken peaceful repossession of the said vehicle.",
+    lm, doc.y, { align: "justify", width: pageWidth });
   doc.moveDown(0.5);
 
-  doc
-    .font("Helvetica")
-    .fontSize(10)
-    .text("We have taken peaceful repossession of the said vehicle on ", lm, doc.y, { continued: true })
-    .font("Helvetica-Bold")
-    .text(p.repossession_date, { continued: true })
-    .font("Helvetica")
-    .text(" at from ", { continued: true })
-    .font("Helvetica-Bold")
-    .text(p.repossession_address, { continued: false, width: pageWidth });
+  doc.text(`We have taken peaceful repossession of the said vehicle on ${p.repossession_date} at from ${p.repossession_address}`,
+    lm, doc.y, { align: "justify", width: pageWidth });
 
   doc.moveDown(0.8);
-  doc.font("Helvetica-Bold").fontSize(11).text("DETAILS OF THE VEHICLE REPOSSESSED:-", lm);
+  doc.fontSize(11).text("DETAILS OF THE VEHICLE REPOSSESSED:-", lm);
   doc.moveDown(0.5);
 
   pdfDetailsTable(
@@ -2316,7 +2211,7 @@ app.post("/api/admin/generate-pre-intimation", requireAdmin, async (req, res) =>
 app.post("/api/admin/generate-pre-intimation-docx", requireAdmin, async (req, res) => {
   try {
     const p        = buildIntimationParams(req.body);
-    const logoPath = path.join(process.cwd(), "server/assets/hero-logo.png");
+    const logoPath = path.join(process.cwd(), "assets/images/hero-logo.png");
     const buf      = await buildIntimationDocx(p, false, logoPath);
     const filename = `Pre_Intimation_${p.customer_name.replace(/\s+/g, "_")}.docx`;
     res.setHeader(
@@ -2361,7 +2256,7 @@ app.post("/api/admin/generate-post-intimation", requireAdmin, async (req, res) =
 app.post("/api/admin/generate-post-intimation-docx", requireAdmin, async (req, res) => {
   try {
     const p        = buildIntimationParams(req.body, true);
-    const logoPath = path.join(process.cwd(), "server/assets/hero-logo.png");
+    const logoPath = path.join(process.cwd(), "assets/images/hero-logo.png");
     const buf      = await buildIntimationDocx(p, true, logoPath);
     const filename = `Post_Intimation_${p.customer_name.replace(/\s+/g, "_")}.docx`;
     res.setHeader(
