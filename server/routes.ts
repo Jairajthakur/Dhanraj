@@ -2082,7 +2082,7 @@ app.post("/api/admin/generate-post-intimation", async (req, res) => {
     const PDFDocument = require("pdfkit");
     const path = require("path");
 
-    const logoPath = path.join(__dirname, "../assets/hero-logo.png");
+    const logoPath = path.join(__dirname, "../assets/hero_logo.png");
 
     const doc = new PDFDocument({
       size: "A4",
