@@ -150,7 +150,7 @@ function PreIntimationModal({ item, onClose }: { item: any; onClose: () => void 
         URL.revokeObjectURL(blobUrl);
       } else {
         const { FileSystem, Sharing } = await Promise.all([
-          import("expo-file-system"), import("expo-sharing"),
+        import("expo-file-system/legacy"), import("expo-sharing"),
         ]).then(([fs, sh]) => ({ FileSystem: fs, Sharing: sh }));
        const buffer = await res.arrayBuffer();
        const bytes = new Uint8Array(buffer);
@@ -384,9 +384,9 @@ function PostIntimationModal({ item, onClose }: { item: any; onClose: () => void
         a.href = blobUrl; a.download = fileName; a.click();
         URL.revokeObjectURL(blobUrl);
       } else {
-        const { FileSystem, Sharing } = await Promise.all([
-          import("expo-file-system"), import("expo-sharing"),
-        ]).then(([fs, sh]) => ({ FileSystem: fs, Sharing: sh }));
+       const { FileSystem, Sharing } = await Promise.all([
+       import("expo-file-system/legacy"), import("expo-sharing"),
+       ]).then(([fs, sh]) => ({ FileSystem: fs, Sharing: sh }));
         const buffer = await res.arrayBuffer();
         const bytes = new Uint8Array(buffer);
         let binary = "";
