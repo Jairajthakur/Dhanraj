@@ -571,29 +571,37 @@ export async function registerRoutes(app: Express): Promise<Server> {
     catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
-  // CHANGE 1: Updated to combine loan_cases + bkt_cases for a given agent
   app.get("/api/admin/cases/agent/:agentId", requireAdmin, async (req, res) => {
-    try {
-      const agentId = Number(req.params.agentId);
-      const result = await storage.query(
-        `SELECT id, loan_no, app_id, customer_name, status, pos::numeric AS pos, bkt::text AS bkt,
-                mobile_no, address, latest_feedback, feedback_code, feedback_comments,
-                ptp_date, telecaller_ptp_date, rollback_yn, agent_id,
-                registration_no, pro, 'loan' AS case_type
-         FROM loan_cases WHERE agent_id = $1
-         UNION ALL
-         SELECT id, loan_no, app_id, customer_name, status, pos::numeric AS pos,
-                COALESCE(bkt::text, case_category) AS bkt,
-                mobile_no, address, latest_feedback, feedback_code, feedback_comments,
-                ptp_date, telecaller_ptp_date, rollback_yn, agent_id,
-                registration_no, pro, 'bkt' AS case_type
-         FROM bkt_cases WHERE agent_id = $1
-         ORDER BY customer_name`,
-        [agentId]
-      );
-      res.json({ cases: result.rows });
-    } catch (e: any) { res.status(500).json({ message: e.message }); }
-  });
+  try {
+    const agentId = Number(req.params.agentId);
+    const result = await storage.query(
+      `SELECT
+        lc.id, lc.loan_no, lc.app_id, lc.customer_name, lc.status,
+        lc.pos::numeric AS pos, lc.bkt::text AS bkt,
+        lc.mobile_no, lc.address, lc.reference_address,
+        lc.latest_feedback, lc.feedback_code, lc.feedback_comments,
+        lc.feedback_date, lc.monthly_feedback,
+        lc.customer_available, lc.vehicle_available,
+        lc.third_party, lc.third_party_name, lc.third_party_number,
+        lc.projection, lc.non_starter, lc.kyc_purchase, lc.workable,
+        lc.ptp_date, lc.telecaller_ptp_date, lc.rollback_yn,
+        lc.agent_id, lc.registration_no, lc.pro,
+        lc.emi_amount, lc.emi_due, lc.cbc, lc.lpp, lc.cbc_lpp,
+        lc.rollback, lc.clearance,
+        lc.asset_name, lc.asset_make, lc.engine_no, lc.chassis_no,
+        lc.tenor, lc.first_emi_due_date, lc.loan_maturity_date,
+        lc.ref1_name, lc.ref1_mobile, lc.ref2_name, lc.ref2_mobile,
+        fa.name AS agent_name,
+        'loan' AS case_type
+       FROM loan_cases lc
+       LEFT JOIN fos_agents fa ON fa.id = lc.agent_id
+       WHERE lc.agent_id = $1
+       ORDER BY lc.customer_name`,
+      [agentId]
+    );
+    res.json({ cases: result.rows });
+  } catch (e: any) { res.status(500).json({ message: e.message }); }
+});
 
   app.get("/api/admin/salary", requireAdmin, async (req, res) => {
     try {
