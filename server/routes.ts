@@ -2210,14 +2210,12 @@ app.post("/api/admin/generate-pre-intimation", requireAdmin, async (req, res) =>
 // 2. Pre Intimation → DOCX
 app.post("/api/admin/generate-pre-intimation-docx", requireAdmin, async (req, res) => {
   try {
-    const p        = buildIntimationParams(req.body);
+    const p = buildIntimationParams(req.body);
     const logoPath = path.join(process.cwd(), "assets/images/hero-logo.png");
-    const buf      = await buildIntimationDocx(p, false, logoPath);
-    const filename = `Pre_Intimation_${p.customer_name.replace(/\s+/g, "_")}.docx`;
-    res.setHeader(
-      "Content-Type",
-      "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-    );
+    console.log("[logo] cwd:", process.cwd());
+    console.log("[logo] path:", logoPath);
+    console.log("[logo] exists:", fs.existsSync(logoPath));
+    
     res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
     res.end(buf);
   } catch (err: any) {
