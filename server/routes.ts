@@ -2165,335 +2165,125 @@ function buildPostIntimationPdf(doc: any, p: ReturnType<typeof buildIntimationPa
 
 // ── DOCX builder ──────────────────────────────────────────────────────────────
 
+// ── DOCX builder ──────────────────────────────────────────────────────────────
+
 async function buildIntimationDocx(
   p: ReturnType<typeof buildIntimationParams>,
   isPost: boolean,
   logoPath: string
 ): Promise<Buffer> {
   const {
-    Document,
-    Packer,
-    Paragraph,
-    TextRun,
-    Table,
-    TableRow,
-    TableCell,
-    AlignmentType,
-    BorderStyle,
-    WidthType,
-    ShadingType,
-    ImageRun,
-    HeadingLevel,
+    Document, Packer, Paragraph, TextRun, AlignmentType, BorderStyle, ImageRun,
   } = require("docx");
   const fs = require("fs");
 
-  const logoData: Buffer | null = fs.existsSync(logoPath)
-    ? fs.readFileSync(logoPath)
-    : null;
-
-  // ── helpers ──────────────────────────────────────────────────────────────
-  const tW = 9026; // A4 content width in DXA (~160mm at 1" margins)
-
-  const solidBorder  = { style: BorderStyle.SINGLE, size: 4, color: "CCCCCC" };
-  const cellBorders  = {
-    top:    solidBorder,
-    bottom: solidBorder,
-    left:   solidBorder,
-    right:  solidBorder,
-  };
-  const cellMargins  = { top: 80, bottom: 80, left: 140, right: 100 };
-
-  const makeDetailRow = (label: string, value: string, shade = false) =>
-    new TableRow({
-      children: [
-        new TableCell({
-          borders:  cellBorders,
-          margins:  cellMargins,
-          width:    { size: Math.floor(tW * 0.44), type: WidthType.DXA },
-          shading:  shade ? { fill: "F5F5F5", type: ShadingType.CLEAR } : undefined,
-          children: [
-            new Paragraph({
-              children: [
-                new TextRun({ text: label, size: 20, font: "Arial", color: "444444" }),
-              ],
-            }),
-          ],
-        }),
-        new TableCell({
-          borders:  cellBorders,
-          margins:  cellMargins,
-          width:    { size: Math.floor(tW * 0.56), type: WidthType.DXA },
-          shading:  shade ? { fill: "F5F5F5", type: ShadingType.CLEAR } : undefined,
-          children: [
-            new Paragraph({
-              children: [
-                new TextRun({ text: value || "—", bold: true, size: 20, font: "Arial" }),
-              ],
-            }),
-          ],
-        }),
-      ],
-    });
-
-  const sp = (n: number) => ({ before: n, after: n });
+  const logoData: Buffer | null = fs.existsSync(logoPath) ? fs.readFileSync(logoPath) : null;
   const body11 = { size: 22, font: "Arial" };
   const body10 = { size: 20, font: "Arial" };
-  const bold11 = { ...body11, bold: true };
-
-  // ── content rows ─────────────────────────────────────────────────────────
-  const preDetailRows = [
-    makeDetailRow("Name of the Borrower",                 p.customer_name,  false),
-    makeDetailRow("Address of Borrower",                  p.address,        true),
-    makeDetailRow("App ID",                               p.app_id,         false),
-    makeDetailRow("Loan cum Hypothecation Agreement No.", p.loan_no,        true),
-    makeDetailRow("Date",                                 p.date,           false),
-    makeDetailRow("Vehicle Registration No.",             p.registration_no,true),
-    makeDetailRow("Model Make",                           p.asset_make,     false),
-    makeDetailRow("Engine No.",                           p.engine_no,      true),
-    makeDetailRow("Chassis No.",                          p.chassis_no,     false),
-  ];
-
-  const postDetailRows = [
-    makeDetailRow("Name of the Borrower",        p.customer_name,   false),
-    makeDetailRow("Address of Borrower",         p.address,         true),
-    makeDetailRow("Loan Agreement No.",          p.loan_no,         false),
-    makeDetailRow("App ID",                      p.app_id,          true),
-    makeDetailRow("Vehicle Registration Number", p.registration_no, false),
-    makeDetailRow("Model Make",                  p.asset_make,      true),
-    makeDetailRow("Engine No.",                  p.engine_no,       false),
-    makeDetailRow("Chassis No.",                 p.chassis_no,      true),
-  ];
-
-  // ── document children ────────────────────────────────────────────────────
+  const sp = (n: number) => ({ before: n, after: n });
   const children: any[] = [];
 
-  // Logo (top-right) — only if file exists
+  // Logo
   if (logoData) {
-    children.push(
-      new Paragraph({
-        alignment: AlignmentType.RIGHT,
-        spacing: { before: 0, after: 40 },
-        children: [
-          new ImageRun({
-            data:           logoData,
-            transformation: { width: 110, height: 64 },
-            type:           "png",
-          }),
-        ],
-      })
-    );
+    children.push(new Paragraph({
+      alignment: AlignmentType.RIGHT,
+      spacing: { before: 0, after: 40 },
+      children: [new ImageRun({ data: logoData, transformation: { width: 110, height: 64 }, type: "png" })],
+    }));
   }
 
-  // Title
-  children.push(
-    new Paragraph({
-      alignment: AlignmentType.CENTER,
-      spacing:   sp(100),
-      children: [
-        new TextRun({
-          text:      isPost
-            ? "Post Repossession Intimation to Police Station"
-            : "Pre Repossession Intimation to Police Station",
-          bold:      true,
-          size:      26,
-          font:      "Arial",
-          underline: isPost ? { type: "single" } : undefined,
-        }),
-      ],
-    })
-  );
+  // Title - no bold
+  children.push(new Paragraph({
+    alignment: AlignmentType.CENTER,
+    spacing: sp(100),
+    children: [new TextRun({
+      text: isPost ? "Post Repossession Intimation to Police Station" : "Pre Repossession Intimation to Police Station",
+      size: 26, font: "Arial",
+      underline: isPost ? { type: "single" } : undefined,
+    })],
+  }));
 
   // Date
-  children.push(
-    new Paragraph({
-      spacing: sp(60),
-      children: [
-        new TextRun({ text: `Date :- ${p.date}`, ...bold11 }),
-      ],
-    })
-  );
+  children.push(new Paragraph({
+    spacing: sp(60),
+    children: [new TextRun({ text: `Date :- ${p.date}`, ...body11 })],
+  }));
 
   // To block
   children.push(
     new Paragraph({ spacing: { before: 60, after: 20 }, children: [new TextRun({ text: "To,", ...body11 })] }),
-    new Paragraph({ spacing: { before: 0,  after: 20 }, children: [new TextRun({ text: "The Senior Inspector,", ...body11 })] }),
-    new Paragraph({ spacing: { before: 0,  after: 20 }, children: [new TextRun({ text: `${p.police_station},`, ...bold11 })] }),
-    new Paragraph({ spacing: { before: 0,  after: 80 }, children: [new TextRun({ text: `TQ. ${p.tq}     Dist. Nanded`, ...body11 })] })
+    new Paragraph({ spacing: { before: 0, after: 20 }, children: [new TextRun({ text: "The Senior Inspector,", ...body11 })] }),
+    new Paragraph({ spacing: { before: 0, after: 20 }, children: [new TextRun({ text: `${p.police_station},`, ...body11 })] }),
+    new Paragraph({ spacing: { before: 0, after: 80 }, children: [new TextRun({ text: `TQ. ${p.tq}     Dist. Nanded`, ...body11 })] })
   );
 
   // Subject
   if (isPost) {
     children.push(
-      new Paragraph({
-        spacing: sp(60),
-        children: [
-          new TextRun({ text: "Sub : ", ...bold11 }),
-          new TextRun({ text: "Intimation after repossession of the vehicle No ", ...body11 }),
-          new TextRun({ text: p.registration_no, ...bold11 }),
-          new TextRun({ text: " From Mr. ", ...body11 }),
-          new TextRun({ text: p.customer_name, ...bold11 }),
-        ],
-      }),
-      new Paragraph({
-        spacing: { before: 0, after: 80 },
-        children: [
-          new TextRun({ text: "(Borrower) residing ", ...body11 }),
-          new TextRun({ text: p.address, ...bold11 }),
-        ],
-      })
+      new Paragraph({ spacing: sp(60), children: [new TextRun({ text: `Sub : Intimation after repossession of the vehicle No ${p.registration_no} From Mr. ${p.customer_name}`, ...body11 })] }),
+      new Paragraph({ spacing: { before: 0, after: 80 }, children: [new TextRun({ text: `(Borrower) residing ${p.address}`, ...body11 })] })
     );
   } else {
     children.push(
-      new Paragraph({
-        spacing: sp(60),
-        children: [
-          new TextRun({ text: "Sub : ", ...bold11 }),
-          new TextRun({ text: "Pre intimation of repossession of the vehicle from ", ...body11 }),
-          new TextRun({ text: p.customer_name, ...bold11 }),
-        ],
-      }),
-      new Paragraph({
-        spacing: { before: 0, after: 80 },
-        children: [
-          new TextRun({ text: "(Borrower) residing ", ...body11 }),
-          new TextRun({ text: p.address, ...bold11 }),
-        ],
-      })
+      new Paragraph({ spacing: sp(60), children: [new TextRun({ text: `Sub : Pre intimation of repossession of the vehicle from ${p.customer_name}`, ...body11 })] }),
+      new Paragraph({ spacing: { before: 0, after: 80 }, children: [new TextRun({ text: `(Borrower) residing ${p.address}`, ...body11 })] })
     );
   }
 
   // Respected Sir
-  children.push(
-    new Paragraph({
-      spacing: sp(60),
-      children: [new TextRun({ text: "Respected Sir,", ...bold11 })],
-    })
-  );
+  children.push(new Paragraph({ spacing: sp(60), children: [new TextRun({ text: "Respected Sir,", ...body11 })] }));
 
   if (isPost) {
-    // Post body
     children.push(
-      new Paragraph({
-        spacing:   sp(60),
-        alignment: AlignmentType.JUSTIFIED,
-        children: [
-          new TextRun({ text: "This is in furtherance to our letter dated bearing reference number ", ...body10 }),
-          new TextRun({ text: p.reference_no, ...{ ...body10, bold: true } }),
-          new TextRun({
-            text: " whereby it was intimated to you that despite our repeated requests, reminders and personal visits the above said borrower has defaulted in repaying the above TW Loan as expressly agreed by him/her under the Loan (cum Hypothecation) Agreement and guarantee entered between the said borrower and the company.",
-            ...body10,
-          }),
-        ],
-      }),
-      new Paragraph({
-        spacing:   sp(60),
-        alignment: AlignmentType.JUSTIFIED,
-        children: [
-          new TextRun({
-            text: "Pursuant to our right under the said Agreement we have taken peaceful repossession of the said vehicle.",
-            ...body10,
-          }),
-        ],
-      }),
-      new Paragraph({
-        spacing:   sp(60),
-        alignment: AlignmentType.JUSTIFIED,
-        children: [
-          new TextRun({ text: "We have taken peaceful repossession of the said vehicle on ", ...body10 }),
-          new TextRun({ text: p.repossession_date, ...{ ...body10, bold: true } }),
-          new TextRun({ text: " at from ", ...body10 }),
-          new TextRun({ text: p.repossession_address, ...{ ...body10, bold: true } }),
-        ],
-      }),
-      new Paragraph({
-        spacing: sp(60),
-        children: [new TextRun({ text: "DETAILS OF THE VEHICLE REPOSSESSED:-", ...bold11 })],
-      }),
-      new Table({
-        width:        { size: tW, type: WidthType.DXA },
-        columnWidths: [Math.floor(tW * 0.44), Math.floor(tW * 0.56)],
-        rows:         postDetailRows,
-      }),
-      new Paragraph({
-        spacing:   sp(80),
-        alignment: AlignmentType.JUSTIFIED,
-        children: [
-          new TextRun({
-            text: "This communication is for your records and to prevent any confusion that may arise for any complaint that the Borrower may lodge with respect to the said vehicle.",
-            ...body10,
-          }),
-        ],
-      })
+      new Paragraph({ spacing: sp(60), alignment: AlignmentType.JUSTIFIED, children: [new TextRun({ text: `This is in furtherance to our letter dated bearing reference number ${p.reference_no} whereby it was intimated to you that despite our repeated requests, reminders and personal visits the above said borrower has defaulted in repaying the above TW Loan as expressly agreed by him/her under the Loan (cum Hypothecation) Agreement and guarantee entered between the said borrower and the company.`, ...body10 })] }),
+      new Paragraph({ spacing: sp(60), alignment: AlignmentType.JUSTIFIED, children: [new TextRun({ text: "Pursuant to our right under the said Agreement we have taken peaceful repossession of the said vehicle.", ...body10 })] }),
+      new Paragraph({ spacing: sp(60), alignment: AlignmentType.JUSTIFIED, children: [new TextRun({ text: `We have taken peaceful repossession of the said vehicle on ${p.repossession_date} at from ${p.repossession_address}`, ...body10 })] }),
+      new Paragraph({ spacing: sp(60), children: [new TextRun({ text: "DETAILS OF THE VEHICLE REPOSSESSED:-", ...body11 })] }),
+      // Plain text details - no table, no bold
+      new Paragraph({ spacing: { before: 20, after: 10 }, children: [new TextRun({ text: `Name of the Borrower : ${p.customer_name}`, ...body10 })] }),
+      new Paragraph({ spacing: { before: 10, after: 10 }, children: [new TextRun({ text: `Address of Borrower : ${p.address}`, ...body10 })] }),
+      new Paragraph({ spacing: { before: 10, after: 10 }, children: [new TextRun({ text: `Loan Agreement No. : ${p.loan_no}`, ...body10 })] }),
+      new Paragraph({ spacing: { before: 10, after: 10 }, children: [new TextRun({ text: `App ID : ${p.app_id}`, ...body10 })] }),
+      new Paragraph({ spacing: { before: 10, after: 10 }, children: [new TextRun({ text: `Vehicle Registration Number : ${p.registration_no}`, ...body10 })] }),
+      new Paragraph({ spacing: { before: 10, after: 10 }, children: [new TextRun({ text: `Model Make : ${p.asset_make}`, ...body10 })] }),
+      new Paragraph({ spacing: { before: 10, after: 10 }, children: [new TextRun({ text: `Engine No. : ${p.engine_no}`, ...body10 })] }),
+      new Paragraph({ spacing: { before: 10, after: 40 }, children: [new TextRun({ text: `Chassis No. : ${p.chassis_no}`, ...body10 })] }),
+      new Paragraph({ spacing: sp(80), alignment: AlignmentType.JUSTIFIED, children: [new TextRun({ text: "This communication is for your records and to prevent any confusion that may arise for any complaint that the Borrower may lodge with respect to the said vehicle.", ...body10 })] })
     );
   } else {
-    // Pre body
     children.push(
-      new Paragraph({
-        spacing:   sp(60),
-        alignment: AlignmentType.JUSTIFIED,
-        children: [
-          new TextRun({
-            text: 'The afore mentioned borrower has taken a loan from Hero Fin-Corp Limited ("Company") for the purchase of the Vehicle having the below mentioned details and further the Borrower hypothecated the said vehicle to the Company in terms of loan-cum-hypothecation agreement executed between the borrower and the Company.',
-            ...body10,
-          }),
-        ],
-      }),
-      new Table({
-        width:        { size: tW, type: WidthType.DXA },
-        columnWidths: [Math.floor(tW * 0.44), Math.floor(tW * 0.56)],
-        rows:         preDetailRows,
-      }),
-      new Paragraph({
-        spacing:   sp(80),
-        alignment: AlignmentType.JUSTIFIED,
-        children: [
-          new TextRun({
-            text: "The Borrower has committed default on the scheduled payment of the Monthly Payments and/or other charges payable on the loan obtained by the Borrower from the Company in terms of the provisions of the aforesaid loan-cum-hypothecation agreement. In spite of Company's requests and reminders, the Borrower has not remitted the outstanding dues; as a result of which the company was left with no option but to enforce the terms and conditions of the said agreement. Under the said agreement, the said Borrower has specifically authorized Company or any of its authorized persons to take charge/repossession of the vehicle, in the event he fails to pay the loan amount when due to the Company. Pursuant to our right therein we are taking steps to recover possession of the said vehicle. This communication is for your record and to prevent confusion that may arise from any complaint that the borrower may lodge with respect to the aforesaid vehicle.",
-            ...body10,
-          }),
-        ],
-      })
+      new Paragraph({ spacing: sp(60), alignment: AlignmentType.JUSTIFIED, children: [new TextRun({ text: 'The afore mentioned borrower has taken a loan from Hero Fin-Corp Limited ("Company") for the purchase of the Vehicle having the below mentioned details and further the Borrower hypothecated the said vehicle to the Company in terms of loan-cum-hypothecation agreement executed between the borrower and the Company.', ...body10 })] }),
+      // Plain text details - no table, no bold
+      new Paragraph({ spacing: { before: 20, after: 10 }, children: [new TextRun({ text: `Name of the Borrower : ${p.customer_name}`, ...body10 })] }),
+      new Paragraph({ spacing: { before: 10, after: 10 }, children: [new TextRun({ text: `Address of Borrower : ${p.address}`, ...body10 })] }),
+      new Paragraph({ spacing: { before: 10, after: 10 }, children: [new TextRun({ text: `App ID : ${p.app_id}`, ...body10 })] }),
+      new Paragraph({ spacing: { before: 10, after: 10 }, children: [new TextRun({ text: `Loan cum Hypothecation Agreement No. : ${p.loan_no}`, ...body10 })] }),
+      new Paragraph({ spacing: { before: 10, after: 10 }, children: [new TextRun({ text: `Date : ${p.date}`, ...body10 })] }),
+      new Paragraph({ spacing: { before: 10, after: 10 }, children: [new TextRun({ text: `Vehicle Registration No. : ${p.registration_no}`, ...body10 })] }),
+      new Paragraph({ spacing: { before: 10, after: 10 }, children: [new TextRun({ text: `Model Make : ${p.asset_make}`, ...body10 })] }),
+      new Paragraph({ spacing: { before: 10, after: 10 }, children: [new TextRun({ text: `Engine No. : ${p.engine_no}`, ...body10 })] }),
+      new Paragraph({ spacing: { before: 10, after: 40 }, children: [new TextRun({ text: `Chassis No. : ${p.chassis_no}`, ...body10 })] }),
+      new Paragraph({ spacing: sp(80), alignment: AlignmentType.JUSTIFIED, children: [new TextRun({ text: "The Borrower has committed default on the scheduled payment of the Monthly Payments and/or other charges payable on the loan obtained by the Borrower from the Company in terms of the provisions of the aforesaid loan-cum-hypothecation agreement. In spite of Company's requests and reminders, the Borrower has not remitted the outstanding dues; as a result of which the company was left with no option but to enforce the terms and conditions of the said agreement. Under the said agreement, the said Borrower has specifically authorized Company or any of its authorized persons to take charge/repossession of the vehicle, in the event he fails to pay the loan amount when due to the Company. Pursuant to our right therein we are taking steps to recover possession of the said vehicle. This communication is for your record and to prevent confusion that may arise from any complaint that the borrower may lodge with respect to the aforesaid vehicle.", ...body10 })] })
     );
   }
 
-  // Closing
+  // Closing - no bold
   children.push(
-    new Paragraph({ spacing: sp(60),            children: [new TextRun({ text: "Thanking you,",    ...body11 })] }),
-    new Paragraph({ spacing: sp(60),            children: [new TextRun({ text: "Yours Sincerely,", ...body11 })] }),
-    new Paragraph({ spacing: { before: 480, after: 60 }, children: [new TextRun({ text: `For, Hero Fin${isPost ? " " : "-"}Corp Limited`, ...bold11 })] })
+    new Paragraph({ spacing: sp(60), children: [new TextRun({ text: "Thanking you,", ...body11 })] }),
+    new Paragraph({ spacing: sp(60), children: [new TextRun({ text: "Yours Sincerely,", ...body11 })] }),
+    new Paragraph({ spacing: { before: 480, after: 60 }, children: [new TextRun({ text: `For, Hero Fin${isPost ? " " : "-"}Corp Limited`, ...body11 })] })
   );
 
-  // Footer divider + address
-  children.push(
-    new Paragraph({
-      alignment: AlignmentType.CENTER,
-      spacing:   { before: 240, after: 0 },
-      border: {
-        top: { style: BorderStyle.SINGLE, size: 6, color: "CCCCCC" },
-      },
-      children: [
-        new TextRun({
-          text: "Hero Fincorp Ltd. Corporate Office: 09, Basant Lok, Vasant Vihar, New Delhi-110057 India",
-          bold: true,
-          size: 18,
-          font: "Arial",
-        }),
-      ],
-    })
-  );
+  // Footer
+  children.push(new Paragraph({
+    alignment: AlignmentType.CENTER,
+    spacing: { before: 240, after: 0 },
+    border: { top: { style: BorderStyle.SINGLE, size: 6, color: "CCCCCC" } },
+    children: [new TextRun({ text: "Hero Fincorp Ltd. Corporate Office: 09, Basant Lok, Vasant Vihar, New Delhi-110057 India", size: 18, font: "Arial" })],
+  }));
 
   const doc = new Document({
-    sections: [
-      {
-        properties: {
-          page: {
-            size:   { width: 11906, height: 16838 },
-            margin: { top: 720, right: 720, bottom: 720, left: 720 },
-          },
-        },
-        children,
-      },
-    ],
+    sections: [{ properties: { page: { size: { width: 11906, height: 16838 }, margin: { top: 720, right: 720, bottom: 720, left: 720 } } }, children }],
   });
 
   return await Packer.toBuffer(doc);
