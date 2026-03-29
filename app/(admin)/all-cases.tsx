@@ -387,8 +387,14 @@ function PostIntimationModal({ item, onClose }: { item: any; onClose: () => void
         const { FileSystem, Sharing } = await Promise.all([
           import("expo-file-system"), import("expo-sharing"),
         ]).then(([fs, sh]) => ({ FileSystem: fs, Sharing: sh }));
-        const buffer  = await res.arrayBuffer();
-        const base64  = btoa(String.fromCharCode(...new Uint8Array(buffer)));
+        const buffer = await res.arrayBuffer();
+        const bytes = new Uint8Array(buffer);
+        let binary = "";
+        const chunkSize = 8192;
+        for (let i = 0; i < bytes.length; i += chunkSize) {
+            binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+        }
+const base64 = btoa(binary);
         const fileUri = FileSystem.documentDirectory + fileName;
         await FileSystem.writeAsStringAsync(fileUri, base64, { encoding: FileSystem.EncodingType.Base64 });
         await Sharing.shareAsync(fileUri, { mimeType });
