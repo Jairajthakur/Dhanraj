@@ -2,7 +2,8 @@ import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "node:http";
 import { randomBytes, createHmac } from "node:crypto";
 import session from "express-session";
-import connectPgSimple from "connect-pg-simple";
+import connectPgSimple from "connect-pg-sim
+  ple";
 import multer from "multer";
 import ExcelJS from "exceljs";
 import * as storage from "./storage";
@@ -1484,11 +1485,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 // ── Pre Repossession Intimation Letter ────────────────────────────────────────
 app.post("/api/admin/generate-pre-intimation", requireAdmin, async (req, res) => {
   try {
-    const {
-      Document, Packer, Paragraph, TextRun, AlignmentType,
-    } = await import("docx");
 
-    const {
+ const {
       customer_name   = "___________",
       address         = "___________",
       app_id          = "___________",
@@ -1498,74 +1496,114 @@ app.post("/api/admin/generate-pre-intimation", requireAdmin, async (req, res) =>
       engine_no       = "___________",
       chassis_no      = "___________",
       date            = new Date().toLocaleDateString("en-IN"),
+      police_station  = "________________________________",
+      tq              = "_____________",
     } = req.body;
 
-    const bold   = (text: string, size = 22) => new TextRun({ text, bold: true,  size, font: "Arial" });
-    const normal = (text: string, size = 22) => new TextRun({ text, bold: false, size, font: "Arial" });
-    const para   = (children: TextRun[], opts: any = {}) =>
-      new Paragraph({ children, spacing: { after: 120 }, ...opts });
-    const blank  = () => new Paragraph({ children: [new TextRun("")], spacing: { after: 80 } });
+    const htmlContent = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: Arial, sans-serif;
+      font-size: 13px;
+      color: #000;
+      padding: 40px 50px;
+      line-height: 1.6;
+    }
+    .title {
+      text-align: center;
+      font-size: 16px;
+      font-weight: bold;
+      margin-bottom: 6px;
+    }
+    .divider { border: none; border-top: 1px solid #ccc; margin: 10px 0; }
+    .date { font-weight: bold; margin-bottom: 16px; }
+    .to-block { margin-left: 24px; margin-bottom: 14px; }
+    .to-block p { margin-bottom: 2px; }
+    .subject { margin-bottom: 14px; }
+    .body-text { margin-bottom: 10px; text-align: justify; }
+    .details-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 12px 0;
+      font-size: 12px;
+    }
+    .details-table tr:nth-child(even) { background-color: #f8f8f8; }
+    .details-table td { padding: 6px 10px; border: 1px solid #ddd; }
+    .details-table td:first-child { width: 45%; color: #333; }
+    .details-table td:last-child { font-weight: bold; }
+    .footer {
+      margin-top: 20px;
+      text-align: center;
+      font-size: 11px;
+      border-top: 1px solid #ccc;
+      padding-top: 8px;
+      font-weight: bold;
+    }
+    .signature { margin-top: 40px; }
+  </style>
+</head>
+<body>
+  <p class="title">Pre Repossession Intimation to Police Station</p>
+  <hr class="divider">
+  <p class="date">Date :- ${date}</p>
+  <div class="to-block">
+    <p>To,</p>
+    <p>The Senior Inspector,</p>
+    <p><strong>${police_station},</strong></p>
+    <p>TQ. ${tq}&nbsp;&nbsp;&nbsp;Dist. Nanded</p>
+  </div>
+  <div class="subject">
+    <p><strong>Sub :</strong> Pre intimation of repossession of the vehicle from <strong>${customer_name}</strong></p>
+    <p>(Borrower) residing <strong>${address}</strong></p>
+  </div>
+  <p class="body-text"><strong>Respected Sir,</strong></p>
+  <p class="body-text">
+    The afore mentioned borrower has taken a loan from Hero Fin-Corp Limited ("Company") for the purchase of the Vehicle having the below mentioned details and further the Borrower hypothecated the said vehicle to the Company in terms of loan-cum-hypothecation agreement executed between the borrower and the Company.
+  </p>
+  <table class="details-table">
+    <tr><td>Name of the Borrower</td><td>${customer_name}</td></tr>
+    <tr><td>Address of Borrower</td><td>${address}</td></tr>
+    <tr><td>App ID</td><td>${app_id}</td></tr>
+    <tr><td>Loan cum Hypothecation Agreement No.</td><td>${loan_no}</td></tr>
+    <tr><td>Date</td><td>${date}</td></tr>
+    <tr><td>Vehicle Registration No.</td><td>${registration_no}</td></tr>
+    <tr><td>Model Make</td><td>${asset_make}</td></tr>
+    <tr><td>Engine No.</td><td>${engine_no}</td></tr>
+    <tr><td>Chassis No.</td><td>${chassis_no}</td></tr>
+  </table>
+  <p class="body-text">
+    The Borrower has committed default on the scheduled payment of the Monthly Payments and/or other charges payable on the loan obtained by the Borrower from the Company in terms of the provisions of the aforesaid loan-cum-hypothecation agreement. In spite of Company's requests and reminders, the Borrower has not remitted the outstanding dues; as a result of which the company was left with no option but to enforce the terms and conditions of the said agreement. Under the said agreement, the said Borrower has specifically authorized Company or any of its authorized persons to take charge/repossession of the vehicle, in the event he fails to pay the loan amount when due to the Company. Pursuant to our right therein we are taking steps to recover possession of the said vehicle. This communication is for your record and to prevent confusion that may arise from any complaint that the borrower may lodge with respect to the aforesaid vehicle.
+  </p>
+  <p class="body-text">Thanking you,</p>
+  <p class="body-text">Yours Sincerely,</p>
+  <div class="signature">
+    <p><strong>For, Hero Fin-Corp Limited</strong></p>
+  </div>
+  <div class="footer">
+    Hero Fincorp Ltd. Corporate Office: 09, Basant Lok, Vasant Vihar, New Delhi-110057 India
+  </div>
+</body>
+</html>`;
 
-    const doc = new Document({
-      sections: [{
-        properties: {
-          page: {
-            size:   { width: 11906, height: 16838 },
-            margin: { top: 1000, right: 1000, bottom: 1000, left: 1000 },
-          },
-        },
-        children: [
-          para([bold("Pre Repossession Intimation to Police Station", 26)],
-            { alignment: AlignmentType.CENTER }),
-          blank(),
-          para([bold(`Date :- ${date}`)]),
-          blank(),
-          para([normal("To,")],                    { indent: { left: 360 } }),
-          para([normal("The Senior Inspector,")],   { indent: { left: 360 } }),
-          para([bold("________________________________,")]),
-          para([normal("TQ._________________ Dist. Nanded")]),
-          blank(),
-          para([bold("Sub : "), normal("Pre intimation of repossession of the vehicle from "), bold(customer_name)]),
-          para([normal("(Borrower) residing "), bold(address)]),
-          blank(),
-          para([bold("Respected Sir,")]),
-          blank(),
-          para([normal(
-            "The afore mentioned borrower has taken a loan from Hero Fin-Corp Limited (\"Company\") for the purchase of the Vehicle having the below mentioned details and further the Borrower hypothecated the said vehicle to the Company in terms of loan-cum-hypothecation agreement executed between the borrower and the Company."
-          )]),
-          blank(),
-          para([bold("Name of the Borrower.  :  "),  bold(customer_name)]),
-          para([bold("Address of Borrower.   :  "),  bold(address)]),
-          para([normal("App ID.                :  "), bold(app_id)]),
-          para([normal("Loan cum Hypothecation Agreement No.  :  "), bold(loan_no)]),
-          para([normal("Date.                  :  "), bold(date)]),
-          para([normal("Vehicle Registration No.  :  "), bold(registration_no)]),
-          para([normal("Model Make.            :  "), bold(asset_make)]),
-          para([normal("Engine No.             :  "), bold(engine_no)]),
-          para([normal("Chassis No.            :  "), bold(chassis_no)]),
-          blank(),
-          para([normal(
-            "The Borrower has committed default on the scheduled payment of the Monthly Payments and/or other charges payable on the loan obtained by the Borrower from the Company in terms of the provisions of the aforesaid loan-cum-hypothecation agreement. In spite of Company's requests and reminders, the Borrower has not remitted the outstanding dues; as a result of which the company was left with no option but to enforce the terms and conditions of the said agreement. Under the said agreement, the said Borrower has specifically authorized Company or any of its authorized persons to take charge/repossession of the vehicle, in the event he fails to pay the loan amount when due to the Company. Pursuant to our right therein we are taking steps to recover possession of the said vehicle. This communication is for your record and to prevent confusion that may arise from any complaint that the borrower may lodge with respect to the aforesaid vehicle."
-          )]),
-          blank(),
-          para([normal("Thanking you,")]),
-          blank(),
-          para([normal("Yours Sincerely,")]),
-          blank(),
-          blank(),
-          para([bold("For, Hero Fin-Corp Limited")]),
-          blank(),
-          para([bold("Hero Fincorp Ltd. Corporate Office: 09, Basant Lok, Vasant Vihar, New Delhi-110057 India")],
-            { alignment: AlignmentType.CENTER }),
-        ],
-      }],
-    });
+    const htmlPdf = require("html-pdf-node");
+    const file    = { content: htmlContent };
+    const options = {
+      format: "A4",
+      margin: { top: "20mm", right: "15mm", bottom: "20mm", left: "15mm" },
+      printBackground: true,
+    };
 
-    const buffer = await Packer.toBuffer(doc);
-    const filename = `Pre_Intimation_${customer_name.replace(/\s+/g, "_")}.docx`;
-    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+    const pdfBuffer = await htmlPdf.generatePdf(file, options);
+    const filename  = `Pre_Intimation_${customer_name.replace(/\s+/g, "_")}.pdf`;
+
+    res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
-    res.send(buffer);
+    res.send(pdfBuffer);
   } catch (err: any) {
     console.error("generate-pre-intimation error:", err);
     res.status(500).json({ message: err.message || "Failed to generate document" });
