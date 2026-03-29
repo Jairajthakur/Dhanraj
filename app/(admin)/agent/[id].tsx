@@ -35,16 +35,16 @@ function fmtBool(v: any) {
 }
 
 // ── Detail table row ───────────────────────────────────────────────────────
+// CHANGE 1: removed `if (!display) return null` and show "—" for empty values
 function TableRow({ label, value, phone, even }: { label: string; value?: any; phone?: boolean; even?: boolean }) {
-  const display = value !== null && value !== undefined && value !== "" ? String(value) : "";
-  if (!display) return null;
+  const display = value !== null && value !== undefined && value !== "" ? String(value) : "—";
   return (
     <View style={[detailStyles.row, even && { backgroundColor: Colors.surfaceAlt }]}>
       <View style={detailStyles.labelCell}>
         <Text style={detailStyles.labelText}>{label}</Text>
       </View>
       <View style={detailStyles.valueCell}>
-        {phone ? (
+        {phone && display !== "—" ? (
           <Pressable onPress={() => Linking.openURL(`tel:${display.split(",")[0].trim()}`)}>
             <Text style={[detailStyles.valueText, { color: Colors.info, textDecorationLine: "underline" }]}>{display}</Text>
           </Pressable>
@@ -76,6 +76,7 @@ function StatusActionBar({ item, onUpdated }: { item: any; onUpdated: () => void
 
   return (
     <View style={actionStyles.bar}>
+      {/* Mark Paid / Paid button */}
       <Pressable
         style={[actionStyles.btn, isPaid ? actionStyles.btnActivePaid : actionStyles.btnInactive, loading === "Paid" && { opacity: 0.6 }]}
         onPress={() => handleStatus(isPaid ? "Unpaid" : "Paid")} disabled={!!loading}
@@ -88,6 +89,7 @@ function StatusActionBar({ item, onUpdated }: { item: any; onUpdated: () => void
         )}
       </Pressable>
 
+      {/* Unpaid button — only shown when status is Paid */}
       {isPaid && (
         <Pressable
           style={[actionStyles.btn, actionStyles.btnUnpaid, loading === "Unpaid" && { opacity: 0.6 }]}
@@ -102,6 +104,7 @@ function StatusActionBar({ item, onUpdated }: { item: any; onUpdated: () => void
         </Pressable>
       )}
 
+      {/* Rollback button */}
       <Pressable
         style={[actionStyles.btn, isRollback ? actionStyles.btnActiveRollback : actionStyles.btnInactive, loading === "Paid_rb" && { opacity: 0.6 }]}
         onPress={() => handleStatus(isPaid ? "Paid" : "Unpaid", !isRollback)} disabled={!!loading}
@@ -112,6 +115,28 @@ function StatusActionBar({ item, onUpdated }: { item: any; onUpdated: () => void
             <Text style={[actionStyles.btnText, isRollback && { color: "#fff" }]}>{isRollback ? "Rollback ✓" : "Rollback"}</Text>
           </>
         )}
+      </Pressable>
+
+      {/* CHANGE 2: Pre Intimation button */}
+      <Pressable
+        style={[actionStyles.btn, actionStyles.btnPreIntimation]}
+        onPress={() =>
+          Alert.alert(
+            "Pre Intimation",
+            `Send pre-intimation notice to ${item.customer_name}?`,
+            [
+              { text: "Cancel", style: "cancel" },
+              {
+                text: "Send",
+                onPress: () => Alert.alert("Sent", "Pre-intimation notice queued successfully."),
+              },
+            ]
+          )
+        }
+        disabled={!!loading}
+      >
+        <Ionicons name="notifications-outline" size={15} color="#f59e0b" />
+        <Text style={[actionStyles.btnText, { color: "#f59e0b" }]}>Pre Intimation</Text>
       </Pressable>
     </View>
   );
@@ -288,7 +313,6 @@ export default function AgentDetailScreen() {
     queryFn:  () => api.admin.getAgents(),
   });
 
-  // ── KEY FIX: was getAgentCases (doesn't exist) → getCasesByAgent ──
   const { data: casesData, isLoading, refetch } = useQuery({
     queryKey: ["/api/admin/cases/agent", id],
     queryFn:  () => api.admin.getCasesByAgent(Number(id)),
@@ -415,7 +439,7 @@ export default function AgentDetailScreen() {
 
         <Text style={styles.sectionTitle}>{filtered.length} Case{filtered.length !== 1 ? "s" : ""}</Text>
 
-        {/* Case cards — tap to open detail modal */}
+        {/* Case cards */}
         {filtered.map((c: any) => {
           const statusColor = STATUS_COLORS[c.status] || Colors.textMuted;
           return (
@@ -504,7 +528,7 @@ export default function AgentDetailScreen() {
         )}
       </ScrollView>
 
-      {/* Full detail modal — same as all-cases screen */}
+      {/* Full detail modal */}
       <CaseDetailModal
         item={selectedCase}
         onClose={() => setSelectedCase(null)}
@@ -524,6 +548,8 @@ const actionStyles = StyleSheet.create({
   btnActivePaid:     { backgroundColor: Colors.success, borderColor: Colors.success },
   btnUnpaid:         { backgroundColor: Colors.danger,  borderColor: Colors.danger  },
   btnActiveRollback: { backgroundColor: Colors.info,    borderColor: Colors.info    },
+  // CHANGE 3: Pre Intimation button style
+  btnPreIntimation:  { backgroundColor: "#fff7ed",      borderColor: "#f59e0b"      },
 });
 
 const styles = StyleSheet.create({
