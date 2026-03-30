@@ -2482,6 +2482,260 @@ app.post("/api/admin/generate-post-intimation-docx", requireAdmin, async (req, r
     res.status(500).json({ message: err.message || "Failed to generate DOCX" });
   }
 });
+
+
+  // ── Twilio + Google Drive Call Recording ──────────────────────────────────
+
+async function uploadToDrive(
+  fileBuffer: Buffer,
+  fileName: string,
+  mimeType: string
+): Promise<{ fileId: string; webViewLink: string }> {
+  const { google } = require("googleapis");
+  const auth = new google.auth.JWT({
+    email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
+    key: (process.env.GOOGLE_PRIVATE_KEY || "").replace(/\\n/g, "\n"),
+    scopes: ["https://www.googleapis.com/auth/drive"],
+  });
+  const drive = google.drive({ version: "v3", auth });
+  const { Readable } = require("stream");
+  const stream = new Readable();
+  stream.push(fileBuffer);
+  stream.push(null);
+  const res = await drive.files.create({
+    requestBody: {
+      name: fileName,
+      parents: [process.env.GOOGLE_DRIVE_FOLDER_ID!],
+    },
+    media: { mimeType, body: stream },
+    fields: "id, webViewLink",
+  });
+  await drive.permissions.create({
+    fileId: res.data.id,
+    requestBody: { role: "reader", type: "anyone" },
+  });
+  return { fileId: res.data.id, webViewLink: res.data.webViewLink };
+}
+
+// 1. Make outbound call to customer
+app.post("/api/make-call", requireAuth, async (req, res) => {
+  try {
+    const { customerPhone, agentName, caseId, loanNo } = req.body;
+    if (!customerPhone) return res.status(400).json({ message: "customerPhone required" });
+
+    const twilio = require("twilio");
+    const client = twilio(
+      process.env.TWILIO_ACCOUNT_SID,
+      process.env.TWILIO_AUTH_TOKEN
+    );
+
+    const baseUrl = process.env.RAILWAY_PUBLIC_DOMAIN
+      ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`
+      : process.env.APP_URL || "";
+
+    const call = await client.calls.create({
+      to: customerPhone.startsWith("+") ? customerPhone : `+91${customerPhone.replace(/\D/g, "").slice(-10)}`,
+      from: process.env.TWILIO_PHONE_NUMBER,
+      url: `${baseUrl}/api/twilio/twiml?agentId=${req.session.agentId}&caseId=${caseId || ""}&loanNo=${encodeURIComponent(loanNo || "")}`,
+      record: true,
+      recordingStatusCallback: `${baseUrl}/api/twilio/recording-callback`,
+      recordingStatusCallbackMethod: "POST",
+      recordingStatusCallbackEvent: ["completed"],
+      statusCallback: `${baseUrl}/api/twilio/call-status`,
+      statusCallbackMethod: "POST",
+      statusCallbackEvent: ["completed"],
+    });
+
+    // Save initial call record
+    await storage.query(
+      `INSERT INTO call_recordings (agent_id, case_id, loan_no, call_sid, recorded_at)
+       VALUES ($1, $2, $3, $4, NOW())
+       ON CONFLICT (recording_sid) DO NOTHING`,
+      [req.session.agentId, caseId || null, loanNo || null, call.sid]
+    );
+
+    res.json({ success: true, callSid: call.sid });
+  } catch (e: any) {
+    console.error("[make-call]", e.message);
+    res.status(500).json({ message: e.message });
+  }
+});
+
+// 2. TwiML — what happens when call connects
+app.post("/api/twilio/twiml", (req, res) => {
+  const twilio = require("twilio");
+  const twiml = new twilio.twiml.VoiceResponse();
+  // Simple: connect agent to customer (you can add IVR here)
+  twiml.say({ voice: "alice", language: "en-IN" }, "Connecting your call. Please hold.");
+  twiml.record({
+    action: "/api/twilio/twiml-end",
+    recordingStatusCallback: `${process.env.RAILWAY_PUBLIC_DOMAIN
+      ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`
+      : ""}/api/twilio/recording-callback`,
+    maxLength: 3600,
+    playBeep: false,
+  });
+  res.type("text/xml");
+  res.send(twiml.toString());
+});
+
+app.post("/api/twilio/twiml-end", (_req, res) => {
+  const twilio = require("twilio");
+  const twiml = new twilio.twiml.VoiceResponse();
+  twiml.hangup();
+  res.type("text/xml");
+  res.send(twiml.toString());
+});
+
+// 3. Recording completed callback — download from Twilio, upload to Drive
+app.post("/api/twilio/recording-callback", async (req, res) => {
+  res.sendStatus(200); // Acknowledge immediately
+  try {
+    const {
+      RecordingSid, RecordingUrl, CallSid,
+      RecordingDuration, RecordingStatus,
+    } = req.body;
+
+    if (RecordingStatus !== "completed" || !RecordingSid) return;
+
+    console.log(`[recording] New recording: ${RecordingSid} | duration: ${RecordingDuration}s`);
+
+    // Download recording from Twilio
+    const twilio = require("twilio");
+    const client = twilio(
+      process.env.TWILIO_ACCOUNT_SID,
+      process.env.TWILIO_AUTH_TOKEN
+    );
+
+    // Wait a moment for Twilio to finish processing
+    await new Promise((r) => setTimeout(r, 3000));
+
+    const audioUrl = `${RecordingUrl}.mp3`;
+    const authHeader = Buffer.from(
+      `${process.env.TWILIO_ACCOUNT_SID}:${process.env.TWILIO_AUTH_TOKEN}`
+    ).toString("base64");
+
+    const audioRes = await fetch(audioUrl, {
+      headers: { Authorization: `Basic ${authHeader}` },
+    });
+
+    if (!audioRes.ok) {
+      console.error("[recording] Failed to download:", audioRes.status);
+      return;
+    }
+
+    const audioBuffer = Buffer.from(await audioRes.arrayBuffer());
+
+    // Get call info from DB
+    const callRow = await storage.query(
+      `SELECT cr.agent_id, cr.loan_no, cr.case_id, fa.name AS agent_name
+       FROM call_recordings cr
+       LEFT JOIN fos_agents fa ON fa.id = cr.agent_id
+       WHERE cr.call_sid = $1`,
+      [CallSid]
+    );
+    const callInfo = callRow.rows[0];
+
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+    const loanLabel = callInfo?.loan_no ? `_${callInfo.loan_no}` : "";
+    const agentLabel = callInfo?.agent_name ? `_${callInfo.agent_name.replace(/\s+/g, "_")}` : "";
+    const fileName = `Call${agentLabel}${loanLabel}_${timestamp}.mp3`;
+
+    // Upload to Google Drive
+    const { fileId, webViewLink } = await uploadToDrive(audioBuffer, fileName, "audio/mpeg");
+    console.log(`[recording] Uploaded to Drive: ${webViewLink}`);
+
+    // Update DB record
+    await storage.query(
+      `INSERT INTO call_recordings (agent_id, case_id, loan_no, recording_sid, call_sid, drive_file_id, drive_link, duration_seconds, recorded_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+       ON CONFLICT (recording_sid) DO UPDATE SET
+         drive_file_id = EXCLUDED.drive_file_id,
+         drive_link = EXCLUDED.drive_link,
+         duration_seconds = EXCLUDED.duration_seconds`,
+      [
+        callInfo?.agent_id || null,
+        callInfo?.case_id || null,
+        callInfo?.loan_no || null,
+        RecordingSid,
+        CallSid,
+        fileId,
+        webViewLink,
+        parseInt(RecordingDuration || "0"),
+      ]
+    );
+
+    // Notify admin
+    const adminRows = await storage.query(
+      `SELECT push_token FROM fos_agents WHERE role='admin' AND push_token IS NOT NULL AND push_token<>''`
+    );
+    const agentName = callInfo?.agent_name || "FOS";
+    const loanNo = callInfo?.loan_no || "unknown";
+    for (const admin of adminRows.rows) {
+      await sendPush(
+        admin.push_token,
+        "🎙️ Call Recording Saved",
+        `${agentName} — ${loanNo} (${RecordingDuration}s) saved to Drive.`,
+        { type: "call_recording", driveLink: webViewLink }
+      );
+    }
+
+    // Delete from Twilio to save storage
+    try {
+      await client.recordings(RecordingSid).remove();
+      console.log(`[recording] Deleted from Twilio: ${RecordingSid}`);
+    } catch (e: any) {
+      console.warn("[recording] Could not delete from Twilio:", e.message);
+    }
+  } catch (e: any) {
+    console.error("[recording-callback] Error:", e.message);
+  }
+});
+
+// 4. Call status callback
+app.post("/api/twilio/call-status", async (req, res) => {
+  res.sendStatus(200);
+  try {
+    const { CallSid, CallStatus, CallDuration } = req.body;
+    console.log(`[call-status] ${CallSid} → ${CallStatus} (${CallDuration}s)`);
+  } catch (e: any) {
+    console.error("[call-status]", e.message);
+  }
+});
+
+// 5. Get call recordings for agent
+app.get("/api/call-recordings", requireAuth, async (req, res) => {
+  try {
+    const result = await storage.query(
+      `SELECT id, loan_no, drive_link, duration_seconds, recorded_at
+       FROM call_recordings
+       WHERE agent_id = $1 AND drive_link IS NOT NULL
+       ORDER BY recorded_at DESC
+       LIMIT 50`,
+      [req.session.agentId!]
+    );
+    res.json({ recordings: result.rows });
+  } catch (e: any) {
+    res.status(500).json({ message: e.message });
+  }
+});
+
+// 6. Admin — all recordings
+app.get("/api/admin/call-recordings", requireAdmin, async (req, res) => {
+  try {
+    const result = await storage.query(
+      `SELECT cr.*, fa.name AS agent_name
+       FROM call_recordings cr
+       LEFT JOIN fos_agents fa ON fa.id = cr.agent_id
+       WHERE cr.drive_link IS NOT NULL
+       ORDER BY cr.recorded_at DESC
+       LIMIT 200`
+    );
+    res.json({ recordings: result.rows });
+  } catch (e: any) {
+    res.status(500).json({ message: e.message });
+  }
+});
   const httpServer = createServer(app);
   return httpServer;
 }
