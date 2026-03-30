@@ -1059,7 +1059,7 @@ app.get("/api/today-ptp", requireAuth, async (req, res) => {
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
-  app.post("/api/admin/salary", requireAdmin, async (req, res) => {
+ app.post("/api/admin/salary", requireAdmin, async (req, res) => {
     try {
       const { agentId, month, year, presentDays, paymentAmount, incentiveAmount, petrolExpense, mobileExpense, grossPayment, advance, otherDeductions, netSalary } = req.body;
       if (!agentId) return res.status(400).json({ message: "agentId is required" });
@@ -1073,6 +1073,36 @@ app.get("/api/today-ptp", requireAuth, async (req, res) => {
         `INSERT INTO salary_details (agent_id, month, year, present_days, payment_amount, incentive_amount, petrol_expense, mobile_expense, gross_payment, advance, other_deductions, total, net_salary) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
         [agentId, monthNum, year ?? new Date().getFullYear(), presentDays ?? 0, paymentAmount ?? 0, incentiveAmount ?? 0, petrolExpense ?? 0, mobileExpense ?? 0, gross, adv, other, total, net]
       );
+
+      // ✅ Notify the FOS agent that salary has been credited
+      try {
+        const agentRow = await storage.query(
+          "SELECT id, name, push_token FROM fos_agents WHERE id = $1",
+          [Number(agentId)]
+        );
+        const agent = agentRow.rows[0];
+        const monthName = typeof month === "string" ? month : (MONTH_NAMES[monthNum - 1] ?? String(month));
+        const yearVal   = year ?? new Date().getFullYear();
+        const netStr    = net.toLocaleString("en-IN", { maximumFractionDigits: 0 });
+
+        console.log(`[salary] agent=${agent?.name} token=${agent?.push_token?.slice(0, 20) ?? "NONE"}`);
+
+        if (agent?.push_token?.trim()) {
+          const pushResult = await sendPush(
+            agent.push_token.trim(),
+            "💰 Salary Credited",
+            `Your salary of ₹${netStr} for ${monthName} ${yearVal} has been processed. Open app to view details.`,
+            { screen: "salary", type: "salary_credited" }
+          );
+          console.log("[salary] push result:", JSON.stringify(pushResult));
+        } else {
+          console.warn(`[salary] ⚠️  No push token for agentId=${agentId}`);
+        }
+      } catch (pushErr: any) {
+        // Push failure should never block the salary save response
+        console.error("[salary] Push notification failed:", pushErr.message);
+      }
+
       res.json({ success: true });
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
