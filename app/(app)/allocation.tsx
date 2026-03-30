@@ -482,11 +482,15 @@ function navigateToDetail(item: any) {
 
 function CaseCard({ item, onFeedback }: { item: any; onFeedback: (item: any) => void }) {
   const call = async () => {
-  if (!item.mobile_no) { Alert.alert("No number available"); return; }
+  if (!item.mobile_no) {
+    Alert.alert("No Number", "This customer has no phone number on record.");
+    return;
+  }
   const phone = item.mobile_no.split(",")[0].trim();
+
   Alert.alert(
     "Call Customer",
-    `Call ${item.customer_name} at ${phone}?\nThe call will be recorded and saved to Google Drive.`,
+    `Call ${item.customer_name} at ${phone}?\n\nYour phone will ring first, then the customer will be connected. The call will be recorded automatically.`,
     [
       { text: "Cancel", style: "cancel" },
       {
@@ -500,16 +504,26 @@ function CaseCard({ item, onFeedback }: { item: any; onFeedback: (item: any) => 
               caseId: item.id,
               loanNo: item.loan_no,
             });
-            Alert.alert("Calling...", "Call started. Recording will auto-save when done.");
+            Alert.alert(
+              "Calling You...",
+              "Your phone will ring now. Pick up to connect to the customer. The call will be saved to Google Drive automatically."
+            );
           } catch (e: any) {
-            Alert.alert("Error", e.message);
+            // Show a friendly message if agent phone not set
+            if (e.message?.includes("not registered")) {
+              Alert.alert(
+                "Phone Not Set",
+                "Your phone number is not registered in the system. Please contact your admin to add it."
+              );
+            } else {
+              Alert.alert("Error", e.message);
+            }
           }
         },
       },
     ]
   );
 };
-
   // ── Recorded call via Twilio ───────────────────────────────────────────────
   const handleRecordedCall = async () => {
     if (!item.mobile_no) { Alert.alert("No number"); return; }
