@@ -37,6 +37,8 @@ module.exports = ({ config }) => {
         "RECEIVE_BOOT_COMPLETED",
         "VIBRATE",
         "ACCESS_NETWORK_STATE",
+        "CALL_PHONE",              // ← ADD THIS for tel: links
+        "READ_PHONE_STATE", 
       ],
       backgroundColor: "#000000",
       notification: {
