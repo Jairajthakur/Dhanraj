@@ -11,6 +11,9 @@ module.exports = ({ config }) => {
     newArchEnabled: true,
     updates: {
       url: "https://u.expo.dev/1b09251a-4423-4759-a22b-fc2f0a44fd8e",
+      enabled: true,
+      checkAutomatically: "ON_LOAD",
+      fallbackToCacheTimeout: 0,
     },
     runtimeVersion: {
       policy: "sdkVersion",
