@@ -953,15 +953,15 @@ app.get("/api/today-ptp", requireAuth, async (req, res) => {
       SELECT 'loan' AS source, id, customer_name, loan_no, pos::numeric AS pos, ptp_date, telecaller_ptp_date
       FROM loan_cases WHERE agent_id=$1
         AND (
-          (status='PTP' AND ptp_date = CURRENT_DATE)
-          OR (telecaller_ptp_date = CURRENT_DATE)
+          (status = 'PTP' AND ptp_date = CURRENT_DATE)
+          OR (status = 'PTP' AND telecaller_ptp_date = CURRENT_DATE)
         )
       UNION ALL
       SELECT 'bkt' AS source, id, customer_name, loan_no, pos::numeric AS pos, ptp_date, telecaller_ptp_date
       FROM bkt_cases WHERE agent_id=$1
         AND (
-          (status='PTP' AND ptp_date = CURRENT_DATE)
-          OR (telecaller_ptp_date = CURRENT_DATE)
+          (status = 'PTP' AND ptp_date = CURRENT_DATE)
+          OR (status = 'PTP' AND telecaller_ptp_date = CURRENT_DATE)
         )
       ORDER BY customer_name
     `, [agentId]);
