@@ -117,30 +117,7 @@ function StatusActionBar({ item, onUpdated }: { item: any; onUpdated: () => void
         )}
       </Pressable>
 
-      {/* CHANGE 2: Pre Intimation button */}
-      <Pressable
-        style={[actionStyles.btn, actionStyles.btnPreIntimation]}
-        onPress={() =>
-          Alert.alert(
-            "Pre Intimation",
-            `Send pre-intimation notice to ${item.customer_name}?`,
-            [
-              { text: "Cancel", style: "cancel" },
-              {
-                text: "Send",
-                onPress: () => Alert.alert("Sent", "Pre-intimation notice queued successfully."),
-              },
-            ]
-          )
-        }
-        disabled={!!loading}
-      >
-        <Ionicons name="notifications-outline" size={15} color="#f59e0b" />
-        <Text style={[actionStyles.btnText, { color: "#f59e0b" }]}>Pre Intimation</Text>
-      </Pressable>
-    </View>
-  );
-}
+  
 
 // ── Case Detail Modal (matches all-cases screen style) ─────────────────────
 function CaseDetailModal({
