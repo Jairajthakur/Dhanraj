@@ -481,13 +481,34 @@ function navigateToDetail(item: any) {
 }
 
 function CaseCard({ item, onFeedback }: { item: any; onFeedback: (item: any) => void }) {
-  const call = () => {
-    const phones = item.mobile_no?.split(",") || [];
-    const num = phones[0]?.trim();
-    if (!num) { Alert.alert("No number available"); return; }
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    Linking.openURL(`tel:${num}`);
-  };
+  const call = async () => {
+  if (!item.mobile_no) { Alert.alert("No number available"); return; }
+  const phone = item.mobile_no.split(",")[0].trim();
+  Alert.alert(
+    "Call Customer",
+    `Call ${item.customer_name} at ${phone}?\nThe call will be recorded and saved to Google Drive.`,
+    [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Call",
+        onPress: async () => {
+          try {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+            await api.makeCall({
+              customerPhone: phone,
+              agentName: "Agent",
+              caseId: item.id,
+              loanNo: item.loan_no,
+            });
+            Alert.alert("Calling...", "Call started. Recording will auto-save when done.");
+          } catch (e: any) {
+            Alert.alert("Error", e.message);
+          }
+        },
+      },
+    ]
+  );
+};
 
   // ── Recorded call via Twilio ───────────────────────────────────────────────
   const handleRecordedCall = async () => {
@@ -669,13 +690,6 @@ function CaseCard({ item, onFeedback }: { item: any; onFeedback: (item: any) => 
         >
           <Ionicons name="chatbox" size={16} color="#fff" />
           <Text style={styles.actionBtnText}>Feedback</Text>
-        </Pressable>
-        <Pressable
-          style={[styles.actionBtn, { backgroundColor: "#7c3aed" }]}
-          onPress={handleRecordedCall}
-        >
-          <Ionicons name="mic" size={16} color="#fff" />
-          <Text style={styles.actionBtnText}>Record</Text>
         </Pressable>
       </View>
     </View>
