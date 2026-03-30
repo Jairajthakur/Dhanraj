@@ -552,7 +552,6 @@ const actionStyles = StyleSheet.create({
   btnActivePaid:     { backgroundColor: Colors.success, borderColor: Colors.success },
   btnUnpaid:         { backgroundColor: Colors.danger,  borderColor: Colors.danger  },
   btnActiveRollback: { backgroundColor: Colors.info,    borderColor: Colors.info    },
-  btnPreIntimation:  { backgroundColor: "#fff7ed",      borderColor: "#f59e0b"      },
 });
 
 const styles = StyleSheet.create({
