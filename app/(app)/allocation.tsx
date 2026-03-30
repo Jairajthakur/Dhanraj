@@ -333,6 +333,7 @@ function FeedbackModal({ visible, caseItem, onClose, isMonthlyLocked = false }: 
             {/* ====== MONTHLY FEEDBACK ====== */}
             {activeTab === "Monthly Feedback" && (
               <>
+                {/* If locked, show locked view; otherwise show the form */}
                 {isMonthlyLocked ? (
                   <LockedFeedbackView item={caseItem} onClose={onClose} />
                 ) : (
@@ -481,49 +482,15 @@ function navigateToDetail(item: any) {
 }
 
 function CaseCard({ item, onFeedback }: { item: any; onFeedback: (item: any) => void }) {
-  const call = async () => {
-    if (!item.mobile_no) {
-      Alert.alert("No Number", "This customer has no phone number on record.");
-      return;
-    }
-    const phone = item.mobile_no.split(",")[0].trim();
-
-    Alert.alert(
-      "Call Customer",
-      `Call ${item.customer_name} at ${phone}?\n\nYour phone will ring first, then the customer will be connected. The call will be recorded automatically.`,
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Call",
-          onPress: async () => {
-            try {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-              await api.makeCall({
-                customerPhone: phone,
-                agentName: "Agent",
-                caseId: item.id,
-                loanNo: item.loan_no,
-              });
-              Alert.alert(
-                "Calling You...",
-                "Your phone will ring now. Pick up to connect to the customer. The call will be saved to Google Drive automatically."
-              );
-            } catch (e: any) {
-              if (e.message?.includes("not registered")) {
-                Alert.alert(
-                  "Phone Not Set",
-                  "Your phone number is not registered. Please contact your admin to add it."
-                );
-              } else {
-                Alert.alert("Error", e.message);
-              }
-            }
-          },
-        },
-      ]
-    );
+  const call = () => {
+    const phones = item.mobile_no?.split(",") || [];
+    const num = phones[0]?.trim();
+    if (!num) { Alert.alert("No number available"); return; }
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    Linking.openURL(`tel:${num}`);
   };
 
+  // Monthly feedback lock indicator (for badge only — button is always Feedback)
   const isMonthlyLocked = !!item.monthly_feedback;
 
   const statusColor  = STATUS_COLORS[item.status] || Colors.textMuted;
@@ -635,6 +602,7 @@ function CaseCard({ item, onFeedback }: { item: any; onFeedback: (item: any) => 
         </View>
       )}
 
+      {/* Hide "SUBMITTED" placeholder — only show real monthly feedback values */}
       {item.monthly_feedback && item.monthly_feedback !== "SUBMITTED" && (
         <View style={styles.monthlyFeedbackRow}>
           <Ionicons name="calendar-outline" size={13} color={Colors.primary} />
@@ -654,7 +622,7 @@ function CaseCard({ item, onFeedback }: { item: any; onFeedback: (item: any) => 
         <View style={[styles.ptpDateRow, { backgroundColor: Colors.info + "12" }]}>
           <Ionicons name="calendar-outline" size={13} color={Colors.info} />
           <Text style={[styles.ptpDateLabel, { color: Colors.info }]}>Telecaller PTP: </Text>
-          <Text style={[styles.ptpDateValue, { color: Colors.info }]}>{String(item.telecaller_ptp_date).slice(0, 10)}</Text>
+          <Text style={[styles.ptpDateValue,  { color: Colors.info }]}>{String(item.telecaller_ptp_date).slice(0, 10)}</Text>
         </View>
       )}
 
@@ -667,6 +635,7 @@ function CaseCard({ item, onFeedback }: { item: any; onFeedback: (item: any) => 
           <Ionicons name="eye" size={16} color={Colors.textSecondary} />
           <Text style={[styles.actionBtnText, { color: Colors.textSecondary }]}>Details</Text>
         </Pressable>
+        {/* Feedback button is always active — lock is only inside the modal */}
         <Pressable
           style={[styles.actionBtn, styles.feedbackBtn]}
           onPress={() => onFeedback(item)}
@@ -678,6 +647,7 @@ function CaseCard({ item, onFeedback }: { item: any; onFeedback: (item: any) => 
     </View>
   );
 }
+
 export default function AllocationScreen() {
   const insets     = useSafeAreaInsets();
   const qc         = useQueryClient();
