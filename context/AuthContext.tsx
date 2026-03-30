@@ -44,6 +44,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // ─── Initial Auth Check ─────────────────────────────────────────────────
   useEffect(() => {
     let cancelled = false;
+    // FIX #1: resolved flag prevents race between timeout and bootstrap
+    // both were calling setAgent/setIsLoading causing flicker to login screen
+    let resolved = false;
 
     const bootstrap = async () => {
       try {
@@ -62,6 +65,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             if (!cancelled) {
               const isAuthError =
                 e?.message === "Unauthorized" ||
+                e?.message?.toLowerCase().includes("unauthorized") ||
                 e?.message?.includes("401") ||
                 e?.status === 401 ||
                 e?.statusCode === 401;
@@ -99,8 +103,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           }
         } catch (e: any) {
           if (!cancelled) {
+            // FIX #4: broadened auth error check — server may return lowercase
+            // or slightly different message, causing false "stay logged in"
             const isAuthError =
               e?.message === "Unauthorized" ||
+              e?.message?.toLowerCase().includes("unauthorized") ||
               e?.message?.includes("401") ||
               e?.status === 401 ||
               e?.statusCode === 401;
@@ -123,15 +130,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setAgent(cached ?? null);
         }
       } finally {
-        if (!cancelled) setIsLoading(false);
+        if (!cancelled) {
+          resolved = true; // FIX #1: mark as resolved so timeout won't overwrite
+          setIsLoading(false);
+        }
       }
     };
 
     // Safety timeout — if bootstrap takes too long, fall back to cache
+    // FIX #1: check resolved so this doesn't race with bootstrap finish
     const timeout = setTimeout(() => {
-      if (!cancelled) {
+      if (!cancelled && !resolved) {
         agentCache.get().then((cached) => {
-          if (!cancelled) {
+          if (!cancelled && !resolved) {
+            resolved = true;
             setAgent(cached ?? null);
             setIsLoading(false);
           }
@@ -140,6 +152,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }, 6000);
 
     bootstrap().finally(() => {
+      resolved = true; // FIX #1: ensure resolved is always set
       clearTimeout(timeout);
       if (!cancelled) setIsLoading(false);
     });
@@ -165,8 +178,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           await agentCache.set(res.agent);
         }
       } catch (e: any) {
-        // ✅ Only logout on confirmed 401, not network errors
-        if (e?.message === "Unauthorized") {
+        // FIX #4: broadened auth error detection — was only checking exact
+        // "Unauthorized" string, would miss "unauthorized", "401", etc.
+        const isAuthError =
+          e?.message === "Unauthorized" ||
+          e?.message?.toLowerCase().includes("unauthorized") ||
+          e?.message?.includes("401") ||
+          e?.status === 401;
+
+        if (isAuthError) {
           await agentCache.clear();
           await tokenStore.clear();
           setAgent(null);
