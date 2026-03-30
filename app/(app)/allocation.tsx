@@ -689,26 +689,24 @@ function CaseCard({ item, onFeedback }: { item: any; onFeedback: (item: any) => 
         </View>
       )}
 
-      <View style={styles.cardActions}>
-        <Pressable style={[styles.actionBtn, styles.callBtn]} onPress={call}>
-          <Ionicons name="call" size={16} color="#fff" />
-          <Text style={styles.actionBtnText}>Call</Text>
-        </Pressable>
-        <Pressable style={[styles.actionBtn, styles.detailBtn]} onPress={() => navigateToDetail(item)}>
-          <Ionicons name="eye" size={16} color={Colors.textSecondary} />
-          <Text style={[styles.actionBtnText, { color: Colors.textSecondary }]}>Details</Text>
-        </Pressable>
-        <Pressable
-          style={[styles.actionBtn, styles.feedbackBtn]}
-          onPress={() => onFeedback(item)}
-        >
-          <Ionicons name="chatbox" size={16} color="#fff" />
-          <Text style={styles.actionBtnText}>Feedback</Text>
-        </Pressable>
-      </View>
-    </View>
-  );
-}
+    <View style={styles.cardActions}>
+  <Pressable style={[styles.actionBtn, styles.callBtn]} onPress={call}>
+    <Ionicons name="call" size={16} color="#fff" />
+    <Text style={styles.actionBtnText}>Call</Text>
+  </Pressable>
+  <Pressable style={[styles.actionBtn, styles.detailBtn]} onPress={() => navigateToDetail(item)}>
+    <Ionicons name="eye" size={16} color={Colors.textSecondary} />
+    <Text style={[styles.actionBtnText, { color: Colors.textSecondary }]}>Details</Text>
+  </Pressable>
+  <Pressable
+    style={[styles.actionBtn, styles.feedbackBtn]}
+    onPress={() => onFeedback(item)}
+  >
+    <Ionicons name="chatbox" size={16} color="#fff" />
+    <Text style={styles.actionBtnText}>Feedback</Text>
+  </Pressable>
+  {/* Record button removed — Call now uses Twilio automatically */}
+</View>
 
 export default function AllocationScreen() {
   const insets     = useSafeAreaInsets();
