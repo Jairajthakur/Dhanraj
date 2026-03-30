@@ -2518,47 +2518,39 @@ async function uploadToDrive(
 }
 
 // 1. Make outbound call to customer
-app.post("/api/make-call", requireAuth, async (req, res) => {
-  try {
-    const { customerPhone, agentName, caseId, loanNo } = req.body;
-    if (!customerPhone) return res.status(400).json({ message: "customerPhone required" });
+app.post("/api/twilio/twiml", (req, res) => {
+  const twilio = require("twilio");
+  const twiml = new twilio.twiml.VoiceResponse();
 
-    const twilio = require("twilio");
-    const client = twilio(
-      process.env.TWILIO_ACCOUNT_SID,
-      process.env.TWILIO_AUTH_TOKEN
-    );
+  const customerPhone = (req.query.customerPhone || req.body.customerPhone) as string;
 
-    const baseUrl = process.env.RAILWAY_PUBLIC_DOMAIN
-      ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`
-      : process.env.APP_URL || "";
-
-    const call = await client.calls.create({
-      to: customerPhone.startsWith("+") ? customerPhone : `+91${customerPhone.replace(/\D/g, "").slice(-10)}`,
-      from: process.env.TWILIO_PHONE_NUMBER,
-      url: `${baseUrl}/api/twilio/twiml?agentId=${req.session.agentId}&caseId=${caseId || ""}&loanNo=${encodeURIComponent(loanNo || "")}`,
-      record: true,
-      recordingStatusCallback: `${baseUrl}/api/twilio/recording-callback`,
-      recordingStatusCallbackMethod: "POST",
-      recordingStatusCallbackEvent: ["completed"],
-      statusCallback: `${baseUrl}/api/twilio/call-status`,
-      statusCallbackMethod: "POST",
-      statusCallbackEvent: ["completed"],
-    });
-
-    // Save initial call record
-    await storage.query(
-      `INSERT INTO call_recordings (agent_id, case_id, loan_no, call_sid, recorded_at)
-       VALUES ($1, $2, $3, $4, NOW())
-       ON CONFLICT (recording_sid) DO NOTHING`,
-      [req.session.agentId, caseId || null, loanNo || null, call.sid]
-    );
-
-    res.json({ success: true, callSid: call.sid });
-  } catch (e: any) {
-    console.error("[make-call]", e.message);
-    res.status(500).json({ message: e.message });
+  if (!customerPhone) {
+    twiml.say({ voice: "alice", language: "en-IN" }, "Error: no customer number provided.");
+    twiml.hangup();
+    res.type("text/xml");
+    res.send(twiml.toString());
+    return;
   }
+
+  // Agent has picked up their phone → now connect to customer
+  twiml.say({ voice: "alice", language: "en-IN" }, "Connecting to customer. Please wait.");
+
+  const dial = twiml.dial({
+    record: "record-from-answer-dual-channel", // dual channel = agent & customer on separate audio tracks
+    recordingStatusCallback: `${
+      process.env.RAILWAY_PUBLIC_DOMAIN
+        ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`
+        : process.env.APP_URL || ""
+    }/api/twilio/recording-callback`,
+    recordingStatusCallbackMethod: "POST",
+    action: "/api/twilio/twiml-end",
+    timeout: 30,
+  });
+
+  dial.number(customerPhone);
+
+  res.type("text/xml");
+  res.send(twiml.toString());
 });
 
 // 2. TwiML — what happens when call connects
