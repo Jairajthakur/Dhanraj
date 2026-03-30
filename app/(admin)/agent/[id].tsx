@@ -35,8 +35,15 @@ function fmtBool(v: any) {
 }
 
 // ── Detail table row ───────────────────────────────────────────────────────
-// CHANGE 1: removed `if (!display) return null` and show "—" for empty values
-function TableRow({ label, value, phone, even }: { label: string; value?: any; phone?: boolean; even?: boolean }) {
+// FIX: Extracted props into named interface — inline destructured TS types
+// cause SyntaxError in Expo web bundler (Babel chokes on the `}: {` pattern)
+interface TableRowProps {
+  label: string;
+  value?: any;
+  phone?: boolean;
+  even?: boolean;
+}
+function TableRow({ label, value, phone, even }: TableRowProps) {
   const display = value !== null && value !== undefined && value !== "" ? String(value) : "—";
   return (
     <View style={[detailStyles.row, even && { backgroundColor: Colors.surfaceAlt }]}>
@@ -57,7 +64,12 @@ function TableRow({ label, value, phone, even }: { label: string; value?: any; p
 }
 
 // ── Status Action Bar ──────────────────────────────────────────────────────
-function StatusActionBar({ item, onUpdated }: { item: any; onUpdated: () => void }) {
+// FIX: Extracted props into named interface
+interface StatusActionBarProps {
+  item: any;
+  onUpdated: () => void;
+}
+function StatusActionBar({ item, onUpdated }: StatusActionBarProps) {
   const [loading, setLoading] = useState<string | null>(null);
   const tableType = item.case_type === "bkt" ? "bkt" : "loan";
 
@@ -116,17 +128,22 @@ function StatusActionBar({ item, onUpdated }: { item: any; onUpdated: () => void
           </>
         )}
       </Pressable>
+    </View>
+    // FIX: This closing </View> and the closing brace below were MISSING in the
+    // original file — the component's JSX return was never closed, causing
+    // Babel to fail parsing everything after it including CaseDetailModal
+  );
+}
 
-  
-
-// ── Case Detail Modal (matches all-cases screen style) ─────────────────────
-function CaseDetailModal({
-  item, onClose, onResetCase, onStatusUpdated,
-}: {
-  item: any; onClose: () => void;
+// ── Case Detail Modal ──────────────────────────────────────────────────────
+// FIX: Extracted props into named interface
+interface CaseDetailModalProps {
+  item: any;
+  onClose: () => void;
   onResetCase: (id: number) => void;
   onStatusUpdated: () => void;
-}) {
+}
+function CaseDetailModal({ item, onClose, onResetCase, onStatusUpdated }: CaseDetailModalProps) {
   const insets = useSafeAreaInsets();
   const [resetting, setResetting] = useState(false);
   const [localItem, setLocalItem] = useState(item);
@@ -136,39 +153,39 @@ function CaseDetailModal({
   const statusColor = localItem ? STATUS_COLORS[localItem.status] || Colors.primary : Colors.primary;
 
   const rows = localItem ? [
-   // Only show Feedback section if there is actual feedback data
-...(localItem.feedback_code || localItem.latest_feedback || localItem.feedback_comments ||
-    localItem.feedback_date || localItem.customer_available != null ||
-    localItem.vehicle_available != null || localItem.third_party != null ||
-    localItem.projection || localItem.non_starter != null || localItem.kyc_purchase != null ||
-    localItem.workable != null || localItem.ptp_date || localItem.telecaller_ptp_date
-  ? [
-      { section: "Feedback" },
-      ...(localItem.feedback_code        ? [{ label: "Feedback Code",   value: localItem.feedback_code }] : []),
-      ...(localItem.latest_feedback      ? [{ label: "Detail Feedback", value: localItem.latest_feedback }] : []),
-      ...(localItem.feedback_comments    ? [{ label: "Comments",        value: localItem.feedback_comments }] : []),
-      ...(localItem.feedback_date        ? [{ label: "Feedback Date",   value: fmtDate(localItem.feedback_date) }] : []),
-      ...(localItem.customer_available != null ? [{ label: "Customer Avail.", value: fmtBool(localItem.customer_available) }] : []),
-      ...(localItem.vehicle_available  != null ? [{ label: "Vehicle Avail.",  value: fmtBool(localItem.vehicle_available) }] : []),
-      ...(localItem.third_party != null ? [{ label: "Third Party", value: fmtBool(localItem.third_party) }] : []),
-      ...(localItem.third_party === true || localItem.third_party === "true" || localItem.third_party === "t"
-        ? [
-            { label: "Third Party Name",   value: localItem.third_party_name },
-            { label: "Third Party Number", value: localItem.third_party_number, phone: true },
-          ] : []),
-      ...(localItem.projection           ? [{ label: "Projection",   value: localItem.projection }] : []),
-      ...(localItem.non_starter  != null ? [{ label: "Non Starter",  value: fmtBool(localItem.non_starter) }] : []),
-      ...(localItem.kyc_purchase != null ? [{ label: "KYC Purchase", value: fmtBool(localItem.kyc_purchase) }] : []),
-      ...(localItem.workable     != null ? [{
-        label: "Workable",
-        value: localItem.workable === true || localItem.workable === "true" || localItem.workable === "t" ? "Workable"
-             : localItem.workable === false || localItem.workable === "false" || localItem.workable === "f" ? "Non Workable" : "",
-      }] : []),
-      ...(localItem.ptp_date           ? [{ label: "PTP Date",       value: fmtDate(localItem.ptp_date) }] : []),
-      ...(localItem.telecaller_ptp_date ? [{ label: "Telecaller PTP", value: fmtDate(localItem.telecaller_ptp_date) }] : []),
-    ]
-  : []
-),
+    // Only show Feedback section if there is actual feedback data
+    ...(localItem.feedback_code || localItem.latest_feedback || localItem.feedback_comments ||
+        localItem.feedback_date || localItem.customer_available != null ||
+        localItem.vehicle_available != null || localItem.third_party != null ||
+        localItem.projection || localItem.non_starter != null || localItem.kyc_purchase != null ||
+        localItem.workable != null || localItem.ptp_date || localItem.telecaller_ptp_date
+      ? [
+          { section: "Feedback" },
+          ...(localItem.feedback_code        ? [{ label: "Feedback Code",   value: localItem.feedback_code }] : []),
+          ...(localItem.latest_feedback      ? [{ label: "Detail Feedback", value: localItem.latest_feedback }] : []),
+          ...(localItem.feedback_comments    ? [{ label: "Comments",        value: localItem.feedback_comments }] : []),
+          ...(localItem.feedback_date        ? [{ label: "Feedback Date",   value: fmtDate(localItem.feedback_date) }] : []),
+          ...(localItem.customer_available != null ? [{ label: "Customer Avail.", value: fmtBool(localItem.customer_available) }] : []),
+          ...(localItem.vehicle_available  != null ? [{ label: "Vehicle Avail.",  value: fmtBool(localItem.vehicle_available) }] : []),
+          ...(localItem.third_party != null ? [{ label: "Third Party", value: fmtBool(localItem.third_party) }] : []),
+          ...(localItem.third_party === true || localItem.third_party === "true" || localItem.third_party === "t"
+            ? [
+                { label: "Third Party Name",   value: localItem.third_party_name },
+                { label: "Third Party Number", value: localItem.third_party_number, phone: true },
+              ] : []),
+          ...(localItem.projection           ? [{ label: "Projection",   value: localItem.projection }] : []),
+          ...(localItem.non_starter  != null ? [{ label: "Non Starter",  value: fmtBool(localItem.non_starter) }] : []),
+          ...(localItem.kyc_purchase != null ? [{ label: "KYC Purchase", value: fmtBool(localItem.kyc_purchase) }] : []),
+          ...(localItem.workable     != null ? [{
+            label: "Workable",
+            value: localItem.workable === true || localItem.workable === "true" || localItem.workable === "t" ? "Workable"
+                 : localItem.workable === false || localItem.workable === "false" || localItem.workable === "f" ? "Non Workable" : "",
+          }] : []),
+          ...(localItem.ptp_date            ? [{ label: "PTP Date",       value: fmtDate(localItem.ptp_date) }] : []),
+          ...(localItem.telecaller_ptp_date ? [{ label: "Telecaller PTP", value: fmtDate(localItem.telecaller_ptp_date) }] : []),
+        ]
+      : []
+    ),
 
     { section: "Case Info" },
     { label: "Status",        value: localItem.status },
@@ -535,46 +552,45 @@ const actionStyles = StyleSheet.create({
   btnActivePaid:     { backgroundColor: Colors.success, borderColor: Colors.success },
   btnUnpaid:         { backgroundColor: Colors.danger,  borderColor: Colors.danger  },
   btnActiveRollback: { backgroundColor: Colors.info,    borderColor: Colors.info    },
-  // CHANGE 3: Pre Intimation button style
   btnPreIntimation:  { backgroundColor: "#fff7ed",      borderColor: "#f59e0b"      },
 });
 
 const styles = StyleSheet.create({
-  container:         { padding: 16, gap: 16 },
-  agentHeader:       { flexDirection: "row", gap: 16, alignItems: "center", backgroundColor: Colors.surface, borderRadius: 16, padding: 16, shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 8, elevation: 2 },
-  avatar:            { width: 64, height: 64, borderRadius: 32, backgroundColor: Colors.primary, alignItems: "center", justifyContent: "center" },
-  agentInfo:         { flex: 1, gap: 4 },
-  agentName:         { fontSize: 18, fontWeight: "800", color: Colors.text },
-  agentPhone:        { fontSize: 13, color: Colors.textMuted },
-  statsGrid:         { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  statCard:          { flex: 1, minWidth: "18%", backgroundColor: Colors.surface, borderRadius: 12, padding: 12, alignItems: "center", gap: 4, borderTopWidth: 3, shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 6, elevation: 2 },
-  statNum:           { fontSize: 22, fontWeight: "800", color: Colors.text },
-  statLabel:         { fontSize: 10, color: Colors.textSecondary, fontWeight: "600" },
-  tabs:              { marginBottom: 4 },
-  tabChip:           { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, backgroundColor: Colors.surface, marginRight: 8, borderWidth: 1, borderColor: Colors.border },
-  tabChipText:       { fontSize: 13, fontWeight: "600", color: Colors.textSecondary },
-  sectionTitle:      { fontSize: 14, fontWeight: "700", color: Colors.textSecondary },
-  caseCard:          { backgroundColor: Colors.surface, borderRadius: 14, padding: 14, gap: 8, shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.04, shadowRadius: 6, elevation: 1, borderWidth: StyleSheet.hairlineWidth, borderColor: Colors.border },
-  caseHeader:        { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
-  caseName:          { flex: 1, fontSize: 13, fontWeight: "800", color: Colors.text, textTransform: "uppercase", marginRight: 8 },
-  statusBadge:       { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20 },
-  statusText:        { fontSize: 10, fontWeight: "700" },
-  typeBadge:         { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8 },
-  typeText:          { fontSize: 9, fontWeight: "800" },
-  tagRow:            { flexDirection: "row", flexWrap: "wrap", gap: 6 },
-  tag:               { flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: Colors.surfaceAlt, borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4 },
-  tagLabel:          { fontSize: 9, fontWeight: "700", color: Colors.textMuted, textTransform: "uppercase" },
-  tagValue:          { fontSize: 11, fontWeight: "700", color: Colors.text },
-  phoneRow:          { flexDirection: "row", alignItems: "center", gap: 6 },
-  caseMobile:        { fontSize: 12, color: Colors.info, textDecorationLine: "underline" },
-  feedbackRow:       { flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap" },
-  feedbackCodeBadge: { backgroundColor: Colors.accent + "20", borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 },
-  feedbackCodeText:  { fontSize: 11, fontWeight: "700", color: Colors.accent },
-  caseFeedback:      { flex: 1, fontSize: 11, color: Colors.textSecondary, fontStyle: "italic" },
-  viewDetailHint:    { flexDirection: "row", alignItems: "center", gap: 4, justifyContent: "flex-end", marginTop: 2 },
-  viewDetailHintText:{ fontSize: 11, color: Colors.primary, fontWeight: "600" },
-  empty:             { flex: 1, justifyContent: "center", alignItems: "center", gap: 12, paddingVertical: 60 },
-  emptyText:         { fontSize: 15, color: Colors.textMuted, textAlign: "center" },
+  container:          { padding: 16, gap: 16 },
+  agentHeader:        { flexDirection: "row", gap: 16, alignItems: "center", backgroundColor: Colors.surface, borderRadius: 16, padding: 16, shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 8, elevation: 2 },
+  avatar:             { width: 64, height: 64, borderRadius: 32, backgroundColor: Colors.primary, alignItems: "center", justifyContent: "center" },
+  agentInfo:          { flex: 1, gap: 4 },
+  agentName:          { fontSize: 18, fontWeight: "800", color: Colors.text },
+  agentPhone:         { fontSize: 13, color: Colors.textMuted },
+  statsGrid:          { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  statCard:           { flex: 1, minWidth: "18%", backgroundColor: Colors.surface, borderRadius: 12, padding: 12, alignItems: "center", gap: 4, borderTopWidth: 3, shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 6, elevation: 2 },
+  statNum:            { fontSize: 22, fontWeight: "800", color: Colors.text },
+  statLabel:          { fontSize: 10, color: Colors.textSecondary, fontWeight: "600" },
+  tabs:               { marginBottom: 4 },
+  tabChip:            { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, backgroundColor: Colors.surface, marginRight: 8, borderWidth: 1, borderColor: Colors.border },
+  tabChipText:        { fontSize: 13, fontWeight: "600", color: Colors.textSecondary },
+  sectionTitle:       { fontSize: 14, fontWeight: "700", color: Colors.textSecondary },
+  caseCard:           { backgroundColor: Colors.surface, borderRadius: 14, padding: 14, gap: 8, shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.04, shadowRadius: 6, elevation: 1, borderWidth: StyleSheet.hairlineWidth, borderColor: Colors.border },
+  caseHeader:         { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  caseName:           { flex: 1, fontSize: 13, fontWeight: "800", color: Colors.text, textTransform: "uppercase", marginRight: 8 },
+  statusBadge:        { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20 },
+  statusText:         { fontSize: 10, fontWeight: "700" },
+  typeBadge:          { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8 },
+  typeText:           { fontSize: 9, fontWeight: "800" },
+  tagRow:             { flexDirection: "row", flexWrap: "wrap", gap: 6 },
+  tag:                { flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: Colors.surfaceAlt, borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4 },
+  tagLabel:           { fontSize: 9, fontWeight: "700", color: Colors.textMuted, textTransform: "uppercase" },
+  tagValue:           { fontSize: 11, fontWeight: "700", color: Colors.text },
+  phoneRow:           { flexDirection: "row", alignItems: "center", gap: 6 },
+  caseMobile:         { fontSize: 12, color: Colors.info, textDecorationLine: "underline" },
+  feedbackRow:        { flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap" },
+  feedbackCodeBadge:  { backgroundColor: Colors.accent + "20", borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 },
+  feedbackCodeText:   { fontSize: 11, fontWeight: "700", color: Colors.accent },
+  caseFeedback:       { flex: 1, fontSize: 11, color: Colors.textSecondary, fontStyle: "italic" },
+  viewDetailHint:     { flexDirection: "row", alignItems: "center", gap: 4, justifyContent: "flex-end", marginTop: 2 },
+  viewDetailHintText: { fontSize: 11, color: Colors.primary, fontWeight: "600" },
+  empty:              { flex: 1, justifyContent: "center", alignItems: "center", gap: 12, paddingVertical: 60 },
+  emptyText:          { fontSize: 15, color: Colors.textMuted, textAlign: "center" },
 });
 
 const detailStyles = StyleSheet.create({
