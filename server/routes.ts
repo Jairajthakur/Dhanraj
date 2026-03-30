@@ -946,26 +946,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
     catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
-  app.get("/api/today-ptp", requireAuth, async (req, res) => {
-    try {
-      const agentId = req.session.agentId!;
-      const result = await storage.query(`
-        SELECT 'loan' AS source, id, customer_name, loan_no, pos::numeric AS pos, ptp_date, telecaller_ptp_date,
-               (status='PTP' AND (ptp_date IS NULL OR ptp_date<=CURRENT_DATE)) AS fos_ptp,
-               (telecaller_ptp_date IS NOT NULL AND telecaller_ptp_date<=CURRENT_DATE) AS tele_ptp
-        FROM loan_cases WHERE agent_id=$1
-          AND ((status='PTP' AND (ptp_date IS NULL OR ptp_date<=CURRENT_DATE)) OR (telecaller_ptp_date IS NOT NULL AND telecaller_ptp_date<=CURRENT_DATE))
-        UNION ALL
-        SELECT 'bkt' AS source, id, customer_name, loan_no, pos::numeric AS pos, ptp_date, telecaller_ptp_date,
-               (status='PTP' AND (ptp_date IS NULL OR ptp_date<=CURRENT_DATE)) AS fos_ptp,
-               (telecaller_ptp_date IS NOT NULL AND telecaller_ptp_date<=CURRENT_DATE) AS tele_ptp
-        FROM bkt_cases WHERE agent_id=$1
-          AND ((status='PTP' AND (ptp_date IS NULL OR ptp_date<=CURRENT_DATE)) OR (telecaller_ptp_date IS NOT NULL AND telecaller_ptp_date<=CURRENT_DATE))
-        ORDER BY customer_name
-      `, [agentId]);
-      res.json({ count: result.rows.length, cases: result.rows });
-    } catch (e: any) { res.status(500).json({ message: e.message }); }
-  });
+app.get("/api/today-ptp", requireAuth, async (req, res) => {
+  try {
+    const agentId = req.session.agentId!;
+    const result = await storage.query(`
+      SELECT 'loan' AS source, id, customer_name, loan_no, pos::numeric AS pos, ptp_date, telecaller_ptp_date
+      FROM loan_cases WHERE agent_id=$1
+        AND (
+          (status='PTP' AND ptp_date = CURRENT_DATE)
+          OR (telecaller_ptp_date = CURRENT_DATE)
+        )
+      UNION ALL
+      SELECT 'bkt' AS source, id, customer_name, loan_no, pos::numeric AS pos, ptp_date, telecaller_ptp_date
+      FROM bkt_cases WHERE agent_id=$1
+        AND (
+          (status='PTP' AND ptp_date = CURRENT_DATE)
+          OR (telecaller_ptp_date = CURRENT_DATE)
+        )
+      ORDER BY customer_name
+    `, [agentId]);
+    res.json({ count: result.rows.length, cases: result.rows });
+  } catch (e: any) { res.status(500).json({ message: e.message }); }
+});
 
   app.get("/api/attendance/today", requireAuth, async (req, res) => {
     try { res.json({ attendance: await storage.getTodayAttendance(req.session.agentId!) }); }
