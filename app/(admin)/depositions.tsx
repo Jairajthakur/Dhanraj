@@ -256,14 +256,15 @@ function AddDepositionModal({ visible, onClose, onSaved, agents }: any) {
 
 // ─── FOS Detail Modal ─────────────────────────────────────────────────────────
 function FosDetailModal({ visible, agentId, agentName, onClose, onUpdated }: any) {
-  const [payItem, setPayItem] = useState<any>(null);
-  const [screenshotUrl, setScreenshotUrl] = useState<string | null>(null);
+  const screenshotSrc = (() => {
+  const url = item.screenshot_url;
+  if (!url) return null;
+  if (url.startsWith("http://") || url.startsWith("https://")) return url;
+  const apiBase = getApiUrl().replace(/\/+$/, "");
+  const path = url.startsWith("/") ? url : `/${url}`;
+  return `${apiBase}${path}`;
+})();
 
-  const { data, isLoading, refetch } = useQuery({
-    queryKey: [`/api/admin/fos-depositions/${agentId}`],
-    queryFn: () => apiReq("GET", `/api/admin/fos-depositions/${agentId}`),
-    enabled: visible && !!agentId,
-  });
 
   const depositions = data?.depositions || [];
 
