@@ -431,9 +431,9 @@ function FeedbackModal({ visible, caseItem, onClose, isMonthlyLocked = false }: 
 
             {/* ====== PTP ====== */}
             {activeTab === "PTP" && (
-              <>
+            <>
                 <Text style={fbStyles.sectionLabel}>Detail Feedback</Text>
-                {renderDetailOptions(PTP_DETAIL_OPTIONS, paidDetailFeedback, setPaidDetailFeedback, Colors.statusPTP)}
+                {renderDetailOptions(PTP_DETAIL_OPTIONS, detailFeedback, setDetailFeedback, Colors.statusPTP)}
                 <Text style={fbStyles.sectionLabel}>PTP Date</Text>
                 <TextInput style={[fbStyles.commentInput, { minHeight: 44, marginBottom: 12 }]} placeholder="DD-MM-YYYY" placeholderTextColor={Colors.textMuted} value={ptpDate} onChangeText={setPtpDate} keyboardType="numeric" />
                 <Text style={fbStyles.sectionLabel}>Comments (Optional)</Text>
