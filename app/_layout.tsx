@@ -1,6 +1,7 @@
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Stack, router, useSegments, useRootNavigationState } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
+import * as Updates from "expo-updates";
 import React, { useEffect, useRef, useState } from "react";
 import { Text, View, Platform, Animated, Easing, Image, StyleSheet } from "react-native";
 import { StatusBar } from "expo-status-bar";
@@ -12,6 +13,23 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import { usePushNotifications } from "@/context/usePushNotifications";
 
 setQueryClientRef(queryClient);
+
+// ─── OTA Update Check ─────────────────────────────────────────────────────────
+// Runs once on app load (non-dev only). Fetches and applies any pending EAS
+// update, then reloads the JS bundle silently.
+async function checkForOTAUpdate() {
+  if (__DEV__ || Platform.OS === "web") return;
+  try {
+    const update = await Updates.checkForUpdateAsync();
+    if (update.isAvailable) {
+      await Updates.fetchUpdateAsync();
+      await Updates.reloadAsync();
+    }
+  } catch (e) {
+    // Network error or no update — safe to ignore, app continues normally
+    console.warn("[OTA] Update check failed:", e);
+  }
+}
 
 // ─── Branded Splash Loader ────────────────────────────────────────────────────
 function SplashLoader() {
@@ -79,6 +97,11 @@ function RootLayoutNav() {
   const lastRedirect = useRef<string | null>(null);
 
   usePushNotifications();
+
+  // ✅ OTA update check — runs once when the nav layer mounts on device
+  useEffect(() => {
+    checkForOTAUpdate();
+  }, []);
 
   useEffect(() => {
     if (!navigationState?.key || isLoading) return;
@@ -148,14 +171,10 @@ export default function RootLayout() {
   }, []);
 
   // ✅ FIX: Inject full-height CSS into the DOM on web.
-  // Expo's static output generates its own HTML without height:100% on
-  // html/body/#root — so all flex:1 views collapse to 0px (blank screens).
-  // This runs synchronously before first paint and fixes it permanently.
   useEffect(() => {
     if (Platform.OS !== "web") return;
     const style = document.createElement("style");
     style.id = "expo-root-fix";
-    // Avoid injecting twice (e.g. hot reload)
     if (!document.getElementById("expo-root-fix")) {
       style.innerHTML = `
         html, body {
