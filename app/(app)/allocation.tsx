@@ -333,7 +333,6 @@ function FeedbackModal({ visible, caseItem, onClose, isMonthlyLocked = false }: 
             {/* ====== MONTHLY FEEDBACK ====== */}
             {activeTab === "Monthly Feedback" && (
               <>
-                {/* If locked, show locked view; otherwise show the form */}
                 {isMonthlyLocked ? (
                   <LockedFeedbackView item={caseItem} onClose={onClose} />
                 ) : (
@@ -490,6 +489,35 @@ function CaseCard({ item, onFeedback }: { item: any; onFeedback: (item: any) => 
     Linking.openURL(`tel:${num}`);
   };
 
+  // ── Recorded call via Twilio ───────────────────────────────────────────────
+  const handleRecordedCall = async () => {
+    if (!item.mobile_no) { Alert.alert("No number"); return; }
+    const phone = item.mobile_no.split(",")[0].trim();
+    Alert.alert(
+      "Start Recorded Call",
+      `Call ${item.customer_name} at ${phone}?\nCall will be recorded and saved to Google Drive.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Call",
+          onPress: async () => {
+            try {
+              await api.makeCall({
+                customerPhone: phone,
+                agentName: "Agent",
+                caseId: item.id,
+                loanNo: item.loan_no,
+              });
+              Alert.alert("Calling...", "Call started. Recording will auto-save when done.");
+            } catch (e: any) {
+              Alert.alert("Error", e.message);
+            }
+          },
+        },
+      ]
+    );
+  };
+
   // Monthly feedback lock indicator (for badge only — button is always Feedback)
   const isMonthlyLocked = !!item.monthly_feedback;
 
@@ -635,13 +663,19 @@ function CaseCard({ item, onFeedback }: { item: any; onFeedback: (item: any) => 
           <Ionicons name="eye" size={16} color={Colors.textSecondary} />
           <Text style={[styles.actionBtnText, { color: Colors.textSecondary }]}>Details</Text>
         </Pressable>
-        {/* Feedback button is always active — lock is only inside the modal */}
         <Pressable
           style={[styles.actionBtn, styles.feedbackBtn]}
           onPress={() => onFeedback(item)}
         >
           <Ionicons name="chatbox" size={16} color="#fff" />
           <Text style={styles.actionBtnText}>Feedback</Text>
+        </Pressable>
+        <Pressable
+          style={[styles.actionBtn, { backgroundColor: "#7c3aed" }]}
+          onPress={handleRecordedCall}
+        >
+          <Ionicons name="mic" size={16} color="#fff" />
+          <Text style={styles.actionBtnText}>Record</Text>
         </Pressable>
       </View>
     </View>
