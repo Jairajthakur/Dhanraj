@@ -350,9 +350,14 @@ function FosDetailModal({ visible, agentId, agentName, onClose, onUpdated }: any
               }
               renderItem={({ item }) => {
                 const color = payMethodColor(item.payment_method);
-                const screenshotSrc = item.screenshot_url
-                  ? (item.screenshot_url.startsWith("http") ? item.screenshot_url : `${getApiUrl()}${item.screenshot_url}`)
-                  : null;
+                const resolveScreenshot = (url: string | null): string | null => {
+                    if (!url) return null;
+                    if (url.startsWith("http://") || url.startsWith("https://")) return url;
+                  // relative path like /uploads/screenshots/...
+                const base = getApiUrl().replace(/\/$/, "");
+                return `${base}${url.startsWith("/") ? url : `/${url}`}`;
+                };
+                const screenshotSrc = resolveScreenshot(item.screenshot_url);
                 return (
                   <View style={[fd.card, { borderLeftColor: color }]}>
                     <View style={fd.cardTop}>
