@@ -192,6 +192,11 @@ export const api = {
 
   // ── Auth ──────────────────────────────────────────────────────────────────
   login: async (username: string, password: string) => {
+    // FIX #3: clear any stale token BEFORE sending the login request
+    // previously, a leftover invalid token was being sent in the Authorization
+    // header of the login POST itself, causing the server to reject re-login
+    await tokenStore.clear();
+
     const res = await apiRequest("POST", "/api/auth/login", { username, password });
     if (res?.agent) await agentCache.set(res.agent);
     if (res?.token && Platform.OS !== "web") await tokenStore.set(res.token);
@@ -202,21 +207,17 @@ export const api = {
     try { await apiRequest("POST", "/api/auth/logout"); } catch {}
   },
 
+  // FIX #2: removed the catch block that was masking errors by returning the
+  // cached agent on ANY non-401 error — this caused AuthContext to re-save
+  // stale cache data and obscured real error states. AuthContext already
+  // handles network errors correctly, so no catch needed here.
   me: async () => {
-    try {
-      const res = await apiRequest("GET", "/api/auth/me");
-      if (res?.agent) {
-        await agentCache.set(res.agent);
-        if (res?.token && Platform.OS !== "web") await tokenStore.set(res.token);
-      }
-      return res;
-    } catch (e: any) {
-      if (Platform.OS !== "web" && e?.message !== "Unauthorized") {
-        const cached = await agentCache.get();
-        if (cached) return { agent: cached };
-      }
-      throw e;
+    const res = await apiRequest("GET", "/api/auth/me");
+    if (res?.agent) {
+      await agentCache.set(res.agent);
+      if (res?.token && Platform.OS !== "web") await tokenStore.set(res.token);
     }
+    return res;
   },
 
   changePassword: (currentPassword: string, newPassword: string) =>
@@ -348,10 +349,8 @@ export const api = {
       apiRequest("POST", `/api/admin/reset-feedback/case/${caseId}`, { table }),
 
     // ── Salary ───────────────────────────────────────────────────────────────
-    // ✅ FIX: getAllSalary is the real method; getSalary is an alias
-    //    used by AdminSalaryScreen → api.admin.getSalary()
     getAllSalary: () => apiRequest("GET", "/api/admin/salary"),
-    getSalary:   () => apiRequest("GET", "/api/admin/salary"),   // ← alias used by screen
+    getSalary:   () => apiRequest("GET", "/api/admin/salary"),
     createSalary: (data: any) => apiRequest("POST", "/api/admin/salary", data),
     deleteSalary: (id: number) => apiRequest("DELETE", `/api/admin/salary/${id}`),
 
@@ -385,10 +384,8 @@ export const api = {
       apiRequest("DELETE", `/api/admin/fos-depositions/${id}`),
 
     // ── Attendance ───────────────────────────────────────────────────────────
-    // ✅ FIX: getAllAttendance is the real method; getAttendance is an alias
-    //    used by AdminAttendanceScreen → api.admin.getAttendance()
     getAllAttendance:  () => apiRequest("GET", "/api/admin/attendance"),
-    getAttendance:    () => apiRequest("GET", "/api/admin/attendance"),  // ← alias used by screen
+    getAttendance:    () => apiRequest("GET", "/api/admin/attendance"),
 
     // ── BKT perf ─────────────────────────────────────────────────────────────
     getBktPerfSummary: () => apiRequest("GET", "/api/admin/bkt-perf-summary"),
