@@ -20,7 +20,7 @@ function base64url(str: string): string {
 
 function signToken(payload: { agentId: number; role: string }): string {
   const header = base64url(JSON.stringify({ alg: "HS256", typ: "JWT" }));
-  const body = base64url(JSON.stringify({ ...payload, iat: Math.floor(Date.now() / 1000), exp: Math.floor(Date.now() / 1000) + 7 * 24 * 3600 }));
+  const body = base64url(JSON.stringify({ ...payload, iat: Math.floor(Date.now() / 1000), exp: Math.floor(Date.now() / 1000) + 30 * 24 * 3600 }));
   const sig = createHmac("sha256", JWT_SECRET).update(`${header}.${body}`).digest("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
   return `${header}.${body}.${sig}`;
 }
@@ -28,13 +28,20 @@ function signToken(payload: { agentId: number; role: string }): string {
 function verifyToken(token: string): { agentId: number; role: string } | null {
   try {
     const [header, body, sig] = token.split(".");
-    const expected = createHmac("sha256", JWT_SECRET).update(`${header}.${body}`).digest("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
+    const expected = createHmac("sha256", JWT_SECRET)
+      .update(`${header}.${body}`)
+      .digest("base64")
+      .replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
     if (sig !== expected) return null;
     const payload = JSON.parse(Buffer.from(body, "base64").toString());
-    if (payload.exp && payload.exp < Math.floor(Date.now() / 1000)) return null;
+    // 2-day grace period: user stays logged in even if token just expired,
+    // giving the client time to get a fresh token via /api/auth/me
+    const GRACE = 2 * 24 * 3600;
+    if (payload.exp && payload.exp + GRACE < Math.floor(Date.now() / 1000)) return null;
     return { agentId: payload.agentId, role: payload.role };
   } catch { return null; }
 }
+
 
 function worksheetToRows(worksheet: ExcelJS.Worksheet, rawStrings: boolean): any[][] {
   const rawRows: any[][] = [];
@@ -830,7 +837,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     store: new PgStore({ conString: process.env.DATABASE_URL, tableName: "user_sessions", createTableIfMissing: true }),
     secret: process.env.SESSION_SECRET || "fos-secret-key-2024",
     resave: false, saveUninitialized: false,
-    cookie: { secure: false, httpOnly: true, sameSite: "lax", maxAge: 7 * 24 * 60 * 60 * 1000 },
+    cookie: { secure: false, httpOnly: true, sameSite: "lax", maxAge: 30 * 24 * 60 * 60 * 1000 },
   }));
 
   function requireAuth(req: Request, res: Response, next: any) {
@@ -891,6 +898,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({ agent: safeAgent, token });
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
+
+  app.post("/api/auth/refresh", requireAuth, async (req, res) => {
+   try {
+     const agent = await storage.getAgentById(req.session.agentId!);
+     if (!agent) return res.status(404).json({ message: "Not found" });
+     const { password: _, ...safeAgent } = agent;
+     const token = signToken({ agentId: agent.id, role: agent.role });
+     res.json({ agent: safeAgent, token });
+   } catch (e: any) { res.status(500).json({ message: e.message }); }
+ });
 
   app.get("/api/cases", requireAuth, async (req, res) => {
     try { res.json({ cases: await storage.getLoanCasesByAgent(req.session.agentId!) }); }
