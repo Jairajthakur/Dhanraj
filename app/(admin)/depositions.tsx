@@ -237,9 +237,8 @@ function AddDepositionModal({ visible, onClose, onSaved, agents }: any) {
 }
 
 // ─── FOS Detail Modal (FIXED) ─────────────────────────────────────────────────
-function FosDetailModal({ visible, agentId, agentName, onClose, onUpdated }: any) {
+function FosDetailModal({ visible, agentId, agentName, onClose, onUpdated, onViewScreenshot }: any) {
   const [payItem, setPayItem] = useState<any>(null);
-  const [screenshotUrl, setScreenshotUrl] = useState<string | null>(null);
 
   const { data, isLoading, refetch } = useQuery({
     queryKey: [`/api/admin/fos-depositions/${agentId}`],
@@ -377,7 +376,7 @@ function FosDetailModal({ visible, agentId, agentName, onClose, onUpdated }: any
                     )}
 
                     {screenshotSrc ? (
-                      <Pressable onPress={() => setScreenshotUrl(screenshotSrc)} style={fd.screenshotCard}>
+                    <Pressable onPress={() => onViewScreenshot(screenshotSrc)} style={fd.screenshotCard}>
                         <Image
                           source={{ uri: screenshotSrc }}
                           style={fd.screenshotThumb}
@@ -416,31 +415,7 @@ function FosDetailModal({ visible, agentId, agentName, onClose, onUpdated }: any
             />
           )}
 
-          {/* Screenshot viewer — INSIDE the main modal */}
-          {screenshotUrl && (
-            <View style={{
-              position: "absolute", top: 0, left: 0, right: 0, bottom: 0,
-              backgroundColor: "rgba(0,0,0,0.92)",
-              justifyContent: "center", alignItems: "center",
-            }}>
-              <Image
-                source={{ uri: screenshotUrl }}
-                style={{ width: "95%", height: "80%", borderRadius: 12 }}
-                resizeMode="contain"
-              />
-              <Pressable
-                style={{
-                  marginTop: 20, backgroundColor: "rgba(255,255,255,0.2)",
-                  paddingHorizontal: 28, paddingVertical: 12, borderRadius: 20,
-                }}
-                onPress={() => setScreenshotUrl(null)}
-              >
-                <Text style={{ color: "#fff", fontWeight: "700", fontSize: 15 }}>Close</Text>
-              </Pressable>
-            </View>
-          )}
-        </View>
-      </Modal>
+         
 
       <PaymentModal
         visible={!!payItem}
@@ -543,6 +518,7 @@ export default function AdminDepositionsScreen() {
   const [importVisible, setImportVisible] = useState(false);
   const [selectedFos, setSelectedFos] = useState<{ id: number; name: string } | null>(null);
   const [downloading, setDownloading] = useState(false);
+  const [screenshotUrl, setScreenshotUrl] = useState<string | null>(null);
 
   const { data, isLoading, refetch } = useQuery({
     queryKey: ["/api/admin/fos-depositions"],
@@ -678,14 +654,40 @@ export default function AdminDepositionsScreen() {
         )}
       </View>
 
-      {selectedFos && (
+     {selectedFos && (
         <FosDetailModal
           visible={!!selectedFos}
           agentId={selectedFos.id}
           agentName={selectedFos.name}
           onClose={() => setSelectedFos(null)}
           onUpdated={() => refetch()}
+          onViewScreenshot={(url: string) => setScreenshotUrl(url)}
         />
+      )}
+
+      {/* Screenshot viewer — ROOT level, outside all modals */}
+      {screenshotUrl && (
+        <View style={{
+          position: "absolute", top: 0, left: 0, right: 0, bottom: 0,
+          backgroundColor: "rgba(0,0,0,0.95)",
+          justifyContent: "center", alignItems: "center",
+          zIndex: 9999,
+        }}>
+          <Image
+            source={{ uri: screenshotUrl }}
+            style={{ width: "95%", height: "80%", borderRadius: 12 }}
+            resizeMode="contain"
+          />
+          <Pressable
+            style={{
+              marginTop: 20, backgroundColor: "rgba(255,255,255,0.2)",
+              paddingHorizontal: 28, paddingVertical: 12, borderRadius: 20,
+            }}
+            onPress={() => setScreenshotUrl(null)}
+          >
+            <Text style={{ color: "#fff", fontWeight: "700", fontSize: 15 }}>Close</Text>
+          </Pressable>
+        </View>
       )}
 
       <AddDepositionModal
