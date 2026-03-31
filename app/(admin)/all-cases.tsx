@@ -925,6 +925,8 @@ export default function AllCasesScreen() {
     return Object.values(groups).sort((a, b) => a.agentName.localeCompare(b.agentName));
   }, [data]);
 
+  // ✅ FIX: use api.admin.resetFeedbackForAgent instead of raw fetch
+  // Raw fetch doesn't send the session cookie reliably on web
   const handleResetAgentFeedback = (agentId: number, agentName: string) => {
     Alert.alert(
       "Reset Agent Feedback",
@@ -936,14 +938,7 @@ export default function AllCasesScreen() {
           onPress: async () => {
             setResettingAgent(agentId);
             try {
-              const token = await tokenStore.get();
-              const url = new URL(`/api/admin/reset-feedback/agent/${agentId}`, getApiUrl()).toString();
-              const res = await fetch(url, {
-                method: "POST", credentials: "include",
-                headers: token ? { Authorization: `Bearer ${token}` } : {},
-              });
-              const json: any = await res.json();
-              if (!res.ok) throw new Error(json.message || "Reset failed");
+              await api.admin.resetFeedbackForAgent(agentId);
               invalidateAll();
               Alert.alert("Done", `All feedback reset for ${agentName}`);
             } catch (e: any) {
@@ -957,20 +952,10 @@ export default function AllCasesScreen() {
     );
   };
 
+  // ✅ FIX: use api.admin.resetFeedbackForCase instead of raw fetch
   const handleResetCase = async (caseId: number) => {
     try {
-      const token = await tokenStore.get();
-      const url = new URL(`/api/admin/reset-feedback/case/${caseId}`, getApiUrl()).toString();
-      const res = await fetch(url, {
-        method: "POST", credentials: "include",
-        headers: {
-          "Content-Type": "application/json",
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        body: JSON.stringify({ table: tableType }),
-      });
-      const json: any = await res.json();
-      if (!res.ok) throw new Error(json.message || "Reset failed");
+      await api.admin.resetFeedbackForCase(caseId, tableType);
       invalidateAll();
       Alert.alert("Done", "Feedback reset. FOS can now re-submit.");
     } catch (e: any) {
