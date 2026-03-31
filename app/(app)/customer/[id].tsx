@@ -266,8 +266,9 @@ const [showAddNumber, setShowAddNumber] = useState(false);
     </Pressable>
   )}
    </SectionCard>
-</SectionCard>
-      );
+
+    </ScrollView>
+  );
 }
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
