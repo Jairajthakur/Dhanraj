@@ -1195,9 +1195,10 @@ app.get("/api/today-ptp", requireAuth, async (req, res) => {
     catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
-  app.get("/api/admin/fos-depositions", requireAdmin, async (req, res) => {
+app.get("/api/admin/fos-depositions", requireAdmin, async (req, res) => {
     try {
-const result = await storage.query(`SELECT fd.*, fa.name AS agent_name, fa.id AS fos_id FROM fos_depositions fd LEFT JOIN fos_agents fa ON fa.id=fd.agent_id WHERE DATE_TRUNC('month', fd.deposition_date) = DATE_TRUNC('month', CURRENT_DATE) ORDER BY fd.deposition_date DESC, fa.name, fd.created_at DESC`);      const grouped: Record<string, any> = {};
+      const result = await storage.query(`SELECT fd.*, fa.name AS agent_name, fa.id AS fos_id FROM fos_depositions fd LEFT JOIN fos_agents fa ON fa.id=fd.agent_id WHERE DATE_TRUNC('month', fd.deposition_date) = DATE_TRUNC('month', CURRENT_DATE) ORDER BY fd.deposition_date DESC, fa.name, fd.created_at DESC`);
+      const grouped: Record<string, any> = {};
       for (const row of result.rows) {
         const key = String(row.fos_id || row.agent_name || "unknown");
         if (!grouped[key]) grouped[key] = { agentId: row.fos_id, agentName: row.agent_name, depositions: [], totalCash: 0, totalOnline: 0, totalAmount: 0 };
@@ -1212,7 +1213,7 @@ const result = await storage.query(`SELECT fd.*, fa.name AS agent_name, fa.id AS
   app.get("/api/admin/fos-depositions/:agentId", requireAdmin, async (req, res) => {
     try {
       const agentId = Number(req.params.agentId);
-      const result = await storage.query(`SELECT fd.*, fa.name AS agent_name FROM fos_depositions fd LEFT JOIN fos_agents fa ON fa.id=fd.agent_id WHERE fd.agent_id=$1 AND (fd.payment_method='pending' OR fd.deposition_date=CURRENT_DATE) ORDER BY fd.deposition_date DESC, fd.created_at DESC`, [agentId]);
+      const result = await storage.query(`SELECT fd.*, fa.name AS agent_name FROM fos_depositions fd LEFT JOIN fos_agents fa ON fa.id=fd.agent_id WHERE fd.agent_id=$1 AND DATE_TRUNC('month', fd.deposition_date) = DATE_TRUNC('month', CURRENT_DATE) ORDER BY fd.deposition_date DESC, fd.created_at DESC`, [agentId]);
       res.json({ depositions: result.rows });
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
@@ -1258,7 +1259,7 @@ const result = await storage.query(`SELECT fd.*, fa.name AS agent_name, fa.id AS
   });
   app.get("/api/fos-depositions", requireAuth, async (req, res) => {
     try {
-    const result = await storage.query(`SELECT * FROM fos_depositions WHERE agent_id=$1 AND DATE_TRUNC('month', deposition_date) = DATE_TRUNC('month', CURRENT_DATE) ORDER BY deposition_date DESC, created_at DESC`, [req.session.agentId!]);
+const result = await storage.query(`SELECT * FROM fos_depositions WHERE agent_id=$1 AND DATE_TRUNC('month', deposition_date) = DATE_TRUNC('month', CURRENT_DATE) ORDER BY deposition_date DESC, created_at DESC`, [req.session.agentId!]);
       res.json({ depositions: result.rows });
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
