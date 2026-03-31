@@ -1302,28 +1302,33 @@ app.get("/api/today-ptp", requireAuth, async (req, res) => {
     res.json({ success: true, screenshotUrl });
   } catch (e: any) { res.status(500).json({ message: e.message }); }
 });
-  async function payBoth(depositId: number, cashAmount: number, onlineAmount: number, screenshotUri: string): Promise<void> {
-  const base = getApiUrl();
-  const token = Platform.OS !== "web" ? await tokenStore.get() : null;
+ app.put("/api/fos-depositions/:id/pay-both", requireAuth, async (req, res) => {
+  try {
+    const id = Number(req.params.id); const agentId = req.session.agentId!;
+    const { cashAmount, onlineAmount, screenshot, ext } = req.body;
+    const cashAmt = parseFloat(cashAmount || "0") || 0;
+    const onlineAmt = parseFloat(onlineAmount || "0") || 0;
+    if (cashAmt <= 0) return res.status(400).json({ message: "Cash amount must be > 0" });
+    if (onlineAmt <= 0) return res.status(400).json({ message: "Online amount must be > 0" });
+    if (!screenshot) return res.status(400).json({ message: "No screenshot uploaded" });
 
-  const FileSystem = await import("expo-file-system/legacy");
-  const base64 = await FileSystem.readAsStringAsync(screenshotUri, {
-    encoding: FileSystem.EncodingType.Base64,
-  });
-  const ext = screenshotUri.split('.').pop()?.toLowerCase() || 'jpg';
-  const mimeType = ext === 'png' ? 'image/png' : 'image/jpeg';
+    const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 9)}.${ext || 'jpg'}`;
+    const filePath = path.join(screenshotDir, filename);
+    fs.writeFileSync(filePath, Buffer.from(screenshot, "base64"));
 
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
-  if (token) headers["Authorization"] = `Bearer ${token}`;
+    const baseUrl = process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : "";
+    const screenshotUrl = `${baseUrl}/uploads/screenshots/${filename}`;
 
-  const res = await fetch(`${base}/api/fos-depositions/${depositId}/pay-both`, {
-    method: "PUT",
-    body: JSON.stringify({ cashAmount, onlineAmount, screenshot: base64, mimeType, ext }),
-    credentials: "include",
-    headers,
-  });
-  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).message || "Failed");
-}
+    await storage.query(`UPDATE fos_depositions SET payment_method='both',cash_amount=$1,online_amount=$2,amount=GREATEST(amount,$3),screenshot_url=$4,updated_at=NOW() WHERE id=$5 AND agent_id=$6`,
+      [cashAmt, onlineAmt, cashAmt + onlineAmt, screenshotUrl, id, agentId]);
+    try {
+      const agentRow = await storage.query(`SELECT name FROM fos_agents WHERE id=$1`, [agentId]);
+      const adminRows = await storage.query(`SELECT push_token FROM fos_agents WHERE role='admin' AND push_token IS NOT NULL AND push_token<>''`);
+      for (const admin of adminRows.rows) await sendPush(admin.push_token, "🔀 Split Payment", `${agentRow.rows[0]?.name || "FOS"} paid ₹${cashAmt.toLocaleString("en-IN")} cash + ₹${onlineAmt.toLocaleString("en-IN")} online.`, { type: "fos_dep_both" });
+    } catch {}
+    res.json({ success: true, screenshotUrl });
+  } catch (e: any) { res.status(500).json({ message: e.message }); }
+});
 
   app.get("/api/admin/fos-depositions-export", requireAdmin, async (req, res) => {
     try {
