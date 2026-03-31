@@ -52,6 +52,59 @@ function fmtRaw(v: any) {
   return String(v);
 }
 
+// ─── Call Picker Modal ────────────────────────────────────────────────────────
+function CallPickerModal({
+  visible, phones, onClose,
+}: {
+  visible: boolean;
+  phones: string[];
+  onClose: () => void;
+}) {
+  const call = (num: string) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    Linking.openURL(`tel:${num}`);
+    onClose();
+  };
+
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <Pressable style={cpStyles.overlay} onPress={onClose}>
+        <View style={cpStyles.sheet}>
+          <Text style={cpStyles.title}>Select Number to Call</Text>
+          {phones.map((ph, i) => (
+            <Pressable key={i} style={cpStyles.numberRow} onPress={() => call(ph)}>
+              <View style={cpStyles.numberIcon}>
+                <Ionicons name="call" size={16} color={Colors.primary} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={cpStyles.numberLabel}>Number {i + 1}{i === 0 ? " (Primary)" : ""}</Text>
+                <Text style={cpStyles.numberText}>{ph}</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={16} color={Colors.textMuted} />
+            </Pressable>
+          ))}
+          <Pressable style={cpStyles.cancelBtn} onPress={onClose}>
+            <Text style={cpStyles.cancelText}>Cancel</Text>
+          </Pressable>
+        </View>
+      </Pressable>
+    </Modal>
+  );
+}
+
+const cpStyles = StyleSheet.create({
+  overlay:     { flex: 1, backgroundColor: "rgba(0,0,0,0.55)", justifyContent: "center", alignItems: "center", padding: 24 },
+  sheet:       { backgroundColor: Colors.surface, borderRadius: 20, padding: 20, width: "100%", gap: 8 },
+  title:       { fontSize: 16, fontWeight: "700", color: Colors.text, marginBottom: 8, textAlign: "center" },
+  numberRow:   { flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: Colors.surfaceAlt, borderRadius: 12, padding: 14, borderWidth: 1, borderColor: Colors.border },
+  numberIcon:  { width: 36, height: 36, borderRadius: 18, backgroundColor: Colors.primary + "18", alignItems: "center", justifyContent: "center" },
+  numberLabel: { fontSize: 11, color: Colors.textMuted, fontWeight: "600", textTransform: "uppercase" },
+  numberText:  { fontSize: 15, color: Colors.text, fontWeight: "700", marginTop: 2 },
+  cancelBtn:   { marginTop: 4, paddingVertical: 14, borderRadius: 12, borderWidth: 1, borderColor: Colors.border, alignItems: "center" },
+  cancelText:  { fontSize: 15, fontWeight: "600", color: Colors.textSecondary },
+});
+
+// ─── YN Toggle ────────────────────────────────────────────────────────────────
 function YNToggle({ label, value, onChange }: {
   label: string; value: boolean | null; onChange: (v: boolean | null) => void;
 }) {
@@ -120,7 +173,8 @@ function LockedFeedbackView({ item, onClose }: { item: any; onClose: () => void 
   );
 }
 
-function FeedbackModal({ visible, caseItem, onClose, isMonthlyLocked = false }: any) {
+// ─── Feedback Modal ────────────────────────────────────────────────────────────
+function FeedbackModal({ visible, caseItem, onClose, isMonthlyLocked = false, extraNumbers = [] }: any) {
   const [activeTab, setActiveTab] = useState("Unpaid");
 
   const [detailFeedback,    setDetailFeedback]    = useState(caseItem?.latest_feedback   || "");
@@ -150,8 +204,14 @@ function FeedbackModal({ visible, caseItem, onClose, isMonthlyLocked = false }: 
   const [workable,          setWorkable]          = useState<boolean | null>(caseItem?.workable      ?? null);
 
   const [loading, setLoading] = useState(false);
+  const [callPickerVisible, setCallPickerVisible] = useState(false);
 
   const qc = useQueryClient();
+
+  // Merge original phones + extra numbers added from detail screen
+  const primaryPhones: string[] = (caseItem?.mobile_no ?? "")
+    .split(",").map((p: string) => p.trim()).filter(Boolean);
+  const allPhones = [...primaryPhones, ...extraNumbers.filter((n: string) => !primaryPhones.includes(n))];
 
   const toIsoDate = (val: string) => {
     const parts = val.trim().split(/[-\/]/);
@@ -189,7 +249,6 @@ function FeedbackModal({ visible, caseItem, onClose, isMonthlyLocked = false }: 
         third_party_number: thirdParty ? thirdPartyNumber : null,
       };
 
-      // Only Monthly Feedback tab writes these fields
       if (activeTab === "Monthly Feedback") {
         payload.feedback_code    = feedbackCode;
         payload.projection       = projection;
@@ -238,7 +297,6 @@ function FeedbackModal({ visible, caseItem, onClose, isMonthlyLocked = false }: 
     </View>
   );
 
-  // Whether the Monthly Feedback tab content should be locked
   const isMonthlyTabLocked = isMonthlyLocked && activeTab === "Monthly Feedback";
 
   return (
@@ -250,6 +308,32 @@ function FeedbackModal({ visible, caseItem, onClose, isMonthlyLocked = false }: 
           <Text style={fbStyles.customerName}>
             {caseItem?.customer_name} · {caseItem?.loan_no}
           </Text>
+
+          {/* ── All available numbers with call button ── */}
+          {allPhones.length > 0 && (
+            <View style={fbStyles.numbersSection}>
+              <Text style={fbStyles.numbersSectionLabel}>
+                <Ionicons name="call-outline" size={12} color={Colors.textMuted} /> Contact Numbers
+              </Text>
+              <View style={fbStyles.numbersRow}>
+                {allPhones.map((ph, i) => (
+                  <Pressable
+                    key={i}
+                    style={[fbStyles.numberChip, i >= primaryPhones.length && fbStyles.numberChipExtra]}
+                    onPress={() => {
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                      Linking.openURL(`tel:${ph}`);
+                    }}
+                  >
+                    <Ionicons name="call" size={12} color={i >= primaryPhones.length ? Colors.success : "#fff"} />
+                    <Text style={[fbStyles.numberChipText, i >= primaryPhones.length && fbStyles.numberChipTextExtra]}>
+                      {ph}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+            </View>
+          )}
 
           {/* Rollback / Clearance chips */}
           <View style={fbStyles.caseInfoRow}>
@@ -267,7 +351,7 @@ function FeedbackModal({ visible, caseItem, onClose, isMonthlyLocked = false }: 
             )}
           </View>
 
-          {/* Tab row — Monthly Feedback tab shows lock icon if locked */}
+          {/* Tab row */}
           <View style={fbStyles.tabRow}>
             {TABS.map((t) => {
               const isActive = activeTab === t;
@@ -333,7 +417,6 @@ function FeedbackModal({ visible, caseItem, onClose, isMonthlyLocked = false }: 
             {/* ====== MONTHLY FEEDBACK ====== */}
             {activeTab === "Monthly Feedback" && (
               <>
-                {/* If locked, show locked view; otherwise show the form */}
                 {isMonthlyLocked ? (
                   <LockedFeedbackView item={caseItem} onClose={onClose} />
                 ) : (
@@ -431,7 +514,7 @@ function FeedbackModal({ visible, caseItem, onClose, isMonthlyLocked = false }: 
 
             {/* ====== PTP ====== */}
             {activeTab === "PTP" && (
-            <>
+              <>
                 <Text style={fbStyles.sectionLabel}>Detail Feedback</Text>
                 {renderDetailOptions(PTP_DETAIL_OPTIONS, detailFeedback, setDetailFeedback, Colors.statusPTP)}
                 <Text style={fbStyles.sectionLabel}>PTP Date</Text>
@@ -444,7 +527,7 @@ function FeedbackModal({ visible, caseItem, onClose, isMonthlyLocked = false }: 
             <View style={{ height: 16 }} />
           </ScrollView>
 
-          {/* Action buttons — hide Save when on locked Monthly Feedback tab */}
+          {/* Action buttons */}
           <View style={fbStyles.btnRow}>
             <Pressable style={fbStyles.cancelBtn} onPress={onClose}>
               <Text style={fbStyles.cancelText}>
@@ -472,25 +555,43 @@ function FeedbackModal({ visible, caseItem, onClose, isMonthlyLocked = false }: 
           <View style={{ height: 24 }} />
         </View>
       </View>
+
+      {/* Call picker inside feedback modal */}
+      <CallPickerModal
+        visible={callPickerVisible}
+        phones={allPhones}
+        onClose={() => setCallPickerVisible(false)}
+      />
     </Modal>
   );
 }
 
+// ─── Navigate to Detail ───────────────────────────────────────────────────────
 function navigateToDetail(item: any) {
   caseStore.set(item);
   router.push({ pathname: "/(app)/customer/[id]", params: { id: String(item.id) } });
 }
 
+// ─── Case Card ────────────────────────────────────────────────────────────────
 function CaseCard({ item, onFeedback }: { item: any; onFeedback: (item: any) => void }) {
+  const [callPickerVisible, setCallPickerVisible] = useState(false);
+
+  const phones: string[] = (item.mobile_no ?? "")
+    .split(",").map((p: string) => p.trim()).filter(Boolean);
+
   const call = () => {
-    const phones = item.mobile_no?.split(",") || [];
-    const num = phones[0]?.trim();
-    if (!num) { Alert.alert("No number available"); return; }
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    Linking.openURL(`tel:${num}`);
+    if (!phones.length) { Alert.alert("No number available"); return; }
+    if (phones.length === 1) {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      Linking.openURL(`tel:${phones[0]}`);
+    } else {
+      setCallPickerVisible(true);
+    }
   };
 
-  // Monthly feedback lock indicator (for badge only — button is always Feedback)
+  // ── Feedback button is ONLY shown when the case has been uploaded
+  //    (treat "uploaded" = case has a loan_no, which means it came from an upload)
+  const isUploaded = !!item.loan_no;
   const isMonthlyLocked = !!item.monthly_feedback;
 
   const statusColor  = STATUS_COLORS[item.status] || Colors.textMuted;
@@ -602,7 +703,6 @@ function CaseCard({ item, onFeedback }: { item: any; onFeedback: (item: any) => 
         </View>
       )}
 
-      {/* Hide "SUBMITTED" placeholder — only show real monthly feedback values */}
       {item.monthly_feedback && item.monthly_feedback !== "SUBMITTED" && (
         <View style={styles.monthlyFeedbackRow}>
           <Ionicons name="calendar-outline" size={13} color={Colors.primary} />
@@ -626,6 +726,7 @@ function CaseCard({ item, onFeedback }: { item: any; onFeedback: (item: any) => 
         </View>
       )}
 
+      {/* ── Card Actions: Call + Details always shown; Feedback only when uploaded ── */}
       <View style={styles.cardActions}>
         <Pressable style={[styles.actionBtn, styles.callBtn]} onPress={call}>
           <Ionicons name="call" size={16} color="#fff" />
@@ -635,25 +736,37 @@ function CaseCard({ item, onFeedback }: { item: any; onFeedback: (item: any) => 
           <Ionicons name="eye" size={16} color={Colors.textSecondary} />
           <Text style={[styles.actionBtnText, { color: Colors.textSecondary }]}>Details</Text>
         </Pressable>
-        {/* Feedback button is always active — lock is only inside the modal */}
-        <Pressable
-          style={[styles.actionBtn, styles.feedbackBtn]}
-          onPress={() => onFeedback(item)}
-        >
-          <Ionicons name="chatbox" size={16} color="#fff" />
-          <Text style={styles.actionBtnText}>Feedback</Text>
-        </Pressable>
+        {isUploaded && (
+          <Pressable
+            style={[styles.actionBtn, styles.feedbackBtn]}
+            onPress={() => onFeedback(item)}
+          >
+            <Ionicons name="chatbox" size={16} color="#fff" />
+            <Text style={styles.actionBtnText}>Feedback</Text>
+          </Pressable>
+        )}
       </View>
+
+      {/* Multi-number call picker */}
+      <CallPickerModal
+        visible={callPickerVisible}
+        phones={phones}
+        onClose={() => setCallPickerVisible(false)}
+      />
     </View>
   );
 }
 
+// ─── Main Screen ──────────────────────────────────────────────────────────────
 export default function AllocationScreen() {
   const insets     = useSafeAreaInsets();
   const qc         = useQueryClient();
   const [activeTab,    setActiveTab]    = useState("All");
   const [search,       setSearch]       = useState("");
   const [feedbackItem, setFeedbackItem] = useState<any>(null);
+
+  // extra numbers added in detail screen, keyed by case id
+  const [extraNumbersMap, setExtraNumbersMap] = useState<Record<string, string[]>>({});
 
   const { data, isLoading } = useQuery({
     queryKey: ["/api/cases"],
@@ -681,8 +794,8 @@ export default function AllocationScreen() {
     Paid:   allCases.filter((c: any) => c.status === "Paid").length,
   }), [allCases]);
 
-  // Lock only the Monthly Feedback tab, not the whole modal
   const feedbackItemMonthlyLocked = feedbackItem ? !!feedbackItem.monthly_feedback : false;
+  const feedbackExtraNumbers = feedbackItem ? (extraNumbersMap[String(feedbackItem.id)] ?? []) : [];
 
   return (
     <View style={{ flex: 1, backgroundColor: Colors.background }}>
@@ -758,6 +871,7 @@ export default function AllocationScreen() {
           visible={!!feedbackItem}
           caseItem={feedbackItem}
           isMonthlyLocked={feedbackItemMonthlyLocked}
+          extraNumbers={feedbackExtraNumbers}
           onClose={() => setFeedbackItem(null)}
         />
       )}
@@ -879,4 +993,12 @@ const fbStyles = StyleSheet.create({
   cancelText:     { fontSize: 15, fontWeight: "600", color: Colors.textSecondary },
   saveBtn:        { flex: 2, paddingVertical: 14, borderRadius: 12, alignItems: "center" },
   saveText:       { fontSize: 15, fontWeight: "700", color: "#fff" },
+  // Numbers in feedback modal
+  numbersSection: { marginBottom: 12 },
+  numbersSectionLabel: { fontSize: 11, fontWeight: "700", color: Colors.textMuted, textTransform: "uppercase", marginBottom: 6 },
+  numbersRow:     { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  numberChip:     { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: Colors.primary, borderRadius: 10, paddingVertical: 8, paddingHorizontal: 12 },
+  numberChipExtra:{ backgroundColor: Colors.success + "18", borderWidth: 1, borderColor: Colors.success + "50" },
+  numberChipText: { color: "#fff", fontWeight: "700", fontSize: 13 },
+  numberChipTextExtra: { color: Colors.success },
 });
