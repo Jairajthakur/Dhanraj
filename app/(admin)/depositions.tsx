@@ -413,9 +413,9 @@ function FosDetailModal({ visible, agentId, agentName, onClose, onUpdated, onVie
                 </View>
               }
             />
-          )}
-
-         
+         )}
+        </View>
+      </Modal>
 
       <PaymentModal
         visible={!!payItem}
