@@ -251,16 +251,13 @@ const [saving, setSaving] = useState(false);
             flex: 2, paddingVertical: 10, borderRadius: 10,
             backgroundColor: Colors.primary, alignItems: "center",
           }}
-          onPress={async () => {
+         onPress={async () => {
   const trimmed = newNumberInput.trim();
   if (!trimmed) { Alert.alert("Enter a valid number"); return; }
   setSaving(true);
   try {
-    const { apiRequest } = await import("@/lib/queryClient"); // or however you call API
-    await apiRequest("POST", `/api/cases/${item.id}/extra-numbers`, {
-      number: trimmed,
-      table: caseType,
-    });
+    const { api } = await import("@/lib/queryClient");
+    await api.addExtraNumber(item.id, trimmed, caseType);  // see below
     setExtraNumbers(prev => [...prev, trimmed]);
     setNewNumberInput("");
     setShowAddNumber(false);
