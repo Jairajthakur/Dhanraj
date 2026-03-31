@@ -1279,9 +1279,12 @@ app.get("/api/today-ptp", requireAuth, async (req, res) => {
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
   app.post("/api/fos-depositions/:id/pay-online", requireAuth, screenshotUpload.single("screenshot"), async (req, res) => {
-    try {
-      const id = Number(req.params.id); const agentId = req.session.agentId!;
-      if (!req.file) return res.status(400).json({ message: "No screenshot uploaded" });
+  try {
+    const id = Number(req.params.id); const agentId = req.session.agentId!;
+    console.log("[pay-online] content-type:", req.headers["content-type"]);
+    console.log("[pay-online] req.file:", JSON.stringify(req.file));
+    console.log("[pay-online] req.body keys:", Object.keys(req.body || {}));
+    if (!req.file) return res.status(400).json({ message: "No screenshot uploaded" });
       const depRow = await storage.query(`SELECT amount FROM fos_depositions WHERE id=$1 AND agent_id=$2`, [id, agentId]);
       if (!depRow.rows[0]) { fs.unlinkSync(req.file.path); return res.status(404).json({ message: "Deposition not found" }); }
       const expectedAmt = parseFloat(depRow.rows[0].amount || 0);
