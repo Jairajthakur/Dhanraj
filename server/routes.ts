@@ -355,7 +355,6 @@ function buildIntimationParams(body: Record<string, any>, isPost = false) {
   };
 }
  
-// ─── HTML builders ────────────────────────────────────────────────────────────
 function buildPreIntimationHtml(p: ReturnType<typeof buildIntimationParams>): string {
   return `<!DOCTYPE html>
 <html>
@@ -479,16 +478,7 @@ function buildPostIntimationHtml(p: ReturnType<typeof buildIntimationParams>): s
 }
  
 // ─── DOCX builder (shared, isPost flag switches content) ──────────────────────
-async function buildIntimationDocx(
-  p: ReturnType<typeof buildIntimationParams>,
-  isPost: boolean,
-  logoPath: string
-): Promise<Buffer> {
-  const {
-    Document, Packer, Paragraph, TextRun, AlignmentType, BorderStyle,
-    WidthType, ImageRun, Table, TableRow, TableCell, ShadingType, VerticalAlign,
-  } = require("docx");
-  const fs = require("fs");
+
  
   const logoData: Buffer | null = fs.existsSync(logoPath) ? fs.readFileSync(logoPath) : null;
  
