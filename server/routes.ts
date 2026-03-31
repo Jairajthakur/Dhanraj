@@ -1326,17 +1326,8 @@ for (const row of savedExtras.rows) {
   if (row.extra_numbers?.length) extrasMap.set(row.loan_no, row.extra_numbers);
 }
 
-await storage.deleteAllLoanCases(); // single delete, after saving extras
+await storage.deleteAllLoanCases();
 
-// ... all the import loop ...
-
-// Restore extra numbers AFTER importing
-for (const [loanNo, numbers] of extrasMap) {
-  await storage.query(
-    `UPDATE loan_cases SET extra_numbers = $1 WHERE loan_no = $2`,
-    [numbers, loanNo]
-  );
-}
       const existingFosAgents = await storage.query(`SELECT id, name FROM fos_agents WHERE role='fos'`);
       let agentsRemoved = 0;
       for (const agent of existingFosAgents.rows) { if (!fosNamesInExcel.has((agent.name || "").toLowerCase().trim())) { await safeDeleteAgent(agent.id, "import"); agentsRemoved++; } }
@@ -1359,7 +1350,25 @@ for (const [loanNo, numbers] of extrasMap) {
           imported++;
         } catch (e: any) { errors.push(`Row ${i + headerRowIdx + 2}: ${e.message}`); skipped++; }
       }
-      for (const [loanNo, ptpData] of ptpLoanMap) { await storage.query(`UPDATE loan_cases SET status='PTP', ptp_date=$1, telecaller_ptp_date=$2 WHERE loan_no=$3`, [ptpData.ptpDate, ptpData.telecallerPtpDate, loanNo]); }
+
+      // Restore extra numbers after all rows are imported
+      for (const [loanNo, numbers] of extrasMap) {
+        await storage.query(
+          `UPDATE loan_cases SET extra_numbers = $1 WHERE loan_no = $2`,
+          [numbers, loanNo]
+        );
+      }
+
+      for (const [loanNo, ptpData] of ptpLoanMap) {
+        await storage.query(
+          `UPDATE loan_cases SET status='PTP', ptp_date=$1, telecaller_ptp_date=$2 WHERE loan_no=$3`,
+          [ptpData.ptpDate, ptpData.telecallerPtpDate, loanNo]
+        );
+      }
+      try { await recalcBktPerfFromAllocation(); } catch (e: any) { console.warn("[import] BKT recalc warning:", e.message); }
+      res.json({ imported, updated: 0, skipped, agentsCreated, agentsRemoved, total: rawRows.slice(headerRowIdx + 1).length, errors: errors.slice(0, 20) });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
       try { await recalcBktPerfFromAllocation(); } catch (e: any) { console.warn("[import] BKT recalc warning:", e.message); }
       res.json({ imported, updated: 0, skipped, agentsCreated, agentsRemoved, total: rawRows.slice(headerRowIdx + 1).length, errors: errors.slice(0, 20) });
     } catch (e: any) { res.status(500).json({ message: e.message }); }
