@@ -115,14 +115,23 @@ function setupCors(app: express.Application) {
 }
 
 function setupBodyParsing(app: express.Application) {
-  app.use(
+  app.use((req, res, next) => {
+    // Skip body parsing for multipart/form-data — let multer handle it
+    if (req.headers["content-type"]?.includes("multipart/form-data")) {
+      return next();
+    }
     express.json({
       verify: (req, _res, buf) => {
         req.rawBody = buf;
       },
-    })
-  );
-  app.use(express.urlencoded({ extended: false }));
+    })(req, res, next);
+  });
+  app.use((req, res, next) => {
+    if (req.headers["content-type"]?.includes("multipart/form-data")) {
+      return next();
+    }
+    express.urlencoded({ extended: false })(req, res, next);
+  });
 }
 
 function setupRequestLogging(app: express.Application) {
