@@ -830,8 +830,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
     console.log("[DB] call_recordings table ready ✅");
   } catch (e: any) { console.error("[DB] call_recordings error:", e.message); }
 
-  app.use("/uploads/screenshots", express.static(path.join(process.cwd(), "server/uploads/screenshots")));
-
+// Ensure multer routes are NOT pre-parsed by JSON body parser
+app.use("/api/fos-depositions", (req, res, next) => {
+  if (req.headers["content-type"]?.includes("multipart/form-data")) {
+    return next(); // skip body parsing for multipart
+  }
+  express.json()(req, res, next);
+});
   const PgStore = connectPgSimple(session);
   app.use(session({
     store: new PgStore({ conString: process.env.DATABASE_URL, tableName: "user_sessions", createTableIfMissing: true }),
