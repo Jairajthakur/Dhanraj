@@ -255,6 +255,7 @@ const [saving, setSaving] = useState(false);
 onPress={async () => {
   const trimmed = newNumberInput.trim();
   if (!trimmed) { Alert.alert("Enter a valid number"); return; }
+  console.log("Saving to case ID:", item.id, "table:", caseType); // ← add this
   setSaving(true);
   try {
     const { apiRequest } = await import("@/lib/queryClient");
@@ -262,13 +263,12 @@ onPress={async () => {
       number: trimmed,
       table: caseType,
     });
-    // apiRequest returns Response — need to check ok
     setExtraNumbers(prev => [...prev, trimmed]);
     setNewNumberInput("");
     setShowAddNumber(false);
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
   } catch (e: any) {
-    Alert.alert("Error", e.message || "Failed to save number");
+    Alert.alert("Error", String(e?.message ?? e) || "Failed to save number");
   } finally {
     setSaving(false);
   }
