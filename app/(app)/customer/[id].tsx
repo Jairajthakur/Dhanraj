@@ -9,6 +9,7 @@ import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import Colors from "@/constants/colors";
 import { caseStore } from "@/lib/caseStore";
+import { ..., TextInput } from "react-native";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function fmt(v: any, prefix = "") {
@@ -97,6 +98,10 @@ export default function CustomerDetailScreen() {
     .map((p: string) => p.trim())
     .filter(Boolean);
 
+// ── Extra numbers added by agent ──
+const [extraNumbers, setExtraNumbers] = useState<string[]>([]);
+const [newNumberInput, setNewNumberInput] = useState("");
+const [showAddNumber, setShowAddNumber] = useState(false);
   return (
     <ScrollView
       style={{ flex: 1, backgroundColor: Colors.background }}
@@ -187,40 +192,79 @@ export default function CustomerDetailScreen() {
       </SectionCard>
 
       {/* ── Feedback History ── */}
-      <SectionCard title="Feedback History" icon="chatbox-outline">
-        <Row label="Status"          value={fmtStr(item.status)} valueColor={statusColor} />
-        <Row label="Feedback Code"   value={fmtStr(item.feedback_code)} valueColor={Colors.accent ?? Colors.primary} />
-        <Row label="Detail Feedback" value={fmtStr(item.latest_feedback)} />
-        <Row label="Monthly Feedback" value={
-          item.monthly_feedback && item.monthly_feedback !== "SUBMITTED"
-            ? item.monthly_feedback
-            : item.monthly_feedback === "SUBMITTED" ? "Submitted" : "—"
-        } />
-        <Row label="PTP Date"           value={fmtDate(item.ptp_date)} valueColor={STATUS_COLORS.PTP} />
-        <Row label="Telecaller PTP Date" value={fmtDate(item.telecaller_ptp_date)} valueColor={Colors.info ?? "#3B82F6"} />
-        <Row label="Projection"         value={fmtStr(item.projection)} />
-        <Row label="Customer Available" value={yn(item.customer_available)} />
-        <Row label="Vehicle Available"  value={yn(item.vehicle_available)} />
-        <Row label="Third Party"        value={yn(item.third_party)} />
-        {(item.third_party === true || item.third_party === "true") && (
-          <>
-            <Row label="3rd Party Name"   value={fmtStr(item.third_party_name)} />
-            <Row label="3rd Party Number" value={fmtStr(item.third_party_number)} />
-          </>
-        )}
-        <Row label="Non Starter"   value={yn(item.non_starter)} />
-        <Row label="KYC Purchase"  value={yn(item.kyc_purchase)} />
-        <Row label="Workable"      value={
-          item.workable === true || item.workable === "true" ? "Workable"
-          : item.workable === false || item.workable === "false" ? "Non Workable"
-          : "—"
-        } />
-        <Row label="Rollback Marked" value={item.rollback_yn === true ? "Yes" : "—"} />
-        <Row label="Comments"        value={fmtStr(item.feedback_comments)} />
-      </SectionCard>
-    </ScrollView>
-  );
-}
+    
+{/* ── Add New Number ── */}
+<SectionCard title="Additional Numbers" icon="phone-portrait-outline">
+  {extraNumbers.map((num, i) => (
+    <View key={i} style={styles.row}>
+      <Text style={styles.rowLabel}>Number {phones.length + i + 1}</Text>
+      <Pressable onPress={() => call(num)} style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+        <Ionicons name="call" size={14} color={Colors.primary} />
+        <Text style={[styles.rowValue, { color: Colors.primary }]}>{num}</Text>
+      </Pressable>
+    </View>
+  ))}
+
+  {showAddNumber ? (
+    <View style={{ padding: 12, gap: 8 }}>
+      <TextInput
+        style={{
+          borderWidth: 1, borderColor: Colors.border, borderRadius: 10,
+          padding: 10, fontSize: 14, color: Colors.text,
+          backgroundColor: Colors.surfaceAlt,
+        }}
+        placeholder="Enter phone number"
+        placeholderTextColor={Colors.textMuted}
+        value={newNumberInput}
+        onChangeText={setNewNumberInput}
+        keyboardType="phone-pad"
+        maxLength={15}
+      />
+      <View style={{ flexDirection: "row", gap: 8 }}>
+        <Pressable
+          style={{
+            flex: 1, paddingVertical: 10, borderRadius: 10,
+            borderWidth: 1, borderColor: Colors.border, alignItems: "center",
+          }}
+          onPress={() => { setShowAddNumber(false); setNewNumberInput(""); }}
+        >
+          <Text style={{ color: Colors.textSecondary, fontWeight: "600" }}>Cancel</Text>
+        </Pressable>
+        <Pressable
+          style={{
+            flex: 2, paddingVertical: 10, borderRadius: 10,
+            backgroundColor: Colors.primary, alignItems: "center",
+          }}
+          onPress={() => {
+            const trimmed = newNumberInput.trim();
+            if (!trimmed) { Alert.alert("Enter a valid number"); return; }
+            setExtraNumbers(prev => [...prev, trimmed]);
+            setNewNumberInput("");
+            setShowAddNumber(false);
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+          }}
+        >
+          <Text style={{ color: "#fff", fontWeight: "700" }}>Save Number</Text>
+        </Pressable>
+      </View>
+    </View>
+  ) : (
+    <Pressable
+      style={{
+        flexDirection: "row", alignItems: "center", gap: 8,
+        margin: 12, padding: 12, borderRadius: 12,
+        borderWidth: 1.5, borderColor: Colors.primary + "50",
+        borderStyle: "dashed", justifyContent: "center",
+      }}
+      onPress={() => setShowAddNumber(true)}
+    >
+      <Ionicons name="add-circle-outline" size={18} color={Colors.primary} />
+      <Text style={{ color: Colors.primary, fontWeight: "700", fontSize: 14 }}>
+        Add New Number
+      </Text>
+    </Pressable>
+  )}
+</SectionCard>
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
