@@ -534,6 +534,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
     console.log("[DB] call_recordings table ready ✅");
   } catch (e: any) { console.error("[DB] call_recordings error:", e.message); }
 
+  try {
+  await storage.query(`ALTER TABLE loan_cases ADD COLUMN IF NOT EXISTS extra_numbers TEXT[] DEFAULT '{}'`);
+  await storage.query(`ALTER TABLE bkt_cases ADD COLUMN IF NOT EXISTS extra_numbers TEXT[] DEFAULT '{}'`);
+  console.log("[DB] extra_numbers columns ready ✅");
+} catch (e: any) { console.error("[DB] extra_numbers migration:", e.message); }
+
 // Ensure multer routes are NOT pre-parsed by JSON body parser
 app.use("/api/fos-depositions", (req, res, next) => {
   if (req.headers["content-type"]?.includes("multipart/form-data")) {
@@ -2397,6 +2403,33 @@ app.post("/api/admin/generate-post-intimation-docx", requireAdmin, async (req, r
     console.error("[post-intimation DOCX]", err);
     res.status(500).json({ message: err.message || "Failed to generate DOCX" });
   }
+});
+
+  app.post("/api/cases/:id/extra-numbers", requireAuth, async (req, res) => {
+  try {
+    const { number, table } = req.body;
+    const caseId = Number(req.params.id);
+    const tbl = table === "bkt" ? "bkt_cases" : "loan_cases";
+    if (!number?.trim()) return res.status(400).json({ message: "number required" });
+    await storage.query(
+      `UPDATE ${tbl} SET extra_numbers = array_append(COALESCE(extra_numbers, '{}'), $1) WHERE id = $2`,
+      [number.trim(), caseId]
+    );
+    res.json({ success: true });
+  } catch (e: any) { res.status(500).json({ message: e.message }); }
+});
+
+app.delete("/api/cases/:id/extra-numbers", requireAuth, async (req, res) => {
+  try {
+    const { number, table } = req.body;
+    const caseId = Number(req.params.id);
+    const tbl = table === "bkt" ? "bkt_cases" : "loan_cases";
+    await storage.query(
+      `UPDATE ${tbl} SET extra_numbers = array_remove(extra_numbers, $1) WHERE id = $2`,
+      [number, caseId]
+    );
+    res.json({ success: true });
+  } catch (e: any) { res.status(500).json({ message: e.message }); }
 });
   const httpServer = createServer(app);
   return httpServer;
