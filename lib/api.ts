@@ -350,8 +350,8 @@ export const api = {
     resetFeedbackForAgent: (agentId: number) =>
       apiRequest("POST", `/api/admin/reset-feedback/agent/${agentId}`),
 
-    resetFeedbackForCase: (caseId: number, table: "loan" | "bkt") =>
-      apiRequest("POST", `/api/admin/reset-feedback/case/${caseId}`, { table }),
+    removeExtraNumber: (id: number, number: string, table: string) =>
+      apiRequest("DELETE", `/api/admin/cases/${id}/extra-numbers`, { number, table }),
 
     // ── Salary ───────────────────────────────────────────────────────────────
     getAllSalary: () => apiRequest("GET", "/api/admin/salary"),
