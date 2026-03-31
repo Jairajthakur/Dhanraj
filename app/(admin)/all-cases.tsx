@@ -758,6 +758,17 @@ function CaseDetailModal({
     { label: "Product",           value: localItem.pro },
     { label: "First EMI Date",    value: fmtDate(localItem.first_emi_due_date) },
     { label: "Maturity Date",     value: fmtDate(localItem.loan_maturity_date) },
+
+    // ── Extra numbers section ─────────────────────────────────────────────
+    ...((localItem.extra_numbers?.length > 0) ? [
+      { section: "Additional Numbers" },
+      ...localItem.extra_numbers.map((num: string, i: number) => ({
+        label: `Number ${i + 1}`,
+        value: num,
+        phone: true,
+        extraNum: num,
+      })),
+    ] : []),
   ] : [];
 
   const handleResetCase = () => {
@@ -832,6 +843,51 @@ function CaseDetailModal({
                     </View>
                   );
                 }
+
+                // ── Extra number rows: tappable phone + delete button ────
+                if ((r as any).extraNum) {
+                  return (
+                    <View key={r.label} style={[detailStyles.row, i % 2 === 1 && { backgroundColor: Colors.surfaceAlt }]}>
+                      <View style={detailStyles.labelCell}>
+                        <Text style={detailStyles.labelText}>{r.label}</Text>
+                      </View>
+                      <View style={[detailStyles.valueCell, { flexDirection: "row", alignItems: "center", justifyContent: "space-between" }]}>
+                        <Pressable onPress={() => Linking.openURL(`tel:${(r as any).extraNum}`)}>
+                          <Text style={[detailStyles.valueText, { color: Colors.info, textDecorationLine: "underline" }]}>
+                            {r.value}
+                          </Text>
+                        </Pressable>
+                        <Pressable
+                          onPress={() => {
+                            Alert.alert("Remove Number", `Remove ${(r as any).extraNum}?`, [
+                              { text: "Cancel", style: "cancel" },
+                              {
+                                text: "Remove",
+                                style: "destructive",
+                                onPress: async () => {
+                                  try {
+                                    await api.admin.removeExtraNumber(localItem.id, (r as any).extraNum, tableType);
+                                    setLocalItem((prev: any) => ({
+                                      ...prev,
+                                      extra_numbers: prev.extra_numbers.filter((n: string) => n !== (r as any).extraNum),
+                                    }));
+                                    onStatusUpdated();
+                                  } catch (e: any) {
+                                    Alert.alert("Error", e.message);
+                                  }
+                                },
+                              },
+                            ]);
+                          }}
+                          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                        >
+                          <Ionicons name="trash-outline" size={16} color={Colors.danger} />
+                        </Pressable>
+                      </View>
+                    </View>
+                  );
+                }
+
                 return (
                   <TableRow
                     key={r.label}
@@ -925,8 +981,6 @@ export default function AllCasesScreen() {
     return Object.values(groups).sort((a, b) => a.agentName.localeCompare(b.agentName));
   }, [data]);
 
-  // ✅ FIX: use api.admin.resetFeedbackForAgent instead of raw fetch
-  // Raw fetch doesn't send the session cookie reliably on web
   const handleResetAgentFeedback = (agentId: number, agentName: string) => {
     Alert.alert(
       "Reset Agent Feedback",
@@ -952,7 +1006,6 @@ export default function AllCasesScreen() {
     );
   };
 
-  // ✅ FIX: use api.admin.resetFeedbackForCase instead of raw fetch
   const handleResetCase = async (caseId: number) => {
     try {
       await api.admin.resetFeedbackForCase(caseId, tableType);
