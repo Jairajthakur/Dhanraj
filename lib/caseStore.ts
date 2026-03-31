@@ -1,6 +1,5 @@
 // lib/caseStore.ts
 // Uses sessionStorage so data survives full-page navigation on web (Railway/static deploy)
-import { apiRequest } from "@/lib/queryClient";
 
 const STORE_KEY = "fos_selected_case";
 let _mem: any = null;
