@@ -20,6 +20,15 @@ const fmt = (n: any) => parseFloat(n || 0).toLocaleString("en-IN");
 const fmtDateTime = (d: any) =>
   d ? new Date(d).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : "";
 
+// ─── Resolve screenshot URL (handles relative + absolute) ────────────────────
+function resolveScreenshotUrl(url: string | null | undefined): string | null {
+  if (!url) return null;
+  if (url.startsWith("http://") || url.startsWith("https://")) return url;
+  const base = getApiUrl().replace(/\/+$/, "");
+  const path = url.startsWith("/") ? url : `/${url}`;
+  return `${base}${path}`;
+}
+
 async function apiReq(method: string, route: string, data?: any) {
   const base = getApiUrl();
   const token = Platform.OS !== "web" ? await tokenStore.get() : null;
@@ -36,18 +45,13 @@ async function apiReq(method: string, route: string, data?: any) {
   return res.json();
 }
 
-// ✅ Fixed: handles both web (File/Blob) and native (uri object) correctly
 async function uploadFile(fileAsset: any, route: string): Promise<any> {
   const base = getApiUrl();
   const token = Platform.OS !== "web" ? await tokenStore.get() : null;
   const headers: Record<string, string> = {};
   if (token) headers["Authorization"] = `Bearer ${token}`;
-
   const form = new FormData();
-
   if (Platform.OS === "web") {
-    // On web, expo-document-picker gives us a File object in assets[0].file
-    // or a uri that is a blob: URL we can fetch
     if (fileAsset.file instanceof File) {
       form.append("file", fileAsset.file, fileAsset.name);
     } else if (fileAsset.uri?.startsWith("blob:") || fileAsset.uri?.startsWith("data:")) {
@@ -58,21 +62,16 @@ async function uploadFile(fileAsset: any, route: string): Promise<any> {
       throw new Error("Could not read file on web. Please try again.");
     }
   } else {
-    // Native: use the RN FormData uri object syntax
     form.append("file", {
       uri: fileAsset.uri,
       name: fileAsset.name || "import.xlsx",
       type: fileAsset.mimeType || fileAsset.type || "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     } as any);
   }
-
   const res = await fetch(`${base}${route}`, {
-    method: "POST",
-    body: form,
-    credentials: "include",
+    method: "POST", body: form, credentials: "include",
     headers: Object.keys(headers).length > 0 ? headers : undefined,
   });
-
   if (!res.ok) {
     const j = await res.json().catch(() => ({}));
     throw new Error(j.message || `HTTP ${res.status}`);
@@ -170,14 +169,11 @@ function AddDepositionModal({ visible, onClose, onSaved, agents }: any) {
     setLoading(true);
     try {
       await apiReq("POST", "/api/admin/fos-depositions", {
-        agentId: selectedAgent.id,
-        loanNo: loanNo || null,
-        customerName: customerName || null,
-        amount: totalAmt,
+        agentId: selectedAgent.id, loanNo: loanNo || null,
+        customerName: customerName || null, amount: totalAmt,
         cashAmount: parseFloat(cashAmt || "0"),
         onlineAmount: parseFloat(onlineAmt || "0"),
-        paymentMethod: method,
-        notes,
+        paymentMethod: method, notes,
       });
       reset(); onSaved(); onClose();
     } catch (e: any) { Alert.alert("Error", e.message); }
@@ -190,7 +186,6 @@ function AddDepositionModal({ visible, onClose, onSaved, agents }: any) {
         <ScrollView style={[ms.sheet, { maxHeight: "92%" }]} showsVerticalScrollIndicator={false}>
           <View style={ms.handle} />
           <Text style={ms.title}>Add Deposition Record</Text>
-
           <Text style={ms.label}>FOS Agent</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 4 }}>
             <View style={{ flexDirection: "row", gap: 8 }}>
@@ -202,19 +197,12 @@ function AddDepositionModal({ visible, onClose, onSaved, agents }: any) {
               ))}
             </View>
           </ScrollView>
-
           <Text style={ms.label}>Customer Name</Text>
-          <TextInput style={ms.input} placeholder="Customer name" placeholderTextColor={Colors.textMuted}
-            value={customerName} onChangeText={setCustomerName} />
-
+          <TextInput style={ms.input} placeholder="Customer name" placeholderTextColor={Colors.textMuted} value={customerName} onChangeText={setCustomerName} />
           <Text style={ms.label}>Loan No (optional)</Text>
-          <TextInput style={ms.input} placeholder="Loan number" placeholderTextColor={Colors.textMuted}
-            value={loanNo} onChangeText={setLoanNo} />
-
+          <TextInput style={ms.input} placeholder="Loan number" placeholderTextColor={Colors.textMuted} value={loanNo} onChangeText={setLoanNo} />
           <Text style={ms.label}>Total Amount (₹)</Text>
-          <TextInput style={ms.input} placeholder="0" placeholderTextColor={Colors.textMuted}
-            value={amount} onChangeText={setAmount} keyboardType="numeric" />
-
+          <TextInput style={ms.input} placeholder="0" placeholderTextColor={Colors.textMuted} value={amount} onChangeText={setAmount} keyboardType="numeric" />
           <Text style={ms.label}>Payment Method</Text>
           <View style={ms.segRow}>
             {(["pending", "cash", "online", "both"] as const).map((m) => (
@@ -225,23 +213,17 @@ function AddDepositionModal({ visible, onClose, onSaved, agents }: any) {
               </Pressable>
             ))}
           </View>
-
           {(method === "cash" || method === "both") && (
             <><Text style={ms.label}>Cash Amount (₹)</Text>
-            <TextInput style={ms.input} placeholder="0" placeholderTextColor={Colors.textMuted}
-              value={cashAmt} onChangeText={setCashAmt} keyboardType="numeric" /></>
+            <TextInput style={ms.input} placeholder="0" placeholderTextColor={Colors.textMuted} value={cashAmt} onChangeText={setCashAmt} keyboardType="numeric" /></>
           )}
           {(method === "online" || method === "both") && (
             <><Text style={ms.label}>Online Amount (₹)</Text>
-            <TextInput style={ms.input} placeholder="0" placeholderTextColor={Colors.textMuted}
-              value={onlineAmt} onChangeText={setOnlineAmt} keyboardType="numeric" /></>
+            <TextInput style={ms.input} placeholder="0" placeholderTextColor={Colors.textMuted} value={onlineAmt} onChangeText={setOnlineAmt} keyboardType="numeric" /></>
           )}
-
           <Text style={ms.label}>Notes (optional)</Text>
           <TextInput style={[ms.input, { minHeight: 56, textAlignVertical: "top" }]}
-            placeholder="Notes..." placeholderTextColor={Colors.textMuted}
-            value={notes} onChangeText={setNotes} multiline />
-
+            placeholder="Notes..." placeholderTextColor={Colors.textMuted} value={notes} onChangeText={setNotes} multiline />
           <View style={[ms.btnRow, { marginBottom: 32 }]}>
             <Pressable style={ms.cancel} onPress={() => { reset(); onClose(); }}><Text style={ms.cancelTxt}>Cancel</Text></Pressable>
             <Pressable style={[ms.save, loading && { opacity: 0.6 }]} onPress={save} disabled={loading}>
@@ -254,19 +236,18 @@ function AddDepositionModal({ visible, onClose, onSaved, agents }: any) {
   );
 }
 
-// ─── FOS Detail Modal ─────────────────────────────────────────────────────────
+// ─── FOS Detail Modal (FIXED) ─────────────────────────────────────────────────
 function FosDetailModal({ visible, agentId, agentName, onClose, onUpdated }: any) {
-  const screenshotSrc = (() => {
-  const url = item.screenshot_url;
-  if (!url) return null;
-  if (url.startsWith("http://") || url.startsWith("https://")) return url;
-  const apiBase = getApiUrl().replace(/\/+$/, "");
-  const path = url.startsWith("/") ? url : `/${url}`;
-  return `${apiBase}${path}`;
-})();
+  const [payItem, setPayItem] = useState<any>(null);
+  const [screenshotUrl, setScreenshotUrl] = useState<string | null>(null);
 
+  const { data, isLoading, refetch } = useQuery({
+    queryKey: [`/api/admin/fos-depositions/${agentId}`],
+    queryFn: () => apiReq("GET", `/api/admin/fos-depositions/${agentId}`),
+    enabled: visible && !!agentId,
+  });
 
-  const depositions = data?.depositions || [];
+  const depositions: any[] = data?.depositions || [];
 
   const handleDelete = (id: number) => {
     Alert.alert("Delete", "Remove this deposition record?", [
@@ -351,14 +332,17 @@ function FosDetailModal({ visible, agentId, agentName, onClose, onUpdated }: any
               }
               renderItem={({ item }) => {
                 const color = payMethodColor(item.payment_method);
-                const resolveScreenshot = (url: string | null): string | null => {
-                    if (!url) return null;
-                    if (url.startsWith("http://") || url.startsWith("https://")) return url;
-                  // relative path like /uploads/screenshots/...
-                const base = getApiUrl().replace(/\/$/, "");
-                return `${base}${url.startsWith("/") ? url : `/${url}`}`;
-                };
-                const screenshotSrc = resolveScreenshot(item.screenshot_url);
+                // ✅ FIXED: use resolveScreenshotUrl helper
+                const screenshotSrc = resolveScreenshotUrl(item.screenshot_url);
+
+                // ✅ NEW: compute collected vs total and remaining
+                const assignedAmt = parseFloat(item.amount || 0);
+                const collectedCash = parseFloat(item.cash_amount || 0);
+                const collectedOnline = parseFloat(item.online_amount || 0);
+                const totalCollected = collectedCash + collectedOnline;
+                const remaining = Math.max(0, assignedAmt - totalCollected);
+                const hasPartialPayment = totalCollected > 0 && totalCollected < assignedAmt;
+
                 return (
                   <View style={[fd.card, { borderLeftColor: color }]}>
                     <View style={fd.cardTop}>
@@ -368,29 +352,63 @@ function FosDetailModal({ visible, agentId, agentName, onClose, onUpdated }: any
                         <Text style={fd.cardDate}>{fmtDateTime(item.created_at)}</Text>
                       </View>
                       <View style={{ alignItems: "flex-end", gap: 6 }}>
-                        <Text style={[fd.cardAmt, { color }]}>₹{fmt(item.amount)}</Text>
+                        <Text style={[fd.cardAmt, { color }]}>₹{fmt(assignedAmt)}</Text>
                         <Pressable onPress={() => handleDelete(item.id)}>
                           <Ionicons name="trash-outline" size={16} color={Colors.danger} />
                         </Pressable>
                       </View>
                     </View>
+
                     <View style={fd.payRow}>
                       <View style={[fd.payBadge, { backgroundColor: color + "20" }]}>
                         <Text style={[fd.payBadgeText, { color }]}>{payMethodLabel(item.payment_method)}</Text>
                       </View>
-                      {parseFloat(item.cash_amount) > 0 && (
-                        <Text style={fd.subAmt}>Cash: ₹{fmt(item.cash_amount)}</Text>
+                      {collectedCash > 0 && (
+                        <Text style={fd.subAmt}>💵 ₹{fmt(collectedCash)}</Text>
                       )}
-                      {parseFloat(item.online_amount) > 0 && (
-                        <Text style={[fd.subAmt, { color: "#2563eb" }]}>Online: ₹{fmt(item.online_amount)}</Text>
+                      {collectedOnline > 0 && (
+                        <Text style={[fd.subAmt, { color: "#2563eb" }]}>📲 ₹{fmt(collectedOnline)}</Text>
                       )}
                     </View>
-                    {screenshotSrc && (
-                      <Pressable onPress={() => setScreenshotUrl(screenshotSrc)} style={fd.thumbRow}>
-                        <Image source={{ uri: screenshotSrc }} style={fd.thumb} resizeMode="cover" />
-                        <Text style={fd.thumbHint}>Tap to view screenshot</Text>
-                      </Pressable>
+
+                    {/* ✅ NEW: Remaining amount banner */}
+                    {remaining > 0 && totalCollected > 0 && (
+                      <View style={fd.remainingBanner}>
+                        <Ionicons name="alert-circle-outline" size={14} color={Colors.warning} />
+                        <Text style={fd.remainingText}>
+                          Collected ₹{fmt(totalCollected)} · Remaining ₹{fmt(remaining)}
+                        </Text>
+                      </View>
                     )}
+
+                    {/* ✅ FIXED: Screenshot with proper URL resolution + larger thumbnail */}
+                    {screenshotSrc ? (
+                      <Pressable
+                        onPress={() => setScreenshotUrl(screenshotSrc)}
+                        style={fd.screenshotCard}
+                      >
+                        <Image
+                          source={{ uri: screenshotSrc }}
+                          style={fd.screenshotThumb}
+                          resizeMode="cover"
+                          onError={() => console.warn("[screenshot] Failed to load:", screenshotSrc)}
+                        />
+                        <View style={fd.screenshotInfo}>
+                          <View style={fd.screenshotBadge}>
+                            <Ionicons name="checkmark-circle" size={14} color="#2563eb" />
+                            <Text style={fd.screenshotBadgeText}>Screenshot uploaded</Text>
+                          </View>
+                          <Text style={fd.screenshotHint}>Tap to view full size</Text>
+                        </View>
+                        <Ionicons name="expand-outline" size={18} color="#2563eb" />
+                      </Pressable>
+                    ) : item.payment_method === "online" || item.payment_method === "both" ? (
+                      <View style={fd.noScreenshot}>
+                        <Ionicons name="image-outline" size={16} color={Colors.textMuted} />
+                        <Text style={fd.noScreenshotText}>No screenshot uploaded</Text>
+                      </View>
+                    ) : null}
+
                     {item.notes && <Text style={fd.notes}>{item.notes}</Text>}
                     <Pressable style={fd.updatePayBtn} onPress={() => setPayItem(item)}>
                       <Ionicons name="pencil-outline" size={14} color={Colors.primary} />
@@ -417,14 +435,19 @@ function FosDetailModal({ visible, agentId, agentName, onClose, onUpdated }: any
         onSaved={() => { refetch(); onUpdated(); setPayItem(null); }}
       />
 
+      {/* ✅ Full-screen screenshot viewer */}
       <Modal visible={!!screenshotUrl} transparent animationType="fade" onRequestClose={() => setScreenshotUrl(null)}>
         <Pressable
-          style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.92)", justifyContent: "center", alignItems: "center" }}
+          style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.95)", justifyContent: "center", alignItems: "center" }}
           onPress={() => setScreenshotUrl(null)}
         >
-          <Image source={{ uri: screenshotUrl! }} style={{ width: "92%", height: "72%", borderRadius: 12 }} resizeMode="contain" />
+          <Image
+            source={{ uri: screenshotUrl! }}
+            style={{ width: "95%", height: "80%", borderRadius: 12 }}
+            resizeMode="contain"
+          />
           <Pressable
-            style={{ marginTop: 20, backgroundColor: "rgba(255,255,255,0.15)", paddingHorizontal: 28, paddingVertical: 10, borderRadius: 20 }}
+            style={{ marginTop: 20, backgroundColor: "rgba(255,255,255,0.15)", paddingHorizontal: 28, paddingVertical: 12, borderRadius: 20 }}
             onPress={() => setScreenshotUrl(null)}
           >
             <Text style={{ color: "#fff", fontWeight: "700", fontSize: 15 }}>Close</Text>
@@ -440,33 +463,26 @@ function ImportModal({ visible, onClose, onImported }: any) {
   const [fileAsset, setFileAsset] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<any>(null);
-  // ✅ Web fallback: hidden <input type="file"> for web
   const webInputRef = useRef<HTMLInputElement | null>(null);
 
   const pickFile = async () => {
     if (Platform.OS === "web") {
-      // On web, trigger a native file input for better compatibility
       if (!webInputRef.current) {
         const input = document.createElement("input");
         input.type = "file";
         input.accept = ".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel";
         input.onchange = (e: any) => {
           const file = e.target.files?.[0];
-          if (file) {
-            setFileAsset({ file, name: file.name, uri: URL.createObjectURL(file) });
-          }
+          if (file) setFileAsset({ file, name: file.name, uri: URL.createObjectURL(file) });
         };
         webInputRef.current = input;
       }
       webInputRef.current.click();
       return;
     }
-
     try {
       const r = await DocumentPicker.getDocumentAsync({ type: ["*/*"], copyToCacheDirectory: true });
-      if (!r.canceled && r.assets?.[0]) {
-        setFileAsset(r.assets[0]);
-      }
+      if (!r.canceled && r.assets?.[0]) setFileAsset(r.assets[0]);
     } catch { Alert.alert("Error", "Could not open file picker"); }
   };
 
@@ -475,16 +491,14 @@ function ImportModal({ visible, onClose, onImported }: any) {
     setLoading(true);
     try {
       const res = await uploadFile(fileAsset, "/api/admin/import-depositions");
-      setResult(res);
-      onImported();
+      setResult(res); onImported();
     } catch (e: any) { Alert.alert("Import Failed", e.message); }
     finally { setLoading(false); }
   };
 
   const handleClose = () => {
-    setFileAsset(null);
-    setResult(null);
-    if (webInputRef.current) { webInputRef.current.value = ""; }
+    setFileAsset(null); setResult(null);
+    if (webInputRef.current) webInputRef.current.value = "";
     onClose();
   };
 
@@ -495,9 +509,8 @@ function ImportModal({ visible, onClose, onImported }: any) {
           <View style={ms.handle} />
           <Text style={ms.title}>Import Depositions Excel</Text>
           <Text style={{ fontSize: 12, color: Colors.textSecondary, marginBottom: 12 }}>
-            Columns: Date, FOS Name, Customer Name, Loan No, Amount, Cash Paid, Online Paid
+            Columns: Date, FOS Name, Customer Name, Loan No, Amount
           </Text>
-
           <Pressable style={imp.pickBtn} onPress={pickFile}>
             <Ionicons name="folder-open" size={20} color={Colors.primary} />
             <Text style={imp.pickText}>{fileAsset?.name ?? "Choose Excel File (.xlsx)"}</Text>
@@ -507,21 +520,15 @@ function ImportModal({ visible, onClose, onImported }: any) {
               </Pressable>
             )}
           </Pressable>
-
           {result && (
             <View style={imp.result}>
               <Text style={imp.resultTitle}>✅ Import Complete</Text>
               <Text style={imp.resultText}>Imported: {result.imported} · Skipped: {result.skipped}</Text>
-              {result.errors?.length > 0 && (
-                <Text style={{ fontSize: 11, color: Colors.danger }}>{result.errors[0]}</Text>
-              )}
+              {result.errors?.length > 0 && <Text style={{ fontSize: 11, color: Colors.danger }}>{result.errors[0]}</Text>}
             </View>
           )}
-
           <View style={ms.btnRow}>
-            <Pressable style={ms.cancel} onPress={handleClose}>
-              <Text style={ms.cancelTxt}>Close</Text>
-            </Pressable>
+            <Pressable style={ms.cancel} onPress={handleClose}><Text style={ms.cancelTxt}>Close</Text></Pressable>
             <Pressable style={[ms.save, (!fileAsset || loading) && { opacity: 0.5 }]} onPress={doImport} disabled={!fileAsset || loading}>
               {loading ? <ActivityIndicator color="#fff" size="small" /> : (
                 <><Ionicons name="cloud-upload" size={16} color="#fff" /><Text style={ms.saveTxt}> Import</Text></>
@@ -567,7 +574,6 @@ export default function AdminDepositionsScreen() {
       const token = Platform.OS !== "web" ? await tokenStore.get() : null;
       const headers: Record<string, string> = {};
       if (token) headers["Authorization"] = `Bearer ${token}`;
-
       if (Platform.OS === "web") {
         const a = document.createElement("a");
         a.href = `${base}/api/admin/fos-depositions-export`;
@@ -576,20 +582,13 @@ export default function AdminDepositionsScreen() {
       } else {
         const fileName = `FOS_Depositions_${new Date().toISOString().slice(0, 10)}.xlsx`;
         const fileUri = `${FileSystem.documentDirectory}${fileName}`;
-
-        const downloadResult = await FileSystem.downloadAsync(
-          `${base}/api/admin/fos-depositions-export`,
-          fileUri,
-          { headers }
-        );
-
+        const downloadResult = await FileSystem.downloadAsync(`${base}/api/admin/fos-depositions-export`, fileUri, { headers });
         if (downloadResult.status === 200) {
           const canShare = await Sharing.isAvailableAsync();
           if (canShare) {
             await Sharing.shareAsync(downloadResult.uri, {
               mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-              dialogTitle: "Save FOS Depositions Excel",
-              UTI: "com.microsoft.excel.xlsx",
+              dialogTitle: "Save FOS Depositions Excel", UTI: "com.microsoft.excel.xlsx",
             });
           } else {
             Alert.alert("Downloaded", `File saved to: ${downloadResult.uri}`);
@@ -605,17 +604,14 @@ export default function AdminDepositionsScreen() {
   return (
     <>
       <View style={[scr.root, { paddingTop: Platform.OS === "web" ? 67 : 0 }]}>
-        {/* Action Bar */}
         <View style={scr.actionBar}>
           <Pressable style={scr.actionBtn} onPress={() => setImportVisible(true)}>
             <Ionicons name="cloud-upload-outline" size={18} color={Colors.primary} />
             <Text style={scr.actionBtnText}>Import</Text>
           </Pressable>
           <Pressable style={scr.actionBtn} onPress={handleDownload} disabled={downloading}>
-            {downloading
-              ? <ActivityIndicator size="small" color={Colors.success} />
-              : <Ionicons name="download-outline" size={18} color={Colors.success} />}
-            <Text style={[scr.actionBtnText, { color: Colors.success }]}>Export Excel</Text>
+            {downloading ? <ActivityIndicator size="small" color={Colors.success} /> : <Ionicons name="download-outline" size={18} color={Colors.success} />}
+            <Text style={[scr.actionBtnText, { color: Colors.success }]}>Export</Text>
           </Pressable>
           <Pressable style={[scr.actionBtn, { backgroundColor: Colors.primary }]} onPress={() => setAddVisible(true)}>
             <Ionicons name="add" size={18} color="#fff" />
@@ -623,7 +619,6 @@ export default function AdminDepositionsScreen() {
           </Pressable>
         </View>
 
-        {/* Summary */}
         <View style={scr.summaryRow}>
           <View style={[scr.sumCard, { borderTopColor: Colors.primary }]}>
             <Text style={scr.sumNum}>₹{fmt(totalAmount)}</Text>
@@ -641,7 +636,6 @@ export default function AdminDepositionsScreen() {
           </View>
         </View>
 
-        {/* FOS List */}
         {isLoading ? (
           <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
             <ActivityIndicator color={Colors.primary} size="large" />
@@ -655,10 +649,7 @@ export default function AdminDepositionsScreen() {
               const pending = item.depositions.filter((d: any) => d.payment_method === "pending").length;
               const displayName = item.agentName || item.depositions[0]?.agent_name || "Unknown";
               return (
-                <Pressable
-                  style={scr.fosCard}
-                  onPress={() => setSelectedFos({ id: item.agentId, name: displayName })}
-                >
+                <Pressable style={scr.fosCard} onPress={() => setSelectedFos({ id: item.agentId, name: displayName })}>
                   <View style={scr.fosAvatar}>
                     <Text style={scr.fosInitial}>{(displayName || "?").charAt(0).toUpperCase()}</Text>
                   </View>
@@ -723,22 +714,14 @@ export default function AdminDepositionsScreen() {
 const scr = StyleSheet.create({
   root: { flex: 1, backgroundColor: Colors.background },
   actionBar: { flexDirection: "row", gap: 8, padding: 16, paddingBottom: 8 },
-  actionBtn: {
-    flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6,
-    backgroundColor: Colors.surface, borderRadius: 12, paddingVertical: 10,
-    shadowColor: "#000", shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 1,
-  },
+  actionBtn: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, backgroundColor: Colors.surface, borderRadius: 12, paddingVertical: 10, shadowColor: "#000", shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 1 },
   actionBtnText: { fontSize: 13, fontWeight: "700", color: Colors.primary },
   summaryRow: { flexDirection: "row", gap: 10, paddingHorizontal: 16, paddingBottom: 12 },
   sumCard: { flex: 1, backgroundColor: Colors.surface, borderRadius: 12, padding: 12, borderTopWidth: 3, alignItems: "center", gap: 2 },
   sumNum: { fontSize: 13, fontWeight: "800", color: Colors.text },
   sumLabel: { fontSize: 10, color: Colors.textSecondary, fontWeight: "600" },
   list: { padding: 16, paddingTop: 0, gap: 10 },
-  fosCard: {
-    backgroundColor: Colors.surface, borderRadius: 16, padding: 16,
-    flexDirection: "row", alignItems: "center", gap: 12,
-    shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 8, elevation: 2,
-  },
+  fosCard: { backgroundColor: Colors.surface, borderRadius: 16, padding: 16, flexDirection: "row", alignItems: "center", gap: 12, shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 8, elevation: 2 },
   fosAvatar: { width: 46, height: 46, borderRadius: 23, backgroundColor: Colors.primary, alignItems: "center", justifyContent: "center" },
   fosInitial: { fontSize: 18, fontWeight: "800", color: "#fff" },
   fosName: { fontSize: 15, fontWeight: "700", color: Colors.text },
@@ -784,11 +767,7 @@ const add = StyleSheet.create({
 });
 
 const fd = StyleSheet.create({
-  header: {
-    flexDirection: "row", alignItems: "center", gap: 12,
-    padding: 16, paddingTop: Platform.OS === "web" ? 67 : 56,
-    backgroundColor: Colors.surface, borderBottomWidth: 1, borderBottomColor: Colors.border,
-  },
+  header: { flexDirection: "row", alignItems: "center", gap: 12, padding: 16, paddingTop: Platform.OS === "web" ? 67 : 56, backgroundColor: Colors.surface, borderBottomWidth: 1, borderBottomColor: Colors.border },
   backBtn: { padding: 4 },
   headerTitle: { fontSize: 17, fontWeight: "800", color: Colors.text },
   headerSub: { fontSize: 12, color: Colors.textSecondary },
@@ -796,10 +775,7 @@ const fd = StyleSheet.create({
   sumCard: { flex: 1, backgroundColor: Colors.surface, borderRadius: 10, padding: 10, borderTopWidth: 3, alignItems: "center", gap: 2 },
   sumNum: { fontSize: 12, fontWeight: "800", color: Colors.text },
   sumLabel: { fontSize: 9, color: Colors.textSecondary, fontWeight: "600" },
-  card: {
-    backgroundColor: Colors.surface, borderRadius: 14, padding: 14,
-    shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 6, elevation: 2, borderLeftWidth: 4,
-  },
+  card: { backgroundColor: Colors.surface, borderRadius: 14, padding: 14, shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 6, elevation: 2, borderLeftWidth: 4 },
   cardTop: { flexDirection: "row", justifyContent: "space-between" },
   cardName: { fontSize: 14, fontWeight: "700", color: Colors.text },
   cardMeta: { fontSize: 12, color: Colors.textSecondary, marginTop: 2 },
@@ -809,15 +785,20 @@ const fd = StyleSheet.create({
   payBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20 },
   payBadgeText: { fontSize: 11, fontWeight: "700" },
   subAmt: { fontSize: 12, fontWeight: "600", color: Colors.success },
-  thumbRow: { flexDirection: "row", alignItems: "center", gap: 10, marginTop: 8 },
-  thumb: { width: 64, height: 64, borderRadius: 8 },
-  thumbHint: { fontSize: 11, color: Colors.textMuted },
+  // ✅ NEW: remaining banner
+  remainingBanner: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 8, backgroundColor: Colors.warning + "15", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6, borderWidth: 1, borderColor: Colors.warning + "30" },
+  remainingText: { fontSize: 12, fontWeight: "700", color: Colors.warning, flex: 1 },
+  // ✅ FIXED: proper screenshot card
+  screenshotCard: { flexDirection: "row", alignItems: "center", gap: 12, marginTop: 10, backgroundColor: "#2563eb08", borderRadius: 10, padding: 10, borderWidth: 1, borderColor: "#2563eb30" },
+  screenshotThumb: { width: 72, height: 72, borderRadius: 8, backgroundColor: Colors.border },
+  screenshotInfo: { flex: 1, gap: 4 },
+  screenshotBadge: { flexDirection: "row", alignItems: "center", gap: 4 },
+  screenshotBadgeText: { fontSize: 12, fontWeight: "700", color: "#2563eb" },
+  screenshotHint: { fontSize: 11, color: Colors.textMuted },
+  noScreenshot: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 8, opacity: 0.5 },
+  noScreenshotText: { fontSize: 11, color: Colors.textMuted },
   notes: { fontSize: 12, color: Colors.textSecondary, fontStyle: "italic", marginTop: 6 },
-  updatePayBtn: {
-    flexDirection: "row", alignItems: "center", gap: 6, marginTop: 10,
-    backgroundColor: Colors.primary + "10", borderRadius: 8,
-    paddingVertical: 8, paddingHorizontal: 12, alignSelf: "flex-start",
-  },
+  updatePayBtn: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 10, backgroundColor: Colors.primary + "10", borderRadius: 8, paddingVertical: 8, paddingHorizontal: 12, alignSelf: "flex-start" },
   updatePayText: { fontSize: 12, fontWeight: "700", color: Colors.primary },
   empty: { alignItems: "center", gap: 8, paddingVertical: 48 },
   emptyText: { fontSize: 14, color: Colors.textMuted },
