@@ -2118,8 +2118,9 @@ function buildPreIntimationPdf(
   doc.strokeColor("#000000").lineWidth(1);
   doc.moveDown(0.6);
  
-  // ─── DATE — LEFT ALIGNED ──────────────────────────────────────────────────
-  doc.font("Helvetica-Bold").fontSize(10.5).text(`Date :- ${p.date}`, lm);
+  // ─── DATE — RIGHT ALIGNED ─────────────────────────────────────────────────
+  doc.font("Helvetica-Bold").fontSize(10.5)
+    .text(`Date :- ${p.date}`, lm, doc.y, { align: "right", width: pageWidth });
   doc.moveDown(0.8);
  
   // ─── TO BLOCK ─────────────────────────────────────────────────────────────
@@ -2206,9 +2207,9 @@ function buildPreIntimationPdf(
   doc.text("Yours Sincerely,", lm);
  
   // ─── DYNAMIC GAP — push "For,..." towards page bottom ────────────────────
-  const footerAbsY  = doc.page.margins.top + pageHeight;   // absolute bottom edge
-  const forLineH    = 10.5 + 6;                            // one line of text
-  const footerLineH = 9 + 12;                              // footer text height
+  const footerAbsY  = doc.page.margins.top + pageHeight;
+  const forLineH    = 10.5 + 6;
+  const footerLineH = 9 + 12;
   const sigTargetY  = footerAbsY - footerLineH - forLineH - 24;
   if (sigTargetY > doc.y + 8) doc.y = sigTargetY;
   else doc.moveDown(1.5);
@@ -2273,11 +2274,12 @@ function buildPostIntimationPdf(
     .strokeColor("#000000").lineWidth(0.7).stroke();
   doc.strokeColor("#000000").lineWidth(1);
  
-  // Advance past header band (NO divider line for post — matches original style)
+  // Advance past header band
   doc.y = startY + logoH + 4;
  
-  // ─── DATE — LEFT ALIGNED ──────────────────────────────────────────────────
-  doc.font("Helvetica-Bold").fontSize(10.5).text(`Date :- ${p.date}`, lm);
+  // ─── DATE — RIGHT ALIGNED ─────────────────────────────────────────────────
+  doc.font("Helvetica-Bold").fontSize(10.5)
+    .text(`Date :- ${p.date}`, lm, doc.y, { align: "right", width: pageWidth });
   doc.moveDown(0.8);
  
   // ─── TO BLOCK ─────────────────────────────────────────────────────────────
@@ -2394,6 +2396,7 @@ function buildPostIntimationPdf(
     lm, doc.y, { align: "center", width: pageWidth }
   );
 }
+ 
 
 // ── DOCX builder (shared, isPost flag switches content) ──────────────────────
 async function buildIntimationDocx(
