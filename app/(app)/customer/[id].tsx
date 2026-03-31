@@ -157,7 +157,7 @@ const [showAddNumber, setShowAddNumber] = useState(false);
         <Row label="BKT"        value={fmtStr(item.bkt)} valueColor={Colors.primary} />
         <Row label="Product"    value={fmtStr(item.pro)} />
         <Row label="Tenor"      value={fmtStr(item.tenor)} />
-        <Row label="EMI Amount" value={fmt(item.emi_amount, "₹")} />
+        <Row label="EMI" value={fmt(item.emi_amount, "₹")} />
         <Row label="EMI Due"    value={fmt(item.emi_due,    "₹")} valueColor={Colors.danger} />
         <Row label="POS"        value={fmt(item.pos,        "₹")} />
         <Row label="CBC"        value={fmt(item.cbc,        "₹")} />
