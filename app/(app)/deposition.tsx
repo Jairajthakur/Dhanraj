@@ -47,76 +47,69 @@ async function payOnline(depositId: number, uri: string): Promise<void> {
   const base = getApiUrl();
   const token = Platform.OS !== "web" ? await tokenStore.get() : null;
 
-  return new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    xhr.open("POST", `${base}/api/fos-depositions/${depositId}/pay-online`);
-    if (token) xhr.setRequestHeader("Authorization", `Bearer ${token}`);
-    xhr.withCredentials = true;
-
-    xhr.onload = () => {
-      if (xhr.status >= 200 && xhr.status < 300) {
-        resolve();
-      } else {
-        try {
-          const json = JSON.parse(xhr.responseText);
-          reject(new Error(json.message || `HTTP ${xhr.status}`));
-        } catch {
-          reject(new Error(`HTTP ${xhr.status}`));
-        }
-      }
-    };
-    xhr.onerror = () => reject(new Error("Network error"));
-
-    const form = new FormData();
-    const ext = uri.split('.').pop()?.toLowerCase() || 'jpg';
-    const mimeType = ext === 'png' ? 'image/png' : 'image/jpeg';
-    form.append("screenshot", {
-      uri,
-      name: `dep_${depositId}.${ext}`,
-      type: mimeType,
-    } as any);
-
-    xhr.send(form);
+  // Read file as base64 and convert to Blob
+  const FileSystem = await import("expo-file-system/legacy");
+  const base64 = await FileSystem.readAsStringAsync(uri, {
+    encoding: FileSystem.EncodingType.Base64,
   });
-}
+  const ext = uri.split('.').pop()?.toLowerCase() || 'jpg';
+  const mimeType = ext === 'png' ? 'image/png' : 'image/jpeg';
+  const byteChars = atob(base64);
+  const byteArray = new Uint8Array(byteChars.length);
+  for (let i = 0; i < byteChars.length; i++) {
+    byteArray[i] = byteChars.charCodeAt(i);
+  }
+  const blob = new Blob([byteArray], { type: mimeType });
 
+  const form = new FormData();
+  form.append("screenshot", blob, `dep_${depositId}.${ext}`);
+
+  const headers: Record<string, string> = {};
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+
+  const res = await fetch(`${base}/api/fos-depositions/${depositId}/pay-online`, {
+    method: "POST",
+    body: form,
+    credentials: "include",
+    headers: Object.keys(headers).length > 0 ? headers : undefined,
+  });
+  if (!res.ok) {
+    const json = await res.json().catch(() => ({})) as any;
+    throw new Error(json.message || "Upload failed");
+  }
+}
 async function payBoth(depositId: number, cashAmount: number, onlineAmount: number, screenshotUri: string): Promise<void> {
   const base = getApiUrl();
   const token = Platform.OS !== "web" ? await tokenStore.get() : null;
 
-  return new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    xhr.open("PUT", `${base}/api/fos-depositions/${depositId}/pay-both`);
-    if (token) xhr.setRequestHeader("Authorization", `Bearer ${token}`);
-    xhr.withCredentials = true;
-
-    xhr.onload = () => {
-      if (xhr.status >= 200 && xhr.status < 300) {
-        resolve();
-      } else {
-        try {
-          const json = JSON.parse(xhr.responseText);
-          reject(new Error(json.message || `HTTP ${xhr.status}`));
-        } catch {
-          reject(new Error(`HTTP ${xhr.status}`));
-        }
-      }
-    };
-    xhr.onerror = () => reject(new Error("Network error"));
-
-    const form = new FormData();
-    form.append("cashAmount", String(cashAmount));
-    form.append("onlineAmount", String(onlineAmount));
-    const ext = screenshotUri.split('.').pop()?.toLowerCase() || 'jpg';
-    const mimeType = ext === 'png' ? 'image/png' : 'image/jpeg';
-    form.append("screenshot", {
-      uri: screenshotUri,
-      name: `dep_${depositId}_both.${ext}`,
-      type: mimeType,
-    } as any);
-
-    xhr.send(form);
+  const FileSystem = await import("expo-file-system/legacy");
+  const base64 = await FileSystem.readAsStringAsync(screenshotUri, {
+    encoding: FileSystem.EncodingType.Base64,
   });
+  const ext = screenshotUri.split('.').pop()?.toLowerCase() || 'jpg';
+  const mimeType = ext === 'png' ? 'image/png' : 'image/jpeg';
+  const byteChars = atob(base64);
+  const byteArray = new Uint8Array(byteChars.length);
+  for (let i = 0; i < byteChars.length; i++) {
+    byteArray[i] = byteChars.charCodeAt(i);
+  }
+  const blob = new Blob([byteArray], { type: mimeType });
+
+  const form = new FormData();
+  form.append("cashAmount", String(cashAmount));
+  form.append("onlineAmount", String(onlineAmount));
+  form.append("screenshot", blob, `dep_${depositId}_both.${ext}`);
+
+  const headers: Record<string, string> = {};
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+
+  const res = await fetch(`${base}/api/fos-depositions/${depositId}/pay-both`, {
+    method: "PUT",
+    body: form,
+    credentials: "include",
+    headers: Object.keys(headers).length > 0 ? headers : undefined,
+  });
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).message || "Failed");
 }
 
 // ─── Bulk Payment Sheet ───────────────────────────────────────────────────────
