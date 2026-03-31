@@ -654,16 +654,14 @@ return (
         )}
       </View>
 
-     {selectedFos && (
-        <FosDetailModal
-          visible={!!selectedFos}
-          agentId={selectedFos.id}
-          agentName={selectedFos.name}
-          onClose={() => setSelectedFos(null)}
-          onUpdated={() => refetch()}
-          onViewScreenshot={(url: string) => setScreenshotUrl(url)}
-        />
-      )}
+  <FosDetailModal
+        visible={!!selectedFos}
+        agentId={selectedFos?.id}
+        agentName={selectedFos?.name}
+        onClose={() => setSelectedFos(null)}
+        onUpdated={() => refetch()}
+        onViewScreenshot={(url: string) => setScreenshotUrl(url)}
+      />
 
       {/* Screenshot viewer — as Modal so it works on both web and mobile */}
       <Modal
