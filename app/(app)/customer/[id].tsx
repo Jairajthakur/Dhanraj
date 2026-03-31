@@ -9,7 +9,7 @@ import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import Colors from "@/constants/colors";
 import { caseStore } from "@/lib/caseStore";
-import { apiRequest } from "@/lib/queryClient";
+import { api } from "@/lib/api";
 
 
 
@@ -212,7 +212,7 @@ const [saving, setSaving] = useState(false);
       </Pressable>
       <Pressable onPress={async () => {
         try {
-          await apiRequest("DELETE", `/api/cases/${item.id}/extra-numbers`, { number: num, table: caseType });
+          await api.removeExtraNumber(item.id, num, caseType);
           setExtraNumbers(prev => prev.filter(n => n !== num));
         } catch { Alert.alert("Failed to remove"); }
       }}>
@@ -259,10 +259,7 @@ onPress={async () => {
   console.log("Saving to case ID:", item.id, "table:", caseType); // ← add this
   setSaving(true);
   try {
-    const res = await apiRequest("POST", `/api/cases/${item.id}/extra-numbers`, {
-      number: trimmed,
-      table: caseType,
-    });
+    await api.addExtraNumber(item.id, trimmed, caseType);
     setExtraNumbers(prev => [...prev, trimmed]);
     setNewNumberInput("");
     setShowAddNumber(false);
