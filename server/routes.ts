@@ -2465,3 +2465,6 @@ app.delete("/api/admin/cases/:id/extra-numbers", requireAdmin, async (req, res) 
     res.json({ success: true });
   } catch (e: any) { res.status(500).json({ message: e.message }); }
 });
+const httpServer = createServer(app);
+  return httpServer;
+}
