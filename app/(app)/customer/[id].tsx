@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import {
   View, Text, StyleSheet, ScrollView, Pressable,
-  Linking, Alert, Platform,
+  Linking, Alert, Platform, TextInput,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLocalSearchParams, router } from "expo-router";
@@ -9,7 +9,7 @@ import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import Colors from "@/constants/colors";
 import { caseStore } from "@/lib/caseStore";
-import { ..., TextInput } from "react-native";
+
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function fmt(v: any, prefix = "") {
@@ -102,6 +102,7 @@ export default function CustomerDetailScreen() {
 const [extraNumbers, setExtraNumbers] = useState<string[]>([]);
 const [newNumberInput, setNewNumberInput] = useState("");
 const [showAddNumber, setShowAddNumber] = useState(false);
+  
   return (
     <ScrollView
       style={{ flex: 1, backgroundColor: Colors.background }}
@@ -264,7 +265,10 @@ const [showAddNumber, setShowAddNumber] = useState(false);
       </Text>
     </Pressable>
   )}
+   </SectionCard>
 </SectionCard>
+      );
+}
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
