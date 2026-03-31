@@ -2076,201 +2076,280 @@ app.put("/api/fos-depositions/:id/pay-both", requireAuth, screenshotUpload.singl
 
 // ── PDF helpers ───────────────────────────────────────────────────────────────
 
-function buildPreIntimationPdf(doc: any, p: ReturnType<typeof buildIntimationParams>, logoPath: string) {
+function buildPreIntimationPdf(
+  doc: any,
+  p: ReturnType<typeof buildIntimationParams>,
+  logoPath: string
+) {
   const lm        = doc.page.margins.left;
   const rm        = doc.page.width - doc.page.margins.right;
   const pageWidth = rm - lm;
+  // A4 usable height (842pt page − top 50 − bottom 50)
+  const pageHeight = doc.page.height - doc.page.margins.top - doc.page.margins.bottom;
   const fsNode    = require("fs");
-
-  // ── Logo top-right, THEN title below it ────────────────────────────────────
-  const startY = doc.y;
-  const logoW  = 100;
-  const logoH  = 50;
-
+ 
+  // ── Header row: logo RIGHT, title CENTRE (logo does NOT overlap title) ────
+  // We reserve a header band of logoH px, then place both independently.
+  const logoW = 110;
+  const logoH = 55;
+ 
+  // Title centred in full width, vertically centred in the logo band
+  const titleY = doc.y + (logoH - 14) / 2;   // 14 ≈ font size
+  doc.font("Helvetica-Bold").fontSize(14)
+    .text(
+      "Pre Repossession Intimation to Police Station",
+      lm, titleY,
+      { align: "center", width: pageWidth }
+    );
+ 
+  // Logo: right side, same band top
   if (fsNode.existsSync(logoPath)) {
     try {
-      doc.image(fsNode.readFileSync(logoPath), rm - logoW, startY, { width: logoW, height: logoH });
+      doc.image(
+        fsNode.readFileSync(logoPath),
+        rm - logoW,
+        doc.y - 14 - (logoH - 14) / 2,   // back to band top
+        { width: logoW, height: logoH }
+      );
     } catch {}
   }
-
-  // Title is centred in the remaining width (left edge to right edge)
-  // We fix Y to startY so logo and title share the same vertical band
-  doc.font("Helvetica-Bold").fontSize(13)
-    .text("Pre Repossession Intimation to Police Station", lm, startY + 16, {
-      align: "center", width: pageWidth,
-    });
-
-  // Move past whichever is taller
-  doc.y = startY + logoH + 6;
-
+ 
+  // Advance past the header band
+  doc.y = doc.page.margins.top + logoH + 4;
+ 
   // Thin divider
   doc.moveTo(lm, doc.y).lineTo(rm, doc.y).strokeColor("#bbbbbb").lineWidth(0.5).stroke();
   doc.strokeColor("#000000").lineWidth(1);
-  doc.moveDown(0.5);
-
-  // ── Date (left) ────────────────────────────────────────────────────────────
-  doc.font("Helvetica").fontSize(11).text(`Date :- ${p.date}`, lm, doc.y);
-  doc.moveDown(0.7);
-
-  // ── To block ───────────────────────────────────────────────────────────────
-  const policeLabel = p.police_station && p.police_station !== "________________________________"
-    ? `${p.police_station} Police Station,`
-    : "________________________________,";
+  doc.moveDown(1.2);
+ 
+  // ── Date ─────────────────────────────────────────────────────────────────
+  doc.font("Helvetica-Bold").fontSize(11).text(`Date :- ${p.date}`, lm);
+  doc.moveDown(1.4);
+ 
+  // ── To block ─────────────────────────────────────────────────────────────
+  const policeLabel =
+    p.police_station && p.police_station !== "________________________________"
+      ? `${p.police_station} Police Station,`
+      : "________________________________,";
+ 
   doc.font("Helvetica").fontSize(11);
-  ["To,", "The Senior Inspector,", policeLabel, `TQ. ${p.tq}     Dist. Nanded`].forEach(line => {
-    doc.text(line, lm); doc.moveDown(0.1);
-  });
-  doc.moveDown(0.6);
-
-  // ── Sub ────────────────────────────────────────────────────────────────────
+  doc.text("To,", lm);                               doc.moveDown(0.45);
+  doc.text("The Senior Inspector,", lm);             doc.moveDown(0.45);
+  doc.text(policeLabel, lm);                         doc.moveDown(0.45);
+  doc.text(`TQ. ${p.tq}     Dist. Nanded`, lm);
+  doc.moveDown(1.4);
+ 
+  // ── Sub ───────────────────────────────────────────────────────────────────
   doc.font("Helvetica").fontSize(11)
-    .text(`Sub :- Pre intimation of repossession of the vehicle from ${p.customer_name}`, lm, doc.y, { width: pageWidth });
-  doc.moveDown(0.1);
+    .text(
+      `Sub :- Pre intimation of repossession of the vehicle from ${p.customer_name}`,
+      lm, doc.y, { width: pageWidth }
+    );
+  doc.moveDown(0.45);
   doc.text(`(Borrower) residing ${p.address}`, lm, doc.y, { width: pageWidth });
-  doc.moveDown(0.7);
-
-  // ── Respected Sir ──────────────────────────────────────────────────────────
-  doc.font("Helvetica").fontSize(11).text("Respected Sir,", lm);
-  doc.moveDown(0.4);
-
-  // ── Intro paragraph ────────────────────────────────────────────────────────
-  doc.font("Helvetica").fontSize(10).text(
-    'The afore mentioned borrower has taken a loan from Hero Fin-Corp Limited ("Company") for the purchase of the Vehicle having the below mentioned details and further the Borrower hypothecated the said vehicle to the Company in terms of loan-cum-hypothecation agreement executed between the borrower and the Company.',
+  doc.moveDown(1.4);
+ 
+  // ── Respected Sir ─────────────────────────────────────────────────────────
+  doc.font("Helvetica-Bold").fontSize(11).text("Respected Sir,", lm);
+  doc.moveDown(1.0);
+ 
+  // ── Intro paragraph ───────────────────────────────────────────────────────
+  doc.font("Helvetica").fontSize(11).text(
+    'The afore mentioned borrower has taken a loan from Hero Fin-Corp Limited ("Company") for the' +
+    " purchase of the Vehicle having the below mentioned details and further the Borrower hypothecated" +
+    " the said vehicle to the Company in terms of loan-cum-hypothecation agreement executed between" +
+    " the borrower and the Company.",
     lm, doc.y, { align: "justify", width: pageWidth }
   );
-  doc.moveDown(0.7);
-
-  // ── Details — plain label : value rows, NO box, NO fill ───────────────────
-  const col1 = pageWidth * 0.46;
+  doc.moveDown(1.4);
+ 
+  // ── Details table (no border, no fill) ────────────────────────────────────
+  const col1W = pageWidth * 0.46;
   const rows: [string, string][] = [
-    ["Name of the Borrower",                  p.customer_name],
-    ["Address of Borrower",                   p.address],
-    ["App ID",                                p.app_id],
-    ["Loan cum Hypothecation Agreement No.",  p.loan_no],
-    ["Date",                                  p.date],
-    ["Vehicle Registration No.",              p.registration_no],
-    ["Model Make",                            p.asset_make],
-    ["Engine No.",                            p.engine_no],
-    ["Chassis No.",                           p.chassis_no],
+    ["Name of the Borrower",                 p.customer_name],
+    ["Address of Borrower",                  p.address],
+    ["App ID",                               p.app_id],
+    ["Loan cum Hypothecation Agreement No.", p.loan_no],
+    ["Date",                                 p.date],
+    ["Vehicle Registration No.",             p.registration_no],
+    ["Model Make",                           p.asset_make],
+    ["Engine No.",                           p.engine_no],
+    ["Chassis No.",                          p.chassis_no],
   ];
-
-  doc.font("Helvetica").fontSize(10);
+ 
+  doc.font("Helvetica").fontSize(11);
   rows.forEach(([label, value]) => {
     const rowY = doc.y;
-    // label column
-    doc.fillColor("#333333").text(label, lm, rowY, { width: col1 - 4, lineBreak: false });
-    // colon + value column
-    doc.fillColor("#000000").text(`: ${value || "—"}`, lm + col1, rowY, { width: pageWidth - col1 });
-    // let pdfkit advance naturally; add a tiny gap
-    doc.moveDown(0.15);
+    doc.fillColor("#333333").text(label, lm, rowY, { width: col1W - 4, lineBreak: false });
+    doc.fillColor("#000000").text(`: ${value || "—"}`, lm + col1W, rowY, { width: pageWidth - col1W });
+    doc.moveDown(0.35);
   });
-  doc.moveDown(0.7);
-
-  // ── Closing paragraph ──────────────────────────────────────────────────────
-  doc.font("Helvetica").fillColor("#000000").fontSize(10).text(
-    "The Borrower has committed default on the scheduled payment of the Monthly Payments and/or other charges payable on the loan obtained by the Borrower from the Company in terms of the provisions of the aforesaid loan-cum-hypothecation agreement. In spite of Company's requests and reminders, the Borrower has not remitted the outstanding dues; as a result of which the company was left with no option but to enforce the terms and conditions of the said agreement. Under the said agreement, the said Borrower has specifically authorized Company or any of its authorized persons to take charge/repossession of the vehicle, in the event he fails to pay the loan amount when due to the Company. Pursuant to our right therein we are taking steps to recover possession of the said vehicle. This communication is for your record and to prevent confusion that may arise from any complaint that the borrower may lodge with respect to the aforesaid vehicle.",
+  doc.moveDown(1.2);
+ 
+  // ── Closing paragraph ─────────────────────────────────────────────────────
+  doc.font("Helvetica").fillColor("#000000").fontSize(11).text(
+    "The Borrower has committed default on the scheduled payment of the Monthly Payments and/or" +
+    " other charges payable on the loan obtained by the Borrower from the Company in terms of the" +
+    " provisions of the aforesaid loan-cum-hypothecation agreement. In spite of Company's requests" +
+    " and reminders, the Borrower has not remitted the outstanding dues; as a result of which the" +
+    " company was left with no option but to enforce the terms and conditions of the said agreement." +
+    " Under the said agreement, the said Borrower has specifically authorized Company or any of its" +
+    " authorized persons to take charge/repossession of the vehicle, in the event he fails to pay the" +
+    " loan amount when due to the Company. Pursuant to our right therein we are taking steps to" +
+    " recover possession of the said vehicle. This communication is for your record and to prevent" +
+    " confusion that may arise from any complaint that the borrower may lodge with respect to the" +
+    " aforesaid vehicle.",
     lm, doc.y, { align: "justify", width: pageWidth }
   );
-  doc.moveDown(0.7);
-
-  // ── Sign-off ────────────────────────────────────────────────────────────────
+  doc.moveDown(1.4);
+ 
+  // ── Sign-off ──────────────────────────────────────────────────────────────
   doc.font("Helvetica").fontSize(11).text("Thanking you,", lm);
-  doc.moveDown(0.2);
+  doc.moveDown(0.5);
   doc.text("Yours Sincerely,", lm);
-  doc.moveDown(2.5);
-  doc.text("For, Hero Fin-Corp Limited", lm);
-  doc.moveDown(1.5);
-
-  // ── Footer ─────────────────────────────────────────────────────────────────
+ 
+  // Dynamic gap: push signature block down so footer stays near page bottom
+  // Target footer at ~pageHeight - 40pt from top margin
+  const footerTargetY = doc.page.margins.top + pageHeight - 40;
+  const signatureBlockH = 11 * 3 + 30; // "For, Hero..." line + footer line heights
+  const sigY = footerTargetY - signatureBlockH - 30;
+  const currentY = doc.y;
+  if (sigY > currentY + 10) doc.y = sigY;
+  else doc.moveDown(3.5);
+ 
+  doc.font("Helvetica").fontSize(11).text("For, Hero Fin-Corp Limited", lm);
+  doc.moveDown(1.8);
+ 
+  // ── Footer ────────────────────────────────────────────────────────────────
   doc.moveTo(lm, doc.y).lineTo(rm, doc.y).strokeColor("#bbbbbb").lineWidth(0.5).stroke();
   doc.strokeColor("#000000").lineWidth(1);
-  doc.moveDown(0.3);
-  doc.font("Helvetica").fontSize(8.5).fillColor("#000000").text(
+  doc.moveDown(0.4);
+  doc.font("Helvetica-Bold").fontSize(9).fillColor("#000000").text(
     "Hero Fincorp Ltd. Corporate Office: 09, Basant Lok, Vasant Vihar, New Delhi-110057 India",
     lm, doc.y, { align: "center", width: pageWidth }
   );
 }
 
-function buildPostIntimationPdf(doc: any, p: ReturnType<typeof buildIntimationParams>, logoPath: string) {
+function buildPostIntimationPdf(
+  doc: any,
+  p: ReturnType<typeof buildIntimationParams>,
+  logoPath: string
+) {
   const lm        = doc.page.margins.left;
   const rm        = doc.page.width - doc.page.margins.right;
   const pageWidth = rm - lm;
+  const pageHeight = doc.page.height - doc.page.margins.top - doc.page.margins.bottom;
   const fsNode    = require("fs");
-
-  // ── Logo top-right ─────────────────────────────────────────────────────────
-  const startY = doc.y;
-  const logoW  = 100;
-  const logoH  = 50;
-
+ 
+  // ── Header row: title LEFT/CENTRE, logo RIGHT ─────────────────────────────
+  // Strategy: place logo first (absolute), then title in remaining width.
+  const logoW = 110;
+  const logoH = 55;
+  const startY = doc.page.margins.top;   // always start at the very top margin
+ 
+  // Logo — anchored top-right
   if (fsNode.existsSync(logoPath)) {
     try {
-      doc.image(fsNode.readFileSync(logoPath), rm - logoW, startY, { width: logoW, height: logoH });
+      doc.image(
+        fsNode.readFileSync(logoPath),
+        rm - logoW,
+        startY,
+        { width: logoW, height: logoH }
+      );
     } catch {}
   }
-
-  // ── Title (centred, underlined) ────────────────────────────────────────────
-  const title = "Post Repossession Intimation to Police Station";
-  doc.font("Helvetica-Bold").fontSize(13);
-  doc.text(title, lm, startY + 4, { align: "center", width: pageWidth });
-  // manual underline
-  const tw = doc.widthOfString(title, { fontSize: 13 });
-  const tx = lm + (pageWidth - tw) / 2;
-  const ty = doc.y;                    // PDFKit advances y after text()
-  doc.moveTo(tx, ty).lineTo(tx + tw, ty).strokeColor("#000000").lineWidth(0.7).stroke();
+ 
+  // Title centred in the space left of the logo, vertically centred in band
+  const titleAreaWidth = pageWidth - logoW - 8;
+  const titleFontSize  = 14;
+  doc.font("Helvetica-Bold").fontSize(titleFontSize);
+  const titleLines = 1;
+  const titleBlockH = titleFontSize * titleLines * 1.2;
+  const titleY = startY + (logoH - titleBlockH) / 2;
+ 
+  doc.text(
+    "Post Repossession Intimation to Police Station",
+    lm, titleY,
+    { align: "center", width: titleAreaWidth }
+  );
+ 
+  // Underline the title manually
+  const titleText  = "Post Repossession Intimation to Police Station";
+  const tw         = doc.widthOfString(titleText, { fontSize: titleFontSize });
+  const titleCentreX = lm + (titleAreaWidth - tw) / 2;
+  const underlineY   = titleY + titleFontSize * 1.15;
+  doc.moveTo(titleCentreX, underlineY)
+    .lineTo(titleCentreX + tw, underlineY)
+    .strokeColor("#000000").lineWidth(0.8).stroke();
   doc.strokeColor("#000000").lineWidth(1);
-
-  // ── Date right-aligned on same line area ───────────────────────────────────
-  // Place date to the right, vertically just below the title
-  doc.font("Helvetica").fontSize(11)
-    .text(`Date: ${p.date}`, lm, ty + 2, { align: "right", width: pageWidth });
-
+ 
+  // Advance past header band
   doc.y = startY + logoH + 6;
-
-  // ── To block ───────────────────────────────────────────────────────────────
-  const policeLabel = p.police_station && p.police_station !== "________________________________"
-    ? `${p.police_station} Police Station,`
-    : "________________________________,";
+ 
+  // ── Date (left-aligned, bold) ─────────────────────────────────────────────
+  doc.font("Helvetica-Bold").fontSize(11).text(`Date :- ${p.date}`, lm);
+  doc.moveDown(1.4);
+ 
+  // ── To block ─────────────────────────────────────────────────────────────
+  const policeLabel =
+    p.police_station && p.police_station !== "________________________________"
+      ? `${p.police_station} Police Station,`
+      : "________________________________,";
+ 
   doc.font("Helvetica").fontSize(11);
-  ["To,", "The Senior Inspector,", policeLabel, `TQ. ${p.tq}     Dist. Nanded`].forEach(line => {
-    doc.text(line, lm); doc.moveDown(0.1);
-  });
-  doc.moveDown(0.6);
-
-  // ── Sub ────────────────────────────────────────────────────────────────────
-  doc.font("Helvetica").fontSize(11)
-    .text(`Sub :- Intimation after repossession of the vehicle No ${p.registration_no} From Mr. ${p.customer_name}`, lm, doc.y, { width: pageWidth });
-  doc.moveDown(0.1);
+  doc.text("To,", lm);                               doc.moveDown(0.45);
+  doc.text("The Senior Inspector,", lm);             doc.moveDown(0.45);
+  doc.text(policeLabel, lm);                         doc.moveDown(0.45);
+  doc.text(`TQ. ${p.tq}     Dist. Nanded`, lm);
+  doc.moveDown(1.4);
+ 
+  // ── Sub ───────────────────────────────────────────────────────────────────
+  doc.font("Helvetica").fontSize(11).text(
+    `Sub :- Intimation after repossession of the vehicle No ${p.registration_no}` +
+    ` From Mr. ${p.customer_name}`,
+    lm, doc.y, { width: pageWidth }
+  );
+  doc.moveDown(0.45);
   doc.text(`(Borrower) residing ${p.address}`, lm, doc.y, { width: pageWidth });
-  doc.moveDown(0.7);
-
-  // ── Respected Sir ──────────────────────────────────────────────────────────
-  doc.font("Helvetica").fontSize(11).text("Respected Sir,", lm);
-  doc.moveDown(0.4);
-
-  // ── Body paragraphs ────────────────────────────────────────────────────────
-  doc.font("Helvetica").fontSize(10);
+  doc.moveDown(1.4);
+ 
+  // ── Respected Sir ─────────────────────────────────────────────────────────
+  doc.font("Helvetica-Bold").fontSize(11).text("Respected Sir,", lm);
+  doc.moveDown(1.0);
+ 
+  // ── Body paragraphs ───────────────────────────────────────────────────────
+  doc.font("Helvetica").fontSize(11);
+ 
   doc.text(
-    `This is in furtherance to our letter dated bearing reference number ${p.reference_no} whereby it was intimated to you that despite our repeated requests, reminders and personal visits the above said borrower has defaulted in repaying the above TW Loan as expressly agreed by him/her under the Loan (cum Hypothecation) Agreement and guarantee entered between the said borrower and the company.`,
+    `This is in furtherance to our letter dated bearing reference number ${p.reference_no}` +
+    " whereby it was intimated to you that despite our repeated requests, reminders and personal" +
+    " visits the above said borrower has defaulted in repaying the above TW Loan as expressly" +
+    " agreed by him/her under the Loan (cum Hypothecation) Agreement and guarantee entered between" +
+    " the said borrower and the company.",
     lm, doc.y, { align: "justify", width: pageWidth }
   );
-  doc.moveDown(0.4);
+  doc.moveDown(1.0);
+ 
   doc.text(
-    "Pursuant to our right under the said Agreement we have taken peaceful repossession of the said vehicle.",
+    "Pursuant to our right under the said Agreement we have taken peaceful repossession of the" +
+    " said vehicle.",
     lm, doc.y, { align: "justify", width: pageWidth }
   );
-  doc.moveDown(0.4);
+  doc.moveDown(1.0);
+ 
   doc.text(
-    `We have taken peaceful repossession of the said vehicle on ${p.repossession_date} at from ${p.repossession_address}`,
+    `We have taken peaceful repossession of the said vehicle on ${p.repossession_date}` +
+    ` at from ${p.repossession_address}`,
     lm, doc.y, { align: "justify", width: pageWidth }
   );
-  doc.moveDown(0.6);
-
+  doc.moveDown(1.2);
+ 
   doc.font("Helvetica-Bold").fontSize(11).text("DETAILS OF THE VEHICLE REPOSSESSED:-", lm);
-  doc.moveDown(0.4);
-
-  // ── Details — plain label : value rows, NO box, NO fill ───────────────────
-  const col1 = pageWidth * 0.42;
-  const rows: [string, string][] = [
+  doc.moveDown(0.8);
+ 
+  // ── Details table ─────────────────────────────────────────────────────────
+  const col1W = pageWidth * 0.42;
+  const detailRows: [string, string][] = [
     ["Name of the Borrower",        p.customer_name],
     ["Address of Borrower",         p.address],
     ["Loan Agreement No.",          p.loan_no],
@@ -2280,36 +2359,45 @@ function buildPostIntimationPdf(doc: any, p: ReturnType<typeof buildIntimationPa
     ["Engine No.",                  p.engine_no],
     ["Chassis No.",                 p.chassis_no],
   ];
-
-  doc.font("Helvetica").fontSize(10);
-  rows.forEach(([label, value]) => {
+ 
+  doc.font("Helvetica").fontSize(11);
+  detailRows.forEach(([label, value]) => {
     const rowY = doc.y;
-    doc.fillColor("#333333").text(label, lm, rowY, { width: col1 - 4, lineBreak: false });
-    doc.fillColor("#000000").text(`: ${value || "—"}`, lm + col1, rowY, { width: pageWidth - col1 });
-    doc.moveDown(0.15);
+    doc.fillColor("#333333").text(label, lm, rowY, { width: col1W - 4, lineBreak: false });
+    doc.fillColor("#000000").text(`: ${value || "—"}`, lm + col1W, rowY, { width: pageWidth - col1W });
+    doc.moveDown(0.35);
   });
-  doc.moveDown(0.6);
-
-  // ── Closing paragraph ──────────────────────────────────────────────────────
-  doc.font("Helvetica").fillColor("#000000").fontSize(10).text(
-    "This communication is for your records and to prevent any confusion that may arise for any complaint that the Borrower may lodge with respect to the said vehicle.",
+  doc.moveDown(1.2);
+ 
+  // ── Closing paragraph ─────────────────────────────────────────────────────
+  doc.font("Helvetica").fillColor("#000000").fontSize(11).text(
+    "This communication is for your records and to prevent any confusion that may arise for any" +
+    " complaint that the Borrower may lodge with respect to the said vehicle.",
     lm, doc.y, { align: "justify", width: pageWidth }
   );
-  doc.moveDown(0.7);
-
-  // ── Sign-off ────────────────────────────────────────────────────────────────
+  doc.moveDown(1.4);
+ 
+  // ── Sign-off ──────────────────────────────────────────────────────────────
   doc.font("Helvetica").fontSize(11).text("Thanking You,", lm);
-  doc.moveDown(0.2);
+  doc.moveDown(0.5);
   doc.text("Yours Sincerely,", lm);
-  doc.moveDown(2.5);
-  doc.text("For, Hero Fin Corp Limited", lm);
-  doc.moveDown(1.5);
-
-  // ── Footer ─────────────────────────────────────────────────────────────────
+ 
+  // Dynamic gap — push "For, ..." near page bottom
+  const footerTargetY  = doc.page.margins.top + pageHeight - 40;
+  const signatureBlockH = 11 * 2 + 30;
+  const sigY   = footerTargetY - signatureBlockH - 30;
+  const curY   = doc.y;
+  if (sigY > curY + 10) doc.y = sigY;
+  else doc.moveDown(3.5);
+ 
+  doc.font("Helvetica").fontSize(11).text("For, Hero Fin Corp Limited", lm);
+  doc.moveDown(1.8);
+ 
+  // ── Footer ────────────────────────────────────────────────────────────────
   doc.moveTo(lm, doc.y).lineTo(rm, doc.y).strokeColor("#bbbbbb").lineWidth(0.5).stroke();
   doc.strokeColor("#000000").lineWidth(1);
-  doc.moveDown(0.3);
-  doc.font("Helvetica").fontSize(8.5).fillColor("#000000").text(
+  doc.moveDown(0.4);
+  doc.font("Helvetica-Bold").fontSize(9).fillColor("#000000").text(
     "Hero Fincorp Ltd. Corporate Office: 09, Basant Lok, Vasant Vihar, New Delhi-110057 India",
     lm, doc.y, { align: "center", width: pageWidth }
   );
