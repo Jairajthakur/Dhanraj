@@ -665,19 +665,27 @@ return (
         />
       )}
 
-      {/* Screenshot viewer — ROOT level, outside all modals */}
-      {screenshotUrl && (
+      {/* Screenshot viewer — as Modal so it works on both web and mobile */}
+      <Modal
+        visible={!!screenshotUrl}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setScreenshotUrl(null)}
+        statusBarTranslucent
+      >
         <View style={{
-          position: "absolute", top: 0, left: 0, right: 0, bottom: 0,
+          flex: 1,
           backgroundColor: "rgba(0,0,0,0.95)",
-          justifyContent: "center", alignItems: "center",
-          zIndex: 9999,
+          justifyContent: "center",
+          alignItems: "center",
         }}>
-          <Image
-            source={{ uri: screenshotUrl }}
-            style={{ width: "95%", height: "80%", borderRadius: 12 }}
-            resizeMode="contain"
-          />
+          {screenshotUrl && (
+            <Image
+              source={{ uri: screenshotUrl }}
+              style={{ width: "95%", height: "80%", borderRadius: 12 }}
+              resizeMode="contain"
+            />
+          )}
           <Pressable
             style={{
               marginTop: 20, backgroundColor: "rgba(255,255,255,0.2)",
@@ -688,7 +696,7 @@ return (
             <Text style={{ color: "#fff", fontWeight: "700", fontSize: 15 }}>Close</Text>
           </Pressable>
         </View>
-      )}
+      </Modal>
 
       <AddDepositionModal
         visible={addVisible}
