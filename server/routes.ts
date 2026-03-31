@@ -1278,54 +1278,71 @@ app.get("/api/today-ptp", requireAuth, async (req, res) => {
       res.json({ success: true });
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
-  app.post("/api/fos-depositions/:id/pay-online", requireAuth, async (req, res) => {
+app.post("/api/fos-depositions/:id/pay-online", requireAuth, screenshotUpload.single("screenshot"), async (req, res) => {
   try {
-    const id = Number(req.params.id); const agentId = req.session.agentId!;
-    const { screenshot, mimeType, ext } = req.body;
-    if (!screenshot) return res.status(400).json({ message: "No screenshot uploaded" });
+    const id = Number(req.params.id); 
+    const agentId = req.session.agentId!;
     
-    const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 9)}.${ext || 'jpg'}`;
-    const filePath = path.join(screenshotDir, filename);
-    fs.writeFileSync(filePath, Buffer.from(screenshot, "base64"));
-    
-    const depRow = await storage.query(`SELECT amount FROM fos_depositions WHERE id=$1 AND agent_id=$2`, [id, agentId]);
-    if (!depRow.rows[0]) { fs.unlinkSync(filePath); return res.status(404).json({ message: "Deposition not found" }); }
-    
+    if (!req.file) return res.status(400).json({ message: "No screenshot uploaded" });
+
+    const filename = req.file.filename;  // multer already saved it
     const baseUrl = process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : "";
     const screenshotUrl = `${baseUrl}/uploads/screenshots/${filename}`;
+
+    const depRow = await storage.query(
+      `SELECT amount FROM fos_depositions WHERE id=$1 AND agent_id=$2`, 
+      [id, agentId]
+    );
+    if (!depRow.rows[0]) {
+      fs.unlinkSync(req.file.path); // cleanup
+      return res.status(404).json({ message: "Deposition not found" });
+    }
+
     const expectedAmt = parseFloat(depRow.rows[0].amount || 0);
-    
-    await storage.query(`UPDATE fos_depositions SET payment_method='online',online_amount=$1,screenshot_url=$2,updated_at=NOW() WHERE id=$3 AND agent_id=$4`, [expectedAmt, screenshotUrl, id, agentId]);
+    await storage.query(
+      `UPDATE fos_depositions SET payment_method='online', online_amount=$1, screenshot_url=$2, updated_at=NOW() WHERE id=$3 AND agent_id=$4`,
+      [expectedAmt, screenshotUrl, id, agentId]
+    );
+
     const adminRows = await storage.query(`SELECT push_token FROM fos_agents WHERE role='admin' AND push_token IS NOT NULL AND push_token<>''`);
     const agentRow = await storage.query(`SELECT name FROM fos_agents WHERE id=$1`, [agentId]);
-    for (const admin of adminRows.rows) await sendPush(admin.push_token, "📸 Screenshot Uploaded", `${agentRow.rows[0]?.name || "FOS"} uploaded payment of ₹${expectedAmt.toLocaleString("en-IN")}.`, { type: "fos_dep_screenshot" });
+    for (const admin of adminRows.rows) {
+      await sendPush(admin.push_token, "📸 Screenshot Uploaded", `${agentRow.rows[0]?.name || "FOS"} uploaded payment of ₹${expectedAmt.toLocaleString("en-IN")}.`, { type: "fos_dep_screenshot" });
+    }
+
     res.json({ success: true, screenshotUrl });
   } catch (e: any) { res.status(500).json({ message: e.message }); }
 });
- app.put("/api/fos-depositions/:id/pay-both", requireAuth, async (req, res) => {
+ // AFTER
+app.put("/api/fos-depositions/:id/pay-both", requireAuth, screenshotUpload.single("screenshot"), async (req, res) => {
   try {
-    const id = Number(req.params.id); const agentId = req.session.agentId!;
-    const { cashAmount, onlineAmount, screenshot, ext } = req.body;
+    const id = Number(req.params.id); 
+    const agentId = req.session.agentId!;
+    const { cashAmount, onlineAmount } = req.body;  // multer puts text fields here
+
     const cashAmt = parseFloat(cashAmount || "0") || 0;
     const onlineAmt = parseFloat(onlineAmount || "0") || 0;
     if (cashAmt <= 0) return res.status(400).json({ message: "Cash amount must be > 0" });
     if (onlineAmt <= 0) return res.status(400).json({ message: "Online amount must be > 0" });
-    if (!screenshot) return res.status(400).json({ message: "No screenshot uploaded" });
+    if (!req.file) return res.status(400).json({ message: "No screenshot uploaded" });
 
-    const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 9)}.${ext || 'jpg'}`;
-    const filePath = path.join(screenshotDir, filename);
-    fs.writeFileSync(filePath, Buffer.from(screenshot, "base64"));
-
+    const filename = req.file.filename;  // multer already saved it
     const baseUrl = process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : "";
     const screenshotUrl = `${baseUrl}/uploads/screenshots/${filename}`;
 
-    await storage.query(`UPDATE fos_depositions SET payment_method='both',cash_amount=$1,online_amount=$2,amount=GREATEST(amount,$3),screenshot_url=$4,updated_at=NOW() WHERE id=$5 AND agent_id=$6`,
-      [cashAmt, onlineAmt, cashAmt + onlineAmt, screenshotUrl, id, agentId]);
+    await storage.query(
+      `UPDATE fos_depositions SET payment_method='both', cash_amount=$1, online_amount=$2, amount=GREATEST(amount,$3), screenshot_url=$4, updated_at=NOW() WHERE id=$5 AND agent_id=$6`,
+      [cashAmt, onlineAmt, cashAmt + onlineAmt, screenshotUrl, id, agentId]
+    );
+
     try {
       const agentRow = await storage.query(`SELECT name FROM fos_agents WHERE id=$1`, [agentId]);
       const adminRows = await storage.query(`SELECT push_token FROM fos_agents WHERE role='admin' AND push_token IS NOT NULL AND push_token<>''`);
-      for (const admin of adminRows.rows) await sendPush(admin.push_token, "🔀 Split Payment", `${agentRow.rows[0]?.name || "FOS"} paid ₹${cashAmt.toLocaleString("en-IN")} cash + ₹${onlineAmt.toLocaleString("en-IN")} online.`, { type: "fos_dep_both" });
+      for (const admin of adminRows.rows) {
+        await sendPush(admin.push_token, "🔀 Split Payment", `${agentRow.rows[0]?.name || "FOS"} paid ₹${cashAmt.toLocaleString("en-IN")} cash + ₹${onlineAmt.toLocaleString("en-IN")} online.`, { type: "fos_dep_both" });
+      }
     } catch {}
+
     res.json({ success: true, screenshotUrl });
   } catch (e: any) { res.status(500).json({ message: e.message }); }
 });
