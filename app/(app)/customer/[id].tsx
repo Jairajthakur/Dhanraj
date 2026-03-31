@@ -156,18 +156,18 @@ const [showAddNumber, setShowAddNumber] = useState(false);
         <Row label="App ID"     value={fmtStr(item.app_id)} />
         <Row label="BKT"        value={fmtStr(item.bkt)} valueColor={Colors.primary} />
         <Row label="Product"    value={fmtStr(item.pro)} />
-        <Row label="Tenor"      value={fmtStr(item.ten)} />
-        <Row label="EMI Amount" value={fmt(item.emi, "₹")} />
+        <Row label="Tenor"      value={fmtStr(item.tenor)} />
+        <Row label="EMI Amount" value={fmt(item.emi_amount, "₹")} />
         <Row label="EMI Due"    value={fmt(item.emi_due,    "₹")} valueColor={Colors.danger} />
         <Row label="POS"        value={fmt(item.pos,        "₹")} />
-        <Row label="CBC"        value={fmt(item.CBC,        "₹")} />
+        <Row label="CBC"        value={fmt(item.cbc,        "₹")} />
         <Row label="LPP"        value={fmt(item.lpp,        "₹")} />
         <Row label="CBC + LPP"  value={fmt(item.cbc_lpp,   "₹")} valueColor={Colors.warning ?? "#F59E0B"} />
-        {(item.rollback && Number(item.Rollback) > 0) && (
-          <Row label="Rollback"  value={fmt(item.Rollback,  "₹")} valueColor={Colors.info ?? "#3B82F6"} />
+        {(item.rollback && Number(item.rollback) > 0) && (
+          <Row label="Rollback"  value={fmt(item.rollback,  "₹")} valueColor={Colors.info ?? "#3B82F6"} />
         )}
-        {(item.clearance && Number(item.Clearance) > 0) && (
-          <Row label="Clearance" value={fmt(item.Clearance, "₹")} valueColor={Colors.success ?? "#22C55E"} />
+        {(item.clearance && Number(item.clearance) > 0) && (
+          <Row label="Clearance" value={fmt(item.clearance, "₹")} valueColor={Colors.success ?? "#22C55E"} />
         )}
         <Row label="First EMI Date"    value={fmtDate(item.first_emi_due_date)} />
         <Row label="Loan Maturity Date" value={fmtDate(item.loan_maturity_date)} />
