@@ -1,191 +1,272 @@
 import React, { useState, useEffect } from "react";
-import { View, Text, ScrollView, Pressable, Linking, Platform, StyleSheet, ActivityIndicator } from "react-native";
-import { useLocalSearchParams, useRouter } from "expo-router";
+import {
+  View, Text, StyleSheet, ScrollView, Pressable, Image,
+  Alert, ActivityIndicator, Platform
+} from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import * as ImagePicker from "expo-image-picker";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Ionicons } from "@expo/vector-icons";
 import Colors from "@/constants/colors";
-import { caseStore } from "@/lib/caseStore";
+import { useAuth, formatAgentId } from "@/context/AuthContext";
 import { api } from "@/lib/api";
 
-function fmt(v: any, prefix = "") {
-  if (v === null || v === undefined || v === "") return "—";
-  const n = parseFloat(String(v).replace(/,/g, ""));
-  if (!isNaN(n) && prefix) return prefix + n.toLocaleString("en-IN", { maximumFractionDigits: 0 });
-  return String(v);
-}
+const PHOTO_KEY = "id_card_photo";
+const PHOTO_SIZE = 90;
+const BORDER     = 4;
+const TOTAL_PHOTO = PHOTO_SIZE + BORDER * 2; // 98
+const BG_HEIGHT   = 110;
+const BOTTOM_PAD  = 12;
+const SECTION_H   = BG_HEIGHT + TOTAL_PHOTO + BOTTOM_PAD; // 220 — full photo inside
 
-// ✅ NEW: strips T00:00:00.000Z and formats as DD-MM-YYYY
-function fmtDate(val: any): string {
-  if (!val) return "—";
-  const s = String(val).slice(0, 10); // "2023-07-08"
-  const parts = s.split("-");
-  if (parts.length === 3 && parts[0].length === 4) {
-    return `${parts[2]}-${parts[1]}-${parts[0]}`; // "08-07-2023"
-  }
-  return s;
-}
-
-function Row({ label, value, highlight, phone }: { label: string; value?: any; highlight?: string; phone?: boolean }) {
-  const d = value !== null && value !== undefined && value !== "" ? String(value) : "—";
-  return (
-    <View style={S.row}>
-      <Text style={S.rl}>{label}</Text>
-      {phone && d !== "—"
-        ? <Pressable onPress={() => Linking.openURL(`tel:${d.split(",")[0].trim()}`)}>
-            <Text style={[S.rv, { color: Colors.info, textDecorationLine: "underline" }]}>{d}</Text>
-          </Pressable>
-        : <Text style={[S.rv, highlight ? { color: highlight, fontWeight: "700" } : null]}>{d}</Text>
-      }
-    </View>
-  );
-}
-
-function Sec({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <View style={S.sec}>
-      <Text style={S.secT}>{title}</Text>
-      {children}
-    </View>
-  );
-}
-
-export default function CustomerDetailScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+export default function IdCardScreen() {
   const insets = useSafeAreaInsets();
-  const router = useRouter();
+  const { agent } = useAuth();
+  const [photoUri, setPhotoUri] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [ready, setReady] = useState(false);
 
-  const [c, setC] = useState<any>(() => {
-    const cached = caseStore.get();
-    if (cached && String(cached.id) === String(id)) return cached;
-    return null;
-  });
-  const [loading, setLoading] = useState(!c);
-  const [error, setError] = useState(false);
+  const agentIdDisplay = agent ? (agent.agent_id || formatAgentId(agent.id)) : "—";
 
   useEffect(() => {
-    if (c) return;
-    if (!id) { setLoading(false); return; }
-    setLoading(true);
-    api.getCaseById(Number(id))
-      .then((res) => {
-        if (res?.case) setC(res.case);
-        else setError(true);
-      })
-      .catch(() => setError(true))
-      .finally(() => setLoading(false));
-  }, [id]);
+    let cancelled = false;
+    async function loadPhoto() {
+      try {
+        const local = await AsyncStorage.getItem(PHOTO_KEY);
+        if (!cancelled && local) setPhotoUri(local);
+      } catch {}
+      try {
+        const p = await api.getProfile();
+        if (!cancelled && p?.photo_url?.startsWith("http")) setPhotoUri(p.photo_url);
+      } catch {}
+      finally { if (!cancelled) setReady(true); }
+    }
+    loadPhoto();
+    return () => { cancelled = true; };
+  }, []);
 
-  if (loading) {
+  const pickAndSave = async (useCamera: boolean) => {
+    try {
+      const result = useCamera
+        ? await ImagePicker.launchCameraAsync({ allowsEditing: true, aspect: [1, 1], quality: 0.8 })
+        : await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], allowsEditing: true, aspect: [1, 1], quality: 0.8 });
+      if (result.canceled || !result.assets?.[0]) return;
+      setSaving(true);
+      const uri = result.assets[0].uri;
+      await AsyncStorage.setItem(PHOTO_KEY, uri);
+      setPhotoUri(uri);
+    } catch (e: any) {
+      Alert.alert("Error", e.message || "Failed to pick photo");
+    } finally { setSaving(false); }
+  };
+
+  const showPhotoOptions = () => {
+    if (Platform.OS === "web") { pickAndSave(false); return; }
+    Alert.alert("Add Photo", "Choose source", [
+      { text: "Camera",  onPress: () => pickAndSave(true)  },
+      { text: "Gallery", onPress: () => pickAndSave(false) },
+      { text: "Cancel",  style: "cancel" },
+    ]);
+  };
+
+  if (!ready) {
     return (
-      <View style={{ flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: Colors.background }}>
+      <View style={styles.loadingContainer}>
         <ActivityIndicator color={Colors.primary} size="large" />
-        <Text style={{ marginTop: 12, color: Colors.textMuted, fontSize: 13 }}>Loading...</Text>
+        <Text style={styles.loadingText}>Loading ID Card...</Text>
       </View>
     );
   }
-
-  if (!c) {
-    return (
-      <View style={{ flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: Colors.background, padding: 32, gap: 12 }}>
-        <Ionicons name="document-outline" size={48} color={Colors.textMuted} />
-        <Text style={{ fontSize: 18, fontWeight: "700", color: Colors.text }}>No data found</Text>
-        <Text style={{ fontSize: 13, color: Colors.textSecondary, textAlign: "center" }}>
-          {error ? "Failed to load. Check your connection." : "Go back and tap Details again."}
-        </Text>
-        <Pressable
-          onPress={() => router.back()}
-          style={{ backgroundColor: Colors.primary, paddingHorizontal: 24, paddingVertical: 12, borderRadius: 12 }}
-        >
-          <Text style={{ color: "#fff", fontWeight: "700" }}>Go Back</Text>
-        </Pressable>
-      </View>
-    );
-  }
-
-  const SC: Record<string, string> = { Unpaid: Colors.statusUnpaid, PTP: Colors.statusPTP, Paid: Colors.statusPaid };
-  const sc = SC[c.status] || Colors.textSecondary;
 
   return (
     <ScrollView
       style={{ flex: 1, backgroundColor: Colors.background }}
-      contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: insets.bottom + 32, paddingTop: Platform.OS === "web" ? 67 : 0 }}
+      contentContainerStyle={[styles.container, {
+        paddingBottom: insets.bottom + 24,
+        paddingTop: Platform.OS === "web" ? 67 : 16,
+      }]}
     >
-      <View style={[S.banner, { borderColor: sc + "40", backgroundColor: sc + "15" }]}>
-        <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: sc }} />
-        <Text style={{ fontSize: 15, fontWeight: "700", color: sc }}>{c.status}</Text>
-        {c.latest_feedback
-          ? <View style={S.fb}><Text style={{ fontSize: 12, fontWeight: "600", color: Colors.text }}>{c.latest_feedback}</Text></View>
-          : null}
+      <View style={styles.card}>
+
+        {/* Header */}
+        <View style={styles.cardHeader}>
+          <Text style={styles.headerSubtitle}>Authorised Collection Agency For</Text>
+          <View style={styles.brandRow}>
+            <View style={styles.brandIcon}>
+              <View style={[styles.brandBar, { backgroundColor: "#2E7D32", height: 18 }]} />
+              <View style={[styles.brandBar, { backgroundColor: "#2E7D32", height: 26, marginLeft: 3 }]} />
+            </View>
+            <View>
+              <Text style={styles.brandName}>Hero</Text>
+              <Text style={styles.brandSub}>FINCORP</Text>
+            </View>
+          </View>
+        </View>
+
+        {/* ── Photo strip ──────────────────────────────────────────────────
+            SECTION_H is tall enough to fit the FULL photo circle inside,
+            so card's overflow:hidden never clips it.                        */}
+        <View style={styles.photoSection}>
+          {/* Coloured geometric background — only covers top BG_HEIGHT */}
+          <View style={[StyleSheet.absoluteFillObject, { height: BG_HEIGHT }]}>
+            <View style={styles.geometricBg}>
+              <View style={[styles.geoBlock, styles.geoRed]}  />
+              <View style={[styles.geoBlock, styles.geoDark]} />
+              <View style={[styles.geoBlock, styles.geoGreen]}/>
+            </View>
+          </View>
+          {/* White background below the blocks */}
+          <View style={[StyleSheet.absoluteFillObject, { top: BG_HEIGHT, backgroundColor: "#fff" }]} />
+
+          {/* Photo — centred, sits fully below the coloured strip */}
+          <View style={styles.photoShell}>
+            <Pressable style={styles.photoWrapper} onPress={showPhotoOptions} disabled={saving}>
+              {saving ? (
+                <View style={styles.photoInner}>
+                  <ActivityIndicator color={Colors.primary} />
+                </View>
+              ) : photoUri ? (
+                <Image
+                  source={{ uri: photoUri }}
+                  style={styles.photoInner}
+                  resizeMode="cover"
+                  onError={() => setPhotoUri(null)}
+                />
+              ) : (
+                <View style={[styles.photoInner, styles.photoPlaceholder]}>
+                  <Ionicons name="person" size={44} color={Colors.textMuted} />
+                </View>
+              )}
+            </Pressable>
+            <Pressable style={styles.photoEditBadge} onPress={showPhotoOptions} disabled={saving}>
+              <Ionicons name="camera" size={12} color="#fff" />
+            </Pressable>
+          </View>
+        </View>
+
+        {/* Body */}
+        <View style={styles.cardBody}>
+          <Text style={styles.agentName}>{agent?.name || "—"}</Text>
+          <Text style={styles.designation}>Collection Officer</Text>
+          <Text style={styles.agentId}>Agent ID No. : {agentIdDisplay}</Text>
+          <View style={styles.divider} />
+          <View style={styles.companyBrandRow}>
+            <Text style={styles.heroText}>Hero</Text>
+            <Text style={styles.financeText}> FINANCE</Text>
+          </View>
+          <Text style={styles.companyName}>DHANRAJ ENTERPRISES</Text>
+          <Text style={styles.address}>
+            2nd Floor Ghodajkar Complex Maharana{"\n"}
+            Pratap Chowk, Hingoli Naka Nanded
+          </Text>
+          <View style={styles.emergencyRow}>
+            <Ionicons name="call" size={12} color={Colors.danger} />
+            <Text style={styles.emergencyLabel}>Emergency Contact</Text>
+          </View>
+          <Text style={styles.phone}>{agent?.phone || "9689898388"}</Text>
+        </View>
+
+        {/* Footer */}
+        <View style={styles.cardFooter}>
+          <View style={[styles.footerBar, { backgroundColor: "#2E7D32" }]} />
+          <View style={[styles.footerBar, { backgroundColor: Colors.danger   }]} />
+          <View style={[styles.footerBar, { backgroundColor: "#1565C0"       }]} />
+        </View>
       </View>
 
-      <Sec title="Loan Details">
-        <Row label="LOAN NO"   value={c.loan_no} />
-        <Row label="APP ID"    value={c.app_id} />
-        <Row label="BKT"       value={c.bkt} highlight={Colors.primary} />
-        <Row label="PRO"       value={c.pro} />
-        <Row label="TENOR"     value={c.tenor ? `${c.tenor} months` : null} />
-        <Row label="FOS NAME"  value={c.fos_name} />
-      </Sec>
-
-      <Sec title="Customer Info">
-        <Row label="CUSTOMER NAME" value={c.customer_name} />
-        <Row label="NUMBER"        value={c.mobile_no} phone />
-        <Row label="ADDRESS"       value={c.address} />
-      </Sec>
-
-      <Sec title="Payment Details">
-        <Row label="EMI AMOUNT" value={fmt(c.emi_amount, "₹")} />
-        <Row label="EMI DUE"    value={fmt(c.emi_due,    "₹")} highlight={Colors.danger} />
-        <Row label="POS"        value={fmt(c.pos,        "₹")} />
-        <Row label="CBC"        value={fmt(c.cbc,        "₹")} />
-        <Row label="LPP"        value={fmt(c.lpp,        "₹")} />
-        <Row label="CBC + LPP"  value={fmt(c.cbc_lpp,   "₹")} highlight={Colors.warning} />
-        <Row label="ROLLBACK"   value={fmt(c.rollback,   "₹")} />
-        <Row label="CLEARANCE"  value={fmt(c.clearance,  "₹")} highlight={Colors.success} />
-      </Sec>
-
-      {/* ✅ FIXED: dates now show DD-MM-YYYY instead of full ISO string */}
-      <Sec title="Important Dates">
-        <Row label="FIRST EMI DUE DATE" value={fmtDate(c.first_emi_due_date)} />
-        <Row label="LOAN MATURITY DATE" value={fmtDate(c.loan_maturity_date)} />
-        {c.ptp_date
-          ? <Row label="PTP DATE"      value={fmtDate(c.ptp_date)}            highlight={Colors.statusPTP} />
-          : null}
-        {c.telecaller_ptp_date
-          ? <Row label="TELECALLER PTP" value={fmtDate(c.telecaller_ptp_date)} highlight={Colors.info} />
-          : null}
-      </Sec>
-
-      <Sec title="Asset Details">
-        <Row label="ASSET MAKE"       value={c.asset_make} />
-        <Row label="REGISTRATION NO"  value={c.registration_no} />
-        <Row label="ENGINE NO"        value={c.engine_no} />
-        <Row label="CHASSIS NO"       value={c.chassis_no} />
-      </Sec>
-
-      <Sec title="References">
-        <Row label="REFERENCE ADDRESS" value={c.reference_address} />
-      </Sec>
-
-      {c.mobile_no
-        ? <Pressable
-            style={{ backgroundColor: Colors.primary, borderRadius: 14, padding: 16, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 }}
-            onPress={() => Linking.openURL(`tel:${c.mobile_no.split(",")[0].trim()}`)}
-          >
-            <Ionicons name="call" size={20} color="#fff" />
-            <Text style={{ color: "#fff", fontSize: 15, fontWeight: "700" }}>Call</Text>
-          </Pressable>
-        : null}
+      <Pressable style={styles.photoBtn} onPress={showPhotoOptions} disabled={saving}>
+        <Ionicons name="camera-outline" size={18} color={Colors.primary} />
+        <Text style={styles.photoBtnText}>{photoUri ? "Change Photo" : "Add Photo"}</Text>
+      </Pressable>
     </ScrollView>
   );
 }
 
-const S = StyleSheet.create({
-  banner: { flexDirection: "row", alignItems: "center", gap: 10, padding: 12, borderRadius: 12, borderWidth: 1 },
-  fb:     { marginLeft: "auto", backgroundColor: "rgba(0,0,0,0.07)", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 3 },
-  sec:    { backgroundColor: Colors.surface, borderRadius: 12, overflow: "hidden", borderWidth: 1, borderColor: Colors.border },
-  secT:   { fontSize: 11, fontWeight: "700", color: Colors.textSecondary, textTransform: "uppercase", letterSpacing: 0.8, paddingHorizontal: 14, paddingVertical: 8, backgroundColor: Colors.surfaceAlt, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: Colors.border },
-  row:    { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: 14, paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: Colors.border },
-  rl:     { fontSize: 12, color: Colors.textSecondary, fontWeight: "600", flex: 1 },
-  rv:     { fontSize: 13, color: Colors.text, fontWeight: "500", flex: 1.5, textAlign: "right" },
+const styles = StyleSheet.create({
+  loadingContainer: { flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: Colors.background, gap: 12 },
+  loadingText:      { fontSize: 14, color: Colors.textMuted, fontWeight: "500" },
+  container:        { alignItems: "center", gap: 16, padding: 20 },
+
+  /* Card — overflow:hidden keeps rounded corners on geo blocks */
+  card: {
+    width: "100%", maxWidth: 340, backgroundColor: "#fff",
+    borderRadius: 20, overflow: "hidden",
+    shadowColor: "#000", shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.2, shadowRadius: 24, elevation: 10,
+    borderWidth: 3, borderColor: "#E8B800",
+  },
+
+  /* Header */
+  cardHeader:     { backgroundColor: "#1a1a2e", paddingTop: 16, paddingBottom: 12, paddingHorizontal: 20, alignItems: "center", gap: 6 },
+  headerSubtitle: { color: "rgba(255,255,255,0.7)", fontSize: 10, letterSpacing: 0.5 },
+  brandRow:       { flexDirection: "row", alignItems: "center", gap: 8 },
+  brandIcon:      { flexDirection: "row", alignItems: "flex-end", height: 28 },
+  brandBar:       { width: 8, borderRadius: 2 },
+  brandName:      { color: "#fff", fontSize: 26, fontWeight: "900", letterSpacing: -0.5, lineHeight: 28 },
+  brandSub:       { color: "rgba(255,255,255,0.85)", fontSize: 10, fontWeight: "700", letterSpacing: 3, marginTop: -2 },
+
+  /* ✅ Photo section — tall enough to contain the FULL circle inside the card */
+  photoSection: {
+    height: SECTION_H,          // BG_HEIGHT + TOTAL_PHOTO + BOTTOM_PAD
+    alignItems: "center",
+    justifyContent: "flex-end", // photo at bottom of section
+    paddingBottom: BOTTOM_PAD,
+  },
+  geometricBg: { height: BG_HEIGHT, flexDirection: "row" },
+  geoBlock:    { flex: 1, transform: [{ skewX: "-15deg" }] },
+  geoRed:      { backgroundColor: "#C62828", marginHorizontal: -10 },
+  geoDark:     { backgroundColor: "#1a1a2e" },
+  geoGreen:    { backgroundColor: "#2E7D32", marginHorizontal: -10 },
+
+  /* Shadow shell — overflow:visible so shadow renders on Android */
+  photoShell: {
+    width: TOTAL_PHOTO, height: TOTAL_PHOTO,
+    borderRadius: TOTAL_PHOTO / 2,
+    shadowColor: "#000", shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3, shadowRadius: 8, elevation: 8,
+    backgroundColor: "#fff",
+  },
+
+  /* ✅ Clip wrapper — overflow:hidden cuts image to circle */
+  photoWrapper: {
+    width: TOTAL_PHOTO, height: TOTAL_PHOTO,
+    borderRadius: TOTAL_PHOTO / 2,
+    borderWidth: BORDER, borderColor: "#fff",
+    overflow: "hidden",           // ✅ clips photo to perfect circle
+    backgroundColor: "#f0f0f0",
+  },
+
+  photoInner:       { width: "100%", height: "100%", alignItems: "center", justifyContent: "center" },
+  photoPlaceholder: { backgroundColor: "#f0f0f0" },
+
+  photoEditBadge: {
+    position: "absolute", bottom: 2, right: 2,
+    width: 22, height: 22, borderRadius: 11,
+    backgroundColor: Colors.primary,
+    alignItems: "center", justifyContent: "center",
+    borderWidth: 2, borderColor: "#fff", zIndex: 10,
+  },
+
+  /* Body */
+  cardBody:        { paddingTop: 16, paddingBottom: 16, paddingHorizontal: 20, alignItems: "center", gap: 4, backgroundColor: "#fff" },
+  agentName:       { fontSize: 18, fontWeight: "800", color: "#1a1a2e", textAlign: "center", letterSpacing: 0.3 },
+  designation:     { fontSize: 12, color: "#C62828", fontWeight: "700", letterSpacing: 0.5 },
+  agentId:         { fontSize: 11, color: "#555", fontWeight: "500", marginBottom: 4 },
+  divider:         { width: "80%", height: StyleSheet.hairlineWidth, backgroundColor: "#ddd", marginVertical: 8 },
+  companyBrandRow: { flexDirection: "row", alignItems: "baseline" },
+  heroText:        { fontSize: 22, fontWeight: "900", color: "#C62828", letterSpacing: -0.5, fontStyle: "italic" },
+  financeText:     { fontSize: 22, fontWeight: "700", color: "#1a1a2e", letterSpacing: 0.5 },
+  companyName:     { fontSize: 14, fontWeight: "900", color: "#1a1a2e", letterSpacing: 1, textAlign: "center", marginTop: 2 },
+  address:         { fontSize: 9, color: "#777", textAlign: "center", lineHeight: 13, marginTop: 2 },
+  emergencyRow:    { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 8 },
+  emergencyLabel:  { fontSize: 10, color: Colors.danger, fontWeight: "600", letterSpacing: 0.3 },
+  phone:           { fontSize: 16, fontWeight: "800", color: "#1a1a2e", letterSpacing: 1 },
+
+  /* Footer */
+  cardFooter: { flexDirection: "row", height: 8 },
+  footerBar:  { flex: 1 },
+
+  /* Add/Change Photo button */
+  photoBtn:     { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: Colors.surface, borderRadius: 12, paddingVertical: 14, paddingHorizontal: 24, borderWidth: 1, borderColor: Colors.border, width: "100%", maxWidth: 340, justifyContent: "center" },
+  photoBtnText: { fontSize: 15, fontWeight: "600", color: Colors.primary },
 });
