@@ -571,8 +571,8 @@ export default function AdminDepositionsScreen() {
     finally { setDownloading(false); }
   };
 
-  return (
-    <>
+return (
+    <View style={{ flex: 1 }}>
       <View style={[scr.root, { paddingTop: Platform.OS === "web" ? 67 : 0 }]}>
         <View style={scr.actionBar}>
           <Pressable style={scr.actionBtn} onPress={() => setImportVisible(true)}>
@@ -697,12 +697,12 @@ export default function AdminDepositionsScreen() {
         agents={agents}
       />
 
-      <ImportModal
+     <ImportModal
         visible={importVisible}
         onClose={() => setImportVisible(false)}
         onImported={() => refetch()}
       />
-    </>
+    </View>
   );
 }
 
