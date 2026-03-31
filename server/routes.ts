@@ -1197,8 +1197,7 @@ app.get("/api/today-ptp", requireAuth, async (req, res) => {
 
   app.get("/api/admin/fos-depositions", requireAdmin, async (req, res) => {
     try {
-      const result = await storage.query(`SELECT fd.*, fa.name AS agent_name, fa.id AS fos_id FROM fos_depositions fd LEFT JOIN fos_agents fa ON fa.id=fd.agent_id WHERE fd.payment_method='pending' OR fd.deposition_date=CURRENT_DATE ORDER BY fd.deposition_date DESC, fa.name, fd.created_at DESC`);
-      const grouped: Record<string, any> = {};
+const result = await storage.query(`SELECT fd.*, fa.name AS agent_name, fa.id AS fos_id FROM fos_depositions fd LEFT JOIN fos_agents fa ON fa.id=fd.agent_id WHERE DATE_TRUNC('month', fd.deposition_date) = DATE_TRUNC('month', CURRENT_DATE) ORDER BY fd.deposition_date DESC, fa.name, fd.created_at DESC`);      const grouped: Record<string, any> = {};
       for (const row of result.rows) {
         const key = String(row.fos_id || row.agent_name || "unknown");
         if (!grouped[key]) grouped[key] = { agentId: row.fos_id, agentName: row.agent_name, depositions: [], totalCash: 0, totalOnline: 0, totalAmount: 0 };
@@ -1259,58 +1258,110 @@ app.get("/api/today-ptp", requireAuth, async (req, res) => {
   });
   app.get("/api/fos-depositions", requireAuth, async (req, res) => {
     try {
-      const result = await storage.query(`SELECT * FROM fos_depositions WHERE agent_id=$1 AND (payment_method='pending' OR deposition_date=CURRENT_DATE) ORDER BY deposition_date DESC, created_at DESC`, [req.session.agentId!]);
+    const result = await storage.query(`SELECT * FROM fos_depositions WHERE agent_id=$1 AND DATE_TRUNC('month', deposition_date) = DATE_TRUNC('month', CURRENT_DATE) ORDER BY deposition_date DESC, created_at DESC`, [req.session.agentId!]);
       res.json({ depositions: result.rows });
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
-  app.post("/api/fos-depositions/:id/pay-cash", requireAuth, async (req, res) => {
+ app.post("/api/fos-depositions/:id/pay-cash", requireAuth, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const agentId = req.session.agentId!;
+    const { cashAmount } = req.body;
+    if (!cashAmount || isNaN(parseFloat(cashAmount))) return res.status(400).json({ message: "Valid cash amount required" });
+
+    const cashAmt = parseFloat(cashAmount);
+    const depRow  = await storage.query(
+      `SELECT amount, cash_amount, online_amount FROM fos_depositions WHERE id=$1 AND agent_id=$2`,
+      [id, agentId]
+    );
+    if (!depRow.rows[0]) return res.status(404).json({ message: "Deposition not found" });
+
+    const totalAssigned  = parseFloat(depRow.rows[0].amount        || 0);
+    const existingCash   = parseFloat(depRow.rows[0].cash_amount   || 0);
+    const existingOnline = parseFloat(depRow.rows[0].online_amount || 0);
+
+    const newCashTotal  = existingCash + cashAmt;
+    const totalPaidNow  = newCashTotal + existingOnline;
+    const fullyPaid     = Math.round(totalPaidNow) >= Math.round(totalAssigned);
+    const paymentMethod = existingOnline > 0 ? "both" : "cash";
+    const finalMethod   = fullyPaid ? paymentMethod : "pending";
+
+    await storage.query(
+      `UPDATE fos_depositions SET payment_method=$1, cash_amount=$2, updated_at=NOW() WHERE id=$3 AND agent_id=$4`,
+      [finalMethod, newCashTotal, id, agentId]
+    );
+
     try {
-      const id = Number(req.params.id); const agentId = req.session.agentId!; const { cashAmount } = req.body;
-      if (!cashAmount || isNaN(parseFloat(cashAmount))) return res.status(400).json({ message: "Valid cash amount required" });
-      const cashAmt = parseFloat(cashAmount);
-      await storage.query(`UPDATE fos_depositions SET payment_method='cash',cash_amount=$1,amount=GREATEST(amount,$1),updated_at=NOW() WHERE id=$2 AND agent_id=$3`, [cashAmt, id, agentId]);
-      try {
-        const depRow = await storage.query(`SELECT fd.amount, fa.name FROM fos_depositions fd JOIN fos_agents fa ON fa.id=fd.agent_id WHERE fd.id=$1`, [id]);
-        const dep = depRow.rows[0];
-        const adminRows = await storage.query(`SELECT push_token FROM fos_agents WHERE role='admin' AND push_token IS NOT NULL AND push_token<>''`);
-        for (const admin of adminRows.rows) await sendPush(admin.push_token, "💵 Cash Payment Marked", `${dep?.name || "FOS"} marked ₹${cashAmt.toLocaleString("en-IN")} as cash.`, { type: "fos_dep_cash" });
-      } catch {}
-      res.json({ success: true });
-    } catch (e: any) { res.status(500).json({ message: e.message }); }
-  });
+      const agentNameRow = await storage.query(`SELECT name FROM fos_agents WHERE id=$1`, [agentId]);
+      const adminRows    = await storage.query(`SELECT push_token FROM fos_agents WHERE role='admin' AND push_token IS NOT NULL AND push_token<>''`);
+      for (const admin of adminRows.rows) {
+        await sendPush(
+          admin.push_token,
+          fullyPaid ? "💵 Cash Payment Complete" : "💵 Partial Cash Payment",
+          `${agentNameRow.rows[0]?.name || "FOS"} paid ₹${cashAmt.toLocaleString("en-IN")} cash${fullyPaid ? "" : ` (₹${(totalAssigned - totalPaidNow).toLocaleString("en-IN")} still pending)`}.`,
+          { type: "fos_dep_cash" }
+        );
+      }
+    } catch {}
+
+    res.json({ success: true, amountApplied: cashAmt, remaining: Math.max(0, totalAssigned - totalPaidNow) });
+  } catch (e: any) { res.status(500).json({ message: e.message }); }
+});
 app.post("/api/fos-depositions/:id/pay-online", requireAuth, screenshotUpload.single("screenshot"), async (req, res) => {
   try {
-    const id = Number(req.params.id); 
+    const id = Number(req.params.id);
     const agentId = req.session.agentId!;
-    
+
     if (!req.file) return res.status(400).json({ message: "No screenshot uploaded" });
 
-    const filename = req.file.filename;  // multer already saved it
+    const requestedOnline = parseFloat(req.body.onlineAmount || "0");
+    const filename = req.file.filename;
     const baseUrl = process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : "";
     const screenshotUrl = `${baseUrl}/uploads/screenshots/${filename}`;
 
     const depRow = await storage.query(
-      `SELECT amount FROM fos_depositions WHERE id=$1 AND agent_id=$2`, 
+      `SELECT amount, cash_amount, online_amount FROM fos_depositions WHERE id=$1 AND agent_id=$2`,
       [id, agentId]
     );
     if (!depRow.rows[0]) {
-      fs.unlinkSync(req.file.path); // cleanup
+      fs.unlinkSync(req.file.path);
       return res.status(404).json({ message: "Deposition not found" });
     }
 
-    const expectedAmt = parseFloat(depRow.rows[0].amount || 0);
+    const totalAssigned  = parseFloat(depRow.rows[0].amount        || 0);
+    const existingCash   = parseFloat(depRow.rows[0].cash_amount   || 0);
+    const existingOnline = parseFloat(depRow.rows[0].online_amount || 0);
+
+    // Use the requested amount; fall back to the full remaining balance
+    const newOnlineAmt  = requestedOnline > 0
+      ? requestedOnline
+      : Math.max(0, totalAssigned - existingCash - existingOnline);
+    const totalOnlineNow = existingOnline + newOnlineAmt;
+    const totalPaidNow   = existingCash + totalOnlineNow;
+    const fullyPaid      = Math.round(totalPaidNow) >= Math.round(totalAssigned);
+
+    // Method: if any cash already exists it becomes "both"; otherwise "online"
+    const paymentMethod  = existingCash > 0 ? "both" : "online";
+    // Only flip away from "pending" once fully paid; keep "pending" for partial payments
+    const finalMethod    = fullyPaid ? paymentMethod : "pending";
+
     await storage.query(
-      `UPDATE fos_depositions SET payment_method='online', online_amount=$1, screenshot_url=$2, updated_at=NOW() WHERE id=$3 AND agent_id=$4`,
-      [expectedAmt, screenshotUrl, id, agentId]
+      `UPDATE fos_depositions SET payment_method=$1, online_amount=$2, screenshot_url=$3, updated_at=NOW() WHERE id=$4 AND agent_id=$5`,
+      [finalMethod, totalOnlineNow, screenshotUrl, id, agentId]
     );
 
     const adminRows = await storage.query(`SELECT push_token FROM fos_agents WHERE role='admin' AND push_token IS NOT NULL AND push_token<>''`);
-    const agentRow = await storage.query(`SELECT name FROM fos_agents WHERE id=$1`, [agentId]);
+    const agentRow  = await storage.query(`SELECT name FROM fos_agents WHERE id=$1`, [agentId]);
     for (const admin of adminRows.rows) {
-      await sendPush(admin.push_token, "📸 Screenshot Uploaded", `${agentRow.rows[0]?.name || "FOS"} uploaded payment of ₹${expectedAmt.toLocaleString("en-IN")}.`, { type: "fos_dep_screenshot" });
+      await sendPush(
+        admin.push_token,
+        fullyPaid ? "📸 Online Payment Complete" : "📸 Partial Online Payment",
+        `${agentRow.rows[0]?.name || "FOS"} paid ₹${newOnlineAmt.toLocaleString("en-IN")} online${fullyPaid ? "" : ` (₹${(totalAssigned - totalPaidNow).toLocaleString("en-IN")} still pending)`}.`,
+        { type: "fos_dep_screenshot" }
+      );
     }
 
-    res.json({ success: true, screenshotUrl });
+    res.json({ success: true, screenshotUrl, amountApplied: newOnlineAmt, remaining: Math.max(0, totalAssigned - totalPaidNow) });
   } catch (e: any) { res.status(500).json({ message: e.message }); }
 });
  // AFTER
