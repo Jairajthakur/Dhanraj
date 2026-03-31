@@ -44,46 +44,79 @@ async function payCash(depositId: number, cashAmount: number): Promise<void> {
 }
 
 async function payOnline(depositId: number, uri: string): Promise<void> {
-  const form = new FormData();
-  const ext = uri.split('.').pop()?.toLowerCase() || 'jpg';
-  const mimeType = ext === 'png' ? 'image/png' : 'image/jpeg';
-  const cleanUri = Platform.OS === 'android' ? uri : uri.replace('file://', '');
-  form.append("screenshot", {
-    uri: cleanUri,
-    name: `dep_${depositId}.${ext}`,
-    type: mimeType,
-  } as any);
   const base = getApiUrl();
   const token = Platform.OS !== "web" ? await tokenStore.get() : null;
-  const headers: Record<string, string> = {};
-  if (token) headers["Authorization"] = `Bearer ${token}`;
-  const res = await fetch(`${base}/api/fos-depositions/${depositId}/pay-online`, {
-    method: "POST", body: form, credentials: "include",
-    headers: Object.keys(headers).length > 0 ? headers : undefined,
+
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `${base}/api/fos-depositions/${depositId}/pay-online`);
+    if (token) xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+    xhr.withCredentials = true;
+
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve();
+      } else {
+        try {
+          const json = JSON.parse(xhr.responseText);
+          reject(new Error(json.message || `HTTP ${xhr.status}`));
+        } catch {
+          reject(new Error(`HTTP ${xhr.status}`));
+        }
+      }
+    };
+    xhr.onerror = () => reject(new Error("Network error"));
+
+    const form = new FormData();
+    const ext = uri.split('.').pop()?.toLowerCase() || 'jpg';
+    const mimeType = ext === 'png' ? 'image/png' : 'image/jpeg';
+    form.append("screenshot", {
+      uri,
+      name: `dep_${depositId}.${ext}`,
+      type: mimeType,
+    } as any);
+
+    xhr.send(form);
   });
-  if (!res.ok) {
-    const json = await res.json().catch(() => ({})) as any;
-    throw new Error(json.message || "Upload failed");
-  }
 }
 
 async function payBoth(depositId: number, cashAmount: number, onlineAmount: number, screenshotUri: string): Promise<void> {
-  const form = new FormData();
-  form.append("cashAmount", String(cashAmount));
-  form.append("onlineAmount", String(onlineAmount));
-  const ext = screenshotUri.split('.').pop()?.toLowerCase() || 'jpg';
-  const mimeType = ext === 'png' ? 'image/png' : 'image/jpeg';
-  const cleanUri = Platform.OS === 'android' ? screenshotUri : screenshotUri.replace('file://', '');
-  form.append("screenshot", { uri: cleanUri, name: `dep_${depositId}_both.${ext}`, type: mimeType } as any);
   const base = getApiUrl();
   const token = Platform.OS !== "web" ? await tokenStore.get() : null;
-  const headers: Record<string, string> = {};
-  if (token) headers["Authorization"] = `Bearer ${token}`;
-  const res = await fetch(`${base}/api/fos-depositions/${depositId}/pay-both`, {
-    method: "PUT", body: form, credentials: "include",
-    headers: Object.keys(headers).length > 0 ? headers : undefined,
+
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("PUT", `${base}/api/fos-depositions/${depositId}/pay-both`);
+    if (token) xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+    xhr.withCredentials = true;
+
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve();
+      } else {
+        try {
+          const json = JSON.parse(xhr.responseText);
+          reject(new Error(json.message || `HTTP ${xhr.status}`));
+        } catch {
+          reject(new Error(`HTTP ${xhr.status}`));
+        }
+      }
+    };
+    xhr.onerror = () => reject(new Error("Network error"));
+
+    const form = new FormData();
+    form.append("cashAmount", String(cashAmount));
+    form.append("onlineAmount", String(onlineAmount));
+    const ext = screenshotUri.split('.').pop()?.toLowerCase() || 'jpg';
+    const mimeType = ext === 'png' ? 'image/png' : 'image/jpeg';
+    form.append("screenshot", {
+      uri: screenshotUri,
+      name: `dep_${depositId}_both.${ext}`,
+      type: mimeType,
+    } as any);
+
+    xhr.send(form);
   });
-  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).message || "Failed");
 }
 
 // ─── Bulk Payment Sheet ───────────────────────────────────────────────────────
