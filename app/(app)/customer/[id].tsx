@@ -14,6 +14,17 @@ function fmt(v: any, prefix = "") {
   return String(v);
 }
 
+// ✅ NEW: strips T00:00:00.000Z and formats as DD-MM-YYYY
+function fmtDate(val: any): string {
+  if (!val) return "—";
+  const s = String(val).slice(0, 10); // "2023-07-08"
+  const parts = s.split("-");
+  if (parts.length === 3 && parts[0].length === 4) {
+    return `${parts[2]}-${parts[1]}-${parts[0]}`; // "08-07-2023"
+  }
+  return s;
+}
+
 function Row({ label, value, highlight, phone }: { label: string; value?: any; highlight?: string; phone?: boolean }) {
   const d = value !== null && value !== undefined && value !== "" ? String(value) : "—";
   return (
@@ -44,7 +55,6 @@ export default function CustomerDetailScreen() {
   const router = useRouter();
 
   const [c, setC] = useState<any>(() => {
-    // Initialize immediately from caseStore
     const cached = caseStore.get();
     if (cached && String(cached.id) === String(id)) return cached;
     return null;
@@ -53,12 +63,8 @@ export default function CustomerDetailScreen() {
   const [error, setError] = useState(false);
 
   useEffect(() => {
-    // If we already have data from caseStore, no need to fetch
     if (c) return;
-
-    // Fallback: fetch from API (web direct URL, or caseStore miss)
     if (!id) { setLoading(false); return; }
-
     setLoading(true);
     api.getCaseById(Number(id))
       .then((res) => {
@@ -113,43 +119,48 @@ export default function CustomerDetailScreen() {
       </View>
 
       <Sec title="Loan Details">
-        <Row label="LOAN NO" value={c.loan_no} />
-        <Row label="APP ID" value={c.app_id} />
-        <Row label="BKT" value={c.bkt} highlight={Colors.primary} />
-        <Row label="PRO" value={c.pro} />
-        <Row label="TENOR" value={c.tenor ? `${c.tenor} months` : null} />
-        <Row label="FOS NAME" value={c.fos_name} />
+        <Row label="LOAN NO"   value={c.loan_no} />
+        <Row label="APP ID"    value={c.app_id} />
+        <Row label="BKT"       value={c.bkt} highlight={Colors.primary} />
+        <Row label="PRO"       value={c.pro} />
+        <Row label="TENOR"     value={c.tenor ? `${c.tenor} months` : null} />
+        <Row label="FOS NAME"  value={c.fos_name} />
       </Sec>
 
       <Sec title="Customer Info">
         <Row label="CUSTOMER NAME" value={c.customer_name} />
-        <Row label="NUMBER" value={c.mobile_no} phone />
-        <Row label="ADDRESS" value={c.address} />
+        <Row label="NUMBER"        value={c.mobile_no} phone />
+        <Row label="ADDRESS"       value={c.address} />
       </Sec>
 
       <Sec title="Payment Details">
         <Row label="EMI AMOUNT" value={fmt(c.emi_amount, "₹")} />
-        <Row label="EMI DUE" value={fmt(c.emi_due, "₹")} highlight={Colors.danger} />
-        <Row label="POS" value={fmt(c.pos, "₹")} />
-        <Row label="CBC" value={fmt(c.cbc, "₹")} />
-        <Row label="LPP" value={fmt(c.lpp, "₹")} />
-        <Row label="CBC + LPP" value={fmt(c.cbc_lpp, "₹")} highlight={Colors.warning} />
-        <Row label="ROLLBACK" value={fmt(c.rollback, "₹")} />
-        <Row label="CLEARANCE" value={fmt(c.clearance, "₹")} highlight={Colors.success} />
+        <Row label="EMI DUE"    value={fmt(c.emi_due,    "₹")} highlight={Colors.danger} />
+        <Row label="POS"        value={fmt(c.pos,        "₹")} />
+        <Row label="CBC"        value={fmt(c.cbc,        "₹")} />
+        <Row label="LPP"        value={fmt(c.lpp,        "₹")} />
+        <Row label="CBC + LPP"  value={fmt(c.cbc_lpp,   "₹")} highlight={Colors.warning} />
+        <Row label="ROLLBACK"   value={fmt(c.rollback,   "₹")} />
+        <Row label="CLEARANCE"  value={fmt(c.clearance,  "₹")} highlight={Colors.success} />
       </Sec>
 
+      {/* ✅ FIXED: dates now show DD-MM-YYYY instead of full ISO string */}
       <Sec title="Important Dates">
-        <Row label="FIRST EMI DUE DATE" value={c.first_emi_due_date} />
-        <Row label="LOAN MATURITY DATE" value={c.loan_maturity_date} />
-        {c.ptp_date ? <Row label="PTP DATE" value={String(c.ptp_date).slice(0, 10)} highlight={Colors.statusPTP} /> : null}
-        {c.telecaller_ptp_date ? <Row label="TELECALLER PTP" value={String(c.telecaller_ptp_date).slice(0, 10)} highlight={Colors.info} /> : null}
+        <Row label="FIRST EMI DUE DATE" value={fmtDate(c.first_emi_due_date)} />
+        <Row label="LOAN MATURITY DATE" value={fmtDate(c.loan_maturity_date)} />
+        {c.ptp_date
+          ? <Row label="PTP DATE"      value={fmtDate(c.ptp_date)}            highlight={Colors.statusPTP} />
+          : null}
+        {c.telecaller_ptp_date
+          ? <Row label="TELECALLER PTP" value={fmtDate(c.telecaller_ptp_date)} highlight={Colors.info} />
+          : null}
       </Sec>
 
       <Sec title="Asset Details">
-        <Row label="ASSET MAKE" value={c.asset_make} />
-        <Row label="REGISTRATION NO" value={c.registration_no} />
-        <Row label="ENGINE NO" value={c.engine_no} />
-        <Row label="CHASSIS NO" value={c.chassis_no} />
+        <Row label="ASSET MAKE"       value={c.asset_make} />
+        <Row label="REGISTRATION NO"  value={c.registration_no} />
+        <Row label="ENGINE NO"        value={c.engine_no} />
+        <Row label="CHASSIS NO"       value={c.chassis_no} />
       </Sec>
 
       <Sec title="References">
@@ -171,10 +182,10 @@ export default function CustomerDetailScreen() {
 
 const S = StyleSheet.create({
   banner: { flexDirection: "row", alignItems: "center", gap: 10, padding: 12, borderRadius: 12, borderWidth: 1 },
-  fb: { marginLeft: "auto", backgroundColor: "rgba(0,0,0,0.07)", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 3 },
-  sec: { backgroundColor: Colors.surface, borderRadius: 12, overflow: "hidden", borderWidth: 1, borderColor: Colors.border },
-  secT: { fontSize: 11, fontWeight: "700", color: Colors.textSecondary, textTransform: "uppercase", letterSpacing: 0.8, paddingHorizontal: 14, paddingVertical: 8, backgroundColor: Colors.surfaceAlt, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: Colors.border },
-  row: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: 14, paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: Colors.border },
-  rl: { fontSize: 12, color: Colors.textSecondary, fontWeight: "600", flex: 1 },
-  rv: { fontSize: 13, color: Colors.text, fontWeight: "500", flex: 1.5, textAlign: "right" },
+  fb:     { marginLeft: "auto", backgroundColor: "rgba(0,0,0,0.07)", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 3 },
+  sec:    { backgroundColor: Colors.surface, borderRadius: 12, overflow: "hidden", borderWidth: 1, borderColor: Colors.border },
+  secT:   { fontSize: 11, fontWeight: "700", color: Colors.textSecondary, textTransform: "uppercase", letterSpacing: 0.8, paddingHorizontal: 14, paddingVertical: 8, backgroundColor: Colors.surfaceAlt, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: Colors.border },
+  row:    { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: 14, paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: Colors.border },
+  rl:     { fontSize: 12, color: Colors.textSecondary, fontWeight: "600", flex: 1 },
+  rv:     { fontSize: 13, color: Colors.text, fontWeight: "500", flex: 1.5, textAlign: "right" },
 });
