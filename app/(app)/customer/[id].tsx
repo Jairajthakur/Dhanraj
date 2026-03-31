@@ -98,10 +98,14 @@ export default function CustomerDetailScreen() {
     .map((p: string) => p.trim())
     .filter(Boolean);
 
-// ── Extra numbers added by agent ──
-const [extraNumbers, setExtraNumbers] = useState<string[]>([]);
+// At the top, get caseType from item (or pass it when navigating)
+const caseType = (item as any).case_type === "bkt" ? "bkt" : "loan";
+
+// Replace useState declarations
+const [extraNumbers, setExtraNumbers] = useState<string[]>((item as any).extra_numbers ?? []);
 const [newNumberInput, setNewNumberInput] = useState("");
 const [showAddNumber, setShowAddNumber] = useState(false);
+const [saving, setSaving] = useState(false);
   
   return (
     <ScrollView
@@ -197,14 +201,25 @@ const [showAddNumber, setShowAddNumber] = useState(false);
 {/* ── Add New Number ── */}
 <SectionCard title="Additional Numbers" icon="phone-portrait-outline">
   {extraNumbers.map((num, i) => (
-    <View key={i} style={styles.row}>
-      <Text style={styles.rowLabel}>Number {phones.length + i + 1}</Text>
+  <View key={i} style={[styles.row, { alignItems: "center" }]}>
+    <Text style={styles.rowLabel}>Number {phones.length + i + 1}</Text>
+    <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
       <Pressable onPress={() => call(num)} style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
         <Ionicons name="call" size={14} color={Colors.primary} />
         <Text style={[styles.rowValue, { color: Colors.primary }]}>{num}</Text>
       </Pressable>
+      <Pressable onPress={async () => {
+        try {
+          const { apiRequest } = await import("@/lib/queryClient");
+          await apiRequest("DELETE", `/api/cases/${item.id}/extra-numbers`, { number: num, table: caseType });
+          setExtraNumbers(prev => prev.filter(n => n !== num));
+        } catch { Alert.alert("Failed to remove"); }
+      }}>
+        <Ionicons name="trash-outline" size={14} color={Colors.danger} />
+      </Pressable>
     </View>
-  ))}
+  </View>
+))}
 
   {showAddNumber ? (
     <View style={{ padding: 12, gap: 8 }}>
@@ -236,14 +251,26 @@ const [showAddNumber, setShowAddNumber] = useState(false);
             flex: 2, paddingVertical: 10, borderRadius: 10,
             backgroundColor: Colors.primary, alignItems: "center",
           }}
-          onPress={() => {
-            const trimmed = newNumberInput.trim();
-            if (!trimmed) { Alert.alert("Enter a valid number"); return; }
-            setExtraNumbers(prev => [...prev, trimmed]);
-            setNewNumberInput("");
-            setShowAddNumber(false);
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-          }}
+          onPress={async () => {
+  const trimmed = newNumberInput.trim();
+  if (!trimmed) { Alert.alert("Enter a valid number"); return; }
+  setSaving(true);
+  try {
+    const { apiRequest } = await import("@/lib/queryClient"); // or however you call API
+    await apiRequest("POST", `/api/cases/${item.id}/extra-numbers`, {
+      number: trimmed,
+      table: caseType,
+    });
+    setExtraNumbers(prev => [...prev, trimmed]);
+    setNewNumberInput("");
+    setShowAddNumber(false);
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+  } catch (e) {
+    Alert.alert("Failed to save number");
+  } finally {
+    setSaving(false);
+  }
+}}
         >
           <Text style={{ color: "#fff", fontWeight: "700" }}>Save Number</Text>
         </Pressable>
