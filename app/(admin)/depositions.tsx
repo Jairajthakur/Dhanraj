@@ -436,24 +436,42 @@ function FosDetailModal({ visible, agentId, agentName, onClose, onUpdated }: any
       />
 
       {/* ✅ Full-screen screenshot viewer */}
-      <Modal visible={!!screenshotUrl} transparent animationType="fade" onRequestClose={() => setScreenshotUrl(null)}>
-        <Pressable
-          style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.95)", justifyContent: "center", alignItems: "center" }}
-          onPress={() => setScreenshotUrl(null)}
-        >
-          <Image
-            source={{ uri: screenshotUrl! }}
-            style={{ width: "95%", height: "80%", borderRadius: 12 }}
-            resizeMode="contain"
-          />
-          <Pressable
-            style={{ marginTop: 20, backgroundColor: "rgba(255,255,255,0.15)", paddingHorizontal: 28, paddingVertical: 12, borderRadius: 20 }}
-            onPress={() => setScreenshotUrl(null)}
-          >
-            <Text style={{ color: "#fff", fontWeight: "700", fontSize: 15 }}>Close</Text>
-          </Pressable>
-        </Pressable>
-      </Modal>
+      {/* Full-screen screenshot viewer */}
+<Modal
+  visible={!!screenshotUrl}
+  transparent
+  animationType="fade"
+  onRequestClose={() => setScreenshotUrl(null)}
+>
+  <View
+    style={{
+      flex: 1,
+      backgroundColor: "rgba(0,0,0,0.92)",
+      justifyContent: "center",
+      alignItems: "center",
+    }}
+  >
+    {screenshotUrl && (
+      <Image
+        source={{ uri: screenshotUrl }}
+        style={{ width: "95%", height: "80%", borderRadius: 12 }}
+        resizeMode="contain"
+      />
+    )}
+    <Pressable
+      style={{
+        marginTop: 20,
+        backgroundColor: "rgba(255,255,255,0.2)",
+        paddingHorizontal: 28,
+        paddingVertical: 12,
+        borderRadius: 20,
+      }}
+      onPress={() => setScreenshotUrl(null)}
+    >
+      <Text style={{ color: "#fff", fontWeight: "700", fontSize: 15 }}>Close</Text>
+    </Pressable>
+  </View>
+</Modal>
     </>
   );
 }
