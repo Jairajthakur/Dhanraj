@@ -1278,54 +1278,52 @@ app.get("/api/today-ptp", requireAuth, async (req, res) => {
       res.json({ success: true });
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
-  app.post("/api/fos-depositions/:id/pay-online", requireAuth, screenshotUpload.single("screenshot"), async (req, res) => {
+  app.post("/api/fos-depositions/:id/pay-online", requireAuth, async (req, res) => {
   try {
     const id = Number(req.params.id); const agentId = req.session.agentId!;
-    console.log("[pay-online] content-type:", req.headers["content-type"]);
-    console.log("[pay-online] req.file:", JSON.stringify(req.file));
-    console.log("[pay-online] req.body keys:", Object.keys(req.body || {}));
-    if (!req.file) return res.status(400).json({ message: "No screenshot uploaded" });
-      const depRow = await storage.query(`SELECT amount FROM fos_depositions WHERE id=$1 AND agent_id=$2`, [id, agentId]);
-      if (!depRow.rows[0]) { fs.unlinkSync(req.file.path); return res.status(404).json({ message: "Deposition not found" }); }
-      const expectedAmt = parseFloat(depRow.rows[0].amount || 0);
-      const screenshotAmt = await extractAmountFromScreenshot(req.file.path);
-      if (screenshotAmt !== null && !amountMatches(expectedAmt, screenshotAmt)) {
-        try { fs.unlinkSync(req.file.path); } catch {}
-        return res.status(400).json({ message: `Screenshot ₹${screenshotAmt.toLocaleString("en-IN")} ≠ required ₹${expectedAmt.toLocaleString("en-IN")}`, screenshotAmount: screenshotAmt, expectedAmount: expectedAmt });
-      }
-      const baseUrl = process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : process.env.APP_URL || "";
-      const screenshotUrl = `${baseUrl}/uploads/screenshots/${req.file.filename}`;
-      await storage.query(`UPDATE fos_depositions SET payment_method='online',online_amount=$1,screenshot_url=$2,updated_at=NOW() WHERE id=$3 AND agent_id=$4`, [expectedAmt, screenshotUrl, id, agentId]);
-      const adminRows = await storage.query(`SELECT push_token FROM fos_agents WHERE role='admin' AND push_token IS NOT NULL AND push_token<>''`);
-      const agentRow = await storage.query(`SELECT name FROM fos_agents WHERE id=$1`, [agentId]);
-      for (const admin of adminRows.rows) await sendPush(admin.push_token, "📸 Screenshot Uploaded", `${agentRow.rows[0]?.name || "FOS"} uploaded payment of ₹${expectedAmt.toLocaleString("en-IN")}.`, { type: "fos_dep_screenshot" });
-      res.json({ success: true, screenshotUrl });
-    } catch (e: any) { res.status(500).json({ message: e.message }); }
+    const { screenshot, mimeType, ext } = req.body;
+    if (!screenshot) return res.status(400).json({ message: "No screenshot uploaded" });
+    
+    const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 9)}.${ext || 'jpg'}`;
+    const filePath = path.join(screenshotDir, filename);
+    fs.writeFileSync(filePath, Buffer.from(screenshot, "base64"));
+    
+    const depRow = await storage.query(`SELECT amount FROM fos_depositions WHERE id=$1 AND agent_id=$2`, [id, agentId]);
+    if (!depRow.rows[0]) { fs.unlinkSync(filePath); return res.status(404).json({ message: "Deposition not found" }); }
+    
+    const baseUrl = process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : "";
+    const screenshotUrl = `${baseUrl}/uploads/screenshots/${filename}`;
+    const expectedAmt = parseFloat(depRow.rows[0].amount || 0);
+    
+    await storage.query(`UPDATE fos_depositions SET payment_method='online',online_amount=$1,screenshot_url=$2,updated_at=NOW() WHERE id=$3 AND agent_id=$4`, [expectedAmt, screenshotUrl, id, agentId]);
+    const adminRows = await storage.query(`SELECT push_token FROM fos_agents WHERE role='admin' AND push_token IS NOT NULL AND push_token<>''`);
+    const agentRow = await storage.query(`SELECT name FROM fos_agents WHERE id=$1`, [agentId]);
+    for (const admin of adminRows.rows) await sendPush(admin.push_token, "📸 Screenshot Uploaded", `${agentRow.rows[0]?.name || "FOS"} uploaded payment of ₹${expectedAmt.toLocaleString("en-IN")}.`, { type: "fos_dep_screenshot" });
+    res.json({ success: true, screenshotUrl });
+  } catch (e: any) { res.status(500).json({ message: e.message }); }
+});
+  async function payBoth(depositId: number, cashAmount: number, onlineAmount: number, screenshotUri: string): Promise<void> {
+  const base = getApiUrl();
+  const token = Platform.OS !== "web" ? await tokenStore.get() : null;
+
+  const FileSystem = await import("expo-file-system/legacy");
+  const base64 = await FileSystem.readAsStringAsync(screenshotUri, {
+    encoding: FileSystem.EncodingType.Base64,
   });
-  app.put("/api/fos-depositions/:id/pay-both", requireAuth, screenshotUpload.single("screenshot"), async (req, res) => {
-    try {
-      const id = Number(req.params.id); const agentId = req.session.agentId!;
-      const cashAmt = parseFloat(req.body?.cashAmount || "0") || 0; const onlineAmt = parseFloat(req.body?.onlineAmount || "0") || 0;
-      if (cashAmt <= 0) return res.status(400).json({ message: "Cash amount must be > 0" });
-      if (onlineAmt <= 0) return res.status(400).json({ message: "Online amount must be > 0" });
-      if (req.file) {
-        const screenshotAmt = await extractAmountFromScreenshot(req.file.path);
-        if (screenshotAmt !== null && !amountMatches(onlineAmt, screenshotAmt)) {
-          try { fs.unlinkSync(req.file.path); } catch {}
-          return res.status(400).json({ message: `Screenshot ₹${screenshotAmt.toLocaleString("en-IN")} ≠ online ₹${onlineAmt.toLocaleString("en-IN")}`, screenshotAmount: screenshotAmt, expectedAmount: onlineAmt });
-        }
-      }
-      let screenshotUrl: string | null = null;
-      if (req.file) { const baseUrl = process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : ""; screenshotUrl = `${baseUrl}/uploads/screenshots/${req.file.filename}`; }
-      await storage.query(`UPDATE fos_depositions SET payment_method='both',cash_amount=$1,online_amount=$2,amount=GREATEST(amount,$3),screenshot_url=COALESCE($4,screenshot_url),updated_at=NOW() WHERE id=$5 AND agent_id=$6`, [cashAmt, onlineAmt, cashAmt + onlineAmt, screenshotUrl, id, agentId]);
-      try {
-        const agentRow = await storage.query(`SELECT name FROM fos_agents WHERE id=$1`, [agentId]);
-        const adminRows = await storage.query(`SELECT push_token FROM fos_agents WHERE role='admin' AND push_token IS NOT NULL AND push_token<>''`);
-        for (const admin of adminRows.rows) await sendPush(admin.push_token, "🔀 Split Payment", `${agentRow.rows[0]?.name || "FOS"} paid ₹${cashAmt.toLocaleString("en-IN")} cash + ₹${onlineAmt.toLocaleString("en-IN")} online.`, { type: "fos_dep_both" });
-      } catch {}
-      res.json({ success: true, screenshotUrl });
-    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  const ext = screenshotUri.split('.').pop()?.toLowerCase() || 'jpg';
+  const mimeType = ext === 'png' ? 'image/png' : 'image/jpeg';
+
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+
+  const res = await fetch(`${base}/api/fos-depositions/${depositId}/pay-both`, {
+    method: "PUT",
+    body: JSON.stringify({ cashAmount, onlineAmount, screenshot: base64, mimeType, ext }),
+    credentials: "include",
+    headers,
   });
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).message || "Failed");
+}
 
   app.get("/api/admin/fos-depositions-export", requireAdmin, async (req, res) => {
     try {
