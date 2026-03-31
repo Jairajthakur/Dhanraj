@@ -46,71 +46,71 @@ async function payCash(depositId: number, cashAmount: number): Promise<void> {
 async function payOnline(depositId: number, uri: string): Promise<void> {
   const base = getApiUrl();
   const token = Platform.OS !== "web" ? await tokenStore.get() : null;
-
-  // Read file as base64 and convert to Blob
-  const FileSystem = await import("expo-file-system/legacy");
-  const base64 = await FileSystem.readAsStringAsync(uri, {
-    encoding: FileSystem.EncodingType.Base64,
-  });
-  const ext = uri.split('.').pop()?.toLowerCase() || 'jpg';
-  const mimeType = ext === 'png' ? 'image/png' : 'image/jpeg';
-  const byteChars = atob(base64);
-  const byteArray = new Uint8Array(byteChars.length);
-  for (let i = 0; i < byteChars.length; i++) {
-    byteArray[i] = byteChars.charCodeAt(i);
-  }
-  const blob = new Blob([byteArray], { type: mimeType });
-
+ 
+  const ext = uri.split(".").pop()?.toLowerCase() || "jpg";
+  const mimeType = ext === "png" ? "image/png" : "image/jpeg";
+ 
   const form = new FormData();
-  form.append("screenshot", blob, `dep_${depositId}.${ext}`);
-
+  // ✅ React Native FormData accepts { uri, type, name } — no Blob/ArrayBuffer needed
+  form.append("screenshot", {
+    uri,
+    type: mimeType,
+    name: `dep_${depositId}.${ext}`,
+  } as any);
+ 
   const headers: Record<string, string> = {};
   if (token) headers["Authorization"] = `Bearer ${token}`;
-
+ 
   const res = await fetch(`${base}/api/fos-depositions/${depositId}/pay-online`, {
     method: "POST",
     body: form,
     credentials: "include",
     headers: Object.keys(headers).length > 0 ? headers : undefined,
   });
+ 
   if (!res.ok) {
     const json = await res.json().catch(() => ({})) as any;
     throw new Error(json.message || "Upload failed");
   }
 }
-async function payBoth(depositId: number, cashAmount: number, onlineAmount: number, screenshotUri: string): Promise<void> {
+ 
+async function payBoth(
+  depositId: number,
+  cashAmount: number,
+  onlineAmount: number,
+  screenshotUri: string
+): Promise<void> {
   const base = getApiUrl();
   const token = Platform.OS !== "web" ? await tokenStore.get() : null;
-
-  const FileSystem = await import("expo-file-system/legacy");
-  const base64 = await FileSystem.readAsStringAsync(screenshotUri, {
-    encoding: FileSystem.EncodingType.Base64,
-  });
-  const ext = screenshotUri.split('.').pop()?.toLowerCase() || 'jpg';
-  const mimeType = ext === 'png' ? 'image/png' : 'image/jpeg';
-  const byteChars = atob(base64);
-  const byteArray = new Uint8Array(byteChars.length);
-  for (let i = 0; i < byteChars.length; i++) {
-    byteArray[i] = byteChars.charCodeAt(i);
-  }
-  const blob = new Blob([byteArray], { type: mimeType });
-
+ 
+  const ext = screenshotUri.split(".").pop()?.toLowerCase() || "jpg";
+  const mimeType = ext === "png" ? "image/png" : "image/jpeg";
+ 
   const form = new FormData();
-  form.append("cashAmount", String(cashAmount));
+  form.append("cashAmount",   String(cashAmount));
   form.append("onlineAmount", String(onlineAmount));
-  form.append("screenshot", blob, `dep_${depositId}_both.${ext}`);
-
+  // ✅ React Native FormData accepts { uri, type, name } — no Blob/ArrayBuffer needed
+  form.append("screenshot", {
+    uri:  screenshotUri,
+    type: mimeType,
+    name: `dep_${depositId}_both.${ext}`,
+  } as any);
+ 
   const headers: Record<string, string> = {};
   if (token) headers["Authorization"] = `Bearer ${token}`;
-
+ 
   const res = await fetch(`${base}/api/fos-depositions/${depositId}/pay-both`, {
     method: "PUT",
     body: form,
     credentials: "include",
     headers: Object.keys(headers).length > 0 ? headers : undefined,
   });
-  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).message || "Failed");
+ 
+  if (!res.ok) {
+    throw new Error((await res.json().catch(() => ({}))).message || "Failed");
+  }
 }
+ 
 
 // ─── Bulk Payment Sheet ───────────────────────────────────────────────────────
 type PayMode = "select" | "cash" | "online" | "both";
