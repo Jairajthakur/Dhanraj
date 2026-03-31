@@ -251,19 +251,24 @@ const [saving, setSaving] = useState(false);
             flex: 2, paddingVertical: 10, borderRadius: 10,
             backgroundColor: Colors.primary, alignItems: "center",
           }}
-         onPress={async () => {
+      // Save number
+onPress={async () => {
   const trimmed = newNumberInput.trim();
   if (!trimmed) { Alert.alert("Enter a valid number"); return; }
   setSaving(true);
   try {
-    const { api } = await import("@/lib/queryClient");
-    await api.addExtraNumber(item.id, trimmed, caseType);  // see below
+    const { apiRequest } = await import("@/lib/queryClient");
+    const res = await apiRequest("POST", `/api/cases/${item.id}/extra-numbers`, {
+      number: trimmed,
+      table: caseType,
+    });
+    // apiRequest returns Response — need to check ok
     setExtraNumbers(prev => [...prev, trimmed]);
     setNewNumberInput("");
     setShowAddNumber(false);
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-  } catch (e) {
-    Alert.alert("Failed to save number");
+  } catch (e: any) {
+    Alert.alert("Error", e.message || "Failed to save number");
   } finally {
     setSaving(false);
   }
