@@ -45,7 +45,14 @@ async function payCash(depositId: number, cashAmount: number): Promise<void> {
 
 async function payOnline(depositId: number, uri: string): Promise<void> {
   const form = new FormData();
-  form.append("screenshot", { uri, name: `dep_${depositId}.jpg`, type: "image/jpeg" } as any);
+  const ext = uri.split('.').pop()?.toLowerCase() || 'jpg';
+  const mimeType = ext === 'png' ? 'image/png' : 'image/jpeg';
+  const cleanUri = Platform.OS === 'android' ? uri : uri.replace('file://', '');
+  form.append("screenshot", {
+    uri: cleanUri,
+    name: `dep_${depositId}.${ext}`,
+    type: mimeType,
+  } as any);
   const base = getApiUrl();
   const token = Platform.OS !== "web" ? await tokenStore.get() : null;
   const headers: Record<string, string> = {};
@@ -64,7 +71,10 @@ async function payBoth(depositId: number, cashAmount: number, onlineAmount: numb
   const form = new FormData();
   form.append("cashAmount", String(cashAmount));
   form.append("onlineAmount", String(onlineAmount));
-  form.append("screenshot", { uri: screenshotUri, name: `dep_${depositId}_both.jpg`, type: "image/jpeg" } as any);
+  const ext = screenshotUri.split('.').pop()?.toLowerCase() || 'jpg';
+  const mimeType = ext === 'png' ? 'image/png' : 'image/jpeg';
+  const cleanUri = Platform.OS === 'android' ? screenshotUri : screenshotUri.replace('file://', '');
+  form.append("screenshot", { uri: cleanUri, name: `dep_${depositId}_both.${ext}`, type: mimeType } as any);
   const base = getApiUrl();
   const token = Platform.OS !== "web" ? await tokenStore.get() : null;
   const headers: Record<string, string> = {};
