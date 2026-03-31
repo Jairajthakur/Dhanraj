@@ -245,6 +245,11 @@ export const api = {
 
   getTodayPtp: () => apiRequest("GET", "/api/today-ptp"),
 
+  addExtraNumber: (id: number, number: string, table: string) =>
+  apiRequest("POST", `/api/cases/${id}/extra-numbers`, { number, table }),
+
+  removeExtraNumber: (id: number, number: string, table: string) =>
+  apiRequest("DELETE", `/api/cases/${id}/extra-numbers`, { number, table }),
   // ── Attendance ────────────────────────────────────────────────────────────
   checkIn:  () => apiRequest("POST", "/api/attendance/checkin"),
   checkOut: () => apiRequest("POST", "/api/attendance/checkout"),
