@@ -1315,8 +1315,28 @@ app.put("/api/fos-depositions/:id/pay-both", requireAuth, screenshotUpload.singl
       for (const row of rawRows.slice(headerRowIdx + 1)) { const mapped: Record<string, any> = {}; for (const [colIdx, dbField] of Object.entries(colIdxMap)) { const val = row[Number(colIdx)]; mapped[dbField] = val !== undefined && val !== "" ? String(val).trim() : null; } if (mapped.fos_name && !isRepeatHeaderRow(mapped)) fosNamesInExcel.add(mapped.fos_name.toLowerCase().trim()); }
       const ptpLoanSave = await storage.query(`SELECT loan_no, ptp_date, telecaller_ptp_date FROM loan_cases WHERE status='PTP'`);
       const ptpLoanMap = new Map(ptpLoanSave.rows.map((r: any) => [r.loan_no, { ptpDate: r.ptp_date, telecallerPtpDate: r.telecaller_ptp_date }]));
-      await storage.query(`UPDATE depositions SET loan_case_id=NULL WHERE loan_case_id IS NOT NULL`);
-      await storage.deleteAllLoanCases();
+     await storage.query(`UPDATE depositions SET loan_case_id=NULL WHERE loan_case_id IS NOT NULL`);
+
+// Save extra numbers BEFORE wiping
+const savedExtras = await storage.query(
+  `SELECT loan_no, extra_numbers FROM loan_cases WHERE extra_numbers IS NOT NULL AND array_length(extra_numbers, 1) > 0`
+);
+const extrasMap = new Map<string, string[]>();
+for (const row of savedExtras.rows) {
+  if (row.extra_numbers?.length) extrasMap.set(row.loan_no, row.extra_numbers);
+}
+
+await storage.deleteAllLoanCases(); // single delete, after saving extras
+
+// ... all the import loop ...
+
+// Restore extra numbers AFTER importing
+for (const [loanNo, numbers] of extrasMap) {
+  await storage.query(
+    `UPDATE loan_cases SET extra_numbers = $1 WHERE loan_no = $2`,
+    [numbers, loanNo]
+  );
+}
       const existingFosAgents = await storage.query(`SELECT id, name FROM fos_agents WHERE role='fos'`);
       let agentsRemoved = 0;
       for (const agent of existingFosAgents.rows) { if (!fosNamesInExcel.has((agent.name || "").toLowerCase().trim())) { await safeDeleteAgent(agent.id, "import"); agentsRemoved++; } }
@@ -2431,6 +2451,17 @@ app.delete("/api/cases/:id/extra-numbers", requireAuth, async (req, res) => {
     res.json({ success: true });
   } catch (e: any) { res.status(500).json({ message: e.message }); }
 });
-  const httpServer = createServer(app);
-  return httpServer;
-}
+
+// ← ADD THIS RIGHT HERE
+app.delete("/api/admin/cases/:id/extra-numbers", requireAdmin, async (req, res) => {
+  try {
+    const { number, table } = req.body;
+    const caseId = Number(req.params.id);
+    const tbl = table === "bkt" ? "bkt_cases" : "loan_cases";
+    await storage.query(
+      `UPDATE ${tbl} SET extra_numbers = array_remove(extra_numbers, $1) WHERE id = $2`,
+      [number, caseId]
+    );
+    res.json({ success: true });
+  } catch (e: any) { res.status(500).json({ message: e.message }); }
+});
