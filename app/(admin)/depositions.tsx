@@ -332,16 +332,12 @@ function FosDetailModal({ visible, agentId, agentName, onClose, onUpdated }: any
               }
               renderItem={({ item }) => {
                 const color = payMethodColor(item.payment_method);
-                // ✅ FIXED: use resolveScreenshotUrl helper
                 const screenshotSrc = resolveScreenshotUrl(item.screenshot_url);
-
-                // ✅ NEW: compute collected vs total and remaining
                 const assignedAmt = parseFloat(item.amount || 0);
                 const collectedCash = parseFloat(item.cash_amount || 0);
                 const collectedOnline = parseFloat(item.online_amount || 0);
                 const totalCollected = collectedCash + collectedOnline;
                 const remaining = Math.max(0, assignedAmt - totalCollected);
-                const hasPartialPayment = totalCollected > 0 && totalCollected < assignedAmt;
 
                 return (
                   <View style={[fd.card, { borderLeftColor: color }]}>
@@ -371,7 +367,6 @@ function FosDetailModal({ visible, agentId, agentName, onClose, onUpdated }: any
                       )}
                     </View>
 
-                    {/* ✅ NEW: Remaining amount banner */}
                     {remaining > 0 && totalCollected > 0 && (
                       <View style={fd.remainingBanner}>
                         <Ionicons name="alert-circle-outline" size={14} color={Colors.warning} />
@@ -381,17 +376,12 @@ function FosDetailModal({ visible, agentId, agentName, onClose, onUpdated }: any
                       </View>
                     )}
 
-                    {/* ✅ FIXED: Screenshot with proper URL resolution + larger thumbnail */}
                     {screenshotSrc ? (
-                      <Pressable
-                        onPress={() => setScreenshotUrl(screenshotSrc)}
-                        style={fd.screenshotCard}
-                      >
+                      <Pressable onPress={() => setScreenshotUrl(screenshotSrc)} style={fd.screenshotCard}>
                         <Image
                           source={{ uri: screenshotSrc }}
                           style={fd.screenshotThumb}
                           resizeMode="cover"
-                          onError={() => console.warn("[screenshot] Failed to load:", screenshotSrc)}
                         />
                         <View style={fd.screenshotInfo}>
                           <View style={fd.screenshotBadge}>
@@ -425,6 +415,30 @@ function FosDetailModal({ visible, agentId, agentName, onClose, onUpdated }: any
               }
             />
           )}
+
+          {/* Screenshot viewer — INSIDE the main modal */}
+          {screenshotUrl && (
+            <View style={{
+              position: "absolute", top: 0, left: 0, right: 0, bottom: 0,
+              backgroundColor: "rgba(0,0,0,0.92)",
+              justifyContent: "center", alignItems: "center",
+            }}>
+              <Image
+                source={{ uri: screenshotUrl }}
+                style={{ width: "95%", height: "80%", borderRadius: 12 }}
+                resizeMode="contain"
+              />
+              <Pressable
+                style={{
+                  marginTop: 20, backgroundColor: "rgba(255,255,255,0.2)",
+                  paddingHorizontal: 28, paddingVertical: 12, borderRadius: 20,
+                }}
+                onPress={() => setScreenshotUrl(null)}
+              >
+                <Text style={{ color: "#fff", fontWeight: "700", fontSize: 15 }}>Close</Text>
+              </Pressable>
+            </View>
+          )}
         </View>
       </Modal>
 
@@ -434,44 +448,6 @@ function FosDetailModal({ visible, agentId, agentName, onClose, onUpdated }: any
         onClose={() => setPayItem(null)}
         onSaved={() => { refetch(); onUpdated(); setPayItem(null); }}
       />
-
-      {/* ✅ Full-screen screenshot viewer */}
-      {/* Full-screen screenshot viewer */}
-<Modal
-  visible={!!screenshotUrl}
-  transparent
-  animationType="fade"
-  onRequestClose={() => setScreenshotUrl(null)}
->
-  <View
-    style={{
-      flex: 1,
-      backgroundColor: "rgba(0,0,0,0.92)",
-      justifyContent: "center",
-      alignItems: "center",
-    }}
-  >
-    {screenshotUrl && (
-      <Image
-        source={{ uri: screenshotUrl }}
-        style={{ width: "95%", height: "80%", borderRadius: 12 }}
-        resizeMode="contain"
-      />
-    )}
-    <Pressable
-      style={{
-        marginTop: 20,
-        backgroundColor: "rgba(255,255,255,0.2)",
-        paddingHorizontal: 28,
-        paddingVertical: 12,
-        borderRadius: 20,
-      }}
-      onPress={() => setScreenshotUrl(null)}
-    >
-      <Text style={{ color: "#fff", fontWeight: "700", fontSize: 15 }}>Close</Text>
-    </Pressable>
-  </View>
-</Modal>
     </>
   );
 }
