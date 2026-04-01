@@ -515,9 +515,7 @@ function DepositionCard({ item, isSelected, onSelect }: {
             size={14}
             color={isSelected ? Colors.primary : Colors.textMuted}
           />
-          <Text style={[card.tapHintText, isSelected && { color: Colors.primary }]}>
-            {isSelected ? "Selected — included in payment" : "Tap to select for payment"}
-          </Text>
+      
         </View>
       )}
     </Pressable>
