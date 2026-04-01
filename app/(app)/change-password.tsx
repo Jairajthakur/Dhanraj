@@ -1,10 +1,56 @@
 import React, { useState } from "react";
-import { View, Text, StyleSheet, TextInput, Pressable, Alert, ActivityIndicator, ScrollView, KeyboardAvoidingView, Platform } from "react-native";
+import {
+  View, Text, StyleSheet, TextInput, Pressable,
+  Alert, ActivityIndicator, ScrollView, KeyboardAvoidingView, Platform
+} from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import Colors from "@/constants/colors";
 import { api } from "@/lib/api";
+
+// ✅ MOVED OUTSIDE — inline component definitions cause unmount/remount
+// on every state change, which dismisses the keyboard
+interface InputFieldProps {
+  label: string;
+  value: string;
+  onChange: (text: string) => void;
+  show: boolean;
+  setShow: (v: boolean) => void;
+}
+
+const InputField = React.memo(({ label, value, onChange, show, setShow }: InputFieldProps) => (
+  <View style={styles.fieldGroup}>
+    <Text style={styles.fieldLabel}>{label}</Text>
+    <View style={styles.inputWrapper}>
+      <Ionicons
+        name="lock-closed-outline"
+        size={20}
+        color={Colors.textSecondary}
+        style={{ marginRight: 10 }}
+      />
+      <TextInput
+        style={{ flex: 1, fontSize: 16, color: Colors.text, paddingVertical: 16 }}
+        value={value}
+        onChangeText={onChange}
+        secureTextEntry={!show}
+        autoCapitalize="none"
+        placeholder="••••••••"
+        placeholderTextColor={Colors.textMuted}
+        // ✅ Prevent keyboard dismissal
+        blurOnSubmit={false}
+        returnKeyType="next"
+      />
+      <Pressable onPress={() => setShow(!show)} style={{ padding: 4 }}>
+        <Ionicons
+          name={show ? "eye-off-outline" : "eye-outline"}
+          size={20}
+          color={Colors.textSecondary}
+        />
+      </Pressable>
+    </View>
+  </View>
+));
 
 export default function ChangePasswordScreen() {
   const insets = useSafeAreaInsets();
@@ -31,7 +77,7 @@ export default function ChangePasswordScreen() {
     }
     setLoading(true);
     try {
-      await api.changePassword({ currentPassword: current, newPassword: newPass });
+      await api.changePassword(current, newPass);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       Alert.alert("Success", "Password changed successfully", [
         { text: "OK", onPress: () => { setCurrent(""); setNewPass(""); setConfirm(""); } }
@@ -43,35 +89,18 @@ export default function ChangePasswordScreen() {
     }
   };
 
-  const InputField = ({ label, value, onChange, show, setShow }: any) => (
-    <View style={styles.fieldGroup}>
-      <Text style={styles.fieldLabel}>{label}</Text>
-      <View style={styles.inputWrapper}>
-        <Ionicons name="lock-closed-outline" size={20} color={Colors.textSecondary} style={{ marginRight: 10 }} />
-        <TextInput
-          style={{ flex: 1, fontSize: 16, color: Colors.text, paddingVertical: 16 }}
-          value={value}
-          onChangeText={onChange}
-          secureTextEntry={!show}
-          autoCapitalize="none"
-          placeholder="••••••••"
-          placeholderTextColor={Colors.textMuted}
-        />
-        <Pressable onPress={() => setShow(!show)} style={{ padding: 4 }}>
-          <Ionicons name={show ? "eye-off-outline" : "eye-outline"} size={20} color={Colors.textSecondary} />
-        </Pressable>
-      </View>
-    </View>
-  );
-
   return (
     <KeyboardAvoidingView
       style={{ flex: 1, backgroundColor: Colors.background }}
       behavior={Platform.OS === "ios" ? "padding" : "height"}
     >
       <ScrollView
-        contentContainerStyle={[styles.container, { paddingBottom: insets.bottom + 24, paddingTop: Platform.OS === "web" ? 67 : 20 }]}
+        contentContainerStyle={[
+          styles.container,
+          { paddingBottom: insets.bottom + 24, paddingTop: Platform.OS === "web" ? 67 : 20 }
+        ]}
         keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="none"
       >
         <View style={styles.iconSection}>
           <View style={styles.iconBox}>
@@ -82,9 +111,27 @@ export default function ChangePasswordScreen() {
         </View>
 
         <View style={styles.card}>
-          <InputField label="Current Password" value={current} onChange={setCurrent} show={showCurrent} setShow={setShowCurrent} />
-          <InputField label="New Password" value={newPass} onChange={setNewPass} show={showNew} setShow={setShowNew} />
-          <InputField label="Confirm New Password" value={confirm} onChange={setConfirm} show={showConfirm} setShow={setShowConfirm} />
+          <InputField
+            label="Current Password"
+            value={current}
+            onChange={setCurrent}
+            show={showCurrent}
+            setShow={setShowCurrent}
+          />
+          <InputField
+            label="New Password"
+            value={newPass}
+            onChange={setNewPass}
+            show={showNew}
+            setShow={setShowNew}
+          />
+          <InputField
+            label="Confirm New Password"
+            value={confirm}
+            onChange={setConfirm}
+            show={showConfirm}
+            setShow={setShowConfirm}
+          />
         </View>
 
         <Pressable
@@ -115,10 +162,14 @@ const styles = StyleSheet.create({
   sectionSub: { fontSize: 14, color: Colors.textSecondary, textAlign: "center" },
   card: {
     backgroundColor: Colors.surface, borderRadius: 20, padding: 20, gap: 16,
-    shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 8, elevation: 2,
+    shadowColor: "#000", shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06, shadowRadius: 8, elevation: 2,
   },
   fieldGroup: { gap: 8 },
-  fieldLabel: { fontSize: 13, fontWeight: "700", color: Colors.textSecondary, textTransform: "uppercase", letterSpacing: 0.5 },
+  fieldLabel: {
+    fontSize: 13, fontWeight: "700", color: Colors.textSecondary,
+    textTransform: "uppercase", letterSpacing: 0.5,
+  },
   inputWrapper: {
     flexDirection: "row", alignItems: "center",
     backgroundColor: Colors.surfaceAlt, borderRadius: 14, paddingHorizontal: 14,
@@ -127,7 +178,8 @@ const styles = StyleSheet.create({
   saveBtn: {
     backgroundColor: Colors.primary, borderRadius: 16, paddingVertical: 16,
     flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 10,
-    shadowColor: Colors.primary, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.4, shadowRadius: 8, elevation: 6,
+    shadowColor: Colors.primary, shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.4, shadowRadius: 8, elevation: 6,
   },
   saveBtnText: { color: "#fff", fontSize: 17, fontWeight: "700" },
 });
