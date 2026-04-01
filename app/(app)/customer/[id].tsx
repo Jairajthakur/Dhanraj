@@ -61,6 +61,7 @@ function Row({ label, value, valueColor }: {
 }
 
 // ─── Receipt Request Modal ────────────────────────────────────────────────────
+// ─── Receipt Request Modal ────────────────────────────────────────────────────
 function ReceiptRequestModal({
   visible, item, onClose,
 }: {
@@ -68,7 +69,6 @@ function ReceiptRequestModal({
   item: any;
   onClose: () => void;
 }) {
-  const [notes, setNotes] = useState("");
   const [loading, setLoading] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const insets = useSafeAreaInsets();
@@ -80,7 +80,6 @@ function ReceiptRequestModal({
         loan_no:       item.loan_no,
         customer_name: item.customer_name,
         table_type:    (item as any).case_type || "loan",
-        notes:         notes.trim() || undefined,
       });
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       setSubmitted(true);
@@ -93,7 +92,6 @@ function ReceiptRequestModal({
 
   const handleClose = () => {
     setSubmitted(false);
-    setNotes("");
     onClose();
   };
 
@@ -140,16 +138,27 @@ function ReceiptRequestModal({
                 </Text>
               </View>
 
-              <Text style={rrStyles.notesLabel}>Notes (Optional)</Text>
-              <TextInput
-                style={rrStyles.notesInput}
-                placeholder="e.g. Customer paid cash today, needs receipt urgently..."
-                placeholderTextColor={Colors.textMuted}
-                value={notes}
-                onChangeText={setNotes}
-                multiline
-                numberOfLines={4}
-              />
+              {/* ── Amount Summary ── */}
+              <View style={rrStyles.amountGrid}>
+                <View style={rrStyles.amountCell}>
+                  <Text style={rrStyles.amountLabel}>EMI AMOUNT</Text>
+                  <Text style={[rrStyles.amountValue, { color: Colors.danger }]}>
+                    {fmt(item?.emi_amount, "₹")}
+                  </Text>
+                </View>
+                <View style={rrStyles.amountCell}>
+                  <Text style={rrStyles.amountLabel}>CBC</Text>
+                  <Text style={[rrStyles.amountValue, { color: (Colors as any).warning ?? "#F59E0B" }]}>
+                    {fmt(item?.cbc, "₹")}
+                  </Text>
+                </View>
+                <View style={rrStyles.amountCell}>
+                  <Text style={rrStyles.amountLabel}>LPP</Text>
+                  <Text style={[rrStyles.amountValue, { color: (Colors as any).warning ?? "#F59E0B" }]}>
+                    {fmt(item?.lpp, "₹")}
+                  </Text>
+                </View>
+              </View>
 
               <View style={rrStyles.btnRow}>
                 <Pressable style={rrStyles.cancelBtn} onPress={handleClose}>
@@ -176,7 +185,6 @@ function ReceiptRequestModal({
     </Modal>
   );
 }
-
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 export default function CustomerDetailScreen() {
   const insets = useSafeAreaInsets();
@@ -652,6 +660,24 @@ const rrStyles = StyleSheet.create({
     flexDirection: "row", justifyContent: "center", gap: 8,
   },
   submitText: { fontSize: 15, fontWeight: "700", color: "#fff" },
+  // Amount grid
+  amountGrid: {
+    flexDirection: "row", gap: 10,
+  },
+  amountCell: {
+    flex: 1, backgroundColor: Colors.surfaceAlt ?? Colors.background,
+    borderRadius: 12, padding: 12, alignItems: "center",
+    borderWidth: 1, borderColor: Colors.border,
+  },
+  amountLabel: {
+    fontSize: 9, fontWeight: "700", color: Colors.textMuted,
+    textTransform: "uppercase", letterSpacing: 0.5,
+  },
+  amountValue: {
+    fontSize: 15, fontWeight: "800", color: Colors.text, marginTop: 4,
+  },
+  // Success
+  successContainer: ...
   // Success
   successContainer: { alignItems: "center", gap: 12, paddingVertical: 16 },
   successIcon: {
