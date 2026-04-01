@@ -452,7 +452,6 @@ function DepositionCard({ item, isSelected, onSelect }: {
         )}
         <View style={{ flex: 1 }}>
           <Text style={card.name} numberOfLines={1}>{item.customer_name || "Assigned Deposit"}</Text>
-          {item.loan_no && <Text style={card.meta}>{item.loan_no}{item.bkt ? ` · BKT ${item.bkt}` : ""}</Text>}
           <Text style={card.date}>Assigned: {fmtDate(item.created_at)}</Text>
         </View>
         <View style={{ alignItems: "flex-end", gap: 4 }}>
