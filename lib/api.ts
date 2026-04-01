@@ -347,9 +347,15 @@ export const api = {
       apiRequest("GET", `/api/admin/bkt-cases${category ? `?category=${category}` : ""}`),
 
     // ── Feedback ─────────────────────────────────────────────────────────────
-    resetFeedbackForAgent: (agentId: number) =>
-      apiRequest("POST", `/api/admin/reset-feedback/agent/${agentId}`),
+   resetFeedbackForCase: (caseId: number, table: string) =>
+  apiRequest("POST", `/api/admin/reset-feedback/case/${caseId}`, { table }),
 
+    resetMonthlyFeedbackForAgent: (agentId: number) =>
+    apiRequest("POST", `/api/admin/reset-monthly-feedback/agent/${agentId}`),
+
+  resetMonthlyFeedbackForCase: (caseId: number, table: string) =>
+  apiRequest("POST", `/api/admin/reset-monthly-feedback/case/${caseId}`, { table }),
+    
     removeExtraNumber: (id: number, number: string, table: string) =>
       apiRequest("DELETE", `/api/admin/cases/${id}/extra-numbers`, { number, table }),
 
