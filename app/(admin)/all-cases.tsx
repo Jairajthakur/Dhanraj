@@ -814,8 +814,8 @@ function CaseDetailModal({
               />
             </View>
 
-            {localItem.latest_feedback || localItem.feedback_code ? (
-              <Pressable
+               {localItem.monthly_feedback ? (
+                <Pressable
                 style={[detailStyles.resetCaseBtn, resetting && { opacity: 0.6 }]}
                 onPress={handleResetCase}
                 disabled={resetting}
@@ -1300,7 +1300,7 @@ const handleResetCase = async (caseId: number) => {
                         style={[agentModalStyles.resetCaseBtn, resettingCaseId === item.id && { opacity: 0.5 }]}
                         disabled={resettingCaseId === item.id}
                         onPress={() => {
-                          Alert.alert("Reset Feedback", `Reset feedback for ${item.customer_name}?`, [
+                            Alert.alert("Reset Monthly Feedback", `Reset only monthly feedback for ${item.customer_name}?`, [
                             { text: "Cancel", style: "cancel" },
                             {
                               text: "Reset", style: "destructive",
@@ -1310,7 +1310,7 @@ const handleResetCase = async (caseId: number) => {
                                   await handleResetCase(item.id);
                                   setAgentCasesModal((prev) =>
                                     prev
-                                      ? { ...prev, cases: prev.cases.map((c) => c.id === item.id ? { ...c, latest_feedback: null, feedback_code: null, status: "Unpaid" } : c) }
+                                      ? { ...prev, cases: prev.cases.map((c) => c.id === item.id ? { ...c, monthly_feedback: null } : c) }
                                       : null
                                   );
                                 } finally {
