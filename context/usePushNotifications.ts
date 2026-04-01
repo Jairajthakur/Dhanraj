@@ -1,6 +1,7 @@
 // context/usePushNotifications.ts
 // ✅ Works on both APK and Web
 // ✅ Always re-registers token on every login — deleted tokens auto-restore
+// ✅ Fixed: no longer aborts on missing auth token — retries instead
 
 import { useEffect, useRef } from "react";
 import { Platform, InteractionManager, PermissionsAndroid } from "react-native";
@@ -19,8 +20,8 @@ async function savePushTokenToServer(playerId: string): Promise<void> {
   const authToken = Platform.OS !== "web" ? await tokenStore.get() : null;
 
   if (!authToken) {
-    console.warn("[OneSignal] ⚠️ No auth token in tokenStore — cannot save push token");
-    throw new Error("No auth token available");
+    // Signal the polling loop to WAIT and retry — not abort
+    throw new Error("NO_AUTH_TOKEN");
   }
 
   const headers: Record<string, string> = {
@@ -66,7 +67,6 @@ async function requestAndroid13Permission(): Promise<boolean> {
     // @ts-ignore — POST_NOTIFICATIONS added in Android 13
     const perm = PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS;
     if (!perm) {
-      // Android < 13 — permission not required
       console.log("[Push] Android < 13, no POST_NOTIFICATIONS perm needed");
       return true;
     }
@@ -86,7 +86,6 @@ async function requestAndroid13Permission(): Promise<boolean> {
 }
 
 // ─── Get OneSignal player/subscription ID ────────────────────────────────────
-// FIX: tries both getOnesignalId() AND pushSubscription.id
 async function getOnesignalPlayerId(OneSignal: any): Promise<string | null> {
   try {
     // Method 1: getOnesignalId (v5 primary)
@@ -147,13 +146,11 @@ function ensureInit(): Promise<void> {
         initialized = true;
         console.log("[OneSignal] ✅ Initialized");
 
-        // FIX: request Android 13 permission BEFORE OneSignal permission
         const androidAllowed = await requestAndroid13Permission();
         if (!androidAllowed) {
           console.warn("[OneSignal] ⚠️ Android permission denied — push may not work");
         }
 
-        // Wait longer for SDK to settle after init
         await new Promise((r) => setTimeout(r, 1000));
 
         try {
@@ -163,7 +160,6 @@ function ensureInit(): Promise<void> {
           console.warn("[OneSignal] requestPermission error:", e);
         }
 
-        // Wait for permission response
         await new Promise((r) => setTimeout(r, 1500));
 
         try {
@@ -201,7 +197,6 @@ export async function registerPushToken(): Promise<void> {
     return;
   }
 
-  // FIX: Check if opted in before polling
   try {
     const isOptedIn = OneSignal.User?.pushSubscription?.optedIn;
     console.log("[OneSignal] Opted in status:", isOptedIn);
@@ -210,7 +205,8 @@ export async function registerPushToken(): Promise<void> {
     }
   } catch (_) {}
 
-  const maxAttempts = 20;
+  const maxAttempts = 30;
+  let noAuthTokenCount = 0; // track how many times auth token was missing
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     console.log(`[OneSignal] Attempt ${attempt}/${maxAttempts}`);
@@ -221,17 +217,30 @@ export async function registerPushToken(): Promise<void> {
       try {
         await savePushTokenToServer(playerId);
         console.log(`[OneSignal] ✅ Token saved on attempt ${attempt}`);
-        return;
+        return; // success
       } catch (e: any) {
-        console.warn("[OneSignal] Server save failed:", e.message);
-        // If auth token missing, stop polling — no point retrying
-        if (e.message === "No auth token available") {
-          console.error("[OneSignal] ❌ Auth token missing — aborting token registration");
-          return;
+        if (e.message === "NO_AUTH_TOKEN") {
+          // ← KEY FIX: was previously aborting here — now we WAIT and RETRY
+          // This happens on startup when cached agent loads before AsyncStorage
+          // has restored the auth token. Just wait for the token to appear.
+          noAuthTokenCount++;
+          console.warn(`[OneSignal] ⏳ Auth token not ready yet (${noAuthTokenCount}x) — waiting 5s`);
+
+          if (noAuthTokenCount >= 10) {
+            // After 10 * 5s = 50 seconds of waiting with no token, give up
+            console.error("[OneSignal] ❌ Auth token never became available — aborting");
+            return;
+          }
+          // Use a longer delay when waiting for auth token
+          await new Promise((r) => setTimeout(r, 5000));
+          continue; // skip the normal 3s delay below
         }
+        // Any other error (network, server error) — log and try next attempt
+        console.warn("[OneSignal] Server save failed:", e.message);
+        noAuthTokenCount = 0; // reset — token was present, just a different error
       }
     } else {
-      // Try opt-in again on every other attempt
+      // OneSignal ID not ready — re-opt-in every other attempt
       if (attempt % 2 === 0) {
         try {
           await OneSignal.User.pushSubscription.optIn();
@@ -259,8 +268,6 @@ export function usePushNotifications() {
     ensureInit();
   }, []);
 
-  // ✅ Register token every time agent loads — no savedRef guard
-  // This means deleted tokens are always restored on next app open/login
   useEffect(() => {
     if (Platform.OS === "web") return;
     if (!agent) {
@@ -294,7 +301,7 @@ export function usePushNotifications() {
       console.warn("[OneSignal] Listener setup error:", e);
     }
 
-    // Always register — no guard — so deleted tokens restore automatically
+    // Always register — so deleted tokens restore automatically
     registerPushToken().catch((e) =>
       console.warn("[OneSignal] registerPushToken error:", e?.message)
     );
@@ -322,5 +329,5 @@ export function usePushNotifications() {
         console.warn("[OneSignal] Cleanup error:", e);
       }
     };
-  }, [agent?.id]); // Runs on every agent change — always re-registers
+  }, [agent?.id]);
 }
