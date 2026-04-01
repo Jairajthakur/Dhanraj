@@ -194,6 +194,33 @@ function ReceiptRequestModal({
     </View>
   </View>
 </View>
+
+              {/* ── Buttons ── */}
+              <View style={rrStyles.btnRow}>
+                <Pressable style={rrStyles.cancelBtn} onPress={handleClose}>
+                  <Text style={rrStyles.cancelText}>Cancel</Text>
+                </Pressable>
+                <Pressable
+                  style={[rrStyles.submitBtn, loading && { opacity: 0.6 }]}
+                  onPress={handleSubmit}
+                  disabled={loading}
+                >
+                  {loading
+                    ? <ActivityIndicator size="small" color="#fff" />
+                    : <>
+                        <Ionicons name="paper-plane-outline" size={16} color="#fff" />
+                        <Text style={rrStyles.submitText}>Send Request</Text>
+                      </>
+                  }
+                </Pressable>
+              </View>
+            </>
+          )}
+        </View>
+      </View>
+    </Modal>
+  );
+}
     
 
 
