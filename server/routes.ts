@@ -34,8 +34,6 @@ function verifyToken(token: string): { agentId: number; role: string } | null {
       .replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
     if (sig !== expected) return null;
     const payload = JSON.parse(Buffer.from(body, "base64").toString());
-    // 2-day grace period: user stays logged in even if token just expired,
-    // giving the client time to get a fresh token via /api/auth/me
     const GRACE = 2 * 24 * 3600;
     if (payload.exp && payload.exp + GRACE < Math.floor(Date.now() / 1000)) return null;
     return { agentId: payload.agentId, role: payload.role };
@@ -226,6 +224,7 @@ function isRepeatHeaderRow(mapped: Record<string, any>): boolean {
   return HEADER_SENTINEL.has(loanNo) || loanNo === "loan no" || loanNo === "s.no" || /^s\.?\s*no\.?$/i.test(loanNo);
 }
 
+// ─── COLUMN_MAP: added company_name mappings ──────────────────────────────────
 const COLUMN_MAP: Record<string, string> = {
   loanno: "loan_no", loannumber: "loan_no", appid: "app_id", applicationid: "app_id", appno: "app_id",
   customername: "customer_name", applicantname: "customer_name", name: "customer_name",
@@ -251,6 +250,10 @@ const COLUMN_MAP: Record<string, string> = {
   comments: "feedback_comments",
   ptpdate: "telecaller_ptp_date", ptp: "telecaller_ptp_date", ptpdt: "telecaller_ptp_date",
   promisetopaydatdate: "telecaller_ptp_date", promisetopaydate: "telecaller_ptp_date",
+  // ── company_name mappings ──────────────────────────────────────────────────
+  companyname: "company_name", company: "company_name", compname: "company_name",
+  financecompany: "company_name", financeco: "company_name", lender: "company_name",
+  nbfc: "company_name", bankname: "company_name", bank: "company_name",
 };
 
 const MONTH_NAMES = ["January","February","March","April","May","June","July","August","September","October","November","December"];
@@ -348,7 +351,6 @@ function buildIntimationParams(body: Record<string, any>, isPost = false) {
     date:            body.date            || today,
     police_station:  body.police_station  || "________________________________",
     tq:              body.tq              || "_____________",
-    // post-only fields
     repossession_date:    body.repossession_date    || body.date || today,
     repossession_address: body.repossession_address || body.address || "___________",
     reference_no:         body.reference_no         || body.loan_no || "___________",
@@ -476,10 +478,6 @@ function buildPostIntimationHtml(p: ReturnType<typeof buildIntimationParams>): s
 </body>
 </html>`;
 }
- 
-// ─── DOCX builder (shared, isPost flag switches content) ──────────────────────
-
- 
 
 export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/health", (_req, res) => res.json({ status: "ok" }));
@@ -494,6 +492,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
     await storage.query(`ALTER TABLE fos_agents ADD COLUMN IF NOT EXISTS phone TEXT`);
     console.log("[DB] fos_agents.phone column ready ✅");
   } catch (e: any) { console.error("[DB] fos_agents.phone migration:", e.message); }
+
+  // ── ADD THIS: migrate company_name column onto loan_cases ─────────────────
+  try {
+    await storage.query(`ALTER TABLE loan_cases ADD COLUMN IF NOT EXISTS company_name TEXT`);
+    console.log("[DB] loan_cases.company_name column ready ✅");
+  } catch (e: any) { console.error("[DB] loan_cases.company_name migration:", e.message); }
 
   try {
     await storage.query(`CREATE TABLE IF NOT EXISTS fos_depositions (
@@ -540,10 +544,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   console.log("[DB] extra_numbers columns ready ✅");
 } catch (e: any) { console.error("[DB] extra_numbers migration:", e.message); }
 
-// Ensure multer routes are NOT pre-parsed by JSON body parser
 app.use("/api/fos-depositions", (req, res, next) => {
   if (req.headers["content-type"]?.includes("multipart/form-data")) {
-    return next(); // skip body parsing for multipart
+    return next();
   }
   express.json()(req, res, next);
 });
@@ -771,6 +774,7 @@ app.get("/api/today-ptp", requireAuth, async (req, res) => {
         lc.tenor, lc.first_emi_due_date, lc.loan_maturity_date,
         lc.ref1_name, lc.ref1_mobile, lc.ref2_name, lc.ref2_mobile,
         lc.extra_numbers,
+        lc.company_name,
         fa.name AS agent_name,
         'loan' AS case_type
        FROM loan_cases lc
@@ -807,7 +811,6 @@ app.get("/api/today-ptp", requireAuth, async (req, res) => {
         [agentId, monthNum, year ?? new Date().getFullYear(), presentDays ?? 0, paymentAmount ?? 0, incentiveAmount ?? 0, petrolExpense ?? 0, mobileExpense ?? 0, gross, adv, other, total, net]
       );
 
-      // ✅ Notify the FOS agent that salary has been credited
       try {
         const agentRow = await storage.query(
           "SELECT id, name, push_token FROM fos_agents WHERE id = $1",
@@ -832,7 +835,6 @@ app.get("/api/today-ptp", requireAuth, async (req, res) => {
           console.warn(`[salary] ⚠️  No push token for agentId=${agentId}`);
         }
       } catch (pushErr: any) {
-        // Push failure should never block the salary save response
         console.error("[salary] Push notification failed:", pushErr.message);
       }
 
@@ -1044,7 +1046,6 @@ app.post("/api/fos-depositions/:id/pay-online", requireAuth, screenshotUpload.si
     const existingCash   = parseFloat(depRow.rows[0].cash_amount   || 0);
     const existingOnline = parseFloat(depRow.rows[0].online_amount || 0);
 
-    // Use the requested amount; fall back to the full remaining balance
     const newOnlineAmt  = requestedOnline > 0
       ? requestedOnline
       : Math.max(0, totalAssigned - existingCash - existingOnline);
@@ -1052,9 +1053,7 @@ app.post("/api/fos-depositions/:id/pay-online", requireAuth, screenshotUpload.si
     const totalPaidNow   = existingCash + totalOnlineNow;
     const fullyPaid      = Math.round(totalPaidNow) >= Math.round(totalAssigned);
 
-    // Method: if any cash already exists it becomes "both"; otherwise "online"
     const paymentMethod  = existingCash > 0 ? "both" : "online";
-    // Only flip away from "pending" once fully paid; keep "pending" for partial payments
     const finalMethod    = fullyPaid ? paymentMethod : "pending";
 
     await storage.query(
@@ -1076,12 +1075,11 @@ app.post("/api/fos-depositions/:id/pay-online", requireAuth, screenshotUpload.si
     res.json({ success: true, screenshotUrl, amountApplied: newOnlineAmt, remaining: Math.max(0, totalAssigned - totalPaidNow) });
   } catch (e: any) { res.status(500).json({ message: e.message }); }
 });
- // AFTER
 app.put("/api/fos-depositions/:id/pay-both", requireAuth, screenshotUpload.single("screenshot"), async (req, res) => {
   try {
     const id = Number(req.params.id); 
     const agentId = req.session.agentId!;
-    const { cashAmount, onlineAmount } = req.body;  // multer puts text fields here
+    const { cashAmount, onlineAmount } = req.body;
 
     const cashAmt = parseFloat(cashAmount || "0") || 0;
     const onlineAmt = parseFloat(onlineAmount || "0") || 0;
@@ -1089,7 +1087,7 @@ app.put("/api/fos-depositions/:id/pay-both", requireAuth, screenshotUpload.singl
     if (onlineAmt <= 0) return res.status(400).json({ message: "Online amount must be > 0" });
     if (!req.file) return res.status(400).json({ message: "No screenshot uploaded" });
 
-    const filename = req.file.filename;  // multer already saved it
+    const filename = req.file.filename;
     const baseUrl = process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : "";
     const screenshotUrl = `${baseUrl}/uploads/screenshots/${filename}`;
 
@@ -1303,6 +1301,9 @@ app.put("/api/fos-depositions/:id/pay-both", requireAuth, screenshotUpload.singl
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
+  // ─────────────────────────────────────────────────────────────────────────────
+  // IMPORT ALLOCATION — now includes company_name
+  // ─────────────────────────────────────────────────────────────────────────────
   app.post("/api/admin/import", requireAdmin, upload.single("file"), async (req, res) => {
     try {
       if (!req.file) return res.status(400).json({ message: "No file uploaded" });
@@ -1318,7 +1319,6 @@ app.put("/api/fos-depositions/:id/pay-both", requireAuth, screenshotUpload.singl
       const ptpLoanMap = new Map(ptpLoanSave.rows.map((r: any) => [r.loan_no, { ptpDate: r.ptp_date, telecallerPtpDate: r.telecaller_ptp_date }]));
      await storage.query(`UPDATE depositions SET loan_case_id=NULL WHERE loan_case_id IS NOT NULL`);
 
-// Save extra numbers BEFORE wiping
 const savedExtras = await storage.query(
  `SELECT loan_no, extra_numbers FROM loan_cases 
  WHERE extra_numbers IS NOT NULL 
@@ -1350,7 +1350,40 @@ await storage.deleteAllLoanCases();
           else { try { const username = fosLower.replace(/\s+/g, ".").replace(/[^a-z0-9.]/g, ""); const newAgent = await storage.createFosAgent({ name: mapped.fos_name, username, password: randomBytes(16).toString("hex") }); agentByName[fosLower] = newAgent.id; agentId = newAgent.id; agentsCreated++; } catch { const found = await storage.getAgentByUsername(mapped.fos_name.toLowerCase().trim().replace(/\s+/g, ".").replace(/[^a-z0-9.]/g, "")); if (found) { agentByName[mapped.fos_name.toLowerCase().trim()] = found.id; agentId = found.id; } } }
         }
         try {
-          await storage.upsertLoanCase({ agentId, fosName: mapped.fos_name || null, loanNo: mapped.loan_no, customerName: mapped.customer_name, bkt: mapped.bkt ? parseInt(mapped.bkt) || null : null, appId: mapped.app_id || null, address: mapped.address || null, mobileNo: mapped.mobile_no || null, referenceAddress: mapped.reference_address || null, pos: parseNum(mapped.pos), assetMake: mapped.asset_make || null, registrationNo: mapped.registration_no || null, engineNo: mapped.engine_no || null, chassisNo: mapped.chassis_no || null, emiAmount: parseNum(mapped.emi_amount), emiDue: parseNum(mapped.emi_due), cbc: parseNum(mapped.cbc), lpp: parseNum(mapped.lpp), cbcLpp: parseNum(mapped.cbc_lpp), rollback: parseNum(mapped.rollback), clearance: parseNum(mapped.clearance), firstEmiDueDate: parseDate(mapped.first_emi_due_date), loanMaturityDate: parseDate(mapped.loan_maturity_date), tenor: mapped.tenor ? parseInt(mapped.tenor) || null : null, pro: mapped.pro || null, status: normalizeStatus(mapped.status), latestFeedback: mapped.latest_feedback || null, feedbackComments: mapped.feedback_comments || null, telecallerPtpDate: parseDate(mapped.telecaller_ptp_date), rollbackYn: parseRollbackYn(mapped.rollback) });
+          // ── upsertLoanCase now receives company_name ────────────────────────
+          await storage.upsertLoanCase({
+            agentId,
+            fosName: mapped.fos_name || null,
+            loanNo: mapped.loan_no,
+            customerName: mapped.customer_name,
+            bkt: mapped.bkt ? parseInt(mapped.bkt) || null : null,
+            appId: mapped.app_id || null,
+            address: mapped.address || null,
+            mobileNo: mapped.mobile_no || null,
+            referenceAddress: mapped.reference_address || null,
+            pos: parseNum(mapped.pos),
+            assetMake: mapped.asset_make || null,
+            registrationNo: mapped.registration_no || null,
+            engineNo: mapped.engine_no || null,
+            chassisNo: mapped.chassis_no || null,
+            emiAmount: parseNum(mapped.emi_amount),
+            emiDue: parseNum(mapped.emi_due),
+            cbc: parseNum(mapped.cbc),
+            lpp: parseNum(mapped.lpp),
+            cbcLpp: parseNum(mapped.cbc_lpp),
+            rollback: parseNum(mapped.rollback),
+            clearance: parseNum(mapped.clearance),
+            firstEmiDueDate: parseDate(mapped.first_emi_due_date),
+            loanMaturityDate: parseDate(mapped.loan_maturity_date),
+            tenor: mapped.tenor ? parseInt(mapped.tenor) || null : null,
+            pro: mapped.pro || null,
+            status: normalizeStatus(mapped.status),
+            latestFeedback: mapped.latest_feedback || null,
+            feedbackComments: mapped.feedback_comments || null,
+            telecallerPtpDate: parseDate(mapped.telecaller_ptp_date),
+            rollbackYn: parseRollbackYn(mapped.rollback),
+            companyName: mapped.company_name || null,  // ← NEW
+          });
           imported++;
         } catch (e: any) { errors.push(`Row ${i + headerRowIdx + 2}: ${e.message}`); skipped++; }
       }
@@ -1363,7 +1396,7 @@ if (extrasMap.size > 0) {
     );
   }
   console.log(`[import] ✅ Restored extra_numbers for ${extrasMap.size} loan(s)`);
-}                // ← closes the if block
+}
 
 for (const [loanNo, ptpData] of ptpLoanMap) {
   await storage.query(
@@ -1586,7 +1619,6 @@ res.json({ imported, updated: 0, skipped, agentsCreated, agentsRemoved, total: r
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
-  // Add this after the existing reset-feedback/case endpoint
 app.post("/api/admin/reset-monthly-feedback/agent/:agentId", requireAdmin, async (req, res) => {
   try {
     const agentId = Number(req.params.agentId);
@@ -1822,24 +1854,6 @@ app.post("/api/admin/reset-monthly-feedback/case/:caseId", requireAdmin, async (
 
 // ── PDF helpers ───────────────────────────────────────────────────────────────
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// REPLACE everything between:
-//   "// ── PDF helpers ──────────────────────────────────────────────────────────────"
-// AND
-//   "  const httpServer = createServer(app);"
-//
-// with the content below.
-// ═══════════════════════════════════════════════════════════════════════════════
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// REPLACE everything from:
-//   "// ── PDF helpers ───────────────────────────────────────────────────────────────"
-// DOWN TO (and including) the closing brace of registerRoutes  "}"
-// with this entire file content.
-// ═══════════════════════════════════════════════════════════════════════════════
-
-// ── PDF helpers ───────────────────────────────────────────────────────────────
-
 function buildPreIntimationPdf(
   doc: any,
   p: ReturnType<typeof buildIntimationParams>,
@@ -1851,12 +1865,10 @@ function buildPreIntimationPdf(
   const pageHeight = doc.page.height - doc.page.margins.top - doc.page.margins.bottom;
   const fsNode     = require("fs");
  
-  // ─── HEADER BAND: logo top-right, title centred left of logo ──────────────
   const logoW  = 110;
   const logoH  = 50;
   const startY = doc.page.margins.top;
  
-  // Logo — absolute top-right
   if (fsNode.existsSync(logoPath)) {
     try {
       doc.image(fsNode.readFileSync(logoPath), rm - logoW, startY, {
@@ -1865,7 +1877,6 @@ function buildPreIntimationPdf(
     } catch {}
   }
  
-  // Title centred in the area left of the logo
   const titleAreaW    = pageWidth - logoW - 10;
   const titleFontSize = 13;
   doc.font("Helvetica-Bold").fontSize(titleFontSize).text(
@@ -1874,20 +1885,16 @@ function buildPreIntimationPdf(
     { align: "center", width: titleAreaW }
   );
  
-  // Advance past header band
   doc.y = startY + logoH + 4;
  
-  // Thin divider
   doc.moveTo(lm, doc.y).lineTo(rm, doc.y).strokeColor("#bbbbbb").lineWidth(0.5).stroke();
   doc.strokeColor("#000000").lineWidth(1);
   doc.moveDown(0.6);
  
-  // ─── DATE — RIGHT ALIGNED ─────────────────────────────────────────────────
   doc.font("Helvetica-Bold").fontSize(10.5)
     .text(`Date :- ${p.date}`, lm, doc.y, { align: "right", width: pageWidth });
   doc.moveDown(0.8);
  
-  // ─── TO BLOCK ─────────────────────────────────────────────────────────────
   const policeLabel =
     p.police_station && p.police_station !== "________________________________"
       ? `${p.police_station} Police Station,`
@@ -1900,7 +1907,6 @@ function buildPreIntimationPdf(
   doc.text(`TQ. ${p.tq}     Dist. Nanded`, lm);
   doc.moveDown(0.8);
  
-  // ─── SUB ──────────────────────────────────────────────────────────────────
   doc.font("Helvetica").fontSize(10.5).text(
     `Sub :- Pre intimation of repossession of the vehicle from ${p.customer_name}`,
     lm, doc.y, { width: pageWidth }
@@ -1909,11 +1915,9 @@ function buildPreIntimationPdf(
   doc.text(`(Borrower) residing ${p.address}`, lm, doc.y, { width: pageWidth });
   doc.moveDown(0.8);
  
-  // ─── RESPECTED SIR ────────────────────────────────────────────────────────
   doc.font("Helvetica-Bold").fontSize(10.5).text("Respected Sir,", lm);
   doc.moveDown(0.6);
  
-  // ─── INTRO PARAGRAPH ──────────────────────────────────────────────────────
   doc.font("Helvetica").fontSize(10.5).text(
     'The afore mentioned borrower has taken a loan from Hero Fin-Corp Limited ("Company") for the' +
     " purchase of the Vehicle having the below mentioned details and further the Borrower hypothecated" +
@@ -1923,7 +1927,6 @@ function buildPreIntimationPdf(
   );
   doc.moveDown(0.7);
  
-  // ─── DETAILS TABLE (borderless) ───────────────────────────────────────────
   const col1W = pageWidth * 0.46;
   const detailRows: [string, string][] = [
     ["Name of the Borrower",                 p.customer_name],
@@ -1948,7 +1951,6 @@ function buildPreIntimationPdf(
   });
   doc.moveDown(0.7);
  
-  // ─── CLOSING PARAGRAPH ────────────────────────────────────────────────────
   doc.font("Helvetica").fillColor("#000000").fontSize(10.5).text(
     "The Borrower has committed default on the scheduled payment of the Monthly Payments and/or" +
     " other charges payable on the loan obtained by the Borrower from the Company in terms of the" +
@@ -1965,12 +1967,10 @@ function buildPreIntimationPdf(
   );
   doc.moveDown(0.8);
  
-  // ─── SIGN-OFF ─────────────────────────────────────────────────────────────
   doc.font("Helvetica").fontSize(10.5).text("Thanking you,", lm);
   doc.moveDown(0.3);
   doc.text("Yours Sincerely,", lm);
  
-  // ─── DYNAMIC GAP — push "For,..." towards page bottom ────────────────────
   const footerAbsY  = doc.page.margins.top + pageHeight;
   const forLineH    = 10.5 + 6;
   const footerLineH = 9 + 12;
@@ -1981,7 +1981,6 @@ function buildPreIntimationPdf(
   doc.font("Helvetica").fontSize(10.5).text("For, Hero Fin-Corp Limited", lm);
   doc.moveDown(1.0);
  
-  // ─── FOOTER ───────────────────────────────────────────────────────────────
   doc.moveTo(lm, doc.y).lineTo(rm, doc.y).strokeColor("#bbbbbb").lineWidth(0.5).stroke();
   doc.strokeColor("#000000").lineWidth(1);
   doc.moveDown(0.3);
@@ -1990,8 +1989,6 @@ function buildPreIntimationPdf(
     lm, doc.y, { align: "center", width: pageWidth }
   );
 }
- 
-// ─────────────────────────────────────────────────────────────────────────────
  
 function buildPostIntimationPdf(
   doc: any,
@@ -2004,12 +2001,10 @@ function buildPostIntimationPdf(
   const pageHeight = doc.page.height - doc.page.margins.top - doc.page.margins.bottom;
   const fsNode     = require("fs");
  
-  // ─── HEADER BAND: logo top-right, title centred left of logo ──────────────
   const logoW  = 110;
   const logoH  = 50;
   const startY = doc.page.margins.top;
  
-  // Logo — absolute top-right
   if (fsNode.existsSync(logoPath)) {
     try {
       doc.image(fsNode.readFileSync(logoPath), rm - logoW, startY, {
@@ -2018,7 +2013,6 @@ function buildPostIntimationPdf(
     } catch {}
   }
  
-  // Title centred in the area left of the logo
   const titleAreaW    = pageWidth - logoW - 10;
   const titleFontSize = 13;
   const titleText     = "Post Repossession Intimation to Police Station";
@@ -2029,7 +2023,6 @@ function buildPostIntimationPdf(
     { align: "center", width: titleAreaW }
   );
  
-  // Manual underline for post title
   const tw           = doc.widthOfString(titleText, { fontSize: titleFontSize });
   const titleCentreX = lm + (titleAreaW - tw) / 2;
   const underlineY   = startY + (logoH - titleFontSize * 1.2) / 2 + titleFontSize * 1.15;
@@ -2038,15 +2031,12 @@ function buildPostIntimationPdf(
     .strokeColor("#000000").lineWidth(0.7).stroke();
   doc.strokeColor("#000000").lineWidth(1);
  
-  // Advance past header band
   doc.y = startY + logoH + 4;
  
-  // ─── DATE — RIGHT ALIGNED ─────────────────────────────────────────────────
   doc.font("Helvetica-Bold").fontSize(10.5)
     .text(`Date :- ${p.date}`, lm, doc.y, { align: "right", width: pageWidth });
   doc.moveDown(0.8);
  
-  // ─── TO BLOCK ─────────────────────────────────────────────────────────────
   const policeLabel =
     p.police_station && p.police_station !== "________________________________"
       ? `${p.police_station} Police Station,`
@@ -2059,7 +2049,6 @@ function buildPostIntimationPdf(
   doc.text(`TQ. ${p.tq}     Dist. Nanded`, lm);
   doc.moveDown(0.8);
  
-  // ─── SUB ──────────────────────────────────────────────────────────────────
   doc.font("Helvetica").fontSize(10.5).text(
     `Sub :- Intimation after repossession of the vehicle No ${p.registration_no}` +
     ` From Mr. ${p.customer_name}`,
@@ -2069,11 +2058,9 @@ function buildPostIntimationPdf(
   doc.text(`(Borrower) residing ${p.address}`, lm, doc.y, { width: pageWidth });
   doc.moveDown(0.8);
  
-  // ─── RESPECTED SIR ────────────────────────────────────────────────────────
   doc.font("Helvetica-Bold").fontSize(10.5).text("Respected Sir,", lm);
   doc.moveDown(0.6);
  
-  // ─── BODY PARAGRAPHS ──────────────────────────────────────────────────────
   doc.font("Helvetica").fontSize(10.5);
  
   doc.text(
@@ -2103,7 +2090,6 @@ function buildPostIntimationPdf(
   doc.font("Helvetica-Bold").fontSize(10.5).text("DETAILS OF THE VEHICLE REPOSSESSED:-", lm);
   doc.moveDown(0.5);
  
-  // ─── DETAILS TABLE (borderless) ───────────────────────────────────────────
   const col1W = pageWidth * 0.42;
   const detailRows: [string, string][] = [
     ["Name of the Borrower",        p.customer_name],
@@ -2127,7 +2113,6 @@ function buildPostIntimationPdf(
   });
   doc.moveDown(0.7);
  
-  // ─── CLOSING PARAGRAPH ────────────────────────────────────────────────────
   doc.font("Helvetica").fillColor("#000000").fontSize(10.5).text(
     "This communication is for your records and to prevent any confusion that may arise for any" +
     " complaint that the Borrower may lodge with respect to the said vehicle.",
@@ -2135,12 +2120,10 @@ function buildPostIntimationPdf(
   );
   doc.moveDown(0.8);
  
-  // ─── SIGN-OFF ─────────────────────────────────────────────────────────────
   doc.font("Helvetica").fontSize(10.5).text("Thanking You,", lm);
   doc.moveDown(0.3);
   doc.text("Yours Sincerely,", lm);
  
-  // ─── DYNAMIC GAP — push "For,..." towards page bottom ────────────────────
   const footerAbsY  = doc.page.margins.top + pageHeight;
   const forLineH    = 10.5 + 6;
   const footerLineH = 9 + 12;
@@ -2151,7 +2134,6 @@ function buildPostIntimationPdf(
   doc.font("Helvetica").fontSize(10.5).text("For, Hero Fin Corp Limited", lm);
   doc.moveDown(1.0);
  
-  // ─── FOOTER ───────────────────────────────────────────────────────────────
   doc.moveTo(lm, doc.y).lineTo(rm, doc.y).strokeColor("#bbbbbb").lineWidth(0.5).stroke();
   doc.strokeColor("#000000").lineWidth(1);
   doc.moveDown(0.3);
@@ -2160,9 +2142,7 @@ function buildPostIntimationPdf(
     lm, doc.y, { align: "center", width: pageWidth }
   );
 }
- 
 
-// ── DOCX builder (shared, isPost flag switches content) ──────────────────────
 async function buildIntimationDocx(
   p: ReturnType<typeof buildIntimationParams>,
   isPost: boolean,
@@ -2179,7 +2159,6 @@ const logoData: Uint8Array | null = fsNode.existsSync(logoPath) ? new Uint8Array
   const body10 = { size: 20, font: "Arial" };
   const sp     = (n: number) => ({ before: n, after: n });
 
-  // ── Borderless 3-column table helpers ────────────────────────────────────
   const noBorder  = { style: BorderStyle.NONE, size: 0, color: "FFFFFF" };
   const noBorders = {
     top: noBorder, bottom: noBorder, left: noBorder, right: noBorder,
@@ -2222,7 +2201,6 @@ const logoData: Uint8Array | null = fsNode.existsSync(logoPath) ? new Uint8Array
 
   const children: any[] = [];
 
-  // ── Logo top-right ─────────────────────────────────────────────────────────
   if (logoData) {
     children.push(new Paragraph({
       alignment: AlignmentType.RIGHT,
@@ -2231,7 +2209,6 @@ const logoData: Uint8Array | null = fsNode.existsSync(logoPath) ? new Uint8Array
     }));
   }
 
-  // ── Title ──────────────────────────────────────────────────────────────────
   children.push(new Paragraph({
     alignment: AlignmentType.CENTER,
     spacing: sp(60),
@@ -2244,14 +2221,12 @@ const logoData: Uint8Array | null = fsNode.existsSync(logoPath) ? new Uint8Array
     })],
   }));
 
-  // ── Date ───────────────────────────────────────────────────────────────────
   children.push(new Paragraph({
     alignment: isPost ? AlignmentType.RIGHT : AlignmentType.LEFT,
     spacing: { before: 20, after: 80 },
     children: [new TextRun({ text: `Date :- ${p.date}`, ...body11 })],
   }));
 
-  // ── To block ───────────────────────────────────────────────────────────────
   const policeLabel = p.police_station && p.police_station !== "________________________________"
     ? `${p.police_station} Police Station,`
     : "________________________________,";
@@ -2263,7 +2238,6 @@ const logoData: Uint8Array | null = fsNode.existsSync(logoPath) ? new Uint8Array
     new Paragraph({ spacing: { before: 0, after: 80 }, children: [new TextRun({ text: `TQ. ${p.tq}     Dist. Nanded`, ...body11 })] })
   );
 
-  // ── Sub ────────────────────────────────────────────────────────────────────
   if (isPost) {
     children.push(
       new Paragraph({
@@ -2288,10 +2262,8 @@ const logoData: Uint8Array | null = fsNode.existsSync(logoPath) ? new Uint8Array
     );
   }
 
-  // ── Respected Sir ─────────────────────────────────────────────────────────
   children.push(new Paragraph({ spacing: { before: 20, after: 40 }, children: [new TextRun({ text: "Respected Sir,", ...body11 })] }));
 
-  // ── Body + details ─────────────────────────────────────────────────────────
   if (isPost) {
     children.push(
       new Paragraph({
@@ -2349,14 +2321,12 @@ const logoData: Uint8Array | null = fsNode.existsSync(logoPath) ? new Uint8Array
     );
   }
 
-  // ── Closing ────────────────────────────────────────────────────────────────
   children.push(
     new Paragraph({ spacing: { before: 60, after: 16 }, children: [new TextRun({ text: "Thanking You,", ...body11 })] }),
     new Paragraph({ spacing: { before: 0, after: 16 }, children: [new TextRun({ text: "Yours Sincerely,", ...body11 })] }),
     new Paragraph({ spacing: { before: 520, after: 60 }, children: [new TextRun({ text: `For, Hero Fin${isPost ? " " : "-"}Corp Limited`, ...body11 })] })
   );
 
-  // ── Footer ─────────────────────────────────────────────────────────────────
   children.push(new Paragraph({
     alignment: AlignmentType.CENTER,
     spacing: { before: 360, after: 0 },
@@ -2379,9 +2349,6 @@ const logoData: Uint8Array | null = fsNode.existsSync(logoPath) ? new Uint8Array
   return await Packer.toBuffer(doc);
 }
 
-// ── Route handlers ────────────────────────────────────────────────────────────
-
-// 1. Pre Intimation → PDF
 app.post("/api/admin/generate-pre-intimation", requireAdmin, async (req, res) => {
   try {
     const p           = buildIntimationParams(req.body);
@@ -2404,7 +2371,6 @@ app.post("/api/admin/generate-pre-intimation", requireAdmin, async (req, res) =>
   }
 });
 
-// 2. Pre Intimation → DOCX
 app.post("/api/admin/generate-pre-intimation-docx", requireAdmin, async (req, res) => {
   try {
     const p        = buildIntimationParams(req.body);
@@ -2420,7 +2386,6 @@ app.post("/api/admin/generate-pre-intimation-docx", requireAdmin, async (req, re
   }
 });
 
-// 3. Post Intimation → PDF
 app.post("/api/admin/generate-post-intimation", requireAdmin, async (req, res) => {
   try {
     const p           = buildIntimationParams(req.body, true);
@@ -2443,7 +2408,6 @@ app.post("/api/admin/generate-post-intimation", requireAdmin, async (req, res) =
   }
 });
 
-// 4. Post Intimation → DOCX
 app.post("/api/admin/generate-post-intimation-docx", requireAdmin, async (req, res) => {
   try {
     const p        = buildIntimationParams(req.body, true);
@@ -2473,9 +2437,8 @@ app.post("/api/admin/generate-post-intimation-docx", requireAdmin, async (req, r
   } catch (e: any) { res.status(500).json({ message: e.message }); }
 });
 
-// ✅ CORRECT
 app.delete("/api/cases/:id/extra-numbers", requireAuth, async (req, res) => {
-  try {                                        // ← must be here
+  try {
     const { number, table } = req.body;
     const caseId = Number(req.params.id);
     const tbl = table === "bkt" ? "bkt_cases" : "loan_cases";
@@ -2488,7 +2451,7 @@ app.delete("/api/cases/:id/extra-numbers", requireAuth, async (req, res) => {
 });
 
 app.delete("/api/admin/cases/:id/extra-numbers", requireAdmin, async (req, res) => {
-  try {                                        // ← must be here too
+  try {
     const { number, table } = req.body;
     const caseId = Number(req.params.id);
     const tbl = table === "bkt" ? "bkt_cases" : "loan_cases";
