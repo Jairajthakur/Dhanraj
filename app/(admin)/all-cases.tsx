@@ -976,7 +976,7 @@ export default function AllCasesScreen() {
       const id = c.agent_id || 0;
       if (!groups[name]) groups[name] = { agentId: id, agentName: name, count: 0, feedbackCount: 0 };
       groups[name].count++;
-      if (c.latest_feedback || c.feedback_code) groups[name].feedbackCount++;
+      if (c.monthly_feedback) groups[name].feedbackCount++;
     }
     return Object.values(groups).sort((a, b) => a.agentName.localeCompare(b.agentName));
   }, [data]);
@@ -1270,7 +1270,7 @@ const handleResetCase = async (caseId: number) => {
               keyExtractor={(item) => String(item.id)}
               contentContainerStyle={{ padding: 12, gap: 10 }}
               renderItem={({ item }) => {
-                const hasFeedback = !!(item.latest_feedback || item.feedback_code);
+                const hasFeedback = !!(item.monthly_feedback);
                 const statusColor = STATUS_COLORS[item.status] || Colors.textMuted;
                 return (
                   <View style={agentModalStyles.caseRow}>
@@ -1282,10 +1282,15 @@ const handleResetCase = async (caseId: number) => {
                         </View>
                       </View>
                       <Text style={agentModalStyles.caseLoan}>{item.loan_no}</Text>
-                      {hasFeedback && (
-                        <Text style={agentModalStyles.caseFeedback} numberOfLines={1}>
-                          {item.feedback_code ? item.feedback_code + " · " : ""}{item.latest_feedback || ""}
-                        </Text>
+                      {(item.latest_feedback || item.feedback_code) && (
+                      <Text style={agentModalStyles.caseFeedback} numberOfLines={1}>
+                      {item.feedback_code ? item.feedback_code + " · " : ""}{item.latest_feedback || ""}
+                      </Text>
+                      )}
+                      {item.monthly_feedback && (
+                          <Text style={agentModalStyles.caseFeedback} numberOfLines={1}>
+                          Monthly: {item.monthly_feedback}
+                          </Text>
                       )}
                       <StatusActionBar
                         item={item}
