@@ -824,7 +824,7 @@ function CaseDetailModal({
                   ? <ActivityIndicator size="small" color={Colors.danger} />
                   : <Ionicons name="refresh" size={16} color={Colors.danger} />}
                 <Text style={detailStyles.resetCaseBtnText}>
-                  {resetting ? "Resetting..." : "Reset Feedback — Allow FOS to re-submit"}
+                  {resetting ? "Resetting…" : "Reset Monthly Feedback — Allow FOS to re-submit"}
                 </Text>
               </Pressable>
             ) : (
@@ -1007,13 +1007,23 @@ export default function AllCasesScreen() {
 };
 
 const handleResetCase = async (caseId: number) => {
+  const tableType = selectedCase?.case_type === "bkt" ? "bkt" : "loan";
   try {
-    await api.admin.resetMonthlyFeedbackForCase(caseId, tableType);
+    const token = await tokenStore.get();
+    const url = new URL(`/api/admin/reset-monthly-feedback/case/${caseId}`, getApiUrl()).toString();
+    const res = await fetch(url, {
+      method: "POST", credentials: "include",
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({ table: tableType }),
+    });
+    const json: any = await res.json();
+    if (!res.ok) throw new Error(json.message || "Reset failed");
     invalidateAll();
     Alert.alert("Done", "Monthly feedback reset. FOS can now re-submit.");
-  } catch (e: any) {
-    Alert.alert("Error", e.message);
-  }
+  } catch (e: any) { Alert.alert("Error", e.message); }
 };
 
   const FILTERS = ["All", "Unpaid", "PTP", "Paid"];
