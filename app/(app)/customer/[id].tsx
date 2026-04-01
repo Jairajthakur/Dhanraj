@@ -72,6 +72,7 @@ function ReceiptRequestModal({
   const [loading, setLoading] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const insets = useSafeAreaInsets();
+  const [manualAmount, setManualAmount] = useState("");
 
   const handleSubmit = async () => {
     setLoading(true);
@@ -80,6 +81,7 @@ function ReceiptRequestModal({
         loan_no:       item.loan_no,
         customer_name: item.customer_name,
         table_type:    (item as any).case_type || "loan",
+          manual_amount: manualAmount ? parseFloat(manualAmount) : undefined,
       });
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       setSubmitted(true);
@@ -92,6 +94,7 @@ function ReceiptRequestModal({
 
   const handleClose = () => {
     setSubmitted(false);
+    setManualAmount("");
     onClose();
   };
 
@@ -138,25 +141,42 @@ function ReceiptRequestModal({
                 </Text>
               </View>
 
-              {/* ── Amount Summary ── */}
-              <View style={rrStyles.amountGrid}>
-                <View style={rrStyles.amountCell}>
-                  <Text style={rrStyles.amountLabel}>EMI AMOUNT</Text>
-                  <Text style={[rrStyles.amountValue, { color: Colors.danger }]}>
-                    {fmt(item?.emi_amount, "₹")}
-                  </Text>
-                </View>
-                <View style={rrStyles.amountCell}>
-                  <Text style={rrStyles.amountLabel}>CBC</Text>
-                  <Text style={[rrStyles.amountValue, { color: (Colors as any).warning ?? "#F59E0B" }]}>
-                    {fmt(item?.cbc, "₹")}
-                  </Text>
-                </View>
-                <View style={rrStyles.amountCell}>
-                  <Text style={rrStyles.amountLabel}>LPP</Text>
-                  <Text style={[rrStyles.amountValue, { color: (Colors as any).warning ?? "#F59E0B" }]}>
-                    {fmt(item?.lpp, "₹")}
-                  </Text>
+            {/* ── Amount Summary ── */}
+<View style={rrStyles.amountGrid}>
+  <View style={rrStyles.amountCell}>
+    <Text style={rrStyles.amountLabel}>EMI AMOUNT</Text>
+    <Text style={[rrStyles.amountValue, { color: Colors.danger }]}>
+      {fmt(item?.emi_amount, "₹")}
+    </Text>
+  </View>
+  <View style={rrStyles.amountCell}>
+    <Text style={rrStyles.amountLabel}>CBC</Text>
+    <Text style={[rrStyles.amountValue, { color: (Colors as any).warning ?? "#F59E0B" }]}>
+      {fmt(item?.cbc, "₹")}
+    </Text>
+  </View>
+  <View style={rrStyles.amountCell}>
+    <Text style={rrStyles.amountLabel}>LPP</Text>
+    <Text style={[rrStyles.amountValue, { color: (Colors as any).warning ?? "#F59E0B" }]}>
+      {fmt(item?.lpp, "₹")}
+    </Text>
+  </View>
+</View>
+
+{/* ── Manual Amount Entry ── */}
+              <View style={rrStyles.manualAmountBox}>
+                <Text style={rrStyles.manualAmountLabel}>AMOUNT COLLECTED (Manual)</Text>
+                <View style={rrStyles.manualAmountInputRow}>
+                  <Text style={rrStyles.rupeeSymbol}>₹</Text>
+                  <TextInput
+                    style={rrStyles.manualAmountInput}
+                    placeholder="Enter amount"
+                    placeholderTextColor={Colors.textMuted}
+                    value={manualAmount}
+                    onChangeText={setManualAmount}
+                    keyboardType="numeric"
+                    maxLength={10}
+                  />
                 </View>
               </View>
 
@@ -677,6 +697,7 @@ const rrStyles = StyleSheet.create({
     fontSize: 15, fontWeight: "800", color: Colors.text, marginTop: 4,
   },
 
+
   // Success
   successContainer: { alignItems: "center", gap: 12, paddingVertical: 16 },
   successIcon: {
@@ -690,4 +711,28 @@ const rrStyles = StyleSheet.create({
     backgroundColor: Colors.success, borderRadius: 14, alignItems: "center",
   },
   doneBtnText: { color: "#fff", fontWeight: "700", fontSize: 15 },
-});
+
+  // ── Manual Amount ──  👈 ADD HERE, before the closing });
+  manualAmountBox: {
+    borderWidth: 1.5,
+    borderColor: Colors.primary + "40",
+    borderRadius: 14,
+    padding: 14,
+    backgroundColor: Colors.primary + "06",
+  },
+  manualAmountLabel: {
+    fontSize: 9, fontWeight: "700", color: Colors.textMuted,
+    textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 8,
+  },
+  manualAmountInputRow: {
+    flexDirection: "row", alignItems: "center", gap: 6,
+  },
+  rupeeSymbol: {
+    fontSize: 20, fontWeight: "800", color: Colors.primary,
+  },
+  manualAmountInput: {
+    flex: 1, fontSize: 22, fontWeight: "800", color: Colors.text,
+    paddingVertical: 4,
+    borderBottomWidth: 1.5, borderBottomColor: Colors.primary + "50",
+  },
+});  // 👈 this is the closing }); of rrStyles
