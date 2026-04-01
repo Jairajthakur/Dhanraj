@@ -410,6 +410,31 @@ export const api = {
     // ── Call recordings ───────────────────────────────────────────────────────
     getCallRecordings: () => apiRequest("GET", "/api/admin/call-recordings"),
 
+    // ─── ADD THESE TO api.ts ───────────────────────────────────────────────────────
+
+// Inside the main api object (alongside getCases, etc.):
+
+  getReceiptPermission: () => apiRequest("GET", "/api/receipt-permission"),
+
+  requestReceipt: (caseId: number, data: {
+    loan_no?: string;
+    customer_name?: string;
+    table_type?: string;
+    notes?: string;
+  }) => apiRequest("POST", `/api/cases/${caseId}/request-receipt`, data),
+
+  getMyReceiptRequests: () => apiRequest("GET", "/api/receipt-requests"),
+
+// Inside the admin object (alongside admin.getCases, etc.):
+
+    getReceiptRequests: () => apiRequest("GET", "/api/admin/receipt-requests"),
+
+    resolveReceiptRequest: (id: number, status: "approved" | "rejected", notes?: string) =>
+      apiRequest("PUT", `/api/admin/receipt-requests/${id}/resolve`, { status, notes }),
+
+    setReceiptPermission: (agentId: number, enabled: boolean) =>
+      apiRequest("PUT", `/api/admin/agents/${agentId}/receipt-permission`, { enabled }),
+
     // ── Exports ──────────────────────────────────────────────────────────────
     exportPtp: async () => {
       const baseUrl = getApiUrl();
