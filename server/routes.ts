@@ -2463,6 +2463,180 @@ app.delete("/api/admin/cases/:id/extra-numbers", requireAdmin, async (req, res) 
   } catch (e: any) { res.status(500).json({ message: e.message }); }
 });
 
+  // ─── PASTE THIS BLOCK INTO routes.ts BEFORE "const httpServer = createServer(app)" ───
+
+// ── DB migrations for receipt requests ────────────────────────────────────────
+try {
+  await storage.query(`ALTER TABLE fos_agents ADD COLUMN IF NOT EXISTS can_request_receipt BOOLEAN DEFAULT FALSE`);
+  console.log("[DB] fos_agents.can_request_receipt column ready ✅");
+} catch (e: any) { console.error("[DB] can_request_receipt migration:", e.message); }
+
+try {
+  await storage.query(`CREATE TABLE IF NOT EXISTS receipt_requests (
+    id SERIAL PRIMARY KEY,
+    agent_id INTEGER REFERENCES fos_agents(id),
+    case_id INTEGER,
+    loan_no TEXT,
+    customer_name TEXT,
+    table_type TEXT DEFAULT 'loan',
+    status TEXT DEFAULT 'pending',
+    notes TEXT,
+    requested_at TIMESTAMP DEFAULT NOW(),
+    resolved_at TIMESTAMP
+  )`);
+  console.log("[DB] receipt_requests table ready ✅");
+} catch (e: any) { console.error("[DB] receipt_requests error:", e.message); }
+
+// ── Check if current FOS agent has receipt permission ─────────────────────────
+app.get("/api/receipt-permission", requireAuth, async (req, res) => {
+  try {
+    const result = await storage.query(
+      `SELECT can_request_receipt FROM fos_agents WHERE id = $1`,
+      [req.session.agentId!]
+    );
+    res.json({ canRequestReceipt: result.rows[0]?.can_request_receipt === true });
+  } catch (e: any) { res.status(500).json({ message: e.message }); }
+});
+
+// ── FOS submits a receipt request ─────────────────────────────────────────────
+app.post("/api/cases/:id/request-receipt", requireAuth, async (req, res) => {
+  try {
+    const agentId = req.session.agentId!;
+    const caseId  = Number(req.params.id);
+    const { loan_no, customer_name, table_type, notes } = req.body;
+
+    // Verify this agent has the receipt permission
+    const permRow = await storage.query(
+      `SELECT can_request_receipt FROM fos_agents WHERE id = $1`, [agentId]
+    );
+    if (!permRow.rows[0]?.can_request_receipt) {
+      return res.status(403).json({ message: "Receipt request not permitted for your account" });
+    }
+
+    // Check for duplicate pending request for same case
+    const existing = await storage.query(
+      `SELECT id FROM receipt_requests WHERE agent_id=$1 AND case_id=$2 AND status='pending'`,
+      [agentId, caseId]
+    );
+    if (existing.rows.length > 0) {
+      return res.status(409).json({ message: "A receipt request for this case is already pending" });
+    }
+
+    const result = await storage.query(
+      `INSERT INTO receipt_requests (agent_id, case_id, loan_no, customer_name, table_type, notes)
+       VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
+      [agentId, caseId, loan_no || null, customer_name || null, table_type || "loan", notes || null]
+    );
+
+    // Notify all admins via push
+    try {
+      const agentRow  = await storage.query(`SELECT name FROM fos_agents WHERE id=$1`, [agentId]);
+      const adminRows = await storage.query(
+        `SELECT push_token FROM fos_agents WHERE role='admin' AND push_token IS NOT NULL AND push_token<>''`
+      );
+      const agentName = agentRow.rows[0]?.name || "FOS";
+      for (const admin of adminRows.rows) {
+        await sendPush(
+          admin.push_token,
+          "🧾 Receipt Request",
+          `${agentName} requested a receipt for ${customer_name || loan_no || "a case"}.`,
+          { screen: "receipt-requests", type: "receipt_request", caseId }
+        );
+      }
+    } catch (pushErr: any) { console.error("[receipt-request] push error:", pushErr.message); }
+
+    res.json({ success: true, request: result.rows[0] });
+  } catch (e: any) { res.status(500).json({ message: e.message }); }
+});
+
+// ── Admin: get all receipt requests ──────────────────────────────────────────
+app.get("/api/admin/receipt-requests", requireAdmin, async (req, res) => {
+  try {
+    const result = await storage.query(`
+      SELECT rr.*, fa.name AS agent_name, fa.push_token AS agent_push_token
+      FROM receipt_requests rr
+      LEFT JOIN fos_agents fa ON fa.id = rr.agent_id
+      ORDER BY rr.requested_at DESC
+    `);
+    res.json({ requests: result.rows });
+  } catch (e: any) { res.status(500).json({ message: e.message }); }
+});
+
+// ── Admin: resolve (approve/reject) a receipt request ────────────────────────
+app.put("/api/admin/receipt-requests/:id/resolve", requireAdmin, async (req, res) => {
+  try {
+    const id     = Number(req.params.id);
+    const { status, notes } = req.body; // status: 'approved' | 'rejected'
+
+    const reqRow = await storage.query(
+      `UPDATE receipt_requests SET status=$1, notes=COALESCE($2, notes), resolved_at=NOW()
+       WHERE id=$3 RETURNING *`,
+      [status, notes || null, id]
+    );
+    const request = reqRow.rows[0];
+    if (!request) return res.status(404).json({ message: "Request not found" });
+
+    // Notify the FOS agent
+    if (request.agent_push_token || request.agent_id) {
+      const agentRow = await storage.query(
+        `SELECT push_token, name FROM fos_agents WHERE id=$1`, [request.agent_id]
+      );
+      const agent = agentRow.rows[0];
+      if (agent?.push_token) {
+        await sendPush(
+          agent.push_token,
+          status === "approved" ? "✅ Receipt Approved" : "❌ Receipt Request Rejected",
+          status === "approved"
+            ? `Your receipt request for ${request.customer_name || request.loan_no} was approved.`
+            : `Your receipt request for ${request.customer_name || request.loan_no} was declined.`,
+          { screen: "receipt-requests", type: "receipt_resolved", status }
+        );
+      }
+    }
+
+    res.json({ success: true });
+  } catch (e: any) { res.status(500).json({ message: e.message }); }
+});
+
+// ── Admin: toggle receipt permission for a FOS agent ─────────────────────────
+app.put("/api/admin/agents/:agentId/receipt-permission", requireAdmin, async (req, res) => {
+  try {
+    const agentId = Number(req.params.agentId);
+    const { enabled } = req.body;
+    await storage.query(
+      `UPDATE fos_agents SET can_request_receipt=$1 WHERE id=$2`,
+      [!!enabled, agentId]
+    );
+
+    // Notify the agent
+    const agentRow = await storage.query(
+      `SELECT name, push_token FROM fos_agents WHERE id=$1`, [agentId]
+    );
+    const agent = agentRow.rows[0];
+    if (agent?.push_token && enabled) {
+      await sendPush(
+        agent.push_token,
+        "🧾 Receipt Feature Enabled",
+        "Admin enabled receipt request for your account. You can now request receipts.",
+        { screen: "allocation", type: "receipt_permission" }
+      );
+    }
+
+    res.json({ success: true });
+  } catch (e: any) { res.status(500).json({ message: e.message }); }
+});
+
+// ── FOS: get own receipt requests (for status tracking) ──────────────────────
+app.get("/api/receipt-requests", requireAuth, async (req, res) => {
+  try {
+    const result = await storage.query(
+      `SELECT * FROM receipt_requests WHERE agent_id=$1 ORDER BY requested_at DESC LIMIT 50`,
+      [req.session.agentId!]
+    );
+    res.json({ requests: result.rows });
+  } catch (e: any) { res.status(500).json({ message: e.message }); }
+});
+  
 const httpServer = createServer(app);
 return httpServer;
 }
