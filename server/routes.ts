@@ -1586,6 +1586,28 @@ res.json({ imported, updated: 0, skipped, agentsCreated, agentsRemoved, total: r
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
+  // Add this after the existing reset-feedback/case endpoint
+app.post("/api/admin/reset-monthly-feedback/agent/:agentId", requireAdmin, async (req, res) => {
+  try {
+    const agentId = Number(req.params.agentId);
+    const agentRow = await storage.query("SELECT name FROM fos_agents WHERE id=$1", [agentId]);
+    if (!agentRow.rows[0]) return res.status(404).json({ message: "Agent not found" });
+    await storage.query(`UPDATE loan_cases SET monthly_feedback=NULL WHERE agent_id=$1`, [agentId]);
+    await storage.query(`UPDATE bkt_cases SET monthly_feedback=NULL WHERE agent_id=$1`, [agentId]);
+    res.json({ success: true, message: `Monthly feedback reset for ${agentRow.rows[0].name}` });
+  } catch (e: any) { res.status(500).json({ message: e.message }); }
+});
+
+app.post("/api/admin/reset-monthly-feedback/case/:caseId", requireAdmin, async (req, res) => {
+  try {
+    const caseId = Number(req.params.caseId);
+    const { table } = req.body;
+    const tbl = table === "bkt" ? "bkt_cases" : "loan_cases";
+    await storage.query(`UPDATE ${tbl} SET monthly_feedback=NULL WHERE id=$1`, [caseId]);
+    res.json({ success: true });
+  } catch (e: any) { res.status(500).json({ message: e.message }); }
+});
+
   app.put("/api/admin/cases/:id/status", requireAdmin, async (req, res) => {
     try {
       const caseId = Number(req.params.id); const { status, rollback_yn, table } = req.body;
