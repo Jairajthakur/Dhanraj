@@ -1,7 +1,7 @@
 // context/usePushNotifications.ts
 // ✅ Works on both APK and Web
 // ✅ Always re-registers token on every login — deleted tokens auto-restore
-// ✅ Fixed: no longer aborts on missing auth token — retries instead
+// ✅ Fixed: post-APK-update token loss on Android (FCM re-registration race)
 
 import { useEffect, useRef } from "react";
 import { Platform, InteractionManager, PermissionsAndroid } from "react-native";
@@ -14,13 +14,18 @@ const ONESIGNAL_APP_ID =
   Constants.expoConfig?.extra?.oneSignalAppId ||
   "bff2c8e0-de24-4aad-a373-d030c210155f";
 
+// ─── App version tracking — detect APK updates ───────────────────────────────
+const CURRENT_VERSION =
+  Constants.expoConfig?.version ||
+  (Constants as any).manifest?.version ||
+  "unknown";
+
 // ─── Save token directly to server ───────────────────────────────────────────
 async function savePushTokenToServer(playerId: string): Promise<void> {
   const base = getApiUrl();
   const authToken = Platform.OS !== "web" ? await tokenStore.get() : null;
 
   if (!authToken) {
-    // Signal the polling loop to WAIT and retry — not abort
     throw new Error("NO_AUTH_TOKEN");
   }
 
@@ -39,7 +44,7 @@ async function savePushTokenToServer(playerId: string): Promise<void> {
   });
 
   const json = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(json.message || `HTTP ${res.status}`);
+  if (!res.ok) throw new Error((json as any).message || `HTTP ${res.status}`);
   console.log("[OneSignal] ✅ Server confirmed token saved:", json);
 }
 
@@ -70,6 +75,12 @@ async function requestAndroid13Permission(): Promise<boolean> {
       console.log("[Push] Android < 13, no POST_NOTIFICATIONS perm needed");
       return true;
     }
+    // Check before requesting to avoid nagging the user every time
+    const already = await PermissionsAndroid.check(perm);
+    if (already) {
+      console.log("[Push] Android 13: already GRANTED");
+      return true;
+    }
     const granted = await PermissionsAndroid.request(perm, {
       title: "Notification Permission",
       message: "Dhanraj Enterprises needs permission to send you case updates.",
@@ -92,7 +103,7 @@ async function getOnesignalPlayerId(OneSignal: any): Promise<string | null> {
     if (typeof OneSignal.User?.getOnesignalId === "function") {
       const id = await OneSignal.User.getOnesignalId();
       if (id && id.length > 5) {
-        console.log("[OneSignal] ✅ Got onesignalId via getOnesignalId:", id.slice(0, 20) + "...");
+        console.log("[OneSignal] ✅ Got id via getOnesignalId:", id.slice(0, 20) + "...");
         return id;
       }
     }
@@ -100,16 +111,16 @@ async function getOnesignalPlayerId(OneSignal: any): Promise<string | null> {
     // Method 2: pushSubscription.id (v5 fallback)
     const subId = OneSignal.User?.pushSubscription?.id;
     if (subId && typeof subId === "string" && subId.length > 5) {
-      console.log("[OneSignal] ✅ Got onesignalId via pushSubscription.id:", subId.slice(0, 20) + "...");
+      console.log("[OneSignal] ✅ Got id via pushSubscription.id:", subId.slice(0, 20) + "...");
       return subId;
     }
 
-    // Method 3: getPushSubscriptionState (older SDK versions)
+    // Method 3: getPushSubscriptionState (older SDK)
     if (typeof OneSignal.User?.pushSubscription?.getPushSubscriptionState === "function") {
       const state = await OneSignal.User.pushSubscription.getPushSubscriptionState();
       const stateId = state?.current?.id ?? state?.id;
       if (stateId && stateId.length > 5) {
-        console.log("[OneSignal] ✅ Got onesignalId via getPushSubscriptionState:", stateId.slice(0, 20) + "...");
+        console.log("[OneSignal] ✅ Got id via getPushSubscriptionState:", stateId.slice(0, 20) + "...");
         return stateId;
       }
     }
@@ -122,19 +133,55 @@ async function getOnesignalPlayerId(OneSignal: any): Promise<string | null> {
   }
 }
 
-// ─── One-time init guard ──────────────────────────────────────────────────────
-let initialized = false;
+// ─── Force re-subscription (post-APK-update recovery) ────────────────────────
+// After an Android APK update, FCM generates a new token. OneSignal won't
+// know about it until it's explicitly triggered via optOut → optIn.
+// Skipping this step = getOnesignalPlayerId returns null indefinitely.
+async function forceResubscribe(OneSignal: any): Promise<void> {
+  console.log("[OneSignal] 🔄 Running post-update re-subscription...");
+  try {
+    await OneSignal.User.pushSubscription.optOut();
+    console.log("[OneSignal] Opted out");
+  } catch (e) {
+    console.warn("[OneSignal] optOut error (non-fatal):", e);
+  }
+
+  // Give Android time to clear the stale FCM registration
+  await new Promise((r) => setTimeout(r, 2000));
+
+  try {
+    await OneSignal.User.pushSubscription.optIn();
+    console.log("[OneSignal] Opted back in");
+  } catch (e) {
+    console.warn("[OneSignal] optIn error:", e);
+  }
+
+  // FCM re-registration with Google servers takes time — this is exactly
+  // why getOnesignalPlayerId returns null after an APK update.
+  await new Promise((r) => setTimeout(r, 5000));
+  console.log("[OneSignal] ✅ Re-subscription complete");
+}
+
+// ─── Init state ───────────────────────────────────────────────────────────────
 let initPromise: Promise<void> | null = null;
+let initCompleted = false;
+
+export function resetPushInit() {
+  initPromise = null;
+  initCompleted = false;
+  console.log("[OneSignal] Init state reset (logout)");
+}
 
 function ensureInit(): Promise<void> {
   if (Platform.OS === "web") return Promise.resolve();
-  if (initialized) return Promise.resolve();
+  if (initCompleted) return Promise.resolve();
   if (initPromise) return initPromise;
 
   initPromise = new Promise<void>((resolve) => {
     const OneSignal = getOneSignal();
     if (!OneSignal) {
       console.warn("[OneSignal] Module not available — skipping init");
+      initCompleted = true;
       resolve();
       return;
     }
@@ -143,19 +190,15 @@ function ensureInit(): Promise<void> {
       try {
         console.log("[OneSignal] Initializing with appId:", ONESIGNAL_APP_ID);
         OneSignal.initialize(ONESIGNAL_APP_ID);
-        initialized = true;
         console.log("[OneSignal] ✅ Initialized");
 
-        const androidAllowed = await requestAndroid13Permission();
-        if (!androidAllowed) {
-          console.warn("[OneSignal] ⚠️ Android permission denied — push may not work");
-        }
-
+        // Android permission must be granted before optIn will work
+        await requestAndroid13Permission();
         await new Promise((r) => setTimeout(r, 1000));
 
         try {
           await OneSignal.Notifications.requestPermission(true);
-          console.log("[OneSignal] ✅ Permission requested");
+          console.log("[OneSignal] ✅ Notification permission requested");
         } catch (e) {
           console.warn("[OneSignal] requestPermission error:", e);
         }
@@ -169,12 +212,17 @@ function ensureInit(): Promise<void> {
           console.warn("[OneSignal] optIn error:", e);
         }
 
-        // Wait for subscription ID to be assigned
-        await new Promise((r) => setTimeout(r, 2000));
+        // Critical: wait for FCM registration to complete on Android.
+        // Too short here is the #1 reason getOnesignalPlayerId returns null.
+        await new Promise((r) => setTimeout(r, 4000));
+
+        initCompleted = true;
+        console.log("[OneSignal] ✅ Init complete, version:", CURRENT_VERSION);
       } catch (e) {
         console.error("[OneSignal] Init error:", e);
-        initialized = false;
+        // Reset so next call retries instead of hanging on the broken promise
         initPromise = null;
+        initCompleted = false;
       } finally {
         resolve();
       }
@@ -184,11 +232,11 @@ function ensureInit(): Promise<void> {
   return initPromise;
 }
 
-// ─── Register push token (polls until available) ──────────────────────────────
-export async function registerPushToken(): Promise<void> {
+// ─── Register push token ──────────────────────────────────────────────────────
+export async function registerPushToken(isPostUpdate = false): Promise<void> {
   if (Platform.OS === "web") return;
 
-  console.log("[OneSignal] registerPushToken() called");
+  console.log("[OneSignal] registerPushToken() — isPostUpdate:", isPostUpdate);
   await ensureInit();
 
   const OneSignal = getOneSignal();
@@ -197,55 +245,69 @@ export async function registerPushToken(): Promise<void> {
     return;
   }
 
-  try {
-    const isOptedIn = OneSignal.User?.pushSubscription?.optedIn;
-    console.log("[OneSignal] Opted in status:", isOptedIn);
-    if (!isOptedIn) {
-      await OneSignal.User.pushSubscription.optIn();
-    }
-  } catch (_) {}
+  if (isPostUpdate) {
+    // Post-APK-update: force a full FCM re-registration cycle
+    await forceResubscribe(OneSignal);
+  } else {
+    // Normal path: only opt-in if not already subscribed
+    try {
+      const isOptedIn = OneSignal.User?.pushSubscription?.optedIn;
+      console.log("[OneSignal] Current optedIn status:", isOptedIn);
+      if (!isOptedIn) {
+        await OneSignal.User.pushSubscription.optIn();
+        await new Promise((r) => setTimeout(r, 3000));
+      }
+    } catch (_) {}
+  }
 
-  const maxAttempts = 30;
-  let noAuthTokenCount = 0; // track how many times auth token was missing
+  // Poll for subscription ID — it arrives asynchronously after FCM registers
+  const maxAttempts = 40; // 40 × 3s = up to 2 minutes
+  let noAuthTokenCount = 0;
+  let nullIdStreak = 0;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    console.log(`[OneSignal] Attempt ${attempt}/${maxAttempts}`);
+    console.log(`[OneSignal] Polling attempt ${attempt}/${maxAttempts}`);
 
     const playerId = await getOnesignalPlayerId(OneSignal);
 
     if (playerId) {
+      nullIdStreak = 0;
       try {
         await savePushTokenToServer(playerId);
-        console.log(`[OneSignal] ✅ Token saved on attempt ${attempt}`);
-        return; // success
+        console.log(`[OneSignal] ✅ Token registered on attempt ${attempt}`);
+        return;
       } catch (e: any) {
         if (e.message === "NO_AUTH_TOKEN") {
-          // ← KEY FIX: was previously aborting here — now we WAIT and RETRY
-          // This happens on startup when cached agent loads before AsyncStorage
-          // has restored the auth token. Just wait for the token to appear.
           noAuthTokenCount++;
-          console.warn(`[OneSignal] ⏳ Auth token not ready yet (${noAuthTokenCount}x) — waiting 5s`);
-
-          if (noAuthTokenCount >= 10) {
-            // After 10 * 5s = 50 seconds of waiting with no token, give up
-            console.error("[OneSignal] ❌ Auth token never became available — aborting");
+          console.warn(`[OneSignal] ⏳ Auth token not ready (${noAuthTokenCount}x) — retrying in 5s`);
+          if (noAuthTokenCount >= 20) {
+            console.error("[OneSignal] ❌ Auth token never appeared — aborting");
             return;
           }
-          // Use a longer delay when waiting for auth token
           await new Promise((r) => setTimeout(r, 5000));
-          continue; // skip the normal 3s delay below
+          continue;
         }
-        // Any other error (network, server error) — log and try next attempt
         console.warn("[OneSignal] Server save failed:", e.message);
-        noAuthTokenCount = 0; // reset — token was present, just a different error
+        noAuthTokenCount = 0;
       }
     } else {
-      // OneSignal ID not ready — re-opt-in every other attempt
-      if (attempt % 2 === 0) {
+      nullIdStreak++;
+      console.log(`[OneSignal] No ID yet (null streak: ${nullIdStreak})`);
+
+      // After ~18s of consecutive nulls, trigger a fresh opt-out/opt-in.
+      // This kicks Android's FCM registration if it silently stalled.
+      if (nullIdStreak % 6 === 0) {
+        console.log("[OneSignal] Extended null streak — triggering optOut/optIn cycle");
         try {
+          await OneSignal.User.pushSubscription.optOut();
+          await new Promise((r) => setTimeout(r, 1500));
           await OneSignal.User.pushSubscription.optIn();
-          console.log("[OneSignal] Re-opted in on attempt", attempt);
+          await new Promise((r) => setTimeout(r, 5000));
+          continue; // skip the normal 3s delay — we already waited
         } catch (_) {}
+      } else if (attempt % 2 === 0) {
+        // Light re-optIn every other attempt
+        try { await OneSignal.User.pushSubscription.optIn(); } catch (_) {}
       }
     }
 
@@ -254,15 +316,16 @@ export async function registerPushToken(): Promise<void> {
     }
   }
 
-  console.warn("[OneSignal] ❌ Could not save token after", maxAttempts, "attempts");
+  console.warn("[OneSignal] ❌ Could not register token after", maxAttempts, "attempts");
 }
 
 // ─── Hook — call inside RootLayoutNav ────────────────────────────────────────
 export function usePushNotifications() {
   const { agent } = useAuth();
   const agentIdRef = useRef<number | null>(null);
+  const lastVersionRef = useRef<string>(CURRENT_VERSION);
 
-  // Init OneSignal on mount (native only)
+  // Init OneSignal on app mount
   useEffect(() => {
     if (Platform.OS === "web") return;
     ensureInit();
@@ -275,13 +338,26 @@ export function usePushNotifications() {
       return;
     }
 
+    // Detect APK update: version changed since last registration
+    const isPostUpdate = lastVersionRef.current !== CURRENT_VERSION;
+    if (isPostUpdate) {
+      console.log(
+        `[OneSignal] APK update detected: ${lastVersionRef.current} → ${CURRENT_VERSION}`
+      );
+    }
+
+    // Skip if same agent and same version already registered
+    if (agentIdRef.current === agent.id && !isPostUpdate) return;
+
     agentIdRef.current = agent.id;
+    lastVersionRef.current = CURRENT_VERSION;
+
     console.log("[OneSignal] Agent logged in:", agent.id, agent.name);
 
     const OneSignal = getOneSignal();
     if (!OneSignal) return;
 
-    // Re-save token if OneSignal refreshes it
+    // Re-save token whenever OneSignal rotates the subscription
     const handleSubscriptionChange = async (event: any) => {
       console.log("[OneSignal] Subscription changed:", JSON.stringify(event));
       const id = await getOnesignalPlayerId(OneSignal);
@@ -301,8 +377,7 @@ export function usePushNotifications() {
       console.warn("[OneSignal] Listener setup error:", e);
     }
 
-    // Always register — so deleted tokens restore automatically
-    registerPushToken().catch((e) =>
+    registerPushToken(isPostUpdate).catch((e) =>
       console.warn("[OneSignal] registerPushToken error:", e?.message)
     );
 
