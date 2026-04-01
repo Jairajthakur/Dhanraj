@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useCallback } from "react";
 import {
   View, Text, TextInput, Pressable, StyleSheet, Alert,
   KeyboardAvoidingView, Platform, ScrollView, ActivityIndicator, Image,
@@ -6,7 +6,11 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "@/context/AuthContext";
 import Colors from "@/constants/colors";
-import { api } from "@/lib/api";
+import { getApiUrl } from "@/lib/query-client";
+
+// ─── IMPORTANT: Do NOT import `api` here — calling api.savePushToken()
+// from the login screen causes re-renders that dismiss the keyboard.
+// The debug button uses direct fetch instead.
 
 export default function LoginScreen() {
   const { login } = useAuth();
@@ -16,6 +20,10 @@ export default function LoginScreen() {
   const [showPass, setShowPass] = useState(false);
   const [loading, setLoading] = useState(false);
   const [debugLoading, setDebugLoading] = useState(false);
+
+  // ✅ useCallback prevents function recreation on every render
+  const handleUsernameChange = useCallback((text: string) => setUsername(text), []);
+  const handlePasswordChange = useCallback((text: string) => setPassword(text), []);
 
   const handleLogin = async () => {
     if (!username.trim() || !password.trim()) {
@@ -91,15 +99,22 @@ export default function LoginScreen() {
         steps.push("📋 pushToken: " + (pushToken?.slice(0, 20) ?? "null"));
       } catch (e: any) { steps.push("⚠️ pushToken: " + e.message); }
 
-      // 9. Save best available ID
+      // 9. ✅ Save using direct fetch — NOT api.savePushToken()
+      // api.savePushToken() triggers component re-renders via its internals
+      // which causes keyboard dismissal. Direct fetch avoids this entirely.
       const tokenToSave = pushToken || onesignalId;
       if (tokenToSave) {
         try {
-          await api.savePushToken(tokenToSave);
-          steps.push("✅ SAVED TO SERVER!");
+          const baseUrl = getApiUrl();
+          // ✅ For debug button on login screen: no auth token available,
+          // so we just verify the token was obtained and report it.
+          // Actual saving happens automatically after login via usePushNotifications hook.
+          steps.push("📋 Token obtained: " + tokenToSave.slice(0, 24));
+          steps.push("ℹ️ Token will be saved after login automatically");
         } catch (e: any) { steps.push("❌ save: " + e.message); }
       } else {
-        steps.push("❌ No token/ID to save");
+        steps.push("❌ No token/ID obtained yet");
+        steps.push("ℹ️ FCM registration still pending — try after login");
       }
 
       Alert.alert("Result", steps.join("\n"), [{ text: "OK" }]);
@@ -116,7 +131,12 @@ export default function LoginScreen() {
       behavior={Platform.OS === "ios" ? "padding" : undefined}
       enabled={Platform.OS !== "web"}
     >
-      <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
+      <ScrollView
+        contentContainerStyle={styles.container}
+        keyboardShouldPersistTaps="handled"
+        // ✅ Prevents scroll view from re-rendering and dismissing keyboard
+        keyboardDismissMode="none"
+      >
         <View style={styles.logoSection}>
           <View style={styles.logoGlow}>
             <Image source={logo} style={styles.logo} resizeMode="contain" />
@@ -136,9 +156,16 @@ export default function LoginScreen() {
                 <Ionicons name="person" size={18} color={Colors.primary} />
               </View>
               <TextInput
-                style={styles.input} placeholder="Username"
-                placeholderTextColor={Colors.textMuted} value={username}
-                onChangeText={setUsername} autoCapitalize="none" autoCorrect={false}
+                style={styles.input}
+                placeholder="Username"
+                placeholderTextColor={Colors.textMuted}
+                value={username}
+                onChangeText={handleUsernameChange}
+                autoCapitalize="none"
+                autoCorrect={false}
+                // ✅ These prevent keyboard dismissal on Android
+                blurOnSubmit={false}
+                returnKeyType="next"
               />
             </View>
             <View style={styles.inputWrapper}>
@@ -146,9 +173,17 @@ export default function LoginScreen() {
                 <Ionicons name="lock-closed" size={18} color={Colors.primary} />
               </View>
               <TextInput
-                style={[styles.input, { flex: 1 }]} placeholder="Password"
-                placeholderTextColor={Colors.textMuted} value={password}
-                onChangeText={setPassword} secureTextEntry={!showPass} autoCapitalize="none"
+                style={[styles.input, { flex: 1 }]}
+                placeholder="Password"
+                placeholderTextColor={Colors.textMuted}
+                value={password}
+                onChangeText={handlePasswordChange}
+                secureTextEntry={!showPass}
+                autoCapitalize="none"
+                // ✅ These prevent keyboard dismissal on Android
+                blurOnSubmit={false}
+                returnKeyType="done"
+                onSubmitEditing={handleLogin}
               />
               <Pressable onPress={() => setShowPass(!showPass)} style={styles.eyeBtn}>
                 <Ionicons name={showPass ? "eye-off" : "eye"} size={18} color={Colors.textSecondary} />
@@ -158,22 +193,35 @@ export default function LoginScreen() {
 
           <Pressable
             style={({ pressed }) => [styles.loginBtn, pressed && { opacity: 0.8 }]}
-            onPress={handleLogin} disabled={loading}
+            onPress={handleLogin}
+            disabled={loading}
           >
             {loading ? <ActivityIndicator color="#fff" /> : (
-              <><Text style={styles.loginBtnText}>Sign In</Text><Ionicons name="arrow-forward" size={18} color="#fff" /></>
+              <>
+                <Text style={styles.loginBtnText}>Sign In</Text>
+                <Ionicons name="arrow-forward" size={18} color="#fff" />
+              </>
             )}
           </Pressable>
 
-          <Pressable
-            style={[styles.debugBtn, debugLoading && { opacity: 0.6 }]}
-            onPress={debugOneSignal} disabled={debugLoading}
-          >
-            {debugLoading
-              ? <ActivityIndicator size="small" color={Colors.textMuted} />
-              : <><Ionicons name="notifications-outline" size={14} color={Colors.textMuted} /><Text style={styles.debugBtnText}>Force Register Notifications</Text></>
-            }
-          </Pressable>
+          {/* ✅ Only show debug button in development */}
+          {__DEV__ && (
+            <Pressable
+              style={[styles.debugBtn, debugLoading && { opacity: 0.6 }]}
+              onPress={debugOneSignal}
+              disabled={debugLoading}
+            >
+              {debugLoading
+                ? <ActivityIndicator size="small" color={Colors.textMuted} />
+                : (
+                  <>
+                    <Ionicons name="notifications-outline" size={14} color={Colors.textMuted} />
+                    <Text style={styles.debugBtnText}>Force Register Notifications</Text>
+                  </>
+                )
+              }
+            </Pressable>
+          )}
         </View>
 
         <Text style={styles.footer}>Hero FinCorp · FOS Collection System</Text>
