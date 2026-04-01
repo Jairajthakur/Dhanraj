@@ -72,17 +72,20 @@ function ReceiptRequestModal({
   const [loading, setLoading] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const insets = useSafeAreaInsets();
-  const [manualAmount, setManualAmount] = useState("");
-
+  const [emiInput, setEmiInput]  = useState(String(item?.emi_amount || ""));
+  const [cbcInput, setCbcInput]  = useState(String(item?.cbc || ""));
+  const [lppInput, setLppInput]  = useState(String(item?.lpp || ""));
   const handleSubmit = async () => {
     setLoading(true);
     try {
       await api.requestReceipt(item.id, {
-        loan_no:       item.loan_no,
-        customer_name: item.customer_name,
-        table_type:    (item as any).case_type || "loan",
-          manual_amount: manualAmount ? parseFloat(manualAmount) : undefined,
-      });
+  loan_no:       item.loan_no,
+  customer_name: item.customer_name,
+  table_type:    (item as any).case_type || "loan",
+  emi_amount:    emiInput ? parseFloat(emiInput) : undefined,
+  cbc:           cbcInput ? parseFloat(cbcInput) : undefined,
+  lpp:           lppInput ? parseFloat(lppInput) : undefined,
+});
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       setSubmitted(true);
     } catch (e: any) {
@@ -93,10 +96,12 @@ function ReceiptRequestModal({
   };
 
   const handleClose = () => {
-    setSubmitted(false);
-    setManualAmount("");
-    onClose();
-  };
+  setSubmitted(false);
+  setEmiInput(String(item?.emi_amount || ""));
+  setCbcInput(String(item?.cbc || ""));
+  setLppInput(String(item?.lpp || ""));
+  onClose();
+};
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={handleClose}>
@@ -141,67 +146,54 @@ function ReceiptRequestModal({
                 </Text>
               </View>
 
-            {/* ── Amount Summary ── */}
+{/* ── Editable Amount Fields ── */}
 <View style={rrStyles.amountGrid}>
   <View style={rrStyles.amountCell}>
     <Text style={rrStyles.amountLabel}>EMI AMOUNT</Text>
-    <Text style={[rrStyles.amountValue, { color: Colors.danger }]}>
-      {fmt(item?.emi_amount, "₹")}
-    </Text>
+    <View style={rrStyles.amountInputRow}>
+      <Text style={rrStyles.amountRupee}>₹</Text>
+      <TextInput
+        style={rrStyles.amountInput}
+        placeholder="0"
+        placeholderTextColor={Colors.textMuted}
+        value={emiInput}
+        onChangeText={setEmiInput}
+        keyboardType="numeric"
+        maxLength={10}
+      />
+    </View>
   </View>
   <View style={rrStyles.amountCell}>
     <Text style={rrStyles.amountLabel}>CBC</Text>
-    <Text style={[rrStyles.amountValue, { color: (Colors as any).warning ?? "#F59E0B" }]}>
-      {fmt(item?.cbc, "₹")}
-    </Text>
+    <View style={rrStyles.amountInputRow}>
+      <Text style={rrStyles.amountRupee}>₹</Text>
+      <TextInput
+        style={rrStyles.amountInput}
+        placeholder="0"
+        placeholderTextColor={Colors.textMuted}
+        value={cbcInput}
+        onChangeText={setCbcInput}
+        keyboardType="numeric"
+        maxLength={10}
+      />
+    </View>
   </View>
   <View style={rrStyles.amountCell}>
     <Text style={rrStyles.amountLabel}>LPP</Text>
-    <Text style={[rrStyles.amountValue, { color: (Colors as any).warning ?? "#F59E0B" }]}>
-      {fmt(item?.lpp, "₹")}
-    </Text>
+    <View style={rrStyles.amountInputRow}>
+      <Text style={rrStyles.amountRupee}>₹</Text>
+      <TextInput
+        style={rrStyles.amountInput}
+        placeholder="0"
+        placeholderTextColor={Colors.textMuted}
+        value={lppInput}
+        onChangeText={setLppInput}
+        keyboardType="numeric"
+        maxLength={10}
+      />
+    </View>
   </View>
 </View>
-
-{/* ── Manual Amount Entry ── */}
-              <View style={rrStyles.manualAmountBox}>
-                <Text style={rrStyles.manualAmountLabel}>AMOUNT COLLECTED (Manual)</Text>
-                <View style={rrStyles.manualAmountInputRow}>
-                  <Text style={rrStyles.rupeeSymbol}>₹</Text>
-                  <TextInput
-                    style={rrStyles.manualAmountInput}
-                    placeholder="Enter amount"
-                    placeholderTextColor={Colors.textMuted}
-                    value={manualAmount}
-                    onChangeText={setManualAmount}
-                    keyboardType="numeric"
-                    maxLength={10}
-                  />
-                </View>
-              </View>
-
-              <View style={rrStyles.btnRow}>
-                <Pressable style={rrStyles.cancelBtn} onPress={handleClose}>
-                  <Text style={rrStyles.cancelText}>Cancel</Text>
-                </Pressable>
-                <Pressable
-                  style={[rrStyles.submitBtn, loading && { opacity: 0.6 }]}
-                  onPress={handleSubmit}
-                  disabled={loading}
-                >
-                  {loading
-                    ? <ActivityIndicator color="#fff" size="small" />
-                    : <>
-                        <Ionicons name="send" size={16} color="#fff" />
-                        <Text style={rrStyles.submitText}>Send Request</Text>
-                      </>
-                  }
-                </Pressable>
-              </View>
-            </>
-          )}
-        </View>
-      </View>
     </Modal>
   );
 }
