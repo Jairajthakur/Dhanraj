@@ -1,12 +1,13 @@
 import React, { useState } from "react";
 import {
   View, Text, StyleSheet, ScrollView, Pressable,
-  Linking, Alert, Platform, TextInput,
+  Linking, Alert, Platform, TextInput, ActivityIndicator,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLocalSearchParams, router } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
+import { useQueryClient } from "@tanstack/react-query";
 import Colors from "@/constants/colors";
 import { caseStore } from "@/lib/caseStore";
 import { api } from "@/lib/api";
@@ -63,8 +64,15 @@ function Row({ label, value, valueColor }: {
 export default function CustomerDetailScreen() {
   const insets = useSafeAreaInsets();
   const { id } = useLocalSearchParams();
+  const qc = useQueryClient(); // ← FIX: needed to invalidate cache
 
   const item = caseStore.get();
+
+  const [extraNumbers, setExtraNumbers] = useState<string[]>((item as any)?.extra_numbers ?? []);
+  const [newNumberInput, setNewNumberInput] = useState("");
+  const [showAddNumber, setShowAddNumber] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [removing, setRemoving] = useState<string | null>(null);
 
   if (!item) {
     return (
@@ -79,6 +87,7 @@ export default function CustomerDetailScreen() {
   }
 
   const statusColor = STATUS_COLORS[item.status] ?? Colors.textMuted;
+  const caseType = (item as any).case_type === "bkt" ? "bkt" : "loan";
 
   const call = (number: string) => {
     const num = number.trim();
@@ -92,22 +101,21 @@ export default function CustomerDetailScreen() {
     .map((p: string) => p.trim())
     .filter(Boolean);
 
-  const caseType = (item as any).case_type === "bkt" ? "bkt" : "loan";
-
-  const [extraNumbers, setExtraNumbers] = useState<string[]>((item as any).extra_numbers ?? []);
-  const [newNumberInput, setNewNumberInput] = useState("");
-  const [showAddNumber, setShowAddNumber] = useState(false);
-  const [saving, setSaving] = useState(false);
-
+  // ─── FIX: invalidate cache so numbers persist across refreshes ──────────────
   const handleAddNumber = async () => {
     const trimmed = newNumberInput.trim();
     if (!trimmed) { Alert.alert("Enter a valid number"); return; }
+    if (trimmed.length < 7) { Alert.alert("Enter a valid phone number"); return; }
     setSaving(true);
     try {
       await api.addExtraNumber(item.id, trimmed, caseType);
       const updated = [...extraNumbers, trimmed];
       setExtraNumbers(updated);
-      caseStore.set({ ...item, extra_numbers: updated }); // persists through refresh
+      // Update caseStore so detail screen stays in sync
+      caseStore.set({ ...item, extra_numbers: updated });
+      // ← KEY FIX: invalidate the cases query so list screen gets fresh data
+      qc.invalidateQueries({ queryKey: ["/api/cases"] });
+      qc.invalidateQueries({ queryKey: ["/api/bkt-cases"] });
       setNewNumberInput("");
       setShowAddNumber(false);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -119,14 +127,33 @@ export default function CustomerDetailScreen() {
   };
 
   const handleRemoveNumber = async (num: string) => {
-    try {
-      await api.removeExtraNumber(item.id, num, caseType);
-      const updated = extraNumbers.filter(n => n !== num);
-      setExtraNumbers(updated);
-      caseStore.set({ ...item, extra_numbers: updated }); // persists through refresh
-    } catch {
-      Alert.alert("Failed to remove");
-    }
+    Alert.alert(
+      "Remove Number",
+      `Remove ${num}?`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Remove",
+          style: "destructive",
+          onPress: async () => {
+            setRemoving(num);
+            try {
+              await api.removeExtraNumber(item.id, num, caseType);
+              const updated = extraNumbers.filter(n => n !== num);
+              setExtraNumbers(updated);
+              caseStore.set({ ...item, extra_numbers: updated });
+              // ← KEY FIX: invalidate cache here too
+              qc.invalidateQueries({ queryKey: ["/api/cases"] });
+              qc.invalidateQueries({ queryKey: ["/api/bkt-cases"] });
+            } catch {
+              Alert.alert("Failed to remove number");
+            } finally {
+              setRemoving(null);
+            }
+          },
+        },
+      ]
+    );
   };
 
   return (
@@ -218,75 +245,87 @@ export default function CustomerDetailScreen() {
 
       {/* ── Additional Numbers ── */}
       <SectionCard title="Additional Numbers" icon="phone-portrait-outline">
+
+        {/* ── Existing extra numbers list ── */}
+        {extraNumbers.length === 0 && !showAddNumber && (
+          <View style={styles.noNumbersRow}>
+            <Ionicons name="information-circle-outline" size={16} color={Colors.textMuted} />
+            <Text style={styles.noNumbersText}>No additional numbers added yet</Text>
+          </View>
+        )}
+
         {extraNumbers.map((num, i) => (
-          <View key={i} style={[styles.row, { alignItems: "center" }]}>
-            <Text style={styles.rowLabel}>Number {phones.length + i + 1}</Text>
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-              <Pressable onPress={() => call(num)} style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                <Ionicons name="call" size={14} color={Colors.primary} />
-                <Text style={[styles.rowValue, { color: Colors.primary }]}>{num}</Text>
-              </Pressable>
-              <Pressable onPress={() => handleRemoveNumber(num)}>
-                <Ionicons name="trash-outline" size={14} color={Colors.danger} />
-              </Pressable>
+          <View key={`${num}-${i}`} style={styles.extraNumberRow}>
+            {/* Left: label */}
+            <View style={styles.extraNumberLabelWrap}>
+              <Text style={styles.extraNumberIndex}>#{phones.length + i + 1}</Text>
+              <Text style={styles.extraNumberLabel}>Additional</Text>
             </View>
+
+            {/* Middle: tap to call */}
+            <Pressable
+              style={styles.extraNumberCallArea}
+              onPress={() => call(num)}
+            >
+              <View style={styles.extraNumberCallIcon}>
+                <Ionicons name="call" size={14} color="#fff" />
+              </View>
+              <Text style={styles.extraNumberValue}>{num}</Text>
+            </Pressable>
+
+            {/* Right: delete */}
+            <Pressable
+              style={styles.extraNumberDeleteBtn}
+              onPress={() => handleRemoveNumber(num)}
+              disabled={removing === num}
+            >
+              {removing === num
+                ? <ActivityIndicator size="small" color={Colors.danger} />
+                : <Ionicons name="trash-outline" size={18} color={Colors.danger} />
+              }
+            </Pressable>
           </View>
         ))}
 
+        {/* ── Add number form ── */}
         {showAddNumber ? (
-          <View style={{ padding: 12, gap: 8 }}>
+          <View style={styles.addNumberForm}>
             <TextInput
-              style={{
-                borderWidth: 1, borderColor: Colors.border, borderRadius: 10,
-                padding: 10, fontSize: 14, color: Colors.text,
-                backgroundColor: Colors.surfaceAlt,
-              }}
+              style={styles.addNumberInput}
               placeholder="Enter phone number"
               placeholderTextColor={Colors.textMuted}
               value={newNumberInput}
               onChangeText={setNewNumberInput}
               keyboardType="phone-pad"
               maxLength={15}
+              autoFocus
             />
-            <View style={{ flexDirection: "row", gap: 8 }}>
+            <View style={styles.addNumberBtns}>
               <Pressable
-                style={{
-                  flex: 1, paddingVertical: 10, borderRadius: 10,
-                  borderWidth: 1, borderColor: Colors.border, alignItems: "center",
-                }}
+                style={styles.addNumberCancelBtn}
                 onPress={() => { setShowAddNumber(false); setNewNumberInput(""); }}
               >
-                <Text style={{ color: Colors.textSecondary, fontWeight: "600" }}>Cancel</Text>
+                <Text style={styles.addNumberCancelText}>Cancel</Text>
               </Pressable>
               <Pressable
-                style={{
-                  flex: 2, paddingVertical: 10, borderRadius: 10,
-                  backgroundColor: saving ? Colors.primary + "80" : Colors.primary,
-                  alignItems: "center",
-                }}
+                style={[styles.addNumberSaveBtn, saving && { opacity: 0.6 }]}
                 onPress={handleAddNumber}
                 disabled={saving}
               >
-                <Text style={{ color: "#fff", fontWeight: "700" }}>
-                  {saving ? "Saving…" : "Save Number"}
-                </Text>
+                {saving
+                  ? <ActivityIndicator size="small" color="#fff" />
+                  : <Text style={styles.addNumberSaveText}>Save</Text>
+                }
               </Pressable>
             </View>
           </View>
         ) : (
           <Pressable
-            style={{
-              flexDirection: "row", alignItems: "center", gap: 8,
-              margin: 12, padding: 12, borderRadius: 12,
-              borderWidth: 1.5, borderColor: Colors.primary + "50",
-              borderStyle: "dashed", justifyContent: "center",
-            }}
+            style={styles.addNumberTrigger}
             onPress={() => setShowAddNumber(true)}
           >
-            <Ionicons name="add-circle-outline" size={18} color={Colors.primary} />
-            <Text style={{ color: Colors.primary, fontWeight: "700", fontSize: 14 }}>
-              Add New Number
-            </Text>
+            <Ionicons name="add-circle" size={20} color={Colors.primary} />
+            <Text style={styles.addNumberTriggerText}>Add New Number</Text>
           </Pressable>
         )}
       </SectionCard>
@@ -307,6 +346,8 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.primary, borderRadius: 12,
   },
   backBtnText: { color: "#fff", fontWeight: "700", fontSize: 14 },
+
+  // ── Hero ──
   heroCard: {
     backgroundColor: Colors.surface,
     borderRadius: 16, padding: 16, gap: 12,
@@ -336,6 +377,8 @@ const styles = StyleSheet.create({
     paddingVertical: 9, paddingHorizontal: 14, flex: 1, justifyContent: "center",
   },
   callBtnText: { color: "#fff", fontWeight: "700", fontSize: 13 },
+
+  // ── Section cards ──
   sectionCard: {
     backgroundColor: Colors.surface, borderRadius: 16,
     borderWidth: 1, borderColor: Colors.border, overflow: "hidden",
@@ -346,7 +389,10 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1, borderBottomColor: Colors.border,
     backgroundColor: Colors.surfaceAlt ?? Colors.background,
   },
-  sectionTitle: { fontSize: 13, fontWeight: "700", color: Colors.text, textTransform: "uppercase", letterSpacing: 0.5 },
+  sectionTitle: {
+    fontSize: 13, fontWeight: "700", color: Colors.text,
+    textTransform: "uppercase", letterSpacing: 0.5,
+  },
   row: {
     flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start",
     paddingHorizontal: 16, paddingVertical: 10,
@@ -354,4 +400,120 @@ const styles = StyleSheet.create({
   },
   rowLabel: { fontSize: 12, color: Colors.textSecondary, fontWeight: "600", flex: 1 },
   rowValue: { fontSize: 12, color: Colors.text, fontWeight: "700", flex: 1.5, textAlign: "right" },
+
+  // ── Additional Numbers ──
+  noNumbersRow: {
+    flexDirection: "row", alignItems: "center", gap: 8,
+    paddingHorizontal: 16, paddingVertical: 14,
+  },
+  noNumbersText: { fontSize: 13, color: Colors.textMuted, fontStyle: "italic" },
+
+  extraNumberRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: Colors.border,
+    gap: 10,
+    minHeight: 58,
+  },
+  extraNumberLabelWrap: {
+    alignItems: "center",
+    width: 44,
+  },
+  extraNumberIndex: {
+    fontSize: 13,
+    fontWeight: "800",
+    color: Colors.primary,
+  },
+  extraNumberLabel: {
+    fontSize: 9,
+    fontWeight: "600",
+    color: Colors.textMuted,
+    textTransform: "uppercase",
+    marginTop: 1,
+  },
+  extraNumberCallArea: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    backgroundColor: Colors.primary + "12",
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+  },
+  extraNumberCallIcon: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: Colors.primary,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  extraNumberValue: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: Colors.primary,
+    flex: 1,
+    letterSpacing: 0.3,
+  },
+  extraNumberDeleteBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: Colors.danger + "12",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  // ── Add number form ──
+  addNumberForm: {
+    padding: 14,
+    gap: 10,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: Colors.border,
+  },
+  addNumberInput: {
+    borderWidth: 1.5,
+    borderColor: Colors.primary + "60",
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: 16,
+    color: Colors.text,
+    backgroundColor: Colors.surfaceAlt,
+    letterSpacing: 0.5,
+  },
+  addNumberBtns: { flexDirection: "row", gap: 10 },
+  addNumberCancelBtn: {
+    flex: 1, paddingVertical: 12, borderRadius: 12,
+    borderWidth: 1, borderColor: Colors.border, alignItems: "center",
+  },
+  addNumberCancelText: { color: Colors.textSecondary, fontWeight: "600", fontSize: 14 },
+  addNumberSaveBtn: {
+    flex: 2, paddingVertical: 12, borderRadius: 12,
+    backgroundColor: Colors.primary, alignItems: "center",
+  },
+  addNumberSaveText: { color: "#fff", fontWeight: "700", fontSize: 14 },
+
+  addNumberTrigger: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    margin: 12,
+    paddingVertical: 14,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: Colors.primary + "50",
+    borderStyle: "dashed",
+    backgroundColor: Colors.primary + "06",
+  },
+  addNumberTriggerText: {
+    color: Colors.primary,
+    fontWeight: "700",
+    fontSize: 14,
+  },
 });
