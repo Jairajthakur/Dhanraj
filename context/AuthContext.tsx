@@ -9,6 +9,8 @@ import React, {
 } from "react";
 import { AppState, AppStateStatus, Platform } from "react-native";
 import { api, agentCache, tokenStore } from "../lib/api";
+import { resetPushInit } from "@/context/usePushNotifications";
+
 
 interface Agent {
   id: number;
@@ -260,6 +262,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await tokenStore.clear();
     setAgent(null);
     try { await api.logout(); } catch (_) {}
+    resetPushInit();
   };
 
   return (
