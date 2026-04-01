@@ -2513,14 +2513,14 @@ app.post("/api/cases/:id/request-receipt", requireAuth, async (req, res) => {
       return res.status(403).json({ message: "Receipt request not permitted for your account" });
     }
 
-    // Check for duplicate pending request for same case
-    const existing = await storage.query(
-      `SELECT id FROM receipt_requests WHERE agent_id=$1 AND case_id=$2 AND status='pending'`,
-      [agentId, caseId]
-    );
-    if (existing.rows.length > 0) {
-      return res.status(409).json({ message: "A receipt request for this case is already pending" });
-    }
+   // With this:
+const existing = await storage.query(
+  `SELECT id FROM receipt_requests WHERE agent_id=$1 AND case_id=$2 AND status='pending' AND requested_at > NOW() - INTERVAL '24 hours'`,
+  [agentId, caseId]
+);
+if (existing.rows.length > 0) {
+  return res.status(409).json({ message: "Already requested. Admin will process it shortly." });
+}
 
     const result = await storage.query(
       `INSERT INTO receipt_requests (agent_id, case_id, loan_no, customer_name, table_type, notes)
