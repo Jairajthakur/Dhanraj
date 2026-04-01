@@ -1357,14 +1357,22 @@ await storage.deleteAllLoanCases();
 
 if (extrasMap.size > 0) {
   for (const [loanNo, numbers] of extrasMap) {
-await storage.query(
-  `UPDATE loan_cases SET extra_numbers = $1::text[] WHERE loan_no = $2`,
-  [numbers, loanNo]
-);
+    await storage.query(
+      `UPDATE loan_cases SET extra_numbers = $1::text[] WHERE loan_no = $2`,
+      [numbers, loanNo]
+    );
+  }
   console.log(`[import] ✅ Restored extra_numbers for ${extrasMap.size} loan(s)`);
-      }
+}                // ← closes the if block
 
-      for (const [loanNo, ptpData] of ptpLoanMap) {
+for (const [loanNo, ptpData] of ptpLoanMap) {
+  await storage.query(
+    `UPDATE loan_cases SET status='PTP', ptp_date=$1, telecaller_ptp_date=$2 WHERE loan_no=$3`,
+    [ptpData.ptpDate, ptpData.telecallerPtpDate, loanNo]
+  );
+}
+try { await recalcBktPerfFromAllocation(); } catch (e: any) { console.warn("[import] BKT recalc warning:", e.message); }
+res.json({ imported, updated: 0, skipped, agentsCreated, agentsRemoved, total: rawRows.slice(headerRowIdx + 1).length, errors: errors.slice(0, 20) });
         await storage.query(
           `UPDATE loan_cases SET status='PTP', ptp_date=$1, telecaller_ptp_date=$2 WHERE loan_no=$3`,
           [ptpData.ptpDate, ptpData.telecallerPtpDate, loanNo]
