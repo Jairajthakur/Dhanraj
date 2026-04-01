@@ -1320,9 +1320,9 @@ app.put("/api/fos-depositions/:id/pay-both", requireAuth, screenshotUpload.singl
 
 // Save extra numbers BEFORE wiping
 const savedExtras = await storage.query(
-  `SELECT loan_no, extra_numbers FROM loan_cases 
-   WHERE extra_numbers IS NOT NULL 
-   AND extra_numbers != '{}'`
+ `SELECT loan_no, extra_numbers FROM loan_cases 
+ WHERE extra_numbers IS NOT NULL 
+ AND array_length(extra_numbers, 1) > 0`
 );
 const extrasMap = new Map<string, string[]>();
 for (const row of savedExtras.rows) {
@@ -1357,11 +1357,10 @@ await storage.deleteAllLoanCases();
 
 if (extrasMap.size > 0) {
   for (const [loanNo, numbers] of extrasMap) {
-    await storage.query(
-      `UPDATE loan_cases SET extra_numbers = $1 WHERE loan_no = $2`,
-      [numbers, loanNo]
-    );
-  }
+await storage.query(
+  `UPDATE loan_cases SET extra_numbers = $1::text[] WHERE loan_no = $2`,
+  [numbers, loanNo]
+);
   console.log(`[import] ✅ Restored extra_numbers for ${extrasMap.size} loan(s)`);
       }
 
