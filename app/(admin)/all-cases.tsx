@@ -982,39 +982,39 @@ export default function AllCasesScreen() {
   }, [data]);
 
   const handleResetAgentFeedback = (agentId: number, agentName: string) => {
-    Alert.alert(
-      "Reset Agent Feedback",
-      `Reset ALL feedback for ${agentName}? This cannot be undone.`,
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Reset All", style: "destructive",
-          onPress: async () => {
-            setResettingAgent(agentId);
-            try {
-              await api.admin.resetFeedbackForAgent(agentId);
-              invalidateAll();
-              Alert.alert("Done", `All feedback reset for ${agentName}`);
-            } catch (e: any) {
-              Alert.alert("Error", e.message);
-            } finally {
-              setResettingAgent(null);
-            }
-          },
+  Alert.alert(
+    "Reset Monthly Feedback",
+    `Reset ONLY monthly feedback for ${agentName}?\n\nStatus, PTP dates, detail feedback and comments will NOT be changed.`,
+    [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Reset Monthly", style: "destructive",
+        onPress: async () => {
+          setResettingAgent(agentId);
+          try {
+            await api.admin.resetMonthlyFeedbackForAgent(agentId);
+            invalidateAll();
+            Alert.alert("Done", `Monthly feedback reset for ${agentName}`);
+          } catch (e: any) {
+            Alert.alert("Error", e.message);
+          } finally {
+            setResettingAgent(null);
+          }
         },
-      ]
-    );
-  };
+      },
+    ]
+  );
+};
 
-  const handleResetCase = async (caseId: number) => {
-    try {
-      await api.admin.resetFeedbackForCase(caseId, tableType);
-      invalidateAll();
-      Alert.alert("Done", "Feedback reset. FOS can now re-submit.");
-    } catch (e: any) {
-      Alert.alert("Error", e.message);
-    }
-  };
+const handleResetCase = async (caseId: number) => {
+  try {
+    await api.admin.resetMonthlyFeedbackForCase(caseId, tableType);
+    invalidateAll();
+    Alert.alert("Done", "Monthly feedback reset. FOS can now re-submit.");
+  } catch (e: any) {
+    Alert.alert("Error", e.message);
+  }
+};
 
   const FILTERS = ["All", "Unpaid", "PTP", "Paid"];
   const paidCount   = (data?.cases || []).filter((c: any) => c.status === "Paid").length;
@@ -1087,7 +1087,7 @@ export default function AllCasesScreen() {
                 <View style={styles.resetPanel}>
                   <View style={styles.resetPanelHeader}>
                     <Ionicons name="refresh-circle" size={18} color={Colors.danger} />
-                    <Text style={styles.resetPanelTitle}>Reset FOS Feedback</Text>
+                    <Text style={styles.resetPanelTitle}>Reset Monthly Feedback</Text>
                   </View>
                   <Text style={styles.resetPanelSub}>Tap an agent to view and reset their feedback</Text>
                   {agentGroups.map((ag) => (
@@ -1111,7 +1111,7 @@ export default function AllCasesScreen() {
                         >
                           {resettingAgent === ag.agentId
                             ? <ActivityIndicator size="small" color="#fff" />
-                            : (<><Ionicons name="refresh" size={13} color="#fff" /><Text style={styles.resetBtnText}>Reset All</Text></>)}
+                            : (<><Ionicons name="refresh" size={13} color="#fff" /><Text style={styles.resetBtnText}>Reset Monthly</Text></>)}
                         </Pressable>
                       ) : (
                         <View style={styles.noFeedbackBadge}>
