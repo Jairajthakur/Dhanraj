@@ -313,12 +313,14 @@ export const api = {
   getReceiptPermission: () => apiRequest("GET", "/api/receipt-permission"),
 
   requestReceipt: (caseId: number, data: {
-    loan_no?: string;
-    customer_name?: string;
-    table_type?: string;
-    notes?: string;
-  }) => apiRequest("POST", `/api/cases/${caseId}/request-receipt`, data),
-
+  loan_no?: string;
+  customer_name?: string;
+  table_type?: string;
+  notes?: string;
+  emi_amount?: number;   // ← add these
+  cbc?: number;
+  lpp?: number;
+}) => apiRequest("POST", `/api/cases/${caseId}/request-receipt`, data),
   getMyReceiptRequests: () => apiRequest("GET", "/api/receipt-requests"),
 
 
