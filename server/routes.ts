@@ -2503,7 +2503,7 @@ app.post("/api/cases/:id/request-receipt", requireAuth, async (req, res) => {
   try {
     const agentId = req.session.agentId!;
     const caseId  = Number(req.params.id);
-    const { loan_no, customer_name, table_type, notes } = req.body;
+    const { loan_no, customer_name, table_type, notes, emi_amount, cbc, lpp } = req.body;
 
     // Verify this agent has the receipt permission
     const permRow = await storage.query(
