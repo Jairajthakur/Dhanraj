@@ -2450,8 +2450,9 @@ app.post("/api/admin/generate-post-intimation-docx", requireAdmin, async (req, r
   } catch (e: any) { res.status(500).json({ message: e.message }); }
 });
 
+// ✅ CORRECT
 app.delete("/api/cases/:id/extra-numbers", requireAuth, async (req, res) => {
-  try {
+  try {                                        // ← must be here
     const { number, table } = req.body;
     const caseId = Number(req.params.id);
     const tbl = table === "bkt" ? "bkt_cases" : "loan_cases";
@@ -2463,9 +2464,8 @@ app.delete("/api/cases/:id/extra-numbers", requireAuth, async (req, res) => {
   } catch (e: any) { res.status(500).json({ message: e.message }); }
 });
 
-// ← ADD THIS RIGHT HERE
 app.delete("/api/admin/cases/:id/extra-numbers", requireAdmin, async (req, res) => {
-  try {
+  try {                                        // ← must be here too
     const { number, table } = req.body;
     const caseId = Number(req.params.id);
     const tbl = table === "bkt" ? "bkt_cases" : "loan_cases";
@@ -2476,6 +2476,7 @@ app.delete("/api/admin/cases/:id/extra-numbers", requireAdmin, async (req, res) 
     res.json({ success: true });
   } catch (e: any) { res.status(500).json({ message: e.message }); }
 });
+
 const httpServer = createServer(app);
-  return httpServer;
+return httpServer;
 }
