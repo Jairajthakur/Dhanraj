@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, memo } from "react";
 import {
   View, Text, TextInput, Pressable, StyleSheet, Alert,
   KeyboardAvoidingView, Platform, ScrollView, ActivityIndicator, Image,
@@ -12,7 +12,7 @@ import { getApiUrl } from "@/lib/query-client";
 // from the login screen causes re-renders that dismiss the keyboard.
 // The debug button uses direct fetch instead.
 
-export default function LoginScreen() {
+const LoginScreen = memo(function LoginScreen() {
   const { login } = useAuth();
   const logo = require("@/assets/images/dhanraj-logo.png");
   const [username, setUsername] = useState("");
@@ -228,7 +228,9 @@ export default function LoginScreen() {
       </ScrollView>
     </KeyboardAvoidingView>
   );
-}
+});
+
+export default LoginScreen;
 
 const styles = StyleSheet.create({
   container: { flexGrow: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 24, paddingVertical: 40, gap: 32 },
