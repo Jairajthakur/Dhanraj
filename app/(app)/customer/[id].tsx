@@ -75,26 +75,31 @@ function ReceiptRequestModal({
   const [emiInput, setEmiInput]  = useState(String(item?.emi_amount || ""));
   const [cbcInput, setCbcInput]  = useState(String(item?.cbc || ""));
   const [lppInput, setLppInput]  = useState(String(item?.lpp || ""));
-  const handleSubmit = async () => {
-    setLoading(true);
-    try {
-      await api.requestReceipt(item.id, {
-  loan_no:       item.loan_no,
-  customer_name: item.customer_name,
-  table_type:    (item as any).case_type || "loan",
-  emi_amount:    emiInput ? parseFloat(emiInput) : undefined,
-  cbc:           cbcInput ? parseFloat(cbcInput) : undefined,
-  lpp:           lppInput ? parseFloat(lppInput) : undefined,
-});
+ const handleSubmit = async () => {
+  setLoading(true);
+  try {
+    await api.requestReceipt(item.id, {
+      loan_no:       item.loan_no,
+      customer_name: item.customer_name,
+      table_type:    (item as any).case_type || "loan",
+      emi_amount:    emiInput ? parseFloat(emiInput) : undefined,
+      cbc:           cbcInput ? parseFloat(cbcInput) : undefined,
+      lpp:           lppInput ? parseFloat(lppInput) : undefined,
+    });
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    setSubmitted(true);
+  } catch (e: any) {
+    // 409 means already pending — treat as success
+    if (e.message?.includes("already") || e.message?.includes("pending")) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       setSubmitted(true);
-    } catch (e: any) {
+    } else {
       Alert.alert("Error", e.message || "Failed to send request");
-    } finally {
-      setLoading(false);
     }
-  };
-
+  } finally {
+    setLoading(false);
+  }
+};
   const handleClose = () => {
   setSubmitted(false);
   setEmiInput(String(item?.emi_amount || ""));
