@@ -1319,12 +1319,15 @@ app.put("/api/fos-depositions/:id/pay-both", requireAuth, screenshotUpload.singl
 
 // Save extra numbers BEFORE wiping
 const savedExtras = await storage.query(
-  `SELECT loan_no, extra_numbers FROM loan_cases WHERE extra_numbers IS NOT NULL AND array_length(extra_numbers, 1) > 0`
+  `SELECT loan_no, extra_numbers FROM loan_cases 
+   WHERE extra_numbers IS NOT NULL 
+   AND extra_numbers != '{}'`
 );
 const extrasMap = new Map<string, string[]>();
 for (const row of savedExtras.rows) {
   if (row.extra_numbers?.length) extrasMap.set(row.loan_no, row.extra_numbers);
 }
+console.log(`[import] 💾 Saved extra_numbers for ${extrasMap.size} loan(s) before wipe`);
 
 await storage.deleteAllLoanCases();
 
@@ -1351,15 +1354,14 @@ await storage.deleteAllLoanCases();
         } catch (e: any) { errors.push(`Row ${i + headerRowIdx + 2}: ${e.message}`); skipped++; }
       }
 
-// Restore extra numbers after all rows are imported
-      if (extrasMap.size > 0) {
-        for (const [loanNo, numbers] of extrasMap) {
-          await storage.query(
-            `UPDATE loan_cases SET extra_numbers = $1 WHERE loan_no = $2 AND (extra_numbers IS NULL OR array_length(extra_numbers, 1) IS NULL OR array_length(extra_numbers, 1) = 0)`,
-            [numbers, loanNo]
-          );
-        }
-        console.log(`[import] ✅ Restored extra_numbers for ${extrasMap.size} loan cases`);
+if (extrasMap.size > 0) {
+  for (const [loanNo, numbers] of extrasMap) {
+    await storage.query(
+      `UPDATE loan_cases SET extra_numbers = $1 WHERE loan_no = $2`,
+      [numbers, loanNo]
+    );
+  }
+  console.log(`[import] ✅ Restored extra_numbers for ${extrasMap.size} loan(s)`);
       }
 
       for (const [loanNo, ptpData] of ptpLoanMap) {
