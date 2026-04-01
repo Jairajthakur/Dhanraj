@@ -80,7 +80,13 @@ export const getQueryFn: <T>(options: {
   async ({ queryKey }) => {
     const baseUrl = getApiUrl();
     const url = buildUrl(queryKey.join("/") as string, baseUrl);
-    const res = await fetch(url, { credentials: "include" });
+    const headers: Record<string, string> = {};
+    const token = await getStoredToken();
+    if (token) headers["Authorization"] = `Bearer ${token}`;
+    const res = await fetch(url, { 
+      credentials: "include",
+      headers,
+    });
     if (unauthorizedBehavior === "returnNull" && res.status === 401) return null;
     await throwIfResNotOk(res);
     return await res.json();
