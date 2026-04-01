@@ -770,6 +770,7 @@ app.get("/api/today-ptp", requireAuth, async (req, res) => {
         lc.asset_name, lc.asset_make, lc.engine_no, lc.chassis_no,
         lc.tenor, lc.first_emi_due_date, lc.loan_maturity_date,
         lc.ref1_name, lc.ref1_mobile, lc.ref2_name, lc.ref2_mobile,
+        lc.extra_numbers,
         fa.name AS agent_name,
         'loan' AS case_type
        FROM loan_cases lc
