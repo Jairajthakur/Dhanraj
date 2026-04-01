@@ -11,8 +11,6 @@ import Colors from "@/constants/colors";
 import { caseStore } from "@/lib/caseStore";
 import { api } from "@/lib/api";
 
-
-
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function fmt(v: any, prefix = "") {
   if (v === null || v === undefined || v === "" || v === "0" || Number(v) === 0) return "—";
@@ -27,11 +25,6 @@ function fmtStr(v: any) {
 function fmtDate(v: any) {
   if (!v) return "—";
   return String(v).slice(0, 10);
-}
-function yn(v: any) {
-  if (v === true  || v === "true"  || v === "t") return "Yes";
-  if (v === false || v === "false" || v === "f") return "No";
-  return "—";
 }
 
 const STATUS_COLORS: Record<string, string> = {
@@ -71,7 +64,6 @@ export default function CustomerDetailScreen() {
   const insets = useSafeAreaInsets();
   const { id } = useLocalSearchParams();
 
-  // Pull the case from the in-memory store set by navigateToDetail()
   const item = caseStore.get();
 
   if (!item) {
@@ -100,15 +92,43 @@ export default function CustomerDetailScreen() {
     .map((p: string) => p.trim())
     .filter(Boolean);
 
-// At the top, get caseType from item (or pass it when navigating)
-const caseType = (item as any).case_type === "bkt" ? "bkt" : "loan";
+  const caseType = (item as any).case_type === "bkt" ? "bkt" : "loan";
 
-// Replace useState declarations
-const [extraNumbers, setExtraNumbers] = useState<string[]>((item as any).extra_numbers ?? []);
-const [newNumberInput, setNewNumberInput] = useState("");
-const [showAddNumber, setShowAddNumber] = useState(false);
-const [saving, setSaving] = useState(false);
-  
+  const [extraNumbers, setExtraNumbers] = useState<string[]>((item as any).extra_numbers ?? []);
+  const [newNumberInput, setNewNumberInput] = useState("");
+  const [showAddNumber, setShowAddNumber] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  const handleAddNumber = async () => {
+    const trimmed = newNumberInput.trim();
+    if (!trimmed) { Alert.alert("Enter a valid number"); return; }
+    setSaving(true);
+    try {
+      await api.addExtraNumber(item.id, trimmed, caseType);
+      const updated = [...extraNumbers, trimmed];
+      setExtraNumbers(updated);
+      caseStore.set({ ...item, extra_numbers: updated }); // persists through refresh
+      setNewNumberInput("");
+      setShowAddNumber(false);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch (e: any) {
+      Alert.alert("Error", String(e?.message ?? e) || "Failed to save number");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleRemoveNumber = async (num: string) => {
+    try {
+      await api.removeExtraNumber(item.id, num, caseType);
+      const updated = extraNumbers.filter(n => n !== num);
+      setExtraNumbers(updated);
+      caseStore.set({ ...item, extra_numbers: updated }); // persists through refresh
+    } catch {
+      Alert.alert("Failed to remove");
+    }
+  };
+
   return (
     <ScrollView
       style={{ flex: 1, backgroundColor: Colors.background }}
@@ -129,7 +149,6 @@ const [saving, setSaving] = useState(false);
           </View>
         </View>
 
-        {/* Quick amounts */}
         <View style={styles.amountRow}>
           {[
             { label: "EMI DUE", value: fmt(item.emi_due, "₹"), color: Colors.danger },
@@ -143,7 +162,6 @@ const [saving, setSaving] = useState(false);
           ))}
         </View>
 
-        {/* Call buttons */}
         {phones.length > 0 && (
           <View style={styles.callBtnRow}>
             {phones.map((ph, i) => (
@@ -163,7 +181,7 @@ const [saving, setSaving] = useState(false);
         <Row label="BKT"        value={fmtStr(item.bkt)} valueColor={Colors.primary} />
         <Row label="Product"    value={fmtStr(item.pro)} />
         <Row label="Tenor"      value={fmtStr(item.tenor)} />
-        <Row label="EMI" value={fmt(item.emi_amount, "₹")} />
+        <Row label="EMI"        value={fmt(item.emi_amount, "₹")} />
         <Row label="EMI Due"    value={fmt(item.emi_due,    "₹")} valueColor={Colors.danger} />
         <Row label="POS"        value={fmt(item.pos,        "₹")} />
         <Row label="CBC"        value={fmt(item.cbc,        "₹")} />
@@ -175,18 +193,18 @@ const [saving, setSaving] = useState(false);
         {(item.clearance && Number(item.clearance) > 0) && (
           <Row label="Clearance" value={fmt(item.clearance, "₹")} valueColor={Colors.success ?? "#22C55E"} />
         )}
-        <Row label="First EMI Date"    value={fmtDate(item.first_emi_due_date)} />
+        <Row label="First EMI Date"     value={fmtDate(item.first_emi_due_date)} />
         <Row label="Loan Maturity Date" value={fmtDate(item.loan_maturity_date)} />
       </SectionCard>
 
       {/* ── Contact Details ── */}
       <SectionCard title="Contact Details" icon="call-outline">
-        <Row label="Mobile" value={fmtStr(item.mobile_no)} />
-        <Row label="Address" value={fmtStr(item.address)} />
+        <Row label="Mobile"            value={fmtStr(item.mobile_no)} />
+        <Row label="Address"           value={fmtStr(item.address)} />
         <Row label="Reference Address" value={fmtStr(item.reference_address)} />
-        {item.ref1_name && <Row label="Ref 1 Name"   value={fmtStr(item.ref1_name)} />}
+        {item.ref1_name   && <Row label="Ref 1 Name"   value={fmtStr(item.ref1_name)} />}
         {item.ref1_mobile && <Row label="Ref 1 Mobile" value={fmtStr(item.ref1_mobile)} />}
-        {item.ref2_name && <Row label="Ref 2 Name"   value={fmtStr(item.ref2_name)} />}
+        {item.ref2_name   && <Row label="Ref 2 Name"   value={fmtStr(item.ref2_name)} />}
         {item.ref2_mobile && <Row label="Ref 2 Mobile" value={fmtStr(item.ref2_mobile)} />}
       </SectionCard>
 
@@ -198,101 +216,80 @@ const [saving, setSaving] = useState(false);
         <Row label="Chassis No"      value={fmtStr(item.chassis_no)} />
       </SectionCard>
 
-      {/* ── Feedback History ── */}
-    
-{/* ── Add New Number ── */}
-<SectionCard title="Additional Numbers" icon="phone-portrait-outline">
-  {extraNumbers.map((num, i) => (
-  <View key={i} style={[styles.row, { alignItems: "center" }]}>
-    <Text style={styles.rowLabel}>Number {phones.length + i + 1}</Text>
-    <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-      <Pressable onPress={() => call(num)} style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-        <Ionicons name="call" size={14} color={Colors.primary} />
-        <Text style={[styles.rowValue, { color: Colors.primary }]}>{num}</Text>
-      </Pressable>
-      <Pressable onPress={async () => {
-        try {
-          await api.removeExtraNumber(item.id, num, caseType);
-          setExtraNumbers(prev => prev.filter(n => n !== num));
-        } catch { Alert.alert("Failed to remove"); }
-      }}>
-        <Ionicons name="trash-outline" size={14} color={Colors.danger} />
-      </Pressable>
-    </View>
-  </View>
-))}
+      {/* ── Additional Numbers ── */}
+      <SectionCard title="Additional Numbers" icon="phone-portrait-outline">
+        {extraNumbers.map((num, i) => (
+          <View key={i} style={[styles.row, { alignItems: "center" }]}>
+            <Text style={styles.rowLabel}>Number {phones.length + i + 1}</Text>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+              <Pressable onPress={() => call(num)} style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                <Ionicons name="call" size={14} color={Colors.primary} />
+                <Text style={[styles.rowValue, { color: Colors.primary }]}>{num}</Text>
+              </Pressable>
+              <Pressable onPress={() => handleRemoveNumber(num)}>
+                <Ionicons name="trash-outline" size={14} color={Colors.danger} />
+              </Pressable>
+            </View>
+          </View>
+        ))}
 
-  {showAddNumber ? (
-    <View style={{ padding: 12, gap: 8 }}>
-      <TextInput
-        style={{
-          borderWidth: 1, borderColor: Colors.border, borderRadius: 10,
-          padding: 10, fontSize: 14, color: Colors.text,
-          backgroundColor: Colors.surfaceAlt,
-        }}
-        placeholder="Enter phone number"
-        placeholderTextColor={Colors.textMuted}
-        value={newNumberInput}
-        onChangeText={setNewNumberInput}
-        keyboardType="phone-pad"
-        maxLength={15}
-      />
-      <View style={{ flexDirection: "row", gap: 8 }}>
-        <Pressable
-          style={{
-            flex: 1, paddingVertical: 10, borderRadius: 10,
-            borderWidth: 1, borderColor: Colors.border, alignItems: "center",
-          }}
-          onPress={() => { setShowAddNumber(false); setNewNumberInput(""); }}
-        >
-          <Text style={{ color: Colors.textSecondary, fontWeight: "600" }}>Cancel</Text>
-        </Pressable>
-        <Pressable
-          style={{
-            flex: 2, paddingVertical: 10, borderRadius: 10,
-            backgroundColor: Colors.primary, alignItems: "center",
-          }}
-      // Save number
-onPress={async () => {
-  const trimmed = newNumberInput.trim();
-  if (!trimmed) { Alert.alert("Enter a valid number"); return; }
-  console.log("Saving to case ID:", item.id, "table:", caseType); // ← add this
-  setSaving(true);
-  try {
-    await api.addExtraNumber(item.id, trimmed, caseType);
-    setExtraNumbers(prev => [...prev, trimmed]);
-    setNewNumberInput("");
-    setShowAddNumber(false);
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-  } catch (e: any) {
-    Alert.alert("Error", String(e?.message ?? e) || "Failed to save number");
-  } finally {
-    setSaving(false);
-  }
-}}
-        >
-          <Text style={{ color: "#fff", fontWeight: "700" }}>Save Number</Text>
-        </Pressable>
-      </View>
-    </View>
-  ) : (
-    <Pressable
-      style={{
-        flexDirection: "row", alignItems: "center", gap: 8,
-        margin: 12, padding: 12, borderRadius: 12,
-        borderWidth: 1.5, borderColor: Colors.primary + "50",
-        borderStyle: "dashed", justifyContent: "center",
-      }}
-      onPress={() => setShowAddNumber(true)}
-    >
-      <Ionicons name="add-circle-outline" size={18} color={Colors.primary} />
-      <Text style={{ color: Colors.primary, fontWeight: "700", fontSize: 14 }}>
-        Add New Number
-      </Text>
-    </Pressable>
-  )}
-   </SectionCard>
-
+        {showAddNumber ? (
+          <View style={{ padding: 12, gap: 8 }}>
+            <TextInput
+              style={{
+                borderWidth: 1, borderColor: Colors.border, borderRadius: 10,
+                padding: 10, fontSize: 14, color: Colors.text,
+                backgroundColor: Colors.surfaceAlt,
+              }}
+              placeholder="Enter phone number"
+              placeholderTextColor={Colors.textMuted}
+              value={newNumberInput}
+              onChangeText={setNewNumberInput}
+              keyboardType="phone-pad"
+              maxLength={15}
+            />
+            <View style={{ flexDirection: "row", gap: 8 }}>
+              <Pressable
+                style={{
+                  flex: 1, paddingVertical: 10, borderRadius: 10,
+                  borderWidth: 1, borderColor: Colors.border, alignItems: "center",
+                }}
+                onPress={() => { setShowAddNumber(false); setNewNumberInput(""); }}
+              >
+                <Text style={{ color: Colors.textSecondary, fontWeight: "600" }}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                style={{
+                  flex: 2, paddingVertical: 10, borderRadius: 10,
+                  backgroundColor: saving ? Colors.primary + "80" : Colors.primary,
+                  alignItems: "center",
+                }}
+                onPress={handleAddNumber}
+                disabled={saving}
+              >
+                <Text style={{ color: "#fff", fontWeight: "700" }}>
+                  {saving ? "Saving…" : "Save Number"}
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+        ) : (
+          <Pressable
+            style={{
+              flexDirection: "row", alignItems: "center", gap: 8,
+              margin: 12, padding: 12, borderRadius: 12,
+              borderWidth: 1.5, borderColor: Colors.primary + "50",
+              borderStyle: "dashed", justifyContent: "center",
+            }}
+            onPress={() => setShowAddNumber(true)}
+          >
+            <Ionicons name="add-circle-outline" size={18} color={Colors.primary} />
+            <Text style={{ color: Colors.primary, fontWeight: "700", fontSize: 14 }}>
+              Add New Number
+            </Text>
+          </Pressable>
+        )}
+      </SectionCard>
     </ScrollView>
   );
 }
@@ -300,7 +297,6 @@ onPress={async () => {
 // ─── Styles ───────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
   container: { padding: 12, gap: 12 },
-
   empty: {
     flex: 1, justifyContent: "center", alignItems: "center",
     backgroundColor: Colors.background, gap: 12,
@@ -311,8 +307,6 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.primary, borderRadius: 12,
   },
   backBtnText: { color: "#fff", fontWeight: "700", fontSize: 14 },
-
-  /* Hero card */
   heroCard: {
     backgroundColor: Colors.surface,
     borderRadius: 16, padding: 16, gap: 12,
@@ -328,7 +322,6 @@ const styles = StyleSheet.create({
   loanNo: { fontSize: 12, color: Colors.textSecondary, marginTop: 2, fontWeight: "500" },
   statusBadge: { paddingHorizontal: 12, paddingVertical: 5, borderRadius: 20 },
   statusText:  { fontSize: 12, fontWeight: "700" },
-
   amountRow: { flexDirection: "row", gap: 8 },
   amountCell: {
     flex: 1, backgroundColor: Colors.surfaceAlt ?? Colors.background,
@@ -336,7 +329,6 @@ const styles = StyleSheet.create({
   },
   amountLabel: { fontSize: 9, fontWeight: "700", color: Colors.textMuted, textTransform: "uppercase" },
   amountValue: { fontSize: 13, fontWeight: "800", color: Colors.text, marginTop: 2 },
-
   callBtnRow: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   callBtn: {
     flexDirection: "row", alignItems: "center", gap: 6,
@@ -344,8 +336,6 @@ const styles = StyleSheet.create({
     paddingVertical: 9, paddingHorizontal: 14, flex: 1, justifyContent: "center",
   },
   callBtnText: { color: "#fff", fontWeight: "700", fontSize: 13 },
-
-  /* Section card */
   sectionCard: {
     backgroundColor: Colors.surface, borderRadius: 16,
     borderWidth: 1, borderColor: Colors.border, overflow: "hidden",
@@ -357,8 +347,6 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.surfaceAlt ?? Colors.background,
   },
   sectionTitle: { fontSize: 13, fontWeight: "700", color: Colors.text, textTransform: "uppercase", letterSpacing: 0.5 },
-
-  /* Row */
   row: {
     flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start",
     paddingHorizontal: 16, paddingVertical: 10,
