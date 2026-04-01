@@ -308,6 +308,19 @@ export const api = {
   // ── Push token ────────────────────────────────────────────────────────────
   savePushToken: (token: string) =>
     apiRequest("POST", "/api/push-token", { token }),
+  
+    // ── Receipt requests ──────────────────────────────────────────────────────
+  getReceiptPermission: () => apiRequest("GET", "/api/receipt-permission"),
+
+  requestReceipt: (caseId: number, data: {
+    loan_no?: string;
+    customer_name?: string;
+    table_type?: string;
+    notes?: string;
+  }) => apiRequest("POST", `/api/cases/${caseId}/request-receipt`, data),
+
+  getMyReceiptRequests: () => apiRequest("GET", "/api/receipt-requests"),
+
 
   // ── Call recordings ───────────────────────────────────────────────────────
   getCallRecordings: () => apiRequest("GET", "/api/call-recordings"),
