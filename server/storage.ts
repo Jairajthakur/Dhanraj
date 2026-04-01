@@ -226,7 +226,8 @@ export async function initDatabase() {
     // ✅ NEW: monthly_feedback
     `ALTER TABLE loan_cases ADD COLUMN IF NOT EXISTS monthly_feedback TEXT`,
     `ALTER TABLE bkt_cases  ADD COLUMN IF NOT EXISTS monthly_feedback TEXT`,
-
+    `ALTER TABLE loan_cases ADD COLUMN IF NOT EXISTS extra_numbers TEXT[] DEFAULT '{}'`,
+    `ALTER TABLE bkt_cases  ADD COLUMN IF NOT EXISTS extra_numbers TEXT[] DEFAULT '{}'`,
     // Normalize bkt
     `UPDATE bkt_perf_summary SET bkt = 'bkt1'  WHERE LOWER(REPLACE(bkt,' ','')) IN ('1','bkt1')  AND bkt <> 'bkt1'`,
     `UPDATE bkt_perf_summary SET bkt = 'bkt2'  WHERE LOWER(REPLACE(bkt,' ','')) IN ('2','bkt2')  AND bkt <> 'bkt2'`,
