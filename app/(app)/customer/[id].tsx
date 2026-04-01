@@ -676,8 +676,7 @@ const rrStyles = StyleSheet.create({
   amountValue: {
     fontSize: 15, fontWeight: "800", color: Colors.text, marginTop: 4,
   },
-  // Success
-  successContainer: ...
+
   // Success
   successContainer: { alignItems: "center", gap: 12, paddingVertical: 16 },
   successIcon: {
