@@ -1351,12 +1351,15 @@ await storage.deleteAllLoanCases();
         } catch (e: any) { errors.push(`Row ${i + headerRowIdx + 2}: ${e.message}`); skipped++; }
       }
 
-      // Restore extra numbers after all rows are imported
-      for (const [loanNo, numbers] of extrasMap) {
-        await storage.query(
-          `UPDATE loan_cases SET extra_numbers = $1 WHERE loan_no = $2`,
-          [numbers, loanNo]
-        );
+// Restore extra numbers after all rows are imported
+      if (extrasMap.size > 0) {
+        for (const [loanNo, numbers] of extrasMap) {
+          await storage.query(
+            `UPDATE loan_cases SET extra_numbers = $1 WHERE loan_no = $2 AND (extra_numbers IS NULL OR array_length(extra_numbers, 1) IS NULL OR array_length(extra_numbers, 1) = 0)`,
+            [numbers, loanNo]
+          );
+        }
+        console.log(`[import] ✅ Restored extra_numbers for ${extrasMap.size} loan cases`);
       }
 
       for (const [loanNo, ptpData] of ptpLoanMap) {
