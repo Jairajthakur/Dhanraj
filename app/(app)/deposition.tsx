@@ -509,18 +509,7 @@ function DepositionCard({ item, isSelected, onSelect }: {
 
       {item.notes && <Text style={card.notes}>{item.notes}</Text>}
 
-      {isPending && (
-        <View style={card.tapHint}>
-          <Ionicons
-            name={isSelected ? "checkbox" : "square-outline"}
-            size={14}
-            color={isSelected ? Colors.primary : Colors.textMuted}
-          />
-          <Text style={[card.tapHintText, isSelected && { color: Colors.primary }]}>
-            {isSelected ? "Selected — included in payment" : "Tap to select for payment"}
-          </Text>
-        </View>
-      )}
+      
     </Pressable>
   );
 }
@@ -858,7 +847,7 @@ const card = StyleSheet.create({
   root:           { backgroundColor: Colors.surface, borderRadius: 16, padding: 16, borderLeftWidth: 4, shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 8, elevation: 3 },
   selectedRoot:   { borderWidth: 1.5, borderColor: Colors.primary, backgroundColor: Colors.primary + "05" },
   header:         { flexDirection: "row", alignItems: "flex-start", gap: 10 },
-  checkbox:       { width: 22, height: 22, borderRadius: 6, borderWidth: 2, borderColor: Colors.border, alignItems: "center", justifyContent: "center", marginTop: 2, flexShrink: 0 },
+  checkbox:       { width: 16, height: 16, borderRadius: 4, borderWidth: 1.5, borderColor: Colors.border, alignItems: "center", justifyContent: "center", marginTop: 2, flexShrink: 0 },
   checkboxActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
   name:           { fontSize: 15, fontWeight: "700", color: Colors.text },
   meta:           { fontSize: 12, color: Colors.textSecondary, marginTop: 2 },
