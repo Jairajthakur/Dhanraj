@@ -1,8 +1,4 @@
 // context/usePushNotifications.ts
-// ✅ Works on both APK and Web
-// ✅ Always re-registers token on every login — deleted tokens auto-restore
-// ✅ Fixed: post-APK-update token loss on Android (FCM re-registration race)
-
 import { useEffect, useRef } from "react";
 import { Platform, InteractionManager, PermissionsAndroid } from "react-native";
 import Constants from "expo-constants";
@@ -19,7 +15,6 @@ const CURRENT_VERSION =
   (Constants as any).manifest?.version ||
   "unknown";
 
-// ─── Save token to server ─────────────────────────────────────────────────────
 async function savePushTokenToServer(playerId: string): Promise<void> {
   const base = getApiUrl();
   const authToken = Platform.OS !== "web" ? await tokenStore.get() : null;
@@ -40,7 +35,6 @@ async function savePushTokenToServer(playerId: string): Promise<void> {
   console.log("[OneSignal] ✅ Token saved to server");
 }
 
-// ─── Get OneSignal module ─────────────────────────────────────────────────────
 function getOneSignal() {
   if (Platform.OS === "web") return null;
   try {
@@ -57,13 +51,12 @@ function getOneSignal() {
   }
 }
 
-// ─── Android 13+ permission ───────────────────────────────────────────────────
 async function requestAndroid13Permission(): Promise<boolean> {
   if (Platform.OS !== "android") return true;
   try {
     // @ts-ignore
     const perm = PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS;
-    if (!perm) return true; // Android < 13
+    if (!perm) return true;
     const already = await PermissionsAndroid.check(perm);
     if (already) return true;
     const result = await PermissionsAndroid.request(perm, {
@@ -81,7 +74,6 @@ async function requestAndroid13Permission(): Promise<boolean> {
   }
 }
 
-// ─── Get OneSignal player/subscription ID ────────────────────────────────────
 async function getOnesignalPlayerId(OneSignal: any): Promise<string | null> {
   try {
     if (typeof OneSignal.User?.getOnesignalId === "function") {
@@ -103,7 +95,6 @@ async function getOnesignalPlayerId(OneSignal: any): Promise<string | null> {
   }
 }
 
-// ─── Force re-subscription (post-APK-update recovery) ────────────────────────
 async function forceResubscribe(OneSignal: any): Promise<void> {
   console.log("[OneSignal] 🔄 Running post-update re-subscription...");
   try { await OneSignal.User.pushSubscription.optOut(); } catch (_) {}
@@ -113,7 +104,7 @@ async function forceResubscribe(OneSignal: any): Promise<void> {
   console.log("[OneSignal] ✅ Re-subscription complete");
 }
 
-// ─── Init state ───────────────────────────────────────────────────────────────
+// ─── Init runs once at app start (no auth needed) ────────────────────────────
 let initPromise: Promise<void> | null = null;
 let initCompleted = false;
 
@@ -157,7 +148,7 @@ function ensureInit(): Promise<void> {
           console.log("[OneSignal] ✅ Opted in");
         } catch (e) { console.warn("[OneSignal] optIn error:", e); }
 
-        // Wait for FCM registration to complete on Android
+        // Wait for FCM registration on Android
         await new Promise((r) => setTimeout(r, 4000));
 
         initCompleted = true;
@@ -175,11 +166,32 @@ function ensureInit(): Promise<void> {
   return initPromise;
 }
 
-// ─── Register push token ──────────────────────────────────────────────────────
+// ─── Wait until auth token is available in tokenStore ────────────────────────
+async function waitForAuthToken(timeoutMs = 15000): Promise<string | null> {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const tok = await tokenStore.get();
+    if (tok) return tok;
+    await new Promise((r) => setTimeout(r, 400));
+  }
+  return null;
+}
+
+// ─── Register push token — only call AFTER user is logged in ─────────────────
 export async function registerPushToken(isPostUpdate = false): Promise<void> {
   if (Platform.OS === "web") return;
 
   console.log("[OneSignal] registerPushToken() — isPostUpdate:", isPostUpdate);
+
+  // ✅ KEY FIX: Wait for auth token FIRST before doing anything
+  console.log("[OneSignal] Waiting for auth token...");
+  const authToken = await waitForAuthToken(15000);
+  if (!authToken) {
+    console.error("[OneSignal] ❌ Auth token never appeared — aborting push registration");
+    return;
+  }
+  console.log("[OneSignal] ✅ Auth token ready");
+
   await ensureInit();
 
   const OneSignal = getOneSignal();
@@ -201,7 +213,6 @@ export async function registerPushToken(isPostUpdate = false): Promise<void> {
   }
 
   const maxAttempts = 40;
-  let noAuthTokenCount = 0;
   let nullIdStreak = 0;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -216,18 +227,12 @@ export async function registerPushToken(isPostUpdate = false): Promise<void> {
         console.log(`[OneSignal] ✅ Token registered on attempt ${attempt}`);
         return;
       } catch (e: any) {
+        // Auth token disappeared mid-flow (e.g. concurrent logout) — abort
         if (e.message === "NO_AUTH_TOKEN") {
-          noAuthTokenCount++;
-          console.warn(`[OneSignal] Auth token not ready (${noAuthTokenCount}x)`);
-          if (noAuthTokenCount >= 20) {
-            console.error("[OneSignal] ❌ Auth token never appeared — aborting");
-            return;
-          }
-          await new Promise((r) => setTimeout(r, 5000));
-          continue;
+          console.error("[OneSignal] ❌ Auth token lost mid-registration — aborting");
+          return;
         }
         console.warn("[OneSignal] Server save failed:", e.message);
-        noAuthTokenCount = 0;
       }
     } else {
       nullIdStreak++;
@@ -259,11 +264,13 @@ export function usePushNotifications() {
 
   useEffect(() => {
     if (Platform.OS === "web") return;
+    // Only init SDK at app start — no token saving here
     ensureInit();
   }, []);
 
   useEffect(() => {
     if (Platform.OS === "web") return;
+    // ✅ Only run when agent is logged in
     if (!agent) { agentIdRef.current = null; return; }
 
     const isPostUpdate = lastVersionRef.current !== CURRENT_VERSION;
@@ -283,6 +290,9 @@ export function usePushNotifications() {
 
     const handleSubscriptionChange = async (event: any) => {
       console.log("[OneSignal] Subscription changed:", JSON.stringify(event));
+      // Only re-save if still logged in
+      const tok = await tokenStore.get();
+      if (!tok) return;
       const id = await getOnesignalPlayerId(OneSignal);
       if (id) {
         try { await savePushTokenToServer(id); console.log("[OneSignal] ✅ Token re-saved"); }
@@ -294,6 +304,7 @@ export function usePushNotifications() {
       OneSignal.User?.pushSubscription?.addEventListener("change", handleSubscriptionChange);
     } catch (e) { console.warn("[OneSignal] Listener error:", e); }
 
+    // ✅ registerPushToken now waits for auth token internally
     registerPushToken(isPostUpdate).catch((e) =>
       console.warn("[OneSignal] registerPushToken error:", e?.message)
     );
