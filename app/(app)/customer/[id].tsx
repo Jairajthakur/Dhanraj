@@ -194,9 +194,9 @@ function ReceiptRequestModal({
     </View>
   </View>
 </View>
-    </Modal>
-  );
-}
+    
+
+
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 export default function CustomerDetailScreen() {
   const insets = useSafeAreaInsets();
@@ -673,22 +673,28 @@ const rrStyles = StyleSheet.create({
   },
   submitText: { fontSize: 15, fontWeight: "700", color: "#fff" },
   // Amount grid
-  amountGrid: {
-    flexDirection: "row", gap: 10,
-  },
+amountGrid: { flexDirection: "row", gap: 8 },
   amountCell: {
     flex: 1, backgroundColor: Colors.surfaceAlt ?? Colors.background,
-    borderRadius: 12, padding: 12, alignItems: "center",
-    borderWidth: 1, borderColor: Colors.border,
+    borderRadius: 12, padding: 10, alignItems: "center",
+    borderWidth: 1.5, borderColor: Colors.border,
   },
   amountLabel: {
     fontSize: 9, fontWeight: "700", color: Colors.textMuted,
-    textTransform: "uppercase", letterSpacing: 0.5,
+    textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6,
   },
-  amountValue: {
-    fontSize: 15, fontWeight: "800", color: Colors.text, marginTop: 4,
+  amountInputRow: {
+    flexDirection: "row", alignItems: "center", gap: 2,
+    borderBottomWidth: 1.5, borderBottomColor: Colors.primary + "60",
+    paddingBottom: 2, width: "100%",
   },
-
+  amountRupee: {
+    fontSize: 13, fontWeight: "800", color: Colors.primary,
+  },
+  amountInput: {
+    flex: 1, fontSize: 14, fontWeight: "800", color: Colors.text,
+    paddingVertical: 2, textAlign: "center",
+  },
 
   // Success
   successContainer: { alignItems: "center", gap: 12, paddingVertical: 16 },
