@@ -245,9 +245,10 @@ export default function CustomerDetailScreen() {
   const [showReceiptModal, setShowReceiptModal] = useState(false);
 
   // Fetch receipt permission for current agent
-  const { data: permData } = useQuery({
+ const { data: permData } = useQuery({
     queryKey: ["/api/receipt-permission"],
     queryFn:  () => api.getReceiptPermission(),
+    staleTime: 0,
   });
   const canRequestReceipt = permData?.canRequestReceipt === true;
 
@@ -680,11 +681,11 @@ const rrStyles = StyleSheet.create({
   subtitle: { fontSize: 13, color: Colors.textSecondary, marginTop: 2 },
   infoBox: {
     flexDirection: "row", alignItems: "flex-start", gap: 10,
-    backgroundColor: Colors.info + "12", borderRadius: 12,
+    backgroundColor: "#3B82F612", borderRadius: 12,
     paddingHorizontal: 14, paddingVertical: 12,
-    borderWidth: 1, borderColor: Colors.info + "30",
+    borderWidth: 1, borderColor: "#3B82F630",
   },
-  infoText: { flex: 1, fontSize: 13, color: Colors.info, lineHeight: 18 },
+  infoText: { flex: 1, fontSize: 13, color: "#3B82F6", lineHeight: 18 },
   notesLabel: { fontSize: 13, fontWeight: "700", color: Colors.textSecondary, textTransform: "uppercase" },
   notesInput: {
     borderWidth: 1, borderColor: Colors.border, borderRadius: 12,
