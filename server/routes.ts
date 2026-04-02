@@ -2494,14 +2494,11 @@ try {
   console.log("[DB] receipt_requests table ready ✅");
 } catch (e: any) { console.error("[DB] receipt_requests error:", e.message); }
 
-// ── Check if current FOS agent has receipt permission ─────────────────────────
 app.get("/api/receipt-permission", requireAuth, async (req, res) => {
   try {
-   const result = await storage.query(
-      `INSERT INTO receipt_requests (agent_id, case_id, loan_no, customer_name, table_type, notes, emi_amount, cbc, lpp)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
-      [agentId, caseId, loan_no || null, customer_name || null, table_type || "loan", notes || null,
-       emi_amount || null, cbc || null, lpp || null]
+    const result = await storage.query(
+      `SELECT can_request_receipt FROM fos_agents WHERE id = $1`,
+      [req.session.agentId!]
     );
     res.json({ canRequestReceipt: result.rows[0]?.can_request_receipt === true });
   } catch (e: any) { res.status(500).json({ message: e.message }); }
@@ -2531,10 +2528,11 @@ if (existing.rows.length > 0) {
   return res.status(409).json({ message: "Already requested. Admin will process it shortly." });
 }
 
-    const result = await storage.query(
-      `INSERT INTO receipt_requests (agent_id, case_id, loan_no, customer_name, table_type, notes)
-       VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
-      [agentId, caseId, loan_no || null, customer_name || null, table_type || "loan", notes || null]
+   const result = await storage.query(
+      `INSERT INTO receipt_requests (agent_id, case_id, loan_no, customer_name, table_type, notes, emi_amount, cbc, lpp)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
+      [agentId, caseId, loan_no || null, customer_name || null, table_type || "loan", notes || null,
+       emi_amount || null, cbc || null, lpp || null]
     );
 
     // Notify all admins via push
