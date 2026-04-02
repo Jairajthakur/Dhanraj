@@ -93,6 +93,30 @@ function RequestCard({ req, onResolve }: { req: any; onResolve: () => void }) {
         )}
       </View>
 
+    {/* Amount Details */}
+      {(req.emi_amount || req.cbc || req.lpp) && (
+        <View style={styles.amountRow}>
+          {req.emi_amount && (
+            <View style={styles.amountChip}>
+              <Text style={styles.amountLabel}>EMI</Text>
+              <Text style={styles.amountValue}>₹{parseFloat(req.emi_amount).toLocaleString("en-IN")}</Text>
+            </View>
+          )}
+          {req.cbc && (
+            <View style={styles.amountChip}>
+              <Text style={styles.amountLabel}>CBC</Text>
+              <Text style={styles.amountValue}>₹{parseFloat(req.cbc).toLocaleString("en-IN")}</Text>
+            </View>
+          )}
+          {req.lpp && (
+            <View style={styles.amountChip}>
+              <Text style={styles.amountLabel}>LPP</Text>
+              <Text style={styles.amountValue}>₹{parseFloat(req.lpp).toLocaleString("en-IN")}</Text>
+            </View>
+          )}
+        </View>
+      )}
+
       {/* Notes */}
       {req.notes && (
         <View style={styles.notesRow}>
@@ -418,7 +442,16 @@ const styles = StyleSheet.create({
     width: 40, height: 40, borderRadius: 20,
     backgroundColor: Colors.primary, alignItems: "center", justifyContent: "center",
   },
-  permAgentName: { fontSize: 14, fontWeight: "700", color: Colors.text },
-  permStatus:    { fontSize: 12, marginTop: 2 },
-  divider:       { height: StyleSheet.hairlineWidth, backgroundColor: Colors.border, marginLeft: 68 },
+ divider:       { height: StyleSheet.hairlineWidth, backgroundColor: Colors.border, marginLeft: 68 },
+
+  amountRow: { flexDirection: "row", gap: 8, flexWrap: "wrap" },
+  amountChip: {
+    flex: 1, minWidth: 80,
+    backgroundColor: Colors.surfaceAlt, borderRadius: 10,
+    paddingHorizontal: 10, paddingVertical: 8,
+    borderWidth: StyleSheet.hairlineWidth, borderColor: Colors.border,
+    alignItems: "center",
+  },
+  amountLabel: { fontSize: 10, fontWeight: "700", color: Colors.textMuted, textTransform: "uppercase", letterSpacing: 0.5 },
+  amountValue: { fontSize: 13, fontWeight: "800", color: Colors.text, marginTop: 2 },
 });
