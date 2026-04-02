@@ -2481,18 +2481,27 @@ try {
     table_type TEXT DEFAULT 'loan',
     status TEXT DEFAULT 'pending',
     notes TEXT,
+    emi_amount NUMERIC(12,2),
+    cbc NUMERIC(12,2),
+    lpp NUMERIC(12,2),
     requested_at TIMESTAMP DEFAULT NOW(),
     resolved_at TIMESTAMP
   )`);
+  // Migration for existing tables
+  await storage.query(`ALTER TABLE receipt_requests ADD COLUMN IF NOT EXISTS emi_amount NUMERIC(12,2)`);
+  await storage.query(`ALTER TABLE receipt_requests ADD COLUMN IF NOT EXISTS cbc NUMERIC(12,2)`);
+  await storage.query(`ALTER TABLE receipt_requests ADD COLUMN IF NOT EXISTS lpp NUMERIC(12,2)`);
   console.log("[DB] receipt_requests table ready ✅");
 } catch (e: any) { console.error("[DB] receipt_requests error:", e.message); }
 
 // ── Check if current FOS agent has receipt permission ─────────────────────────
 app.get("/api/receipt-permission", requireAuth, async (req, res) => {
   try {
-    const result = await storage.query(
-      `SELECT can_request_receipt FROM fos_agents WHERE id = $1`,
-      [req.session.agentId!]
+   const result = await storage.query(
+      `INSERT INTO receipt_requests (agent_id, case_id, loan_no, customer_name, table_type, notes, emi_amount, cbc, lpp)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
+      [agentId, caseId, loan_no || null, customer_name || null, table_type || "loan", notes || null,
+       emi_amount || null, cbc || null, lpp || null]
     );
     res.json({ canRequestReceipt: result.rows[0]?.can_request_receipt === true });
   } catch (e: any) { res.status(500).json({ message: e.message }); }
