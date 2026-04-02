@@ -29,29 +29,34 @@ function RequestCard({ req, onResolve }: { req: any; onResolve: () => void }) {
   const qc = useQueryClient();
 
   const handleResolve = async (status: "approved" | "rejected") => {
-    Alert.alert(
-      status === "approved" ? "Approve Request" : "Reject Request",
-      `${status === "approved" ? "Approve" : "Reject"} receipt request from ${req.agent_name}?`,
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: status === "approved" ? "Approve" : "Reject",
-          style: status === "rejected" ? "destructive" : "default",
-          onPress: async () => {
-            setLoading(status);
-            try {
-              await api.admin.resolveReceiptRequest(req.id, status);
-              qc.invalidateQueries({ queryKey: ["/api/admin/receipt-requests"] });
-              onResolve();
-            } catch (e: any) {
-              Alert.alert("Error", e.message);
-            } finally {
-              setLoading(null);
-            }
-          },
-        },
-      ]
-    );
+    const confirmed = Platform.OS === "web"
+      ? window.confirm(`${status === "approved" ? "Approve" : "Reject"} receipt request from ${req.agent_name}?`)
+      : await new Promise<boolean>((resolve) => {
+          Alert.alert(
+            status === "approved" ? "Approve Request" : "Reject Request",
+            `${status === "approved" ? "Approve" : "Reject"} receipt request from ${req.agent_name}?`,
+            [
+              { text: "Cancel", style: "cancel", onPress: () => resolve(false) },
+              { text: status === "approved" ? "Approve" : "Reject",
+                style: status === "rejected" ? "destructive" : "default",
+                onPress: () => resolve(true) },
+            ]
+          );
+        });
+
+    if (!confirmed) return;
+
+    setLoading(status);
+    try {
+      await api.admin.resolveReceiptRequest(req.id, status);
+      qc.invalidateQueries({ queryKey: ["/api/admin/receipt-requests"] });
+      onResolve();
+    } catch (e: any) {
+      if (Platform.OS === "web") window.alert("Error: " + e.message);
+      else Alert.alert("Error", e.message);
+    } finally {
+      setLoading(null);
+    }
   };
 
   const statusColor = STATUS_COLORS[req.status] || Colors.textMuted;
