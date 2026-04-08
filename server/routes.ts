@@ -1130,7 +1130,8 @@ app.put("/api/fos-depositions/:id/pay-both", requireAuth, screenshotUpload.singl
       const wb = new ExcelJS.Workbook(); await wb.xlsx.load(req.file.buffer);
       const ws = wb.worksheets[0]; const rawRows = worksheetToRows(ws, true);
       if (rawRows.length === 0) return res.json({ imported: 0, skipped: 0, errors: [] });
-const COL_MAP: Record<string, string> = { agreementno: "loan_no", agreementnumber: "loan_no", agreement: "loan_no", agrmtno: "loan_no", agrno: "loan_no", loanno: "loan_no", loannumber: "loan_no", loan: "loan_no", custname: "customer_name", customername: "customer_name", cust: "customer_name", customer: "customer_name", name: "customer_name", amount: "amount", totalamount: "amount", total: "amount", amountdue: "amount", dueamount: "amount", emiamount: "amount", emiamt: "amount", fos: "fos_name", fosname: "fos_name", fosagent: "fos_name", agent: "fos_name", collector: "fos_name", fosid: "fos_name", bkt: "bkt", bucket: "bkt" };      let headerIdx = -1; let colMap: Record<number, string> = {};
+      const COL_MAP: Record<string, string> = { agreementno: "loan_no", agreementnumber: "loan_no", agreement: "loan_no", agrmtno: "loan_no", agrno: "loan_no", loanno: "loan_no", loannumber: "loan_no", loan: "loan_no", custname: "customer_name", customername: "customer_name", cust: "customer_name", customer: "customer_name", name: "customer_name", amount: "amount", totalamount: "amount", total: "amount", amountdue: "amount", dueamount: "amount", fos: "fos_name", fosname: "fos_name", fosagent: "fos_name", agent: "fos_name", collector: "fos_name" };
+      let headerIdx = -1; let colMap: Record<number, string> = {};
       for (let r = 0; r < Math.min(rawRows.length, 10); r++) { const row = rawRows[r]; const tempMap: Record<number, string> = {}; let matched = 0; for (let c = 0; c < row.length; c++) { const norm = normalizeHeader(String(row[c] || "")); if (COL_MAP[norm]) { tempMap[c] = COL_MAP[norm]; matched++; } } if (matched >= 2) { headerIdx = r; colMap = tempMap; break; } }
       if (headerIdx === -1) return res.status(400).json({ message: "Could not find header row." });
       const { rows: existingAgents } = await storage.query(`SELECT id, name FROM fos_agents WHERE name IS NOT NULL`);
@@ -1152,7 +1153,8 @@ const COL_MAP: Record<string, string> = { agreementno: "loan_no", agreementnumbe
         if (!mapped.amount || parseFloat(mapped.amount) <= 0) { skipped++; continue; }
         const agentId = mapped.fos_name ? resolveAgentId(mapped.fos_name) : null;
         if (mapped.fos_name && !agentId) { errors.push(`Row ${i + headerIdx + 2}: FOS "${mapped.fos_name}" not found`); skipped++; continue; }
-try { await storage.query(`INSERT INTO fos_depositions (agent_id,loan_no,customer_name,bkt,amount,cash_amount,online_amount,payment_method,deposition_date) VALUES ($1,$2,$3,$4,$5,0,0,'pending',$6)`, [agentId, mapped.loan_no || null, mapped.customer_name || null, mapped.bkt ? `bkt${mapped.bkt}` : null, parseFloat(mapped.amount || "0") || 0, today]); imported++; }        catch (e: any) { errors.push(`Row ${i + headerIdx + 2}: ${e.message}`); skipped++; }
+        try { await storage.query(`INSERT INTO fos_depositions (agent_id,loan_no,customer_name,amount,cash_amount,online_amount,payment_method,deposition_date) VALUES ($1,$2,$3,$4,0,0,'pending',$5)`, [agentId, mapped.loan_no || null, mapped.customer_name || null, parseFloat(mapped.amount || "0") || 0, today]); imported++; }
+        catch (e: any) { errors.push(`Row ${i + headerIdx + 2}: ${e.message}`); skipped++; }
       }
       if (imported > 0) {
         try {
