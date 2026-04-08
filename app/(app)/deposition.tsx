@@ -110,7 +110,9 @@ function CashCollectedWidget({ depositions }: { depositions: any[] }) {
   let totalCash = 0;
 
   for (const d of depositions) {
-    const cash = parseFloat(d.cash_amount || 0);
+    const cash = parseFloat(
+      d.payment_method !== "pending" ? (d.cash_amount || 0) : (d.amount || 0)
+    );
     if (cash <= 0) continue;
     totalCash += cash;
 
