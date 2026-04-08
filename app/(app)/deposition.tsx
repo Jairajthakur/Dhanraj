@@ -1,4 +1,3 @@
-
 import React, { useState, useCallback } from "react";
 import {
   View, Text, StyleSheet, FlatList, Pressable, Modal,
