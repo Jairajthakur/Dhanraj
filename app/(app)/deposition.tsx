@@ -95,7 +95,121 @@ async function payBoth(
 
 // ─── PayMode — single declaration ─────────────────────────────────────────────
 type PayMode = "select" | "cash" | "online_amt" | "online" | "both";
+// ─── Cash Collected Widget ────────────────────────────────────────────────────
+function CashCollectedWidget({ depositions }: { depositions: any[] }) {
+  const bktMeta = [
+    { key: "bkt1", label: "BKT 1", color: Colors.info },
+    { key: "bkt2", label: "BKT 2", color: Colors.warning },
+    { key: "bkt3", label: "BKT 3", color: Colors.danger },
+  ] as const;
 
+  // BKT-wise cash totals
+  const bktCash: Record<string, number> = { bkt1: 0, bkt2: 0, bkt3: 0 };
+  // Product-wise cash totals  (loan_type or product_type field: "TW" / "UC")
+  let twCash = 0;
+  let ucCash = 0;
+  let totalCash = 0;
+
+  for (const d of depositions) {
+    const cash = parseFloat(d.cash_amount || 0);
+    if (cash <= 0) continue;
+    totalCash += cash;
+
+    const bkt = (d.bkt || "").toLowerCase();
+    if (bkt in bktCash) bktCash[bkt] += cash;
+
+    const product = (d.product_type || d.loan_type || "").toUpperCase();
+    if (product === "TW") twCash += cash;
+    else if (product === "UC") ucCash += cash;
+  }
+
+  if (totalCash === 0) return null;
+
+  const fmt = (v: number) =>
+    v >= 100000 ? `₹${(v / 100000).toFixed(1)}L`
+    : v >= 1000  ? `₹${(v / 1000).toFixed(1)}K`
+    : `₹${v.toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
+
+  return (
+    <View style={cashW.card}>
+      {/* Header */}
+      <View style={cashW.header}>
+        <View style={cashW.iconWrap}>
+          <Ionicons name="cash-outline" size={16} color={Colors.success} />
+        </View>
+        <Text style={cashW.title}>Cash Collected</Text>
+        <Text style={cashW.total}>{fmt(totalCash)}</Text>
+      </View>
+
+      {/* BKT row */}
+      <View style={cashW.bktRow}>
+        {bktMeta.map(({ key, label, color }) => {
+          const val = bktCash[key];
+          const pct = totalCash > 0 ? (val / totalCash) * 100 : 0;
+          return (
+            <View key={key} style={[cashW.bktCard, { borderTopColor: color }]}>
+              <Text style={[cashW.bktLabel, { color }]}>{label}</Text>
+              <Text style={cashW.bktAmt}>{fmt(val)}</Text>
+              <Text style={cashW.bktPct}>{pct.toFixed(0)}%</Text>
+              {/* mini bar */}
+              <View style={cashW.miniBarTrack}>
+                <View style={[cashW.miniBarFill, { width: `${Math.min(100, pct)}%` as any, backgroundColor: color }]} />
+              </View>
+            </View>
+          );
+        })}
+      </View>
+
+      {/* TW / UC split */}
+      {(twCash > 0 || ucCash > 0) && (
+        <View style={cashW.productRow}>
+          {twCash > 0 && (
+            <View style={[cashW.productChip, { borderColor: Colors.primary + "50", backgroundColor: Colors.primary + "0D" }]}>
+              <View style={[cashW.productDot, { backgroundColor: Colors.primary }]} />
+              <Text style={[cashW.productLabel, { color: Colors.primary }]}>Two Wheeler</Text>
+              <Text style={cashW.productAmt}>{fmt(twCash)}</Text>
+            </View>
+          )}
+          {ucCash > 0 && (
+            <View style={[cashW.productChip, { borderColor: Colors.accent + "50", backgroundColor: Colors.accent + "0D" }]}>
+              <View style={[cashW.productDot, { backgroundColor: Colors.accent }]} />
+              <Text style={[cashW.productLabel, { color: Colors.accent }]}>Used Car</Text>
+              <Text style={cashW.productAmt}>{fmt(ucCash)}</Text>
+            </View>
+          )}
+          {/* Unclassified remainder */}
+          {(totalCash - twCash - ucCash) > 0 && (
+            <View style={[cashW.productChip, { borderColor: Colors.textMuted + "50", backgroundColor: Colors.surfaceAlt }]}>
+              <View style={[cashW.productDot, { backgroundColor: Colors.textMuted }]} />
+              <Text style={[cashW.productLabel, { color: Colors.textMuted }]}>Other</Text>
+              <Text style={cashW.productAmt}>{fmt(totalCash - twCash - ucCash)}</Text>
+            </View>
+          )}
+        </View>
+      )}
+    </View>
+  );
+}
+
+const cashW = StyleSheet.create({
+  card:         { backgroundColor: Colors.surface, borderRadius: 16, padding: 14, gap: 12, borderWidth: 1, borderColor: Colors.success + "40", shadowColor: Colors.success, shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.08, shadowRadius: 6, elevation: 3 },
+  header:       { flexDirection: "row", alignItems: "center", gap: 8 },
+  iconWrap:     { width: 30, height: 30, borderRadius: 9, backgroundColor: Colors.success + "18", alignItems: "center", justifyContent: "center" },
+  title:        { flex: 1, fontSize: 14, fontWeight: "800", color: Colors.text },
+  total:        { fontSize: 20, fontWeight: "900", color: Colors.success },
+  bktRow:       { flexDirection: "row", gap: 8 },
+  bktCard:      { flex: 1, backgroundColor: Colors.surfaceAlt, borderRadius: 10, padding: 10, borderTopWidth: 3, gap: 2 },
+  bktLabel:     { fontSize: 10, fontWeight: "800", textTransform: "uppercase" as any },
+  bktAmt:       { fontSize: 13, fontWeight: "800", color: Colors.text },
+  bktPct:       { fontSize: 10, color: Colors.textMuted },
+  miniBarTrack: { height: 4, backgroundColor: Colors.border, borderRadius: 2, overflow: "hidden", marginTop: 4 },
+  miniBarFill:  { height: "100%" as any, borderRadius: 2 },
+  productRow:   { flexDirection: "row", flexWrap: "wrap" as any, gap: 8 },
+  productChip:  { flexDirection: "row", alignItems: "center", gap: 6, borderWidth: 1, borderRadius: 20, paddingHorizontal: 10, paddingVertical: 6 },
+  productDot:   { width: 7, height: 7, borderRadius: 4 },
+  productLabel: { fontSize: 11, fontWeight: "700" },
+  productAmt:   { fontSize: 12, fontWeight: "800", color: Colors.text },
+});
 // ─── Bulk Payment Sheet ───────────────────────────────────────────────────────
 function BulkPaymentSheet({ visible, selectedItems, onClose, onPaid }: {
   visible: boolean; selectedItems: any[]; onClose: () => void; onPaid: () => void;
@@ -643,8 +757,12 @@ export default function FosDepositionScreen() {
           depositions.length === 0 && { flex: 1 },
         ]}
         ListHeaderComponent={
-          depositions.length > 0 ? (
-            <View style={{ gap: 12, marginBottom: 4 }}>
+  depositions.length > 0 ? (
+    <View style={{ gap: 12, marginBottom: 4 }}>
+
+      {/* ── NEW: Cash Collected Widget ── */}
+      <CashCollectedWidget depositions={depositions} />
+
               {/* Summary cards */}
               <View style={main.summaryRow}>
                 <View style={[main.sumCard, { borderTopColor: Colors.warning }]}>
