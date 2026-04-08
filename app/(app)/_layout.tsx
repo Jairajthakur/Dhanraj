@@ -15,7 +15,7 @@ const MENU_ITEMS = [
   { key: "allocation",      label: "My Cases",        icon: "list"             as const, screen: "/(app)/allocation" },
   { key: "drr",             label: "DRR / Targets",   icon: "trending-up"      as const, screen: "/(app)/drr" },
   { key: "ready-payment",   label: "Ready Payment",   icon: "phone-portrait"   as const, screen: "/(app)/ready-payment" },
-  { key: "deposition",      label: "Deposition",      icon: "cash"             as const, screen: "/(app)/fos-deposition" },
+  { key: "deposition",      label: "Deposition",      icon: "cash"             as const, screen: "/(app)/deposition" },
   { key: "performance",     label: "Performance",     icon: "stats-chart"      as const, screen: "/(app)/performance" },
   { key: "id-card",         label: "ID Card",         icon: "card"             as const, screen: "/(app)/id-card" },
   { key: "attendance",      label: "Attendance",      icon: "checkmark-circle" as const, screen: "attendance" },
@@ -166,9 +166,8 @@ export default function AppLayout() {
         <Stack.Screen name="salary" />
         <Stack.Screen name="id-card" />
         <Stack.Screen name="ready-payment" />
-                <Stack.Screen name="deposition" />
+        <Stack.Screen name="deposition" />
         <Stack.Screen name="depositions" />
-        <Stack.Screen name="fos-deposition" />
         <Stack.Screen name="change-password" />
       </Stack>
       <Drawer visible={drawerOpen} onClose={() => setDrawerOpen(false)} agentName={agent?.name || "Agent"} />
