@@ -12,6 +12,7 @@ import {
   Linking,
   Platform,
   Alert,
+  KeyboardAvoidingView,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -201,17 +202,8 @@ const base64 = btoa(binary);
           </View>
         </View>
 
+        <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={{ flex: 1 }}>
         <ScrollView style={{ flex: 1 }} contentContainerStyle={intimStyles.letterContainer} showsVerticalScrollIndicator={false}>
-
-          {/* Editable fields */}
-          <View style={intimStyles.editableCard}>
-            <Text style={intimStyles.editableTitle}>
-              <Ionicons name="create-outline" size={14} color={Colors.primary} /> Fill in Police Station Details
-            </Text>
-            <View style={intimStyles.editableRow}>
-              <Text style={intimStyles.editableLabel}>Police Station Name</Text>
-              <TextInput
-                style={intimStyles.editableInput}
                 placeholder="Enter police station name"
                 placeholderTextColor={Colors.textMuted}
                 value={policeStation}
@@ -293,6 +285,7 @@ const base64 = btoa(binary);
           </View>
           <View style={{ height: insets.bottom + 24 }} />
         </ScrollView>
+        </KeyboardAvoidingView>
       </View>
     </Modal>
   );
@@ -436,6 +429,7 @@ const base64 = btoa(binary);
           </View>
         </View>
 
+        <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={{ flex: 1 }}>
         <ScrollView style={{ flex: 1 }} contentContainerStyle={intimStyles.letterContainer} showsVerticalScrollIndicator={false}>
 
           {/* Editable fields */}
@@ -1087,6 +1081,7 @@ const handleResetCase = async (caseId: number) => {
         </View>
       ) : (
         <FlatList
+          keyboardShouldPersistTaps="handled"
           data={filtered}
           keyExtractor={(item) => String(item.id)}
           contentContainerStyle={[styles.list, { paddingBottom: insets.bottom + 24 }, !filtered.length && { flex: 1 }]}
