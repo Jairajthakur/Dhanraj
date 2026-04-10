@@ -10,6 +10,7 @@ import { queryClient } from "../lib/query-client";
 import { AuthProvider, useAuth } from "../context/AuthContext";
 import { setQueryClientRef } from "../lib/api";
 import { SafeAreaProvider } from "react-native-safe-area-context";
+import { KeyboardProvider } from "react-native-keyboard-controller";
 import { usePushNotifications } from "@/context/usePushNotifications";
 
 setQueryClientRef(queryClient);
@@ -215,10 +216,12 @@ export default function RootLayout() {
         </View>
       ) : (
         <SafeAreaProvider>
+          <KeyboardProvider>
           <StatusBar style="dark" />
           <AuthProvider>
             <RootLayoutNav />
           </AuthProvider>
+          </KeyboardProvider>
         </SafeAreaProvider>
       )}
     </QueryClientProvider>
