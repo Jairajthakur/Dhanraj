@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from "react";
 import {
   View, Text, StyleSheet, FlatList, Pressable, TextInput, Linking,
-  Alert, ActivityIndicator, Modal, ScrollView, Platform
+  Alert, ActivityIndicator, Modal, ScrollView, Platform, KeyboardAvoidingView,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -301,6 +301,7 @@ function FeedbackModal({ visible, caseItem, onClose, isMonthlyLocked = false, ex
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={{ flex: 1 }}>
       <View style={fbStyles.overlay}>
         <View style={fbStyles.sheet}>
           <View style={fbStyles.handle} />
@@ -562,6 +563,7 @@ function FeedbackModal({ visible, caseItem, onClose, isMonthlyLocked = false, ex
         phones={allPhones}
         onClose={() => setCallPickerVisible(false)}
       />
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
@@ -844,6 +846,7 @@ export default function AllocationScreen() {
         </View>
       ) : (
         <FlatList
+          keyboardShouldPersistTaps="handled"
           data={filtered}
           keyExtractor={(item) => String(item.id)}
           renderItem={({ item }) => (
