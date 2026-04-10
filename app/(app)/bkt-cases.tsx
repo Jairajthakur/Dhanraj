@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from "react";
 import {
   View, Text, StyleSheet, FlatList, Pressable, TextInput,
-  ScrollView, Modal, Platform, ActivityIndicator, Alert,
+  ScrollView, Modal, Platform, ActivityIndicator, Alert, KeyboardAvoidingView,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
@@ -141,8 +141,9 @@ function FeedbackModal({
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={{ flex: 1 }}>
       <View style={fbStyles.overlay}>
-        <ScrollView style={fbStyles.sheet} showsVerticalScrollIndicator={false}>
+        <ScrollView style={fbStyles.sheet} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
           <View style={fbStyles.handle} />
           <Text style={fbStyles.title}>Update Feedback</Text>
           {item && (
@@ -313,6 +314,7 @@ function FeedbackModal({
           <View style={{ height: 24 }} />
         </ScrollView>
       </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
@@ -397,6 +399,7 @@ export default function FosBktCases() {
         </View>
       ) : (
         <FlatList
+          keyboardShouldPersistTaps="handled"
           data={filtered}
           keyExtractor={(item) => String(item.id)}
           contentContainerStyle={[styles.list, { paddingBottom: insets.bottom + 80 }]}
