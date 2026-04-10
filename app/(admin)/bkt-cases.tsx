@@ -266,6 +266,7 @@ export default function AdminBktPerformance() {
         </View>
       ) : (
         <FlatList
+          keyboardShouldPersistTaps="handled"
           data={summaryFosNames}
           keyExtractor={(item) => item}
           contentContainerStyle={{ padding: 12, gap: 12, paddingBottom: insets.bottom + 32 }}
