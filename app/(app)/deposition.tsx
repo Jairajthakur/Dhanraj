@@ -1,9 +1,7 @@
-
-
 import React, { useState, useCallback } from "react";
 import {
   View, Text, StyleSheet, FlatList, Pressable, Modal,
-  TextInput, Alert, Platform, Image, ActivityIndicator,
+  TextInput, Alert, Platform, Image, ActivityIndicator, KeyboardAvoidingView,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -195,6 +193,7 @@ function BulkPaymentSheet({ visible, selectedItems, onClose, onPaid }: {
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={() => { reset(); onClose(); }}>
+      <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={{ flex: 1 }}>
       <View style={pay.overlay}>
         <View style={pay.sheet}>
           <View style={pay.handle} />
@@ -412,6 +411,7 @@ function BulkPaymentSheet({ visible, selectedItems, onClose, onPaid }: {
           )}
         </View>
       </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
@@ -747,6 +747,7 @@ export default function FosDepositionScreen() {
         animationType="slide"
         onRequestClose={() => { setAmountEntryItem(null); setEnteredAmount(""); }}
       >
+        <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={{ flex: 1 }}>
         <View style={pay.overlay}>
           <View style={pay.sheet}>
             <View style={pay.handle} />
@@ -813,6 +814,7 @@ export default function FosDepositionScreen() {
             })()}
           </View>
         </View>
+        </KeyboardAvoidingView>
       </Modal>
     </View>
   );
