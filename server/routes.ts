@@ -1320,15 +1320,27 @@ app.put("/api/fos-depositions/:id/pay-both", requireAuth, screenshotUpload.singl
      await storage.query(`UPDATE depositions SET loan_case_id=NULL WHERE loan_case_id IS NOT NULL`);
 
 const savedExtras = await storage.query(
- `SELECT loan_no, extra_numbers FROM loan_cases 
- WHERE extra_numbers IS NOT NULL 
- AND array_length(extra_numbers, 1) > 0`
+  `SELECT loan_no, extra_numbers FROM loan_cases 
+  WHERE extra_numbers IS NOT NULL 
+  AND array_length(extra_numbers, 1) > 0`
 );
 const extrasMap = new Map<string, string[]>();
 for (const row of savedExtras.rows) {
   if (row.extra_numbers?.length) extrasMap.set(row.loan_no, row.extra_numbers);
 }
 console.log(`[import] 💾 Saved extra_numbers for ${extrasMap.size} loan(s) before wipe`);
+
+// ── Save monthly_feedback before wipe ─────────────────────────
+const savedMonthlyFb = await storage.query(`
+  SELECT loan_no, monthly_feedback 
+  FROM loan_cases 
+  WHERE monthly_feedback IS NOT NULL AND monthly_feedback != ''
+`);
+const monthlyFeedbackMap = new Map<string, string>();
+for (const row of savedMonthlyFb.rows) {
+  if (row.monthly_feedback) monthlyFeedbackMap.set(row.loan_no, row.monthly_feedback);
+}
+console.log(`[import] 💾 Saved monthly_feedback for ${monthlyFeedbackMap.size} loan(s) before wipe`);
 
 await storage.deleteAllLoanCases();
 
@@ -1396,6 +1408,17 @@ if (extrasMap.size > 0) {
     );
   }
   console.log(`[import] ✅ Restored extra_numbers for ${extrasMap.size} loan(s)`);
+}
+
+// ── Restore monthly_feedback ───────────────────────────────────
+if (monthlyFeedbackMap.size > 0) {
+  for (const [loanNo, feedback] of monthlyFeedbackMap) {
+    await storage.query(
+      `UPDATE loan_cases SET monthly_feedback = $1 WHERE loan_no = $2`,
+      [feedback, loanNo]
+    );
+  }
+  console.log(`[import] ✅ Restored monthly_feedback for ${monthlyFeedbackMap.size} loan(s)`);
 }
 
 for (const [loanNo, ptpData] of ptpLoanMap) {
