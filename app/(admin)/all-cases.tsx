@@ -721,7 +721,10 @@ function CaseDetailModal({
              : localItem.workable === false || localItem.workable === "false" || localItem.workable === "f" ? "Non Workable" : "",
       }] : []),
       ...(localItem.ptp_date            ? [{ label: "PTP Date",       value: fmtDate(localItem.ptp_date) }] : []),
+     ...(localItem.ptp_date_mf ? [{ label: "PTP Date (Monthly)", value: fmtDate(localItem.ptp_date_mf) }] : []),
       ...(localItem.telecaller_ptp_date ? [{ label: "Telecaller PTP", value: fmtDate(localItem.telecaller_ptp_date) }] : []),
+      ...(localItem.shifted_city ? [{ label: "Shifted City", value: localItem.shifted_city }] : []),
+      ...(localItem.occupation   ? [{ label: "Occupation",   value: localItem.occupation   }] : []),
     ]
   : []
 ),
