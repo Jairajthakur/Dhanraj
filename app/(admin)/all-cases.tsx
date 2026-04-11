@@ -203,7 +203,17 @@ const base64 = btoa(binary);
         </View>
 
         <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={{ flex: 1 }}>
-        <ScrollView style={{ flex: 1 }} contentContainerStyle={intimStyles.letterContainer} showsVerticalScrollIndicator={false}>
+<ScrollView style={{ flex: 1 }} contentContainerStyle={intimStyles.letterContainer} showsVerticalScrollIndicator={false}>
+
+          {/* Editable fields */}
+          <View style={intimStyles.editableCard}>
+            <Text style={intimStyles.editableTitle}>
+              <Ionicons name="create-outline" size={14} color={Colors.primary} /> Fill in Details
+            </Text>
+            <View style={intimStyles.editableRow}>
+              <Text style={intimStyles.editableLabel}>Police Station Name</Text>
+              <TextInput
+                style={intimStyles.editableInput}
                 placeholder="Enter police station name"
                 placeholderTextColor={Colors.textMuted}
                 value={policeStation}
@@ -554,6 +564,7 @@ const base64 = btoa(binary);
           </View>
           <View style={{ height: insets.bottom + 24 }} />
         </ScrollView>
+          </KeyboardAvoidingView>
       </View>
     </Modal>
   );
