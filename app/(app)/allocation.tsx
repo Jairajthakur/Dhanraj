@@ -694,7 +694,7 @@ function FeedbackModal({ visible, caseItem, onClose, isMonthlyLocked = false, ex
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <View style={fbStyles.overlay}>
-        <View style={fbStyles.sheet}>
+          <View style={[fbStyles.sheet, activeTab === "Monthly Feedback" && { flex: 1 }]}>
           <View style={fbStyles.handle} />
           <Text style={fbStyles.title}>Update Feedback</Text>
           <Text style={fbStyles.customerName}>
@@ -744,43 +744,43 @@ function FeedbackModal({ visible, caseItem, onClose, isMonthlyLocked = false, ex
           </View>
 
           {/* Tab row */}
+{/* Tab row */}
           <View style={fbStyles.tabRow}>
-            {TABS.map((t) => {
-              const isActive = activeTab === t;
-              const isThisTabLocked = t === "Monthly Feedback" && isMonthlyLocked;
-              const color = t === "Paid" ? Colors.success
-                : t === "PTP"             ? Colors.statusPTP
-                : t === "Monthly Feedback"? Colors.primary
-                : Colors.statusUnpaid;
-              return (
-                <Pressable
-                  key={t}
-                  style={[
-                    fbStyles.tabChip,
-                    isActive && { backgroundColor: color, borderColor: color },
-                    isThisTabLocked && !isActive && {
-                      borderColor: Colors.warning + "60",
-                      backgroundColor: Colors.warning + "10",
-                    },
-                  ]}
-                  onPress={() => setActiveTab(t)}
-                >
-                  <View style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
-                    {isThisTabLocked && (
-                      <Ionicons name="lock-closed" size={11} color={isActive ? "#fff" : Colors.warning} />
-                    )}
-                    <Text style={[
-                      fbStyles.tabChipText,
-                      isActive && { color: "#fff" },
-                      isThisTabLocked && !isActive && { color: Colors.warning },
-                    ]}>
-                      {t}
-                    </Text>
-                  </View>
-                </Pressable>
-              );
-            })}
-          </View>
+  {["Unpaid", "PTP", "Paid"].map((t) => {
+    const isActive = activeTab === t;
+    const color = t === "Paid" ? Colors.success : t === "PTP" ? Colors.statusPTP : Colors.statusUnpaid;
+    return (
+      <Pressable
+        key={t}
+        style={[fbStyles.tabChip, isActive && { backgroundColor: color, borderColor: color }]}
+        onPress={() => setActiveTab(t)}
+      >
+        <Text style={[fbStyles.tabChipText, isActive && { color: "#fff" }]}>{t}</Text>
+      </Pressable>
+    );
+  })}
+</View>
+
+<Pressable
+  style={[
+    fbStyles.tabChip,
+    { width: "100%", justifyContent: "center", marginBottom: 16, borderColor: Colors.primary + "60", backgroundColor: Colors.primary + "10" },
+    activeTab === "Monthly Feedback" && { backgroundColor: Colors.primary, borderColor: Colors.primary },
+    isMonthlyLocked && activeTab !== "Monthly Feedback" && { borderColor: Colors.warning + "60", backgroundColor: Colors.warning + "10" },
+  ]}
+  onPress={() => setActiveTab("Monthly Feedback")}
+>
+  <View style={{ flexDirection: "row", alignItems: "center", gap: 6, justifyContent: "center" }}>
+    {isMonthlyLocked && (
+      <Ionicons name="lock-closed" size={12} color={activeTab === "Monthly Feedback" ? "#fff" : Colors.warning} />
+    )}
+    <Ionicons name="calendar" size={14} color={activeTab === "Monthly Feedback" ? "#fff" : Colors.primary} />
+    <Text style={[fbStyles.tabChipText, activeTab === "Monthly Feedback" && { color: "#fff" }, isMonthlyLocked && activeTab !== "Monthly Feedback" && { color: Colors.warning }]}>
+      Monthly Feedback
+    </Text>
+  </View>
+</Pressable>
+        </View> 
 
           {/* ── Monthly Feedback: Full stepper ── */}
           {activeTab === "Monthly Feedback" && (
@@ -789,14 +789,16 @@ function FeedbackModal({ visible, caseItem, onClose, isMonthlyLocked = false, ex
                 <LockedFeedbackView item={caseItem} />
                 <View style={{ height: 16 }} />
               </ScrollView>
-            ) : (
+           ) : (
+            <View style={{ flex: 1 }}>
               <MonthlyFeedbackStepper
                 caseItem={caseItem}
                 onClose={onClose}
                 onSubmit={saveMonthly}
                 loading={loading}
               />
-            )
+            </View>
+          )
           )}
 
           {/* ── Non-monthly tabs ── */}
@@ -1264,7 +1266,7 @@ const styles = StyleSheet.create({
 
 const fbStyles = StyleSheet.create({
   overlay:             { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" },
-  sheet:               { backgroundColor: Colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, maxHeight: "92%", flexShrink: 1 },
+  sheet: { backgroundColor: Colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, maxHeight: "92%", flexShrink: 1, minHeight: 420 },
   handle:              { width: 40, height: 4, backgroundColor: Colors.border, borderRadius: 2, alignSelf: "center", marginBottom: 12 },
   title:               { fontSize: 20, fontWeight: "700", color: Colors.text, marginBottom: 4 },
   customerName:        { fontSize: 13, color: Colors.textSecondary, marginBottom: 8, textTransform: "uppercase" },
