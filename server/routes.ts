@@ -1350,15 +1350,18 @@ for (const row of savedExtras.rows) {
 }
 console.log(`[import] 💾 Saved extra_numbers for ${extrasMap.size} loan(s) before wipe`);
 
-// ── Save monthly_feedback before wipe ─────────────────────────
 const savedMonthlyFb = await storage.query(`
-  SELECT loan_no, monthly_feedback 
+  SELECT loan_no, monthly_feedback, customer_available, vehicle_available,
+         third_party, third_party_name, third_party_number,
+         feedback_code, latest_feedback, feedback_comments,
+         projection, non_starter, kyc_purchase, workable,
+         occupation, ptp_date_mf, shifted_city
   FROM loan_cases 
   WHERE monthly_feedback IS NOT NULL AND monthly_feedback != ''
 `);
-const monthlyFeedbackMap = new Map<string, string>();
+const monthlyFeedbackMap = new Map<string, any>();
 for (const row of savedMonthlyFb.rows) {
-  if (row.monthly_feedback) monthlyFeedbackMap.set(row.loan_no, row.monthly_feedback);
+  if (row.monthly_feedback) monthlyFeedbackMap.set(row.loan_no, row);
 }
 console.log(`[import] 💾 Saved monthly_feedback for ${monthlyFeedbackMap.size} loan(s) before wipe`);
 
@@ -1430,15 +1433,48 @@ if (extrasMap.size > 0) {
   console.log(`[import] ✅ Restored extra_numbers for ${extrasMap.size} loan(s)`);
 }
 
-// ── Restore monthly_feedback ───────────────────────────────────
 if (monthlyFeedbackMap.size > 0) {
-  for (const [loanNo, feedback] of monthlyFeedbackMap) {
-    await storage.query(
-      `UPDATE loan_cases SET monthly_feedback = $1 WHERE loan_no = $2`,
-      [feedback, loanNo]
-    );
+  for (const [loanNo, row] of monthlyFeedbackMap) {
+    await storage.query(`
+      UPDATE loan_cases SET
+        monthly_feedback    = $1,
+        customer_available  = $2,
+        vehicle_available   = $3,
+        third_party         = $4,
+        third_party_name    = $5,
+        third_party_number  = $6,
+        feedback_code       = $7,
+        latest_feedback     = $8,
+        feedback_comments   = $9,
+        projection          = $10,
+        non_starter         = $11,
+        kyc_purchase        = $12,
+        workable            = $13,
+        occupation          = $14,
+        ptp_date_mf         = $15,
+        shifted_city        = $16
+      WHERE loan_no = $17
+    `, [
+      row.monthly_feedback,
+      row.customer_available,
+      row.vehicle_available,
+      row.third_party,
+      row.third_party_name,
+      row.third_party_number,
+      row.feedback_code,
+      row.latest_feedback,
+      row.feedback_comments,
+      row.projection,
+      row.non_starter,
+      row.kyc_purchase,
+      row.workable,
+      row.occupation,
+      row.ptp_date_mf,
+      row.shifted_city,
+      loanNo
+    ]);
   }
-  console.log(`[import] ✅ Restored monthly_feedback for ${monthlyFeedbackMap.size} loan(s)`);
+  console.log(`[import] ✅ Restored full monthly feedback for ${monthlyFeedbackMap.size} loan(s)`);
 }
 
 for (const [loanNo, ptpData] of ptpLoanMap) {
