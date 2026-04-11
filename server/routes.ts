@@ -1507,47 +1507,197 @@ res.json({ imported, updated: 0, skipped, agentsCreated, agentsRemoved, total: r
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
-  app.get("/api/admin/feedback-export", requireAdmin, async (req, res) => {
-    try {
-      const result = await storage.query(`
-        SELECT TO_CHAR(COALESCE(lc.created_at,NOW()),'DD-Mon') AS allu_date, lc.loan_no, lc.app_id, lc.customer_name, lc.bkt::text AS bkt, lc.pro, 'NANDED'::text AS branch, lc.customer_available, lc.vehicle_available, lc.third_party, lc.third_party_name, lc.third_party_number, lc.feedback_code, lc.latest_feedback, lc.monthly_feedback, lc.ptp_date, lc.projection, lc.non_starter, lc.kyc_purchase, lc.workable, lc.status, lc.feedback_comments, fa.name AS fos_name
-        FROM loan_cases lc LEFT JOIN fos_agents fa ON lc.agent_id=fa.id
-        WHERE lc.latest_feedback IS NOT NULL OR lc.feedback_code IS NOT NULL OR lc.status IN ('Paid','PTP')
-        UNION ALL
-        SELECT TO_CHAR(COALESCE(bc.created_at,NOW()),'DD-Mon') AS allu_date, bc.loan_no, bc.app_id, bc.customer_name, bc.case_category AS bkt, bc.pro, 'NANDED'::text AS branch, bc.customer_available, bc.vehicle_available, bc.third_party, bc.third_party_name, bc.third_party_number, bc.feedback_code, bc.latest_feedback, bc.monthly_feedback, bc.ptp_date, bc.projection, bc.non_starter, bc.kyc_purchase, bc.workable, bc.status, bc.feedback_comments, fa.name AS fos_name
-        FROM bkt_cases bc LEFT JOIN fos_agents fa ON bc.agent_id=fa.id
-        WHERE bc.latest_feedback IS NOT NULL OR bc.feedback_code IS NOT NULL OR bc.status IN ('Paid','PTP')
-        ORDER BY fos_name NULLS LAST, loan_no
-      `);
-      const yn = (v: any) => v === true || v === "true" || v === "t" || v === 1 ? "Y" : v === false || v === "false" || v === "f" || v === 0 ? "N" : "";
-      const rows = result.rows.map((r: any) => ({
-        "Allu Date": r.allu_date || "", "LOAN NO": r.loan_no || "", "APP ID": r.app_id || "", "CUSTOMERNAME": r.customer_name || "",
-        "Bkt": r.bkt || "", "Pro": r.pro || "", "Branch": r.branch || "",
-        "Customer Y/N": yn(r.customer_available), "Vehicle Y/N": yn(r.vehicle_available), "Third_party Y/N": yn(r.third_party),
-        "Third Party Name": r.third_party === true || r.third_party === "true" || r.third_party === "t" ? r.third_party_name || "" : "",
-        "Third Party Number": r.third_party === true || r.third_party === "true" || r.third_party === "t" ? r.third_party_number || "" : "",
-        "FEEDBACK CODE": r.feedback_code != null ? String(r.feedback_code) : "",
-        "Details FEEDBACK": r.latest_feedback != null ? String(r.latest_feedback) : "",
-        "Monthly Feedback": r.monthly_feedback != null ? String(r.monthly_feedback) : "",
-        "PTP DATE": r.ptp_date ? (r.ptp_date instanceof Date ? r.ptp_date.toISOString().slice(0, 10) : String(r.ptp_date).slice(0, 10)) : "",
-        "Projection": r.projection != null ? String(r.projection) : "",
-        "NON_STARTER (Y/N)": yn(r.non_starter), "KYC PURCHASE (Y/N)": yn(r.kyc_purchase),
-        "Workable/Non": r.workable === true || r.workable === "true" || r.workable === "t" ? "WORKABLE" : r.workable === false || r.workable === "false" || r.workable === "f" ? "NONWORKABLE" : "",
-        "Comments": r.feedback_comments || "", "Status": r.status || "", "FOS Name": r.fos_name || "",
-      }));
-      const wb = new ExcelJS.Workbook(); const ws = wb.addWorksheet("Feedback Report");
-      const exportRows = rows.length ? rows : [{}];
-      ws.columns = Object.keys(exportRows[0]).map((key) => ({ header: key, key, width: ["CUSTOMERNAME", "Details FEEDBACK", "Monthly Feedback", "Comments"].includes(key) ? 30 : 16 }));
-      exportRows.forEach((row) => ws.addRow(row));
-      ws.getRow(1).eachCell((cell) => { cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFFF00" } }; cell.font = { bold: true }; cell.alignment = { vertical: "middle", horizontal: "center", wrapText: true }; });
-      ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: Object.keys(exportRows[0]).length } };
-      ws.views = [{ state: "frozen", ySplit: 1 }];
-      const buf = await wb.xlsx.writeBuffer();
-      res.setHeader("Content-Disposition", `attachment; filename="Feedback_Report_${new Date().toISOString().slice(0, 10)}.xlsx"`);
-      res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-      res.send(Buffer.from(buf));
-    } catch (e: any) { res.status(500).json({ message: e.message }); }
-  });
+app.get("/api/admin/feedback-export", requireAdmin, async (req, res) => {
+  try {
+    const result = await storage.query(`
+      SELECT
+        TO_CHAR(COALESCE(lc.created_at,NOW()),'DD-Mon') AS allu_date,
+        lc.loan_no, lc.app_id, lc.customer_name, lc.bkt::text AS bkt, lc.pro,
+        'NANDED'::text AS branch,
+        lc.customer_available, lc.vehicle_available, lc.third_party,
+        lc.third_party_name, lc.third_party_number,
+        lc.feedback_code, lc.latest_feedback, lc.monthly_feedback,
+        lc.ptp_date, lc.ptp_date_mf, lc.shifted_city, lc.occupation,
+        lc.projection, lc.non_starter, lc.kyc_purchase, lc.workable,
+        lc.status, lc.feedback_comments, fa.name AS fos_name
+      FROM loan_cases lc LEFT JOIN fos_agents fa ON lc.agent_id=fa.id
+      WHERE lc.latest_feedback IS NOT NULL OR lc.feedback_code IS NOT NULL
+        OR lc.status IN ('Paid','PTP') OR lc.monthly_feedback IS NOT NULL
+      UNION ALL
+      SELECT
+        TO_CHAR(COALESCE(bc.created_at,NOW()),'DD-Mon') AS allu_date,
+        bc.loan_no, bc.app_id, bc.customer_name, bc.case_category AS bkt, bc.pro,
+        'NANDED'::text AS branch,
+        bc.customer_available, bc.vehicle_available, bc.third_party,
+        bc.third_party_name, bc.third_party_number,
+        bc.feedback_code, bc.latest_feedback, bc.monthly_feedback,
+        bc.ptp_date, bc.ptp_date_mf, bc.shifted_city, bc.occupation,
+        bc.projection, bc.non_starter, bc.kyc_purchase, bc.workable,
+        bc.status, bc.feedback_comments, fa.name AS fos_name
+      FROM bkt_cases bc LEFT JOIN fos_agents fa ON bc.agent_id=fa.id
+      WHERE bc.latest_feedback IS NOT NULL OR bc.feedback_code IS NOT NULL
+        OR bc.status IN ('Paid','PTP') OR bc.monthly_feedback IS NOT NULL
+      ORDER BY fos_name NULLS LAST, loan_no
+    `);
+
+    const yn = (v: any) =>
+      v === true || v === "true" || v === "t" || v === 1 ? "Y"
+      : v === false || v === "false" || v === "f" || v === 0 ? "N" : "";
+
+    // ── Full human-readable sentence builder ──────────────────────────────
+    function buildFullDetailFeedback(r: any): string {
+      const parts: string[] = [];
+
+      // Availability
+      if (r.customer_available != null)
+        parts.push(`Customer was ${yn(r.customer_available) === "Y" ? "available" : "not available"}`);
+      if (r.vehicle_available != null)
+        parts.push(`vehicle was ${yn(r.vehicle_available) === "Y" ? "available" : "not available"}`);
+
+      // Third party
+      if (r.third_party != null) {
+        if (yn(r.third_party) === "Y") {
+          const tpName = r.third_party_name   ? ` (${r.third_party_name}` : "";
+          const tpNum  = r.third_party_number ? `, ${r.third_party_number})` : (tpName ? ")" : "");
+          parts.push(`third party was contacted${tpName}${tpNum}`);
+        } else {
+          parts.push("no third party contacted");
+        }
+      }
+
+      // Feedback code
+      const codeLabels: Record<string, string> = {
+        PTP:  "customer promised to pay",
+        PAID: "customer has already paid",
+        REPO: "vehicle was repossessed",
+        RTP:  "customer refused to pay",
+        SFT:  "customer has transferred / shifted",
+        SKIP: "customer is a skip case",
+      };
+      if (r.feedback_code)
+        parts.push(codeLabels[r.feedback_code] || `feedback code: ${r.feedback_code}`);
+
+      // PTP date from monthly feedback
+      if (r.ptp_date_mf)
+        parts.push(`promised to pay by ${String(r.ptp_date_mf).slice(0, 10)}`);
+      else if (r.ptp_date && r.status === "PTP")
+        parts.push(`PTP date set for ${String(r.ptp_date).slice(0, 10)}`);
+
+      // Detail feedback
+      if (r.latest_feedback)
+        parts.push(`detail: ${r.latest_feedback}`);
+
+      // City for shifted
+      if (r.shifted_city)
+        parts.push(`shifted to ${r.shifted_city}`);
+
+      // Projection
+      const projLabels: Record<string, string> = {
+        ST: "projected for settlement",
+        RF: "projected for full rollback",
+        RB: "projected for partial rollback",
+      };
+      if (r.projection)
+        parts.push(projLabels[r.projection] || `projection: ${r.projection}`);
+
+      // Flags
+      if (yn(r.non_starter) === "Y")  parts.push("marked as non-starter");
+      if (yn(r.kyc_purchase) === "Y") parts.push("KYC purchase done");
+      if (r.workable != null) {
+        const w = r.workable === true || r.workable === "true" || r.workable === "t";
+        parts.push(w ? "case is workable" : "case is non-workable");
+      }
+
+      // Occupation
+      if (r.occupation)
+        parts.push(`occupation: ${r.occupation}`);
+
+      // Comments
+      if (r.feedback_comments)
+        parts.push(`agent note: "${r.feedback_comments}"`);
+
+      if (parts.length === 0) return "—";
+
+      // Capitalise first word, join with "; "
+      const sentence = parts.join("; ");
+      return sentence.charAt(0).toUpperCase() + sentence.slice(1) + ".";
+    }
+
+    const rows = result.rows.map((r: any) => ({
+      "Allu Date":             r.allu_date || "",
+      "LOAN NO":               r.loan_no || "",
+      "APP ID":                r.app_id || "",
+      "CUSTOMERNAME":          r.customer_name || "",
+      "Bkt":                   r.bkt || "",
+      "Pro":                   r.pro || "",
+      "Branch":                r.branch || "",
+      "Customer Y/N":          yn(r.customer_available),
+      "Vehicle Y/N":           yn(r.vehicle_available),
+      "Third_party Y/N":       yn(r.third_party),
+      "Third Party Name":      yn(r.third_party) === "Y" ? r.third_party_name  || "" : "",
+      "Third Party Number":    yn(r.third_party) === "Y" ? r.third_party_number || "" : "",
+      "FEEDBACK CODE":         r.feedback_code != null ? String(r.feedback_code) : "",
+      "Details FEEDBACK":      r.latest_feedback != null ? String(r.latest_feedback) : "",
+      "Shifted City":          r.shifted_city || "",
+      "Monthly Feedback":      r.monthly_feedback != null ? String(r.monthly_feedback) : "",
+      "PTP DATE (Field)":      r.ptp_date    ? String(r.ptp_date).slice(0, 10) : "",
+      "PTP DATE (Monthly)":    r.ptp_date_mf ? String(r.ptp_date_mf).slice(0, 10) : "",
+      "Projection":            r.projection != null ? String(r.projection) : "",
+      "NON_STARTER (Y/N)":     yn(r.non_starter),
+      "KYC PURCHASE (Y/N)":    yn(r.kyc_purchase),
+      "Workable/Non":          r.workable === true || r.workable === "true" || r.workable === "t"
+                                 ? "WORKABLE"
+                                 : r.workable === false || r.workable === "false" || r.workable === "f"
+                                 ? "NONWORKABLE" : "",
+      "Occupation":            r.occupation || "",
+      "Comments":              r.feedback_comments || "",
+      "Status":                r.status || "",
+      "FOS Name":              r.fos_name || "",
+      "Full Detail Feedback":  buildFullDetailFeedback(r),
+    }));
+
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet("Feedback Report");
+    const exportRows = rows.length ? rows : [{}];
+    const colKeys = Object.keys(exportRows[0]);
+
+    ws.columns = colKeys.map((key) => ({
+      header: key, key,
+      width: key === "Full Detail Feedback" ? 70
+           : ["CUSTOMERNAME","Details FEEDBACK","Monthly Feedback","Comments","Shifted City"].includes(key) ? 32
+           : 18,
+    }));
+
+    exportRows.forEach((row) => ws.addRow(row));
+
+    ws.getRow(1).eachCell((cell) => {
+      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFFF00" } };
+      cell.font = { bold: true };
+      cell.alignment = { vertical: "middle", horizontal: "center", wrapText: true };
+    });
+
+    // Green header for Full Detail Feedback column
+    const fdIdx = colKeys.indexOf("Full Detail Feedback") + 1;
+    if (fdIdx > 0) {
+      const h = ws.getRow(1).getCell(fdIdx);
+      h.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF92D050" } };
+      h.font = { bold: true, color: { argb: "FF000000" } };
+    }
+
+    // Wrap text in Full Detail Feedback column cells
+    ws.getColumn(fdIdx).eachCell((cell) => {
+      cell.alignment = { wrapText: true, vertical: "top" };
+    });
+
+    ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: colKeys.length } };
+    ws.views = [{ state: "frozen", ySplit: 1 }];
+
+    const buf = await wb.xlsx.writeBuffer();
+    res.setHeader("Content-Disposition", `attachment; filename="Feedback_Report_${new Date().toISOString().slice(0, 10)}.xlsx"`);
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.send(Buffer.from(buf));
+  } catch (e: any) { res.status(500).json({ message: e.message }); }
+});
 
   app.post("/api/admin/clear-ptp", requireAdmin, async (req, res) => {
     try {
