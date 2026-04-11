@@ -743,44 +743,50 @@ function FeedbackModal({ visible, caseItem, onClose, isMonthlyLocked = false, ex
             )}
           </View>
 
-          {/* Tab row */}
 {/* Tab row */}
-          <View style={fbStyles.tabRow}>
-  {["Unpaid", "PTP", "Paid"].map((t) => {
-    const isActive = activeTab === t;
-    const color = t === "Paid" ? Colors.success : t === "PTP" ? Colors.statusPTP : Colors.statusUnpaid;
-    return (
-      <Pressable
-        key={t}
-        style={[fbStyles.tabChip, isActive && { backgroundColor: color, borderColor: color }]}
-        onPress={() => setActiveTab(t)}
-      >
-        <Text style={[fbStyles.tabChipText, isActive && { color: "#fff" }]}>{t}</Text>
-      </Pressable>
-    );
-  })}
-</View>
+          <View style={{ gap: 8, marginBottom: 16 }}>
+            <View style={{ flexDirection: "row", gap: 8 }}>
+              {["Unpaid", "PTP", "Paid"].map((t) => {
+                const isActive = activeTab === t;
+                const color = t === "Paid" ? Colors.success : t === "PTP" ? Colors.statusPTP : Colors.statusUnpaid;
+                return (
+                  <Pressable
+                    key={t}
+                    style={[fbStyles.tabChip, isActive && { backgroundColor: color, borderColor: color }]}
+                    onPress={() => setActiveTab(t)}
+                  >
+                    <Text style={[fbStyles.tabChipText, isActive && { color: "#fff" }]}>{t}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
 
-<Pressable
-  style={[
-    fbStyles.tabChip,
-    { width: "100%", justifyContent: "center", marginBottom: 16, borderColor: Colors.primary + "60", backgroundColor: Colors.primary + "10" },
-    activeTab === "Monthly Feedback" && { backgroundColor: Colors.primary, borderColor: Colors.primary },
-    isMonthlyLocked && activeTab !== "Monthly Feedback" && { borderColor: Colors.warning + "60", backgroundColor: Colors.warning + "10" },
-  ]}
-  onPress={() => setActiveTab("Monthly Feedback")}
->
-  <View style={{ flexDirection: "row", alignItems: "center", gap: 6, justifyContent: "center" }}>
-    {isMonthlyLocked && (
-      <Ionicons name="lock-closed" size={12} color={activeTab === "Monthly Feedback" ? "#fff" : Colors.warning} />
-    )}
-    <Ionicons name="calendar" size={14} color={activeTab === "Monthly Feedback" ? "#fff" : Colors.primary} />
-    <Text style={[fbStyles.tabChipText, activeTab === "Monthly Feedback" && { color: "#fff" }, isMonthlyLocked && activeTab !== "Monthly Feedback" && { color: Colors.warning }]}>
-      Monthly Feedback
-    </Text>
-  </View>
-</Pressable>
-        </View> 
+            <Pressable
+              style={[
+                fbStyles.tabChip,
+                { width: "100%", justifyContent: "center", borderColor: Colors.primary + "60", backgroundColor: Colors.primary + "10" },
+                activeTab === "Monthly Feedback" && { backgroundColor: Colors.primary, borderColor: Colors.primary },
+                isMonthlyLocked && activeTab !== "Monthly Feedback" && { borderColor: Colors.warning + "60", backgroundColor: Colors.warning + "10" },
+              ]}
+              onPress={() => setActiveTab("Monthly Feedback")}
+            >
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 6, justifyContent: "center" }}>
+                {isMonthlyLocked && (
+                  <Ionicons name="lock-closed" size={12} color={activeTab === "Monthly Feedback" ? "#fff" : Colors.warning} />
+                )}
+                <Ionicons name="calendar" size={14} color={activeTab === "Monthly Feedback" ? "#fff" : Colors.primary} />
+                <Text style={[
+                  fbStyles.tabChipText,
+                  activeTab === "Monthly Feedback" && { color: "#fff" },
+                  isMonthlyLocked && activeTab !== "Monthly Feedback" && { color: Colors.warning },
+                ]}>
+                  Monthly Feedback
+                </Text>
+              </View>
+            </Pressable>
+          </View>
+
+          
 
           {/* ── Monthly Feedback: Full stepper ── */}
           {activeTab === "Monthly Feedback" && (
