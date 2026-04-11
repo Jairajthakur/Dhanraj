@@ -1580,84 +1580,146 @@ app.get("/api/admin/feedback-export", requireAdmin, async (req, res) => {
       v === true || v === "true" || v === "t" || v === 1 ? "Y"
       : v === false || v === "false" || v === "f" || v === 0 ? "N" : "";
 
-    // ── Full human-readable sentence builder ──────────────────────────────
-    function buildFullDetailFeedback(r: any): string {
-      const parts: string[] = [];
+function buildFullDetailFeedback(r: any): string {
+  const formatDate = (val: any): string => {
+    if (!val) return "";
+    const s = String(val).slice(0, 10);
+    const d = new Date(s + "T00:00:00Z");
+    if (isNaN(d.getTime())) return s;
+    const day   = String(d.getUTCDate()).padStart(2, "0");
+    const month = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][d.getUTCMonth()];
+    return `${day}-${month}-${d.getUTCFullYear()}`;
+  };
 
-      // Availability
-      if (r.customer_available != null)
-        parts.push(`Customer was ${yn(r.customer_available) === "Y" ? "available" : "not available"}`);
-      if (r.vehicle_available != null)
-        parts.push(`vehicle was ${yn(r.vehicle_available) === "Y" ? "available" : "not available"}`);
+  const isTrue  = (v: any) => v === true  || v === "true"  || v === "t" || v === 1;
+  const isFalse = (v: any) => v === false || v === "false" || v === "f" || v === 0;
 
-      // Third party
-      if (r.third_party != null) {
-        if (yn(r.third_party) === "Y") {
-          const tpName = r.third_party_name   ? ` (${r.third_party_name}` : "";
-          const tpNum  = r.third_party_number ? `, ${r.third_party_number})` : (tpName ? ")" : "");
-          parts.push(`third party was contacted${tpName}${tpNum}`);
-        } else {
-          parts.push("no third party contacted");
-        }
-      }
+  const parts: string[] = [];
 
-      // Feedback code
-      const codeLabels: Record<string, string> = {
-        PTP:  "customer promised to pay",
-        PAID: "customer has already paid",
-        REPO: "vehicle was repossessed",
-        RTP:  "customer refused to pay",
-        SFT:  "customer has transferred / shifted",
-        SKIP: "customer is a skip case",
-      };
-      if (r.feedback_code)
-        parts.push(codeLabels[r.feedback_code] || `feedback code: ${r.feedback_code}`);
+  // ── 1. Customer Availability ──────────────────────────────────────────────
+  if (r.customer_available != null) {
+    parts.push(
+      isTrue(r.customer_available)
+        ? "Customer Availability: Available at residence during field visit."
+        : "Customer Availability: Not Available at residence during field visit."
+    );
+  }
 
-      // PTP date from monthly feedback
-      if (r.ptp_date_mf)
-        parts.push(`promised to pay by ${String(r.ptp_date_mf).slice(0, 10)}`);
-      else if (r.ptp_date && r.status === "PTP")
-        parts.push(`PTP date set for ${String(r.ptp_date).slice(0, 10)}`);
+  // ── 2. Vehicle Status ─────────────────────────────────────────────────────
+  if (r.vehicle_available != null) {
+    parts.push(
+      isTrue(r.vehicle_available)
+        ? "Vehicle Status: Vehicle was present/available at location."
+        : "Vehicle Status: Vehicle was not available at location."
+    );
+  }
 
-      // Detail feedback
-      if (r.latest_feedback)
-        parts.push(`detail: ${r.latest_feedback}`);
-
-      // City for shifted
-      if (r.shifted_city)
-        parts.push(`shifted to ${r.shifted_city}`);
-
-      // Projection
-      const projLabels: Record<string, string> = {
-        ST: "projected for settlement",
-        RF: "projected for full rollback",
-        RB: "projected for partial rollback",
-      };
-      if (r.projection)
-        parts.push(projLabels[r.projection] || `projection: ${r.projection}`);
-
-      // Flags
-      if (yn(r.non_starter) === "Y")  parts.push("marked as non-starter");
-      if (yn(r.kyc_purchase) === "Y") parts.push("KYC purchase done");
-      if (r.workable != null) {
-        const w = r.workable === true || r.workable === "true" || r.workable === "t";
-        parts.push(w ? "case is workable" : "case is non-workable");
-      }
-
-      // Occupation
-      if (r.occupation)
-        parts.push(`occupation: ${r.occupation}`);
-
-      // Comments
-      if (r.feedback_comments)
-        parts.push(`agent note: "${r.feedback_comments}"`);
-
-      if (parts.length === 0) return "—";
-
-      // Capitalise first word, join with "; "
-      const sentence = parts.join("; ");
-      return sentence.charAt(0).toUpperCase() + sentence.slice(1) + ".";
+  // ── 3. Third Party Contact ────────────────────────────────────────────────
+  if (r.third_party != null) {
+    if (isTrue(r.third_party)) {
+      const who = r.third_party_name   ? r.third_party_name   : "third party";
+      const num = r.third_party_number ? ` (${r.third_party_number})` : "";
+      parts.push(`Third Party Contact: ${who}${num} was contacted during visit.`);
+    } else {
+      parts.push("Third Party Contact: No third party contact made during visit.");
     }
+  }
+
+  // ── 4. Payment Status ─────────────────────────────────────────────────────
+  const codeMap: Record<string, string> = {
+    PTP:  "Customer has given Promise to Pay",
+    PAID: "Customer has already paid",
+    REPO: "Vehicle has been repossessed",
+    RTP:  "Customer refused to make payment",
+    SFT:  "Customer has transferred / shifted",
+    SKIP: "Customer is untraceable — skip case",
+  };
+
+  if (r.feedback_code === "PTP") {
+    const ptpDate = r.ptp_date_mf
+      ? formatDate(r.ptp_date_mf)
+      : r.ptp_date ? formatDate(r.ptp_date) : null;
+    parts.push(
+      `Payment Status: Customer has given Promise to Pay${ptpDate ? ` — confirmed payment date ${ptpDate}` : ""}.`
+    );
+  } else if (r.feedback_code === "RTP") {
+    parts.push("Payment Status: Customer refused to make payment.");
+  } else if (r.feedback_code === "PAID") {
+    parts.push("Payment Status: Customer has already paid.");
+  } else if (r.feedback_code === "REPO") {
+    parts.push("Payment Status: Vehicle has been repossessed.");
+  } else if (r.feedback_code === "SFT") {
+    parts.push(`Payment Status: Customer has transferred / shifted${r.shifted_city ? ` to ${r.shifted_city}` : ""}.`);
+  } else if (r.feedback_code === "SKIP") {
+    parts.push("Payment Status: Customer is untraceable — marked as skip case.");
+  } else if (r.ptp_date_mf) {
+    parts.push(`Payment Status: Customer committed to pay by ${formatDate(r.ptp_date_mf)}.`);
+  } else if (r.ptp_date && r.status === "PTP") {
+    parts.push(`Payment Status: PTP date set for ${formatDate(r.ptp_date)}.`);
+  }
+
+  // ── 5. Customer Profile (detail feedback + projection together) ───────────
+  const profileParts: string[] = [];
+
+  const skipDetail = new Set([
+    "customer already paid",
+    "promise to pay",
+    "customer has already paid",
+  ]);
+  if (
+    r.latest_feedback &&
+    !skipDetail.has(r.latest_feedback.toLowerCase().trim()) &&
+    !(r.feedback_code === "PTP" && r.latest_feedback.toLowerCase().includes("promise to pay"))
+  ) {
+    // Capitalise first letter
+    const fb = r.latest_feedback.charAt(0).toUpperCase() + r.latest_feedback.slice(1);
+    profileParts.push(fb);
+  }
+
+  const projMap: Record<string, string> = {
+    ST: "case projected for settlement discussion",
+    RF: "case projected for full rollback discussion",
+    RB: "case projected for partial rollback discussion",
+  };
+  if (r.projection && projMap[r.projection])
+    profileParts.push(projMap[r.projection]);
+
+  if (profileParts.length > 0)
+    parts.push(`Customer Profile: ${profileParts.join("; ")}.`);
+
+  // ── 6. Case Classification (non-starter + workable) ───────────────────────
+  const classParts: string[] = [];
+
+  if (isTrue(r.non_starter))
+    classParts.push("Non-starter");
+
+  if (isTrue(r.workable))
+    classParts.push("case is workable");
+  else if (isFalse(r.workable))
+    classParts.push("case marked as non-workable at present stage");
+
+  if (isTrue(r.kyc_purchase))
+    classParts.push("KYC purchase completed");
+
+  if (classParts.length > 0)
+    parts.push(`Case Classification: ${classParts.join("; ")}.`);
+
+  // ── 7. Occupation Details ─────────────────────────────────────────────────
+  if (r.occupation)
+    parts.push(`Occupation Details: ${r.occupation}.`);
+
+  // ── 8. Agent Observation (comments) ──────────────────────────────────────
+  if (r.feedback_comments)
+    parts.push(`Agent Observation: ${r.feedback_comments}.`);
+
+  // ── 9. Monthly feedback note ──────────────────────────────────────────────
+  if (r.monthly_feedback === "SUBMITTED")
+    parts.push("Monthly feedback not updated in APK — physical note recorded by agent.");
+
+  if (parts.length === 0) return "—";
+
+  return parts.join(" ");
+}
 
     const rows = result.rows.map((r: any) => ({
       "Allu Date":             r.allu_date || "",
