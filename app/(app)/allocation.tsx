@@ -1044,12 +1044,105 @@ function CaseCard({ item, onFeedback }: { item: any; onFeedback: (item: any) => 
         </View>
       )}
 
-      {item.monthly_feedback && item.monthly_feedback !== "SUBMITTED" && (
-        <View style={styles.monthlyFeedbackRow}>
-          <Ionicons name="calendar-outline" size={13} color={Colors.primary} />
-          <Text style={styles.monthlyFeedbackText}>{item.monthly_feedback}</Text>
+     {item.monthly_feedback === "SUBMITTED" && (
+  <View style={{ gap: 5, backgroundColor: Colors.primary + "08", borderRadius: 10, padding: 10, borderWidth: 1, borderColor: Colors.primary + "25" }}>
+    
+    {/* Header */}
+    <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 2 }}>
+      <Ionicons name="checkmark-circle" size={13} color={Colors.primary} />
+      <Text style={{ fontSize: 11, fontWeight: "700", color: Colors.primary, textTransform: "uppercase", letterSpacing: 0.5 }}>
+        Monthly Feedback Submitted
+      </Text>
+      <Ionicons name="lock-closed" size={10} color={Colors.warning} style={{ marginLeft: "auto" }} />
+    </View>
+
+    {/* Feedback Code + Detail on same row */}
+    {(item.feedback_code || item.latest_feedback) && (
+      <View style={{ flexDirection: "row", gap: 6, flexWrap: "wrap" }}>
+        {item.feedback_code && (
+          <View style={{ backgroundColor: Colors.accent + "20", borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 }}>
+            <Text style={{ fontSize: 11, fontWeight: "800", color: Colors.accent }}>{item.feedback_code}</Text>
+          </View>
+        )}
+        {item.latest_feedback && (
+          <View style={{ backgroundColor: Colors.surfaceAlt, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3, flex: 1 }}>
+            <Text style={{ fontSize: 11, color: Colors.textSecondary, fontWeight: "600" }} numberOfLines={1}>
+              {item.latest_feedback}
+            </Text>
+          </View>
+        )}
+      </View>
+    )}
+
+    {/* Flags row */}
+    <View style={{ flexDirection: "row", gap: 5, flexWrap: "wrap" }}>
+      {item.projection && (
+        <View style={{ backgroundColor: Colors.primary + "18", borderRadius: 6, paddingHorizontal: 7, paddingVertical: 2 }}>
+          <Text style={{ fontSize: 10, fontWeight: "700", color: Colors.primary }}>📊 {item.projection}</Text>
         </View>
       )}
+      {item.non_starter === true && (
+        <View style={{ backgroundColor: Colors.danger + "15", borderRadius: 6, paddingHorizontal: 7, paddingVertical: 2 }}>
+          <Text style={{ fontSize: 10, fontWeight: "700", color: Colors.danger }}>⛔ Non-Starter</Text>
+        </View>
+      )}
+      {item.workable === false && (
+        <View style={{ backgroundColor: Colors.danger + "15", borderRadius: 6, paddingHorizontal: 7, paddingVertical: 2 }}>
+          <Text style={{ fontSize: 10, fontWeight: "700", color: Colors.danger }}>🔴 Non-Workable</Text>
+        </View>
+      )}
+      {item.workable === true && (
+        <View style={{ backgroundColor: Colors.success + "15", borderRadius: 6, paddingHorizontal: 7, paddingVertical: 2 }}>
+          <Text style={{ fontSize: 10, fontWeight: "700", color: Colors.success }}>🟢 Workable</Text>
+        </View>
+      )}
+      {item.kyc_purchase === true && (
+        <View style={{ backgroundColor: Colors.info + "15", borderRadius: 6, paddingHorizontal: 7, paddingVertical: 2 }}>
+          <Text style={{ fontSize: 10, fontWeight: "700", color: Colors.info }}>✅ KYC Done</Text>
+        </View>
+      )}
+    </View>
+
+    {/* Occupation */}
+    {item.occupation && (
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
+        <Ionicons name="briefcase-outline" size={11} color={Colors.textMuted} />
+        <Text style={{ fontSize: 11, color: Colors.textMuted, flex: 1 }} numberOfLines={1}>
+          {item.occupation}
+        </Text>
+      </View>
+    )}
+
+    {/* Customer availability row */}
+    <View style={{ flexDirection: "row", gap: 10 }}>
+      {item.customer_available != null && (
+        <Text style={{ fontSize: 10, color: Colors.textMuted }}>
+          👤 Customer: <Text style={{ fontWeight: "700", color: item.customer_available ? Colors.success : Colors.danger }}>
+            {item.customer_available ? "Available" : "Not Available"}
+          </Text>
+        </Text>
+      )}
+      {item.vehicle_available != null && (
+        <Text style={{ fontSize: 10, color: Colors.textMuted }}>
+          🚗 Vehicle: <Text style={{ fontWeight: "700", color: item.vehicle_available ? Colors.success : Colors.danger }}>
+            {item.vehicle_available ? "Available" : "Not Available"}
+          </Text>
+        </Text>
+      )}
+    </View>
+
+    {/* Comments */}
+    {item.feedback_comments && (
+      <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 5, borderTopWidth: 1, borderTopColor: Colors.border, paddingTop: 6, marginTop: 2 }}>
+        <Ionicons name="chatbox-outline" size={11} color={Colors.textMuted} style={{ marginTop: 1 }} />
+        <Text style={{ fontSize: 11, color: Colors.textMuted, flex: 1, fontStyle: "italic" }} numberOfLines={2}>
+          {item.feedback_comments}
+        </Text>
+      </View>
+    )}
+
+  </View>
+)}
 
       {item.ptp_date && (
         <View style={styles.ptpDateRow}>
