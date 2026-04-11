@@ -1712,10 +1712,6 @@ function buildFullDetailFeedback(r: any): string {
   if (r.feedback_comments)
     parts.push(`Agent Observation: ${r.feedback_comments}.`);
 
-  // ── 9. Monthly feedback note ──────────────────────────────────────────────
-  if (r.monthly_feedback === "SUBMITTED")
-    parts.push("Monthly feedback not updated in APK — physical note recorded by agent.");
-
   if (parts.length === 0) return "—";
 
   return parts.join(" ");
