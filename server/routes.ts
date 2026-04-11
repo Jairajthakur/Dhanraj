@@ -543,6 +543,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
   await storage.query(`ALTER TABLE bkt_cases ADD COLUMN IF NOT EXISTS extra_numbers TEXT[] DEFAULT '{}'`);
   console.log("[DB] extra_numbers columns ready ✅");
 } catch (e: any) { console.error("[DB] extra_numbers migration:", e.message); }
+  try {
+    await storage.query(`ALTER TABLE loan_cases ADD COLUMN IF NOT EXISTS ptp_date_mf DATE`);
+    await storage.query(`ALTER TABLE bkt_cases  ADD COLUMN IF NOT EXISTS ptp_date_mf DATE`);
+    console.log("[DB] ptp_date_mf columns ready ✅");
+  } catch (e: any) { console.error("[DB] ptp_date_mf migration:", e.message); }
+
+  try {
+    await storage.query(`ALTER TABLE loan_cases ADD COLUMN IF NOT EXISTS shifted_city TEXT`);
+    await storage.query(`ALTER TABLE bkt_cases  ADD COLUMN IF NOT EXISTS shifted_city TEXT`);
+    console.log("[DB] shifted_city columns ready ✅");
+  } catch (e: any) { console.error("[DB] shifted_city migration:", e.message); }
+
+  try {
+    await storage.query(`ALTER TABLE loan_cases ADD COLUMN IF NOT EXISTS occupation TEXT`);
+    await storage.query(`ALTER TABLE bkt_cases  ADD COLUMN IF NOT EXISTS occupation TEXT`);
+    console.log("[DB] occupation columns ready ✅");
+  } catch (e: any) { console.error("[DB] occupation migration:", e.message); }
 
 app.use("/api/fos-depositions", (req, res, next) => {
   if (req.headers["content-type"]?.includes("multipart/form-data")) {
@@ -642,7 +659,7 @@ app.use("/api/fos-depositions", (req, res, next) => {
 
   app.put("/api/cases/:id/feedback", requireAuth, async (req, res) => {
     try {
-      const { status, feedback, comments, ptp_date, rollback_yn, customer_available, vehicle_available, third_party, third_party_name, third_party_number, feedback_code, projection, non_starter, kyc_purchase, workable, monthly_feedback } = req.body;
+      const { status, feedback, comments, ptp_date, rollback_yn, customer_available, vehicle_available, third_party, third_party_name, third_party_number, feedback_code, projection, non_starter, kyc_purchase, workable, monthly_feedback, ptp_date_mf, shifted_city, occupation } = req.body;
       const ynVal = rollback_yn === true || rollback_yn === "true" ? true : rollback_yn === false || rollback_yn === "false" ? false : null;
       const toBool = (v: any) => v === true || v === "true" ? true : v === false || v === "false" ? false : null;
       const caseId = Number(req.params.id);
@@ -660,6 +677,9 @@ app.use("/api/fos-depositions", (req, res, next) => {
         ...(kyc_purchase !== undefined && { kycPurchase: toBool(kyc_purchase) }),
         ...(workable !== undefined && { workable: toBool(workable) }),
         monthlyFeedback: monthly_feedback || null,
+        ptpDateMf:       ptp_date_mf  || null,
+        shiftedCity:     shifted_city || null,
+        occupation:      occupation   || null,
       };
       await storage.updateLoanCaseFeedback(caseId, status, feedback, comments, ptp_date, ynVal, extraFields);
       if (old && old.bkt && old.agent_id && !["UC","RUC"].includes((old.pro || "").toUpperCase())) {
@@ -1267,7 +1287,7 @@ app.put("/api/fos-depositions/:id/pay-both", requireAuth, screenshotUpload.singl
 
   app.put("/api/bkt-cases/:id/feedback", requireAuth, async (req, res) => {
     try {
-      const { status, feedback, comments, ptp_date, rollback_yn, customer_available, vehicle_available, third_party, third_party_name, third_party_number, feedback_code, projection, non_starter, kyc_purchase, workable, monthly_feedback } = req.body;
+      const { status, feedback, comments, ptp_date, rollback_yn, customer_available, vehicle_available, third_party, third_party_name, third_party_number, feedback_code, projection, non_starter, kyc_purchase, workable, monthly_feedback, ptp_date_mf, shifted_city, occupation } = req.body;
       const ynVal = rollback_yn === true || rollback_yn === "true" ? true : rollback_yn === false || rollback_yn === "false" ? false : null;
       const toBool = (v: any) => v === true || v === "true" ? true : v === false || v === "false" ? false : null;
       const caseId = Number(req.params.id);
