@@ -232,6 +232,8 @@ type MFState = {
   workable:          boolean | null;
   occupation:        string[];
   comments:          string;
+  ptpDateMf:         string;
+  shiftedCity:       string;
 };
 
 function MonthlyFeedbackStepper({
@@ -259,15 +261,17 @@ function MonthlyFeedbackStepper({
     kycPurchase:       caseItem?.kyc_purchase       ?? null,
     workable:          caseItem?.workable           ?? null,
     occupation:        [],
-    comments:          caseItem?.feedback_comments  || "",
+     comments:          caseItem?.feedback_comments  || "",
+    ptpDateMf:         caseItem?.ptp_date_mf ? String(caseItem.ptp_date_mf).slice(0,10) : "",
+    shiftedCity:       caseItem?.shifted_city || "",
   });
 
   const upd = (patch: Partial<MFState>) => setMf((prev) => ({ ...prev, ...patch }));
 
   const isStepValid = () => {
     if (step === 0) return mf.customerAvailable !== null && mf.vehicleAvailable !== null && mf.thirdParty !== null;
-    if (step === 1) return !!mf.feedbackCode;
-    if (step === 2) return !!mf.detailFeedback;
+    if (step === 1) return !!mf.feedbackCode && (mf.feedbackCode !== "PTP" || !!mf.ptpDateMf.trim());
+    if (step === 2) return !!mf.detailFeedback && (mf.detailFeedback !== "Customer shifted" || !!mf.shiftedCity.trim());
     if (step === 3) return !!mf.projection && mf.nonStarter !== null && mf.kycPurchase !== null && mf.workable !== null;
     if (step === 4) return mf.occupation.length > 0;
     if (step === 5) return true; // comments optional
@@ -362,10 +366,27 @@ function MonthlyFeedbackStepper({
                 );
               })}
             </View>
+
+            {mf.feedbackCode === "PTP" && (
+              <View style={{ marginTop: 16, backgroundColor: Colors.statusPTP + "10", borderRadius: 12, padding: 14, borderWidth: 1, borderColor: Colors.statusPTP + "40" }}>
+                <Text style={[fbStyles.sectionLabel, { color: Colors.statusPTP }]}>📅 Promise to Pay Date *</Text>
+                <TextInput
+                  style={[fbStyles.commentInput, { minHeight: 44, marginBottom: 0, borderColor: Colors.statusPTP + "60" }]}
+                  placeholder="DD-MM-YYYY"
+                  placeholderTextColor={Colors.textMuted}
+                  value={mf.ptpDateMf}
+                  onChangeText={(t) => upd({ ptpDateMf: t })}
+                  keyboardType="numeric"
+                />
+                <Text style={{ fontSize: 11, color: Colors.textMuted, marginTop: 6 }}>
+                  Required — date when customer promises to pay
+                </Text>
+              </View>
+            )}
           </View>
         )}
 
-        {/* ── STEP 2: Detail Feedback ── */}
+        {/* ── STEP 2: Detail Feedback */}
         {step === 2 && (
           <View>
             <Text style={mfStyles.hint}>More specific reason behind the feedback code</Text>
@@ -390,10 +411,26 @@ function MonthlyFeedbackStepper({
                 );
               })}
             </View>
+
+            {mf.detailFeedback === "Customer shifted" && (
+              <View style={{ marginTop: 16, backgroundColor: Colors.warning + "10", borderRadius: 12, padding: 14, borderWidth: 1, borderColor: Colors.warning + "40" }}>
+                <Text style={[fbStyles.sectionLabel, { color: Colors.warning }]}>📍 City / Location Shifted To *</Text>
+                <TextInput
+                  style={[fbStyles.commentInput, { minHeight: 44, marginBottom: 0, borderColor: Colors.warning + "60" }]}
+                  placeholder="Enter city or area name"
+                  placeholderTextColor={Colors.textMuted}
+                  value={mf.shiftedCity}
+                  onChangeText={(t) => upd({ shiftedCity: t })}
+                />
+                <Text style={{ fontSize: 11, color: Colors.textMuted, marginTop: 6 }}>
+                  Required — where has the customer shifted?
+                </Text>
+              </View>
+            )}
           </View>
         )}
 
-        {/* ── STEP 3: Case Flags ── */}
+        {/* ── STEP 3: Case Flags */}
         {step === 3 && (
           <View>
             <Text style={mfStyles.hint}>Tap one option per row</Text>
@@ -412,7 +449,10 @@ function MonthlyFeedbackStepper({
                     { flex: 1, alignItems: "center" },
                     mf.projection === code && { backgroundColor: Colors.primary, borderColor: Colors.primary },
                   ]}
-                  onPress={() => upd({ projection: mf.projection === code ? "" : code })}
+                  onPress={() => {
+                    if (code === "ST" && mf.projection === "ST") return;
+                    upd({ projection: mf.projection === code ? "" : code });
+                  }}
                 >
                   <Text style={[mfStyles.projCode, mf.projection === code && { color: "#fff" }]}>{code}</Text>
                   <Text style={[mfStyles.projLabel, mf.projection === code && { color: "rgba(255,255,255,0.75)" }]}>
@@ -608,6 +648,12 @@ function FeedbackModal({ visible, caseItem, onClose, isMonthlyLocked = false, ex
         non_starter:        mfState.nonStarter,
         kyc_purchase:       mfState.kycPurchase,
         workable:           mfState.workable,
+        ptp_date_mf:        mfState.feedbackCode === "PTP" && mfState.ptpDateMf
+                              ? toIsoDate(mfState.ptpDateMf) : null,
+        shifted_city:       mfState.detailFeedback === "Customer shifted"
+                              ? (mfState.shiftedCity.trim() || null) : null,
+        occupation:         mfState.occupation.length > 0
+                              ? mfState.occupation.join(", ") : null,
         monthly_feedback:   "SUBMITTED",
       };
       await api.updateFeedback(caseItem.id, payload);
