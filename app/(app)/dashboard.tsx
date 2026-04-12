@@ -302,7 +302,7 @@ export default function Dashboard() {
       count_total: row.count_total || 0,
     };
   });
-  const hasTwData = twSummaryData && Object.keys(twSummary).length > 0;
+  const hasTwData = !!twSummaryData;
 
   const fmtNum = (v: number) =>
     v >= 100000 ? `₹${(v / 100000).toFixed(1)}L` : `₹${v.toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
