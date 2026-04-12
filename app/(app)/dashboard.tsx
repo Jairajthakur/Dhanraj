@@ -9,6 +9,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import Colors from "@/constants/colors";
 import { api } from "@/lib/api";
+import { getApiUrl } from "@/lib/query-client";
 
 // ─── Milestone config ─────────────────────────────────────────────────────────
 const MILESTONES = [
@@ -264,11 +265,22 @@ export default function Dashboard() {
     queryFn: () => api.getBktPerfSummary(),
   });
 
+  const { data: twSummaryData, refetch: refetchTw } = useQuery({
+    queryKey: ["/api/bkt-tw-collection-summary"],
+    queryFn: async () => {
+      const url = new URL("/api/bkt-tw-collection-summary", getApiUrl());
+      const res = await fetch(url.toString(), { credentials: "include" });
+      if (!res.ok) throw new Error("Failed");
+      return res.json();
+    },
+  });
+
   const refetch = useCallback(() => {
     refetchStats();
     refetchPtp();
     refetchDrr();
-  }, [refetchStats, refetchPtp, refetchDrr]);
+    refetchTw();
+  }, [refetchStats, refetchPtp, refetchDrr, refetchTw]);
 
   if (isLoading) {
     return (
@@ -281,6 +293,16 @@ export default function Dashboard() {
   const ptpCases: any[] = ptpData?.cases || [];
   const ptpCount: number = ptpData?.count || 0;
   const drrRows: any[]  = drrData?.rows || [];
+
+  const twSummary: Record<string, { amount_collected: number; count_paid: number; count_total: number }> = {};
+  (twSummaryData?.summary || []).forEach((row: any) => {
+    twSummary[row.case_category] = {
+      amount_collected: parseFloat(row.amount_collected) || 0,
+      count_paid: row.count_paid || 0,
+      count_total: row.count_total || 0,
+    };
+  });
+  const hasTwData = twSummaryData && Object.keys(twSummary).length > 0;
 
   const fmtNum = (v: number) =>
     v >= 100000 ? `₹${(v / 100000).toFixed(1)}L` : `₹${v.toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
@@ -305,6 +327,38 @@ export default function Dashboard() {
 
       {/* DRR Widget */}
       {drrRows.length > 0 && <DRRWidget rows={drrRows} />}
+
+      {/* TW Collection Summary */}
+      {hasTwData && (
+        <View style={styles.twCard}>
+          <View style={styles.twHeader}>
+            <View style={[styles.twIconWrap, { backgroundColor: Colors.warning + "20" }]}>
+              <Ionicons name="bicycle" size={18} color={Colors.warning} />
+            </View>
+            <Text style={styles.twTitle}>TW Collected (BKT-wise)</Text>
+          </View>
+          <View style={styles.twGrid}>
+            {[
+              { key: "bkt1", label: "BKT 1", color: Colors.info },
+              { key: "bkt2", label: "BKT 2", color: Colors.warning },
+              { key: "bkt3", label: "BKT 3", color: Colors.danger },
+            ].map(({ key, label, color }) => {
+              const s = twSummary[key];
+              return (
+                <View key={key} style={[styles.twBox, { borderTopColor: color }]}>
+                  <Text style={[styles.twBoxLabel, { color }]}>{label}</Text>
+                  <Text style={styles.twBoxAmount}>
+                    {s ? fmt(s.amount_collected) : "₹0"}
+                  </Text>
+                  <Text style={styles.twBoxSub}>
+                    {s ? `${s.count_paid}/${s.count_total} cases` : "0 cases"}
+                  </Text>
+                </View>
+              );
+            })}
+          </View>
+        </View>
+      )}
 
       {/* PTP Card */}
       <View style={styles.ptpCard}>
@@ -383,4 +437,13 @@ const styles = StyleSheet.create({
   ptpDatesRow:    { flexDirection: "row", flexWrap: "wrap", gap: 4, marginTop: 4 },
   ptpDateTag:     { borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
   ptpDateLabel:   { fontSize: 11, fontWeight: "600" },
+  twCard:         { backgroundColor: Colors.surface, borderRadius: 16, padding: 16, gap: 12, borderWidth: 1, borderColor: Colors.border, shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 6, elevation: 2 },
+  twHeader:       { flexDirection: "row", alignItems: "center", gap: 10 },
+  twIconWrap:     { width: 32, height: 32, borderRadius: 10, alignItems: "center", justifyContent: "center" },
+  twTitle:        { fontSize: 14, fontWeight: "800", color: Colors.text },
+  twGrid:         { flexDirection: "row", gap: 8 },
+  twBox:          { flex: 1, backgroundColor: Colors.surfaceAlt, borderRadius: 10, padding: 10, alignItems: "center", borderTopWidth: 3 },
+  twBoxLabel:     { fontSize: 11, fontWeight: "700", marginBottom: 4 },
+  twBoxAmount:    { fontSize: 14, fontWeight: "900", color: Colors.text },
+  twBoxSub:       { fontSize: 10, color: Colors.textMuted, marginTop: 2 },
 });
