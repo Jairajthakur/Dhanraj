@@ -1551,16 +1551,22 @@ res.json({ imported, updated: 0, skipped, agentsCreated, agentsRemoved, total: r
       const agentId = req.session.agentId!;
       const result = await storage.query(
         `SELECT
-           case_category,
+           bkt_key AS case_category,
            COUNT(*) FILTER (WHERE status = 'Paid')::int AS count_paid,
            COUNT(*)::int AS count_total,
            COALESCE(SUM(pos::numeric) FILTER (WHERE status = 'Paid'), 0) AS amount_collected,
            COALESCE(SUM(pos::numeric), 0) AS amount_total
-         FROM bkt_cases
-         WHERE agent_id = $1
-           AND case_category IN ('bkt1', 'bkt2', 'bkt3')
-         GROUP BY case_category
-         ORDER BY case_category`,
+         FROM (
+           SELECT 'bkt' || bkt::text AS bkt_key, pos, status
+           FROM loan_cases
+           WHERE agent_id = $1 AND bkt IN (1, 2, 3) AND pos IS NOT NULL
+           UNION ALL
+           SELECT case_category AS bkt_key, pos, status
+           FROM bkt_cases
+           WHERE agent_id = $1 AND case_category IN ('bkt1','bkt2','bkt3') AND pos IS NOT NULL
+         ) combined
+         GROUP BY bkt_key
+         ORDER BY bkt_key`,
         [agentId]
       );
       res.json({ summary: result.rows });
