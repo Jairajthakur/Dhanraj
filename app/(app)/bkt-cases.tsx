@@ -152,7 +152,6 @@ function FeedbackModal({
             </Text>
           )}
 
-          {/* Status */}
           <Text style={fbStyles.label}>Status</Text>
           <View style={fbStyles.chips}>
             {STATUS_OPTIONS.map((s) => (
@@ -172,7 +171,6 @@ function FeedbackModal({
             ))}
           </View>
 
-          {/* Y/N toggles */}
           <YNToggle label="Customer Available" value={customerAvailable} onChange={setCustomerAvailable} />
           <YNToggle label="Vehicle Available" value={vehicleAvailable} onChange={setVehicleAvailable} />
           <YNToggle label="Third Party" value={thirdParty} onChange={setThirdParty} />
@@ -199,7 +197,6 @@ function FeedbackModal({
             </>
           )}
 
-          {/* Feedback Code */}
           <Text style={fbStyles.label}>Feedback Code</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
             <View style={{ flexDirection: "row", gap: 8 }}>
@@ -221,7 +218,6 @@ function FeedbackModal({
             </View>
           </ScrollView>
 
-          {/* Details Feedback */}
           <Text style={fbStyles.label}>Details Feedback</Text>
           <TextInput
             style={fbStyles.input}
@@ -233,7 +229,6 @@ function FeedbackModal({
             numberOfLines={3}
           />
 
-          {/* PTP Date */}
           {(status === "PTP" || feedbackCode === "PTP") && (
             <>
               <Text style={fbStyles.label}>PTP Date</Text>
@@ -248,7 +243,6 @@ function FeedbackModal({
             </>
           )}
 
-          {/* Projection */}
           <Text style={fbStyles.label}>Projection</Text>
           <View style={{ flexDirection: "row", gap: 8, marginBottom: 12 }}>
             {PROJECTION_OPTIONS.map((p) => (
@@ -266,16 +260,10 @@ function FeedbackModal({
             ))}
           </View>
 
-          {/* Rollback */}
           <YNToggle label="Rollback" value={rollbackYn} onChange={setRollbackYn} />
-
-          {/* Non Starter */}
           <YNToggle label="Non Starter" value={nonStarter} onChange={setNonStarter} />
-
-          {/* KYC Purchase */}
           <YNToggle label="KYC Purchase" value={kycPurchase} onChange={setKycPurchase} />
 
-          {/* Workable */}
           <Text style={fbStyles.label}>Workable</Text>
           <View style={{ flexDirection: "row", gap: 8, marginBottom: 16 }}>
             {(["Workable", "Non Workable"] as const).map((w) => {
@@ -353,7 +341,6 @@ export default function FosBktCases() {
 
   return (
     <View style={{ flex: 1, backgroundColor: Colors.background }}>
-      {/* Tabs */}
       <View style={[styles.tabBar, { paddingTop: Platform.OS === "web" ? 67 : insets.top }]}>
         <ScrollView
           horizontal
