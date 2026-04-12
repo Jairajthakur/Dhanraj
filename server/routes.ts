@@ -543,23 +543,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
   await storage.query(`ALTER TABLE bkt_cases ADD COLUMN IF NOT EXISTS extra_numbers TEXT[] DEFAULT '{}'`);
   console.log("[DB] extra_numbers columns ready ✅");
 } catch (e: any) { console.error("[DB] extra_numbers migration:", e.message); }
-  try {
-    await storage.query(`ALTER TABLE loan_cases ADD COLUMN IF NOT EXISTS ptp_date_mf DATE`);
-    await storage.query(`ALTER TABLE bkt_cases  ADD COLUMN IF NOT EXISTS ptp_date_mf DATE`);
-    console.log("[DB] ptp_date_mf columns ready ✅");
-  } catch (e: any) { console.error("[DB] ptp_date_mf migration:", e.message); }
-
-  try {
-    await storage.query(`ALTER TABLE loan_cases ADD COLUMN IF NOT EXISTS shifted_city TEXT`);
-    await storage.query(`ALTER TABLE bkt_cases  ADD COLUMN IF NOT EXISTS shifted_city TEXT`);
-    console.log("[DB] shifted_city columns ready ✅");
-  } catch (e: any) { console.error("[DB] shifted_city migration:", e.message); }
-
-  try {
-    await storage.query(`ALTER TABLE loan_cases ADD COLUMN IF NOT EXISTS occupation TEXT`);
-    await storage.query(`ALTER TABLE bkt_cases  ADD COLUMN IF NOT EXISTS occupation TEXT`);
-    console.log("[DB] occupation columns ready ✅");
-  } catch (e: any) { console.error("[DB] occupation migration:", e.message); }
 
 app.use("/api/fos-depositions", (req, res, next) => {
   if (req.headers["content-type"]?.includes("multipart/form-data")) {
@@ -659,7 +642,7 @@ app.use("/api/fos-depositions", (req, res, next) => {
 
   app.put("/api/cases/:id/feedback", requireAuth, async (req, res) => {
     try {
-      const { status, feedback, comments, ptp_date, rollback_yn, customer_available, vehicle_available, third_party, third_party_name, third_party_number, feedback_code, projection, non_starter, kyc_purchase, workable, monthly_feedback, ptp_date_mf, shifted_city, occupation } = req.body;
+      const { status, feedback, comments, ptp_date, rollback_yn, customer_available, vehicle_available, third_party, third_party_name, third_party_number, feedback_code, projection, non_starter, kyc_purchase, workable, monthly_feedback } = req.body;
       const ynVal = rollback_yn === true || rollback_yn === "true" ? true : rollback_yn === false || rollback_yn === "false" ? false : null;
       const toBool = (v: any) => v === true || v === "true" ? true : v === false || v === "false" ? false : null;
       const caseId = Number(req.params.id);
@@ -677,9 +660,6 @@ app.use("/api/fos-depositions", (req, res, next) => {
         ...(kyc_purchase !== undefined && { kycPurchase: toBool(kyc_purchase) }),
         ...(workable !== undefined && { workable: toBool(workable) }),
         monthlyFeedback: monthly_feedback || null,
-        ptpDateMf:       ptp_date_mf  || null,
-        shiftedCity:     shifted_city || null,
-        occupation:      occupation   || null,
       };
       await storage.updateLoanCaseFeedback(caseId, status, feedback, comments, ptp_date, ynVal, extraFields);
       if (old && old.bkt && old.agent_id && !["UC","RUC"].includes((old.pro || "").toUpperCase())) {
@@ -1287,7 +1267,7 @@ app.put("/api/fos-depositions/:id/pay-both", requireAuth, screenshotUpload.singl
 
   app.put("/api/bkt-cases/:id/feedback", requireAuth, async (req, res) => {
     try {
-      const { status, feedback, comments, ptp_date, rollback_yn, customer_available, vehicle_available, third_party, third_party_name, third_party_number, feedback_code, projection, non_starter, kyc_purchase, workable, monthly_feedback, ptp_date_mf, shifted_city, occupation } = req.body;
+      const { status, feedback, comments, ptp_date, rollback_yn, customer_available, vehicle_available, third_party, third_party_name, third_party_number, feedback_code, projection, non_starter, kyc_purchase, workable, monthly_feedback } = req.body;
       const ynVal = rollback_yn === true || rollback_yn === "true" ? true : rollback_yn === false || rollback_yn === "false" ? false : null;
       const toBool = (v: any) => v === true || v === "true" ? true : v === false || v === "false" ? false : null;
       const caseId = Number(req.params.id);
@@ -1350,18 +1330,15 @@ for (const row of savedExtras.rows) {
 }
 console.log(`[import] 💾 Saved extra_numbers for ${extrasMap.size} loan(s) before wipe`);
 
+// ── Save monthly_feedback before wipe ─────────────────────────
 const savedMonthlyFb = await storage.query(`
-  SELECT loan_no, monthly_feedback, customer_available, vehicle_available,
-         third_party, third_party_name, third_party_number,
-         feedback_code, latest_feedback, feedback_comments,
-         projection, non_starter, kyc_purchase, workable,
-         occupation, ptp_date_mf, shifted_city
+  SELECT loan_no, monthly_feedback 
   FROM loan_cases 
   WHERE monthly_feedback IS NOT NULL AND monthly_feedback != ''
 `);
-const monthlyFeedbackMap = new Map<string, any>();
+const monthlyFeedbackMap = new Map<string, string>();
 for (const row of savedMonthlyFb.rows) {
-  if (row.monthly_feedback) monthlyFeedbackMap.set(row.loan_no, row);
+  if (row.monthly_feedback) monthlyFeedbackMap.set(row.loan_no, row.monthly_feedback);
 }
 console.log(`[import] 💾 Saved monthly_feedback for ${monthlyFeedbackMap.size} loan(s) before wipe`);
 
@@ -1433,48 +1410,15 @@ if (extrasMap.size > 0) {
   console.log(`[import] ✅ Restored extra_numbers for ${extrasMap.size} loan(s)`);
 }
 
+// ── Restore monthly_feedback ───────────────────────────────────
 if (monthlyFeedbackMap.size > 0) {
-  for (const [loanNo, row] of monthlyFeedbackMap) {
-    await storage.query(`
-      UPDATE loan_cases SET
-        monthly_feedback    = $1,
-        customer_available  = $2,
-        vehicle_available   = $3,
-        third_party         = $4,
-        third_party_name    = $5,
-        third_party_number  = $6,
-        feedback_code       = $7,
-        latest_feedback     = $8,
-        feedback_comments   = $9,
-        projection          = $10,
-        non_starter         = $11,
-        kyc_purchase        = $12,
-        workable            = $13,
-        occupation          = $14,
-        ptp_date_mf         = $15,
-        shifted_city        = $16
-      WHERE loan_no = $17
-    `, [
-      row.monthly_feedback,
-      row.customer_available,
-      row.vehicle_available,
-      row.third_party,
-      row.third_party_name,
-      row.third_party_number,
-      row.feedback_code,
-      row.latest_feedback,
-      row.feedback_comments,
-      row.projection,
-      row.non_starter,
-      row.kyc_purchase,
-      row.workable,
-      row.occupation,
-      row.ptp_date_mf,
-      row.shifted_city,
-      loanNo
-    ]);
+  for (const [loanNo, feedback] of monthlyFeedbackMap) {
+    await storage.query(
+      `UPDATE loan_cases SET monthly_feedback = $1 WHERE loan_no = $2`,
+      [feedback, loanNo]
+    );
   }
-  console.log(`[import] ✅ Restored full monthly feedback for ${monthlyFeedbackMap.size} loan(s)`);
+  console.log(`[import] ✅ Restored monthly_feedback for ${monthlyFeedbackMap.size} loan(s)`);
 }
 
 for (const [loanNo, ptpData] of ptpLoanMap) {
@@ -1543,255 +1487,47 @@ res.json({ imported, updated: 0, skipped, agentsCreated, agentsRemoved, total: r
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
-app.get("/api/admin/feedback-export", requireAdmin, async (req, res) => {
-  try {
-    const result = await storage.query(`
-      SELECT
-        TO_CHAR(COALESCE(lc.created_at,NOW()),'DD-Mon') AS allu_date,
-        lc.loan_no, lc.app_id, lc.customer_name, lc.bkt::text AS bkt, lc.pro,
-        'NANDED'::text AS branch,
-        lc.customer_available, lc.vehicle_available, lc.third_party,
-        lc.third_party_name, lc.third_party_number,
-        lc.feedback_code, lc.latest_feedback, lc.monthly_feedback,
-        lc.ptp_date, lc.ptp_date_mf, lc.shifted_city, lc.occupation,
-        lc.projection, lc.non_starter, lc.kyc_purchase, lc.workable,
-        lc.status, lc.feedback_comments, fa.name AS fos_name
-      FROM loan_cases lc LEFT JOIN fos_agents fa ON lc.agent_id=fa.id
-      WHERE lc.latest_feedback IS NOT NULL OR lc.feedback_code IS NOT NULL
-        OR lc.status IN ('Paid','PTP') OR lc.monthly_feedback IS NOT NULL
-      UNION ALL
-      SELECT
-        TO_CHAR(COALESCE(bc.created_at,NOW()),'DD-Mon') AS allu_date,
-        bc.loan_no, bc.app_id, bc.customer_name, bc.case_category AS bkt, bc.pro,
-        'NANDED'::text AS branch,
-        bc.customer_available, bc.vehicle_available, bc.third_party,
-        bc.third_party_name, bc.third_party_number,
-        bc.feedback_code, bc.latest_feedback, bc.monthly_feedback,
-        bc.ptp_date, bc.ptp_date_mf, bc.shifted_city, bc.occupation,
-        bc.projection, bc.non_starter, bc.kyc_purchase, bc.workable,
-        bc.status, bc.feedback_comments, fa.name AS fos_name
-      FROM bkt_cases bc LEFT JOIN fos_agents fa ON bc.agent_id=fa.id
-      WHERE bc.latest_feedback IS NOT NULL OR bc.feedback_code IS NOT NULL
-        OR bc.status IN ('Paid','PTP') OR bc.monthly_feedback IS NOT NULL
-      ORDER BY fos_name NULLS LAST, loan_no
-    `);
-
-    const yn = (v: any) =>
-      v === true || v === "true" || v === "t" || v === 1 ? "Y"
-      : v === false || v === "false" || v === "f" || v === 0 ? "N" : "";
-
-function buildFullDetailFeedback(r: any): string {
-  const formatDate = (val: any): string => {
-    if (!val) return "";
-    const s = String(val).slice(0, 10);
-    const d = new Date(s + "T00:00:00Z");
-    if (isNaN(d.getTime())) return s;
-    const day   = String(d.getUTCDate()).padStart(2, "0");
-    const month = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][d.getUTCMonth()];
-    return `${day}-${month}-${d.getUTCFullYear()}`;
-  };
-
-  const isTrue  = (v: any) => v === true  || v === "true"  || v === "t" || v === 1;
-  const isFalse = (v: any) => v === false || v === "false" || v === "f" || v === 0;
-
-  const parts: string[] = [];
-
-  // ── 1. Customer Availability ──────────────────────────────────────────────
-  if (r.customer_available != null) {
-    parts.push(
-      isTrue(r.customer_available)
-        ? "Customer Availability: Available at residence during field visit."
-        : "Customer Availability: Not Available at residence during field visit."
-    );
-  }
-
-  // ── 2. Vehicle Status ─────────────────────────────────────────────────────
-  if (r.vehicle_available != null) {
-    parts.push(
-      isTrue(r.vehicle_available)
-        ? "Vehicle Status: Vehicle was present/available at location."
-        : "Vehicle Status: Vehicle was not available at location."
-    );
-  }
-
-  // ── 3. Third Party Contact ────────────────────────────────────────────────
-  if (r.third_party != null) {
-    if (isTrue(r.third_party)) {
-      const who = r.third_party_name   ? r.third_party_name   : "third party";
-      const num = r.third_party_number ? ` (${r.third_party_number})` : "";
-      parts.push(`Third Party Contact: ${who}${num} was contacted during visit.`);
-    } else {
-      parts.push("Third Party Contact: No third party contact made during visit.");
-    }
-  }
-
-  // ── 4. Payment Status ─────────────────────────────────────────────────────
-  const codeMap: Record<string, string> = {
-    PTP:  "Customer has given Promise to Pay",
-    PAID: "Customer has already paid",
-    REPO: "Vehicle has been repossessed",
-    RTP:  "Customer refused to make payment",
-    SFT:  "Customer has transferred / shifted",
-    SKIP: "Customer is untraceable — skip case",
-  };
-
-  if (r.feedback_code === "PTP") {
-    const ptpDate = r.ptp_date_mf
-      ? formatDate(r.ptp_date_mf)
-      : r.ptp_date ? formatDate(r.ptp_date) : null;
-    parts.push(
-      `Payment Status: Customer has given Promise to Pay${ptpDate ? ` — confirmed payment date ${ptpDate}` : ""}.`
-    );
-  } else if (r.feedback_code === "RTP") {
-    parts.push("Payment Status: Customer refused to make payment.");
-  } else if (r.feedback_code === "PAID") {
-    parts.push("Payment Status: Customer has already paid.");
-  } else if (r.feedback_code === "REPO") {
-    parts.push("Payment Status: Vehicle has been repossessed.");
-  } else if (r.feedback_code === "SFT") {
-    parts.push(`Payment Status: Customer has transferred / shifted${r.shifted_city ? ` to ${r.shifted_city}` : ""}.`);
-  } else if (r.feedback_code === "SKIP") {
-    parts.push("Payment Status: Customer is untraceable — marked as skip case.");
-  } else if (r.ptp_date_mf) {
-    parts.push(`Payment Status: Customer committed to pay by ${formatDate(r.ptp_date_mf)}.`);
-  } else if (r.ptp_date && r.status === "PTP") {
-    parts.push(`Payment Status: PTP date set for ${formatDate(r.ptp_date)}.`);
-  }
-
-  // ── 5. Customer Profile (detail feedback + projection together) ───────────
-  const profileParts: string[] = [];
-
-  const skipDetail = new Set([
-    "customer already paid",
-    "promise to pay",
-    "customer has already paid",
-  ]);
-  if (
-    r.latest_feedback &&
-    !skipDetail.has(r.latest_feedback.toLowerCase().trim()) &&
-    !(r.feedback_code === "PTP" && r.latest_feedback.toLowerCase().includes("promise to pay"))
-  ) {
-    // Capitalise first letter
-    const fb = r.latest_feedback.charAt(0).toUpperCase() + r.latest_feedback.slice(1);
-    profileParts.push(fb);
-  }
-
-  const projMap: Record<string, string> = {
-    ST: "case projected for settlement discussion",
-    RF: "case projected for full rollback discussion",
-    RB: "case projected for partial rollback discussion",
-  };
-  if (r.projection && projMap[r.projection])
-    profileParts.push(projMap[r.projection]);
-
-  if (profileParts.length > 0)
-    parts.push(`Customer Profile: ${profileParts.join("; ")}.`);
-
-  // ── 6. Case Classification (non-starter + workable) ───────────────────────
-  const classParts: string[] = [];
-
-  if (isTrue(r.non_starter))
-    classParts.push("Non-starter");
-
-  if (isTrue(r.workable))
-    classParts.push("case is workable");
-  else if (isFalse(r.workable))
-    classParts.push("case marked as non-workable at present stage");
-
-  if (isTrue(r.kyc_purchase))
-    classParts.push("KYC purchase completed");
-
-  if (classParts.length > 0)
-    parts.push(`Case Classification: ${classParts.join("; ")}.`);
-
-  // ── 7. Occupation Details ─────────────────────────────────────────────────
-  if (r.occupation)
-    parts.push(`Occupation Details: ${r.occupation}.`);
-
-  // ── 8. Agent Observation (comments) ──────────────────────────────────────
-  if (r.feedback_comments)
-    parts.push(`Agent Observation: ${r.feedback_comments}.`);
-
-  if (parts.length === 0) return "—";
-
-  return parts.join(" ");
-}
-
-    const rows = result.rows.map((r: any) => ({
-      "Allu Date":             r.allu_date || "",
-      "LOAN NO":               r.loan_no || "",
-      "APP ID":                r.app_id || "",
-      "CUSTOMERNAME":          r.customer_name || "",
-      "Bkt":                   r.bkt || "",
-      "Pro":                   r.pro || "",
-      "Branch":                r.branch || "",
-      "Customer Y/N":          yn(r.customer_available),
-      "Vehicle Y/N":           yn(r.vehicle_available),
-      "Third_party Y/N":       yn(r.third_party),
-      "Third Party Name":      yn(r.third_party) === "Y" ? r.third_party_name  || "" : "",
-      "Third Party Number":    yn(r.third_party) === "Y" ? r.third_party_number || "" : "",
-      "FEEDBACK CODE":         r.feedback_code != null ? String(r.feedback_code) : "",
-      "Details FEEDBACK":      r.latest_feedback != null ? String(r.latest_feedback) : "",
-      "Shifted City":          r.shifted_city || "",
-      "Monthly Feedback":      r.monthly_feedback != null ? String(r.monthly_feedback) : "",
-      "PTP DATE (Field)":      r.ptp_date    ? String(r.ptp_date).slice(0, 10) : "",
-      "PTP DATE (Monthly)":    r.ptp_date_mf ? String(r.ptp_date_mf).slice(0, 10) : "",
-      "Projection":            r.projection != null ? String(r.projection) : "",
-      "NON_STARTER (Y/N)":     yn(r.non_starter),
-      "KYC PURCHASE (Y/N)":    yn(r.kyc_purchase),
-      "Workable/Non":          r.workable === true || r.workable === "true" || r.workable === "t"
-                                 ? "WORKABLE"
-                                 : r.workable === false || r.workable === "false" || r.workable === "f"
-                                 ? "NONWORKABLE" : "",
-      "Occupation":            r.occupation || "",
-      "Comments":              r.feedback_comments || "",
-      "Status":                r.status || "",
-      "FOS Name":              r.fos_name || "",
-      "Full Detail Feedback":  buildFullDetailFeedback(r),
-    }));
-
-    const wb = new ExcelJS.Workbook();
-    const ws = wb.addWorksheet("Feedback Report");
-    const exportRows = rows.length ? rows : [{}];
-    const colKeys = Object.keys(exportRows[0]);
-
-    ws.columns = colKeys.map((key) => ({
-      header: key, key,
-      width: key === "Full Detail Feedback" ? 70
-           : ["CUSTOMERNAME","Details FEEDBACK","Monthly Feedback","Comments","Shifted City"].includes(key) ? 32
-           : 18,
-    }));
-
-    exportRows.forEach((row) => ws.addRow(row));
-
-    ws.getRow(1).eachCell((cell) => {
-      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFFF00" } };
-      cell.font = { bold: true };
-      cell.alignment = { vertical: "middle", horizontal: "center", wrapText: true };
-    });
-
-    // Green header for Full Detail Feedback column
-    const fdIdx = colKeys.indexOf("Full Detail Feedback") + 1;
-    if (fdIdx > 0) {
-      const h = ws.getRow(1).getCell(fdIdx);
-      h.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF92D050" } };
-      h.font = { bold: true, color: { argb: "FF000000" } };
-    }
-
-    // Wrap text in Full Detail Feedback column cells
-    ws.getColumn(fdIdx).eachCell((cell) => {
-      cell.alignment = { wrapText: true, vertical: "top" };
-    });
-
-    ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: colKeys.length } };
-    ws.views = [{ state: "frozen", ySplit: 1 }];
-
-    const buf = await wb.xlsx.writeBuffer();
-    res.setHeader("Content-Disposition", `attachment; filename="Feedback_Report_${new Date().toISOString().slice(0, 10)}.xlsx"`);
-    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-    res.send(Buffer.from(buf));
-  } catch (e: any) { res.status(500).json({ message: e.message }); }
-});
+  app.get("/api/admin/feedback-export", requireAdmin, async (req, res) => {
+    try {
+      const result = await storage.query(`
+        SELECT TO_CHAR(COALESCE(lc.created_at,NOW()),'DD-Mon') AS allu_date, lc.loan_no, lc.app_id, lc.customer_name, lc.bkt::text AS bkt, lc.pro, 'NANDED'::text AS branch, lc.customer_available, lc.vehicle_available, lc.third_party, lc.third_party_name, lc.third_party_number, lc.feedback_code, lc.latest_feedback, lc.monthly_feedback, lc.ptp_date, lc.projection, lc.non_starter, lc.kyc_purchase, lc.workable, lc.status, lc.feedback_comments, fa.name AS fos_name
+        FROM loan_cases lc LEFT JOIN fos_agents fa ON lc.agent_id=fa.id
+        WHERE lc.latest_feedback IS NOT NULL OR lc.feedback_code IS NOT NULL OR lc.status IN ('Paid','PTP')
+        UNION ALL
+        SELECT TO_CHAR(COALESCE(bc.created_at,NOW()),'DD-Mon') AS allu_date, bc.loan_no, bc.app_id, bc.customer_name, bc.case_category AS bkt, bc.pro, 'NANDED'::text AS branch, bc.customer_available, bc.vehicle_available, bc.third_party, bc.third_party_name, bc.third_party_number, bc.feedback_code, bc.latest_feedback, bc.monthly_feedback, bc.ptp_date, bc.projection, bc.non_starter, bc.kyc_purchase, bc.workable, bc.status, bc.feedback_comments, fa.name AS fos_name
+        FROM bkt_cases bc LEFT JOIN fos_agents fa ON bc.agent_id=fa.id
+        WHERE bc.latest_feedback IS NOT NULL OR bc.feedback_code IS NOT NULL OR bc.status IN ('Paid','PTP')
+        ORDER BY fos_name NULLS LAST, loan_no
+      `);
+      const yn = (v: any) => v === true || v === "true" || v === "t" || v === 1 ? "Y" : v === false || v === "false" || v === "f" || v === 0 ? "N" : "";
+      const rows = result.rows.map((r: any) => ({
+        "Allu Date": r.allu_date || "", "LOAN NO": r.loan_no || "", "APP ID": r.app_id || "", "CUSTOMERNAME": r.customer_name || "",
+        "Bkt": r.bkt || "", "Pro": r.pro || "", "Branch": r.branch || "",
+        "Customer Y/N": yn(r.customer_available), "Vehicle Y/N": yn(r.vehicle_available), "Third_party Y/N": yn(r.third_party),
+        "Third Party Name": r.third_party === true || r.third_party === "true" || r.third_party === "t" ? r.third_party_name || "" : "",
+        "Third Party Number": r.third_party === true || r.third_party === "true" || r.third_party === "t" ? r.third_party_number || "" : "",
+        "FEEDBACK CODE": r.feedback_code != null ? String(r.feedback_code) : "",
+        "Details FEEDBACK": r.latest_feedback != null ? String(r.latest_feedback) : "",
+        "Monthly Feedback": r.monthly_feedback != null ? String(r.monthly_feedback) : "",
+        "PTP DATE": r.ptp_date ? (r.ptp_date instanceof Date ? r.ptp_date.toISOString().slice(0, 10) : String(r.ptp_date).slice(0, 10)) : "",
+        "Projection": r.projection != null ? String(r.projection) : "",
+        "NON_STARTER (Y/N)": yn(r.non_starter), "KYC PURCHASE (Y/N)": yn(r.kyc_purchase),
+        "Workable/Non": r.workable === true || r.workable === "true" || r.workable === "t" ? "WORKABLE" : r.workable === false || r.workable === "false" || r.workable === "f" ? "NONWORKABLE" : "",
+        "Comments": r.feedback_comments || "", "Status": r.status || "", "FOS Name": r.fos_name || "",
+      }));
+      const wb = new ExcelJS.Workbook(); const ws = wb.addWorksheet("Feedback Report");
+      const exportRows = rows.length ? rows : [{}];
+      ws.columns = Object.keys(exportRows[0]).map((key) => ({ header: key, key, width: ["CUSTOMERNAME", "Details FEEDBACK", "Monthly Feedback", "Comments"].includes(key) ? 30 : 16 }));
+      exportRows.forEach((row) => ws.addRow(row));
+      ws.getRow(1).eachCell((cell) => { cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFFF00" } }; cell.font = { bold: true }; cell.alignment = { vertical: "middle", horizontal: "center", wrapText: true }; });
+      ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: Object.keys(exportRows[0]).length } };
+      ws.views = [{ state: "frozen", ySplit: 1 }];
+      const buf = await wb.xlsx.writeBuffer();
+      res.setHeader("Content-Disposition", `attachment; filename="Feedback_Report_${new Date().toISOString().slice(0, 10)}.xlsx"`);
+      res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+      res.send(Buffer.from(buf));
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
 
   app.post("/api/admin/clear-ptp", requireAdmin, async (req, res) => {
     try {
@@ -1808,6 +1544,30 @@ function buildFullDetailFeedback(r: any): string {
       const result = await storage.query(`WITH norm AS (SELECT *, CASE LOWER(REPLACE(bkt,' ','')) WHEN '1' THEN 'bkt1' WHEN '2' THEN 'bkt2' WHEN '3' THEN 'bkt3' WHEN 'bkt1' THEN 'bkt1' WHEN 'bkt2' THEN 'bkt2' WHEN 'bkt3' THEN 'bkt3' ELSE LOWER(REPLACE(bkt,' ','')) END AS bkt_norm FROM bkt_perf_summary), latest AS (SELECT DISTINCT ON (fos_name, bkt_norm) * FROM norm ORDER BY fos_name, bkt_norm, uploaded_at DESC) SELECT fos_name, bkt_norm AS bkt, COALESCE(pos_paid,0) AS pos_paid, COALESCE(pos_unpaid,0) AS pos_unpaid, COALESCE(pos_grand_total,0) AS pos_grand_total, COALESCE(pos_percentage,0) AS pos_percentage, COALESCE(count_paid,0) AS count_paid, COALESCE(count_unpaid,0) AS count_unpaid, COALESCE(count_total,0) AS count_total, COALESCE(rollback_paid,0) AS rollback_paid, COALESCE(rollback_unpaid,0) AS rollback_unpaid, COALESCE(rollback_grand_total,0) AS rollback_grand_total, COALESCE(rollback_percentage,0) AS rollback_percentage FROM latest ORDER BY fos_name, bkt_norm`);
       res.json({ rows: result.rows });
     } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  app.get("/api/bkt-tw-collection-summary", requireAuth, async (req, res) => {
+    try {
+      const agentId = req.session.agentId!;
+      const result = await storage.query(
+        `SELECT
+           case_category,
+           COUNT(*) FILTER (WHERE status = 'Paid')::int AS count_paid,
+           COUNT(*)::int AS count_total,
+           COALESCE(SUM(pos::numeric) FILTER (WHERE status = 'Paid'), 0) AS amount_collected,
+           COALESCE(SUM(pos::numeric), 0) AS amount_total
+         FROM bkt_cases
+         WHERE agent_id = $1
+           AND UPPER(TRIM(COALESCE(pro, ''))) = 'TW'
+           AND case_category IN ('bkt1', 'bkt2', 'bkt3')
+         GROUP BY case_category
+         ORDER BY case_category`,
+        [agentId]
+      );
+      res.json({ summary: result.rows });
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
   });
 
   app.get("/api/bkt-perf-summary", requireAuth, async (req, res) => {
