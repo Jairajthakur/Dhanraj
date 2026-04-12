@@ -1558,7 +1558,6 @@ res.json({ imported, updated: 0, skipped, agentsCreated, agentsRemoved, total: r
            COALESCE(SUM(pos::numeric), 0) AS amount_total
          FROM bkt_cases
          WHERE agent_id = $1
-           AND UPPER(TRIM(COALESCE(pro, ''))) = 'TW'
            AND case_category IN ('bkt1', 'bkt2', 'bkt3')
          GROUP BY case_category
          ORDER BY case_category`,
