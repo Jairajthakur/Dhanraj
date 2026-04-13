@@ -31,6 +31,8 @@ export const agentCache = {
     } catch {}
   },
 };
+
+// ─── Types ───────────────────────────────────────────────────────────────────
 export interface CreateFieldVisitPayload {
   case_id:       string;
   customer_name: string;
@@ -40,37 +42,6 @@ export interface CreateFieldVisitPayload {
   outcome:       "Contacted" | "Not Home" | "Partial Payment" | "Paid" | "Refused";
   notes:         string;
 }
- 
-// ─── Agent API methods ────────────────────────────────────────────────────────
-// Add inside your `api` export object:
- 
-fieldVisits: {
-  // Log a new visit (agent)
-  create: (payload: CreateFieldVisitPayload) =>
-    fetchWithAuth("/api/field-visits", {
-      method: "POST",
-      body:   JSON.stringify(payload),
-    }),
- 
-  // Get this agent's own visit history
-  list: (limit = 50) =>
-    fetchWithAuth(`/api/field-visits?limit=${limit}`),
-},
- 
-// ─── Admin API methods ────────────────────────────────────────────────────────
-// Add inside your `api.admin` object:
- 
-getFieldVisits: (filters?: { agent_id?: string; outcome?: string; date?: string }) => {
-  const params = new URLSearchParams();
-  if (filters?.agent_id) params.set("agent_id", filters.agent_id);
-  if (filters?.outcome)  params.set("outcome",  filters.outcome);
-  if (filters?.date)     params.set("date",      filters.date);
-  const qs = params.toString();
-  return fetchWithAuth(`/api/admin/field-visits${qs ? `?${qs}` : ""}`);
-},
- 
-getFieldVisitStats: () =>
-  fetchWithAuth("/api/admin/field-visits/stats"),
 
 // ─── Token store ─────────────────────────────────────────────────────────────
 export const tokenStore = {
@@ -232,11 +203,7 @@ export const api = {
 
   // ── Auth ──────────────────────────────────────────────────────────────────
   login: async (username: string, password: string) => {
-    // FIX #3: clear any stale token BEFORE sending the login request
-    // previously, a leftover invalid token was being sent in the Authorization
-    // header of the login POST itself, causing the server to reject re-login
     await tokenStore.clear();
-
     const res = await apiRequest("POST", "/api/auth/login", { username, password });
     if (res?.agent) await agentCache.set(res.agent);
     if (res?.token && Platform.OS !== "web") await tokenStore.set(res.token);
@@ -247,10 +214,6 @@ export const api = {
     try { await apiRequest("POST", "/api/auth/logout"); } catch {}
   },
 
-  // FIX #2: removed the catch block that was masking errors by returning the
-  // cached agent on ANY non-401 error — this caused AuthContext to re-save
-  // stale cache data and obscured real error states. AuthContext already
-  // handles network errors correctly, so no catch needed here.
   me: async () => {
     const res = await apiRequest("GET", "/api/auth/me");
     if (res?.agent) {
@@ -276,7 +239,7 @@ export const api = {
     apiRequest("GET", `/api/bkt-cases${category ? `?category=${category}` : ""}`),
 
   getStats: () => apiRequest("GET", "/api/stats"),
-   getAgentNotifications: () => apiRequest("GET", "/api/agent/notifications"),
+  getAgentNotifications: () => apiRequest("GET", "/api/agent/notifications"),
 
   updateFeedback: (id: number, data: any) =>
     apiRequest("PUT", `/api/cases/${id}/feedback`, data),
@@ -287,10 +250,11 @@ export const api = {
   getTodayPtp: () => apiRequest("GET", "/api/today-ptp"),
 
   addExtraNumber: (id: number, number: string, table: string) =>
-  apiRequest("POST", `/api/cases/${id}/extra-numbers`, { number, table }),
+    apiRequest("POST", `/api/cases/${id}/extra-numbers`, { number, table }),
 
   removeExtraNumber: (id: number, number: string, table: string) =>
-  apiRequest("DELETE", `/api/cases/${id}/extra-numbers`, { number, table }),
+    apiRequest("DELETE", `/api/cases/${id}/extra-numbers`, { number, table }),
+
   // ── Attendance ────────────────────────────────────────────────────────────
   checkIn:  () => apiRequest("POST", "/api/attendance/checkin"),
   checkOut: () => apiRequest("POST", "/api/attendance/checkout"),
@@ -349,21 +313,21 @@ export const api = {
   // ── Push token ────────────────────────────────────────────────────────────
   savePushToken: (token: string) =>
     apiRequest("POST", "/api/push-token", { token }),
-  
-    // ── Receipt requests ──────────────────────────────────────────────────────
+
+  // ── Receipt requests ──────────────────────────────────────────────────────
   getReceiptPermission: () => apiRequest("GET", "/api/receipt-permission"),
 
   requestReceipt: (caseId: number, data: {
-  loan_no?: string;
-  customer_name?: string;
-  table_type?: string;
-  notes?: string;
-  emi_amount?: number;   // ← add these
-  cbc?: number;
-  lpp?: number;
-}) => apiRequest("POST", `/api/cases/${caseId}/request-receipt`, data),
-  getMyReceiptRequests: () => apiRequest("GET", "/api/receipt-requests"),
+    loan_no?: string;
+    customer_name?: string;
+    table_type?: string;
+    notes?: string;
+    emi_amount?: number;
+    cbc?: number;
+    lpp?: number;
+  }) => apiRequest("POST", `/api/cases/${caseId}/request-receipt`, data),
 
+  getMyReceiptRequests: () => apiRequest("GET", "/api/receipt-requests"),
 
   // ── Call recordings ───────────────────────────────────────────────────────
   getCallRecordings: () => apiRequest("GET", "/api/call-recordings"),
@@ -375,6 +339,14 @@ export const api = {
     caseId: string | number;
     loanNo: string;
   }) => apiRequest("POST", "/api/make-call", data),
+
+  // ── Field Visits ──────────────────────────────────────────────────────────
+  fieldVisits: {
+    create: (payload: CreateFieldVisitPayload) =>
+      apiRequest("POST", "/api/field-visits", payload),
+    list: (limit = 50) =>
+      apiRequest("GET", `/api/field-visits?limit=${limit}`),
+  },
 
   // ─── ADMIN ────────────────────────────────────────────────────────────────
   admin: {
@@ -403,15 +375,15 @@ export const api = {
       apiRequest("GET", `/api/admin/bkt-cases${category ? `?category=${category}` : ""}`),
 
     // ── Feedback ─────────────────────────────────────────────────────────────
-   resetFeedbackForCase: (caseId: number, table: string) =>
-  apiRequest("POST", `/api/admin/reset-feedback/case/${caseId}`, { table }),
+    resetFeedbackForCase: (caseId: number, table: string) =>
+      apiRequest("POST", `/api/admin/reset-feedback/case/${caseId}`, { table }),
 
     resetMonthlyFeedbackForAgent: (agentId: number) =>
-    apiRequest("POST", `/api/admin/reset-monthly-feedback/agent/${agentId}`),
+      apiRequest("POST", `/api/admin/reset-monthly-feedback/agent/${agentId}`),
 
-  resetMonthlyFeedbackForCase: (caseId: number, table: string) =>
-  apiRequest("POST", `/api/admin/reset-monthly-feedback/case/${caseId}`, { table }),
-    
+    resetMonthlyFeedbackForCase: (caseId: number, table: string) =>
+      apiRequest("POST", `/api/admin/reset-monthly-feedback/case/${caseId}`, { table }),
+
     removeExtraNumber: (id: number, number: string, table: string) =>
       apiRequest("DELETE", `/api/admin/cases/${id}/extra-numbers`, { number, table }),
 
@@ -466,15 +438,27 @@ export const api = {
     // ── Call recordings ───────────────────────────────────────────────────────
     getCallRecordings: () => apiRequest("GET", "/api/admin/call-recordings"),
 
-    // ─── ADD THESE TO api.ts ───────────────────────────────────────────────────────
-
-getReceiptRequests: () => apiRequest("GET", "/api/admin/receipt-requests"),
+    // ── Receipt requests ──────────────────────────────────────────────────────
+    getReceiptRequests: () => apiRequest("GET", "/api/admin/receipt-requests"),
 
     resolveReceiptRequest: (id: number, status: "approved" | "rejected", notes?: string) =>
       apiRequest("PUT", `/api/admin/receipt-requests/${id}/resolve`, { status, notes }),
 
     setReceiptPermission: (agentId: number, enabled: boolean) =>
       apiRequest("PUT", `/api/admin/agents/${agentId}/receipt-permission`, { enabled }),
+
+    // ── Field Visits ──────────────────────────────────────────────────────────
+    getFieldVisits: (filters?: { agent_id?: string; outcome?: string; date?: string }) => {
+      const params = new URLSearchParams();
+      if (filters?.agent_id) params.set("agent_id", filters.agent_id);
+      if (filters?.outcome)  params.set("outcome",  filters.outcome);
+      if (filters?.date)     params.set("date",      filters.date);
+      const qs = params.toString();
+      return apiRequest("GET", `/api/admin/field-visits${qs ? `?${qs}` : ""}`);
+    },
+
+    getFieldVisitStats: () =>
+      apiRequest("GET", "/api/admin/field-visits/stats"),
 
     // ── Exports ──────────────────────────────────────────────────────────────
     exportPtp: async () => {
