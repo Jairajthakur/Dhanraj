@@ -275,12 +275,23 @@ export default function Dashboard() {
     },
   });
 
+  const { data: priorityData, refetch: refetchPriority } = useQuery({
+    queryKey: ["/api/today-priority"],
+    queryFn: async () => {
+      const url = new URL("/api/today-priority", getApiUrl());
+      const res = await fetch(url.toString(), { credentials: "include" });
+      if (!res.ok) throw new Error("Failed");
+      return res.json();
+    },
+  });
+
   const refetch = useCallback(() => {
     refetchStats();
     refetchPtp();
     refetchDrr();
     refetchTw();
-  }, [refetchStats, refetchPtp, refetchDrr, refetchTw]);
+    refetchPriority();
+  }, [refetchStats, refetchPtp, refetchDrr, refetchTw, refetchPriority]);
 
   if (isLoading) {
     return (
@@ -327,6 +338,36 @@ export default function Dashboard() {
 
       {/* DRR Widget */}
       {drrRows.length > 0 && <DRRWidget rows={drrRows} />}
+
+      {/* Today's Priority */}
+      {priorityData?.cases?.length > 0 && (
+        <View style={styles.twCard}>
+          <View style={styles.twHeader}>
+            <View style={[styles.twIconWrap, { backgroundColor: Colors.warning + "20" }]}>
+              <Ionicons name="flag" size={18} color={Colors.warning} />
+            </View>
+            <Text style={styles.twTitle}>Today's Priority</Text>
+            <View style={{ marginLeft: "auto", backgroundColor: Colors.warning + "20", borderRadius: 10, paddingHorizontal: 8, paddingVertical: 3 }}>
+              <Text style={{ fontSize: 11, fontWeight: "700", color: Colors.warning }}>{priorityData.cases.length} cases</Text>
+            </View>
+          </View>
+          {priorityData.cases.slice(0, 4).map((c: any) => (
+            <View key={c.id} style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: Colors.border }}>
+              <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: c.priority_type === "ptp" ? Colors.info : Colors.warning }} />
+              <View style={{ flex: 1 }}>
+                <Text style={{ fontSize: 13, fontWeight: "700", color: Colors.text }} numberOfLines={1}>{c.customer_name}</Text>
+                <Text style={{ fontSize: 10, color: Colors.textMuted }}>{c.loan_no}{c.bkt ? ` · BKT ${c.bkt}` : ""}</Text>
+              </View>
+              <View style={{ alignItems: "flex-end" }}>
+                <Text style={{ fontSize: 11, fontWeight: "700", color: c.priority_type === "ptp" ? Colors.info : Colors.warning }}>
+                  {c.priority_type === "ptp" ? "PTP Today" : "High POS"}
+                </Text>
+                <Text style={{ fontSize: 10, color: Colors.textSecondary }}>₹{Number(c.pos || 0).toLocaleString("en-IN", { maximumFractionDigits: 0 })}</Text>
+              </View>
+            </View>
+          ))}
+        </View>
+      )}
 
       {/* TW Collection Summary */}
       {hasTwData && (
