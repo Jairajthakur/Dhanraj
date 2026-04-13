@@ -544,25 +544,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
   console.log("[DB] extra_numbers columns ready ✅");
 } catch (e: any) { console.error("[DB] extra_numbers migration:", e.message); }
 
-try {
-  await storage.query(`CREATE TABLE IF NOT EXISTS visit_logs (
-    id SERIAL PRIMARY KEY,
-    agent_id INTEGER REFERENCES fos_agents(id),
-    loan_no TEXT,
-    customer_name TEXT,
-    bkt TEXT,
-    outcome TEXT,
-    note TEXT,
-    contact_type TEXT DEFAULT 'visit',
-    amount NUMERIC(12,2) DEFAULT 0,
-    utr_no TEXT,
-    lat NUMERIC(10,6),
-    lng NUMERIC(10,6),
-    logged_at TIMESTAMP DEFAULT NOW()
-  )`);
-  console.log("[DB] visit_logs table ready ✅");
-} catch (e: any) { console.error("[DB] visit_logs error:", e.message); }
-
 app.use("/api/fos-depositions", (req, res, next) => {
   if (req.headers["content-type"]?.includes("multipart/form-data")) {
     return next();
@@ -699,145 +680,6 @@ app.use("/api/fos-depositions", (req, res, next) => {
     try { res.json(await storage.getAgentStats(req.session.agentId!)); }
     catch (e: any) { res.status(500).json({ message: e.message }); }
   });
-  // ─────────────────────────────────────────────────────────────────────────────
-// PASTE THIS BLOCK right after the existing  app.get("/api/stats", ...)  route
-// in server/routes.ts  (around line 701)
-// ─────────────────────────────────────────────────────────────────────────────
-
-  app.get("/api/agent/notifications", requireAuth, async (req, res) => {
-    try {
-      const agentId = req.session.agentId!;
-      const notifications: any[] = [];
-
-      // ── 1. PTP cases due today ──────────────────────────────────────────────
-      const ptpResult = await storage.query(
-        `SELECT customer_name, loan_no, pos::numeric AS pos, ptp_date
-         FROM loan_cases
-         WHERE agent_id = $1
-           AND status = 'PTP'
-           AND (ptp_date = CURRENT_DATE OR telecaller_ptp_date = CURRENT_DATE)
-         UNION ALL
-         SELECT customer_name, loan_no, pos::numeric AS pos, ptp_date
-         FROM bkt_cases
-         WHERE agent_id = $1
-           AND status = 'PTP'
-           AND (ptp_date = CURRENT_DATE OR telecaller_ptp_date = CURRENT_DATE)`,
-        [agentId]
-      );
-      for (const row of ptpResult.rows) {
-        const amt = row.pos ? `₹${Number(row.pos).toLocaleString("en-IN")}` : "";
-        notifications.push({
-          id: `ptp-${row.loan_no}`,
-          type: "ptp_today",
-          title: `PTP Reminder — ${row.customer_name}`,
-          body: `${row.customer_name} has PTP due today. Collect ${amt}.`,
-          timeRaw: new Date().setHours(8, 0, 0, 0), // treat as 8 AM today
-          read: false,
-          meta: { loanNo: row.loan_no, screen: "/(app)/allocation" },
-        });
-      }
-
-      // ── 2. Cases auto-marked Paid via online collection (last 24 h) ─────────
-      const autoResult = await storage.query(
-        `SELECT oc.customer_name, oc.loan_no, oc.amount::numeric AS amount, oc.created_at
-         FROM online_collections oc
-         WHERE oc.agent_id = $1
-           AND oc.created_at >= NOW() - INTERVAL '24 hours'
-         ORDER BY oc.created_at DESC
-         LIMIT 10`,
-        [agentId]
-      );
-      for (const row of autoResult.rows) {
-        const amt = row.amount ? `₹${Number(row.amount).toLocaleString("en-IN")}` : "";
-        notifications.push({
-          id: `auto-paid-${row.loan_no}-${new Date(row.created_at).getTime()}`,
-          type: "auto_paid",
-          title: `Case auto-marked Paid — ${row.customer_name}`,
-          body: `${row.customer_name} (${row.loan_no}) marked Paid after your online deposit of ${amt}.`,
-          timeRaw: new Date(row.created_at).getTime(),
-          read: false,
-          meta: { loanNo: row.loan_no },
-        });
-      }
-
-      // ── 3. Pending depositions ──────────────────────────────────────────────
-      const depResult = await storage.query(
-        `SELECT COUNT(*)::int AS cnt, SUM(amount)::numeric AS total
-         FROM fos_depositions
-         WHERE agent_id = $1
-           AND payment_method = 'pending'`,
-        [agentId]
-      );
-      const depRow = depResult.rows[0];
-      if (depRow && depRow.cnt > 0) {
-        const totalAmt = depRow.total
-          ? `₹${Number(depRow.total).toLocaleString("en-IN")}`
-          : "";
-        notifications.push({
-          id: "pending-dep",
-          type: "pending_deposition",
-          title: "Pending deposition",
-          body: `You have ${depRow.cnt} deposition${depRow.cnt > 1 ? "s" : ""} (${totalAmt}) not submitted. Please submit before 6 PM.`,
-          timeRaw: new Date().setHours(12, 0, 0, 0),
-          read: false,
-          meta: { screen: "/(app)/deposition" },
-        });
-      }
-
-      // ── 4. Latest admin broadcast (last 7 days) ─────────────────────────────
-      // broadcasts table is optional — only query if it exists
-      try {
-        const bcResult = await storage.query(
-          `SELECT title, message, sent_at
-           FROM broadcasts
-           WHERE sent_at >= NOW() - INTERVAL '7 days'
-           ORDER BY sent_at DESC
-           LIMIT 3`
-        );
-        for (const row of bcResult.rows) {
-          notifications.push({
-            id: `bc-${new Date(row.sent_at).getTime()}`,
-            type: "broadcast",
-            title: row.title || "Admin",
-            body: row.message,
-            timeRaw: new Date(row.sent_at).getTime(),
-            read: true, // broadcasts treated as read
-            meta: {},
-          });
-        }
-      } catch {
-        // broadcasts table may not exist yet — safe to skip
-      }
-
-      // ── Sort newest first ───────────────────────────────────────────────────
-      notifications.sort((a, b) => Number(b.timeRaw) - Number(a.timeRaw));
-
-      // Convert epoch ms back to ISO strings for the client
-      const out = notifications.map((n) => ({
-        ...n,
-        timeRaw: new Date(n.timeRaw).toISOString(),
-        time: formatNotifTime(new Date(n.timeRaw)),
-      }));
-
-      res.json({ notifications: out });
-    } catch (e: any) {
-      console.error("[notifications]", e.message);
-      res.status(500).json({ message: e.message });
-    }
-  });
-
-// Helper — same logic as fmtTime in the client
-function formatNotifTime(d: Date): string {
-  const now = new Date();
-  const diffMs = now.getTime() - d.getTime();
-  const diffMin = Math.floor(diffMs / 60000);
-  if (diffMin < 1)  return "Just now";
-  if (diffMin < 60) return `${diffMin}m ago`;
-  const diffH = Math.floor(diffMin / 60);
-  if (diffH < 24)
-    return `Today ${d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}`;
-  return `Yesterday ${d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}`;
-}
 
 app.get("/api/today-ptp", requireAuth, async (req, res) => {
   try {
@@ -1704,196 +1546,27 @@ res.json({ imported, updated: 0, skipped, agentsCreated, agentsRemoved, total: r
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
-  // ─────────────────────────────────────────────────────────────────────────────
-  // VISIT LOG — agent logs a visit/call outcome
-  // ─────────────────────────────────────────────────────────────────────────────
-  app.post("/api/visit-log", requireAuth, async (req, res) => {
-    try {
-      const agentId = req.session.agentId!;
-      const { loan_no, customer_name, bkt, outcome, note, contact_type, amount, utr_no, lat, lng } = req.body;
-      const result = await storage.query(
-        `INSERT INTO visit_logs (agent_id, loan_no, customer_name, bkt, outcome, note, contact_type, amount, utr_no, lat, lng)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
-        [agentId, loan_no || null, customer_name || null, bkt || null, outcome || null,
-         note || null, contact_type || "visit", parseFloat(amount) || 0, utr_no || null,
-         lat || null, lng || null]
-      );
-      res.json({ log: result.rows[0] });
-    } catch (e: any) { res.status(500).json({ message: e.message }); }
-  });
-
-  app.get("/api/visit-log/today", requireAuth, async (req, res) => {
-    try {
-      const agentId = req.session.agentId!;
-      const result = await storage.query(
-        `SELECT * FROM visit_logs WHERE agent_id=$1 AND DATE(logged_at)=CURRENT_DATE ORDER BY logged_at DESC`,
-        [agentId]
-      );
-      res.json({ logs: result.rows });
-    } catch (e: any) { res.status(500).json({ message: e.message }); }
-  });
-
-  // ─────────────────────────────────────────────────────────────────────────────
-  // ONLINE COLLECTION — agent records online payment, auto-marks case Paid + creates deposition
-  // ─────────────────────────────────────────────────────────────────────────────
-  app.post("/api/online-collection", requireAuth, async (req, res) => {
-    try {
-      const agentId = req.session.agentId!;
-      const { loan_no, customer_name, amount, payment_type, utr_no } = req.body;
-      if (!loan_no || !amount) return res.status(400).json({ message: "loan_no and amount required" });
-
-      const totalAmt = parseFloat(amount) || 0;
-
-      // Look up bkt from loan_cases or bkt_cases
-      let bkt: string | null = null;
-      const lc = await storage.query(`SELECT bkt FROM loan_cases WHERE loan_no=$1 AND agent_id=$2`, [loan_no, agentId]);
-      if (lc.rows[0]?.bkt) bkt = String(lc.rows[0].bkt);
-      else {
-        const bc = await storage.query(`SELECT case_category FROM bkt_cases WHERE loan_no=$1 AND agent_id=$2`, [loan_no, agentId]);
-        if (bc.rows[0]?.case_category) bkt = bc.rows[0].case_category.replace("bkt","");
-      }
-
-      // Create deposition record
-      const dep = await storage.query(
-        `INSERT INTO fos_depositions (agent_id, loan_no, customer_name, bkt, amount, online_amount, cash_amount, payment_method, notes, deposition_date)
-         VALUES ($1,$2,$3,$4,$5,$5,0,$6,$7,CURRENT_DATE) RETURNING *`,
-        [agentId, loan_no, customer_name || null, bkt, totalAmt, payment_type || "online", utr_no ? `UTR: ${utr_no}` : null]
-      );
-
-      // Auto-mark case as Paid in loan_cases
-      await storage.query(`UPDATE loan_cases SET status='Paid', latest_feedback='Online payment received', feedback_date=NOW() WHERE loan_no=$1 AND agent_id=$2`, [loan_no, agentId]);
-      // Also update bkt_cases if exists
-      await storage.query(`UPDATE bkt_cases SET status='Paid', latest_feedback='Online payment received', feedback_date=NOW() WHERE loan_no=$1 AND agent_id=$2`, [loan_no, agentId]);
-
-      // Log the visit
-      await storage.query(
-        `INSERT INTO visit_logs (agent_id, loan_no, customer_name, bkt, outcome, note, contact_type, amount, utr_no)
-         VALUES ($1,$2,$3,$4,'Paid',$5,'online',$6,$7)`,
-        [agentId, loan_no, customer_name || null, bkt, `${payment_type || "UPI"} payment`, totalAmt, utr_no || null]
-      );
-
-      res.json({ success: true, deposition: dep.rows[0], bkt });
-    } catch (e: any) { res.status(500).json({ message: e.message }); }
-  });
-
-  // ─────────────────────────────────────────────────────────────────────────────
-  // TODAY'S PRIORITY — PTP due today + high POS unpaid cases
-  // ─────────────────────────────────────────────────────────────────────────────
-  app.get("/api/today-priority", requireAuth, async (req, res) => {
-    try {
-      const agentId = req.session.agentId!;
-      const result = await storage.query(
-        `SELECT id, customer_name, loan_no, mobile_no, pos, bkt, status, ptp_date, 'loan' AS source,
-                CASE WHEN ptp_date::date = CURRENT_DATE THEN 'ptp' ELSE 'high_pos' END AS priority_type
-         FROM loan_cases
-         WHERE agent_id=$1 AND status != 'Paid'
-           AND (ptp_date::date = CURRENT_DATE OR pos::numeric > 20000)
-         ORDER BY CASE WHEN ptp_date::date = CURRENT_DATE THEN 0 ELSE 1 END, pos::numeric DESC
-         LIMIT 10`,
-        [agentId]
-      );
-      res.json({ cases: result.rows });
-    } catch (e: any) { res.status(500).json({ message: e.message }); }
-  });
-
-  // ─────────────────────────────────────────────────────────────────────────────
-  // ADMIN — LIVE AGENT ACTIVITY TRACKER
-  // ─────────────────────────────────────────────────────────────────────────────
-  app.get("/api/admin/live-activity", requireAdmin, async (req, res) => {
-    try {
-      const result = await storage.query(
-        `SELECT fa.id, fa.name,
-           COUNT(CASE WHEN DATE(lc.feedback_date)=CURRENT_DATE THEN 1 END)::int AS cases_today,
-           MAX(lc.feedback_date) AS last_feedback_at,
-           COUNT(CASE WHEN DATE(vl.logged_at)=CURRENT_DATE THEN 1 END)::int AS visits_today
-         FROM fos_agents fa
-         LEFT JOIN loan_cases lc ON lc.agent_id=fa.id
-         LEFT JOIN visit_logs vl ON vl.agent_id=fa.id
-         WHERE fa.role='fos'
-         GROUP BY fa.id, fa.name
-         ORDER BY last_feedback_at DESC NULLS LAST`
-      );
-      res.json({ agents: result.rows });
-    } catch (e: any) { res.status(500).json({ message: e.message }); }
-  });
-
-  // ─────────────────────────────────────────────────────────────────────────────
-  // ADMIN — ZERO FEEDBACK CASES (no feedback for 3+ days)
-  // ─────────────────────────────────────────────────────────────────────────────
-  app.get("/api/admin/zero-feedback", requireAdmin, async (req, res) => {
-    try {
-      const result = await storage.query(
-        `SELECT lc.id, lc.customer_name, lc.loan_no, lc.bkt, lc.status, lc.pos,
-                fa.name AS agent_name,
-                EXTRACT(DAY FROM NOW() - COALESCE(lc.feedback_date, lc.created_at))::int AS days_no_feedback
-         FROM loan_cases lc
-         LEFT JOIN fos_agents fa ON fa.id=lc.agent_id
-         WHERE lc.status != 'Paid'
-           AND COALESCE(lc.feedback_date, lc.created_at) < NOW() - INTERVAL '3 days'
-         ORDER BY days_no_feedback DESC
-         LIMIT 20`
-      );
-      res.json({ cases: result.rows });
-    } catch (e: any) { res.status(500).json({ message: e.message }); }
-  });
-
-  // ─────────────────────────────────────────────────────────────────────────────
-  // ADMIN — DAILY REPORT per agent
-  // ─────────────────────────────────────────────────────────────────────────────
-  app.get("/api/admin/daily-report", requireAdmin, async (req, res) => {
-    try {
-      const result = await storage.query(
-        `SELECT fa.id, fa.name AS agent_name,
-           COUNT(CASE WHEN DATE(lc.feedback_date)=CURRENT_DATE THEN 1 END)::int AS visited_today,
-           COUNT(CASE WHEN DATE(lc.feedback_date)=CURRENT_DATE AND lc.status='Paid' THEN 1 END)::int AS paid_today,
-           COALESCE(SUM(CASE WHEN DATE(fd.deposition_date)=CURRENT_DATE THEN fd.amount ELSE 0 END),0) AS collected_today,
-           COUNT(CASE WHEN DATE(vl.logged_at)=CURRENT_DATE AND vl.contact_type='call' THEN 1 END)::int AS calls_today
-         FROM fos_agents fa
-         LEFT JOIN loan_cases lc ON lc.agent_id=fa.id
-         LEFT JOIN fos_depositions fd ON fd.agent_id=fa.id
-         LEFT JOIN visit_logs vl ON vl.agent_id=fa.id
-         WHERE fa.role='fos'
-         GROUP BY fa.id, fa.name
-         ORDER BY collected_today DESC, paid_today DESC`
-      );
-      res.json({ report: result.rows });
-    } catch (e: any) { res.status(500).json({ message: e.message }); }
-  });
-
-  // ─────────────────────────────────────────────────────────────────────────────
-  // ADMIN — BROADCAST PUSH NOTIFICATION to all agents
-  // ─────────────────────────────────────────────────────────────────────────────
-  app.post("/api/admin/broadcast", requireAdmin, async (req, res) => {
-    try {
-      const { title, message } = req.body;
-      if (!message) return res.status(400).json({ message: "message required" });
-      const agents = await storage.query(`SELECT push_token FROM fos_agents WHERE push_token IS NOT NULL AND push_token != '' AND role='fos'`);
-      let sent = 0;
-      for (const agent of agents.rows) {
-        try {
-          await sendPush(agent.push_token, title || "Admin Message", message, { type: "broadcast" });
-          sent++;
-        } catch {}
-      }
-      res.json({ success: true, sent });
-    } catch (e: any) { res.status(500).json({ message: e.message }); }
-  });
-
   app.get("/api/bkt-tw-collection-summary", requireAuth, async (req, res) => {
     try {
       const agentId = req.session.agentId!;
       const result = await storage.query(
         `SELECT
-           'bkt' || bkt AS case_category,
-           COUNT(*)::int AS count_paid,
-           COALESCE(SUM(amount::numeric), 0) AS amount_collected
-         FROM fos_depositions
-         WHERE agent_id = $1
-           AND bkt IN ('1', '2', '3')
-           AND payment_method != 'pending'
-           AND DATE_TRUNC('month', deposition_date) = DATE_TRUNC('month', CURRENT_DATE)
-         GROUP BY bkt
-         ORDER BY bkt`,
+           bkt_key AS case_category,
+           COUNT(*) FILTER (WHERE status = 'Paid')::int AS count_paid,
+           COUNT(*)::int AS count_total,
+           COALESCE(SUM(pos::numeric) FILTER (WHERE status = 'Paid'), 0) AS amount_collected,
+           COALESCE(SUM(pos::numeric), 0) AS amount_total
+         FROM (
+           SELECT 'bkt' || bkt::text AS bkt_key, pos, status
+           FROM loan_cases
+           WHERE agent_id = $1 AND bkt IN (1, 2, 3) AND pos IS NOT NULL
+           UNION ALL
+           SELECT case_category AS bkt_key, pos, status
+           FROM bkt_cases
+           WHERE agent_id = $1 AND case_category IN ('bkt1','bkt2','bkt3') AND pos IS NOT NULL
+         ) combined
+         GROUP BY bkt_key
+         ORDER BY bkt_key`,
         [agentId]
       );
       res.json({ summary: result.rows });
@@ -2089,35 +1762,6 @@ app.post("/api/admin/reset-monthly-feedback/case/:caseId", requireAdmin, async (
     } catch (e: any) { console.error("[fos-dep-reminder]", e.message); }
   }
   runFosDepositionReminderJob(); setInterval(runFosDepositionReminderJob, 60 * 60 * 1000);
-
-  // ── 6 PM pending deposition alert ─────────────────────────────────────────
-  const pendingDepAlert6pmSent = new Set<string>();
-  async function run6pmPendingDepAlert() {
-    try {
-      const { hour, todayKey } = getISTHour();
-      if (hour !== 18) return;
-      const slotKey = `${todayKey}-6pm-dep`;
-      if (pendingDepAlert6pmSent.has(slotKey)) return;
-      const result = await storage.query(
-        `SELECT fa.id, fa.push_token, fa.name, COUNT(fd.id)::int AS cnt
-         FROM fos_agents fa
-         JOIN fos_depositions fd ON fd.agent_id=fa.id AND fd.payment_method='pending'
-         WHERE fa.push_token IS NOT NULL AND fa.push_token<>'' AND fa.role='fos'
-         GROUP BY fa.id, fa.push_token, fa.name HAVING COUNT(fd.id)>0`
-      );
-      for (const row of result.rows) {
-        await sendPush(row.push_token, "⚠️ Pending Depositions",
-          `You have ${row.cnt} pending deposition${row.cnt > 1 ? "s" : ""} not submitted. Please submit before end of day.`,
-          { screen: "deposition", type: "pending_dep_6pm" });
-      }
-      pendingDepAlert6pmSent.add(slotKey);
-      if (pendingDepAlert6pmSent.size > 7) pendingDepAlert6pmSent.delete(pendingDepAlert6pmSent.values().next().value);
-    } catch (e: any) { console.error("[6pm-dep-alert]", e.message); }
-  }
-  run6pmPendingDepAlert(); setInterval(run6pmPendingDepAlert, 10 * 60 * 1000);
-
-  // ── Auto-notify admin when agent submits online collection ─────────────────
-  // (handled inline in /api/online-collection endpoint above)
 
   const batchReminderSentDates = new Set<string>();
   async function runBatchReminderJob() {
@@ -3051,142 +2695,7 @@ app.get("/api/receipt-requests", requireAuth, async (req, res) => {
     res.json({ requests: result.rows });
   } catch (e: any) { res.status(500).json({ message: e.message }); }
 });
-
-
-  // ── DB migration for field_visits ─────────────────────────────────────────────
-try {
-  await storage.query(`CREATE TABLE IF NOT EXISTS field_visits (
-    id            SERIAL PRIMARY KEY,
-    agent_id      INTEGER REFERENCES fos_agents(id),
-    case_id       TEXT,
-    customer_name TEXT        NOT NULL,
-    latitude      NUMERIC(10,7) NOT NULL,
-    longitude     NUMERIC(10,7) NOT NULL,
-    address       TEXT,
-    outcome       TEXT        NOT NULL
-                  CHECK (outcome IN ('Contacted','Not Home','Partial Payment','Paid','Refused')),
-    notes         TEXT        DEFAULT '',
-    visited_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
-  )`);
-  await storage.query(`CREATE INDEX IF NOT EXISTS idx_field_visits_agent   ON field_visits(agent_id)`);
-  await storage.query(`CREATE INDEX IF NOT EXISTS idx_field_visits_visited ON field_visits(visited_at DESC)`);
-  console.log("[DB] field_visits table ready ✅");
-} catch (e: any) { console.error("[DB] field_visits error:", e.message); }
-
-// ── POST /api/field-visits — agent logs a visit ───────────────────────────────
-app.post("/api/field-visits", requireAuth, async (req, res) => {
-  try {
-    const agentId = req.session.agentId!;
-    const { case_id, customer_name, latitude, longitude, address, outcome, notes } = req.body;
-    if (!customer_name || latitude == null || longitude == null || !outcome) {
-      return res.status(400).json({ message: "customer_name, latitude, longitude, outcome are required" });
-    }
-    const { rows } = await storage.query(
-      `INSERT INTO field_visits (agent_id, case_id, customer_name, latitude, longitude, address, outcome, notes)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
-      [agentId, case_id || null, customer_name, latitude, longitude, address || null, outcome, notes || ""]
-    );
-    res.status(201).json({ visit: rows[0] });
-  } catch (e: any) { res.status(500).json({ message: e.message }); }
-});
-
-// ── GET /api/field-visits — agent's own visit history ────────────────────────
-app.get("/api/field-visits", requireAuth, async (req, res) => {
-  try {
-    const { rows } = await storage.query(
-      `SELECT fv.*, fa.name AS agent_name FROM field_visits fv
-       LEFT JOIN fos_agents fa ON fa.id = fv.agent_id
-       WHERE fv.agent_id = $1 ORDER BY fv.visited_at DESC LIMIT 100`,
-      [req.session.agentId!]
-    );
-    res.json({ visits: rows });
-  } catch (e: any) { res.status(500).json({ message: e.message }); }
-});
-
-// ── GET /api/admin/field-visits — all visits (admin) ─────────────────────────
-app.get("/api/admin/field-visits", requireAdmin, async (req, res) => {
-  try {
-    const { agent_id, outcome, date } = req.query;
-    const conditions: string[] = [];
-    const params: any[] = [];
-    let idx = 1;
-    if (agent_id) { conditions.push(`fv.agent_id = $${idx++}`); params.push(agent_id); }
-    if (outcome)  { conditions.push(`fv.outcome = $${idx++}`);   params.push(outcome);  }
-    if (date)     { conditions.push(`fv.visited_at::date = $${idx++}`); params.push(date); }
-    const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
-    const { rows } = await storage.query(
-      `SELECT fv.*, fa.name AS agent_name FROM field_visits fv
-       LEFT JOIN fos_agents fa ON fa.id = fv.agent_id
-       ${where} ORDER BY fv.visited_at DESC LIMIT 200`,
-      params
-    );
-    res.json({ visits: rows });
-  } catch (e: any) { res.status(500).json({ message: e.message }); }
-});
-
-// ── GET /api/admin/field-visits/stats ────────────────────────────────────────
-app.get("/api/admin/field-visits/stats", requireAdmin, async (req, res) => {
-  try {
-    const { rows } = await storage.query(`
-      SELECT
-        COUNT(*)::int                                                    AS total_visits,
-        COUNT(*) FILTER (WHERE visited_at::date = CURRENT_DATE)::int    AS today_visits,
-        COUNT(DISTINCT agent_id)::int                                   AS active_agents,
-        COUNT(*) FILTER (WHERE outcome = 'Paid')::int                   AS paid_count,
-        COUNT(*) FILTER (WHERE outcome = 'Partial Payment')::int        AS partial_count,
-        COUNT(*) FILTER (WHERE outcome = 'Not Home')::int               AS not_home_count,
-        COUNT(*) FILTER (WHERE outcome = 'Refused')::int                AS refused_count
-      FROM field_visits
-      WHERE visited_at >= NOW() - INTERVAL '30 days'
-    `);
-    res.json({ stats: rows[0] });
-  } catch (e: any) { res.status(500).json({ message: e.message }); }
-});
-
-// ── Live Location ─────────────────────────────────────────────────────────────
-// DB migration — create table if not exists
-try {
-  await storage.query(`CREATE TABLE IF NOT EXISTS agent_locations (
-    id          SERIAL PRIMARY KEY,
-    agent_id    INTEGER NOT NULL REFERENCES fos_agents(id) ON DELETE CASCADE,
-    latitude    DECIMAL(10,8) NOT NULL,
-    longitude   DECIMAL(11,8) NOT NULL,
-    accuracy    DECIMAL(10,2),
-    updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    UNIQUE(agent_id)
-  )`);
-  console.log("[DB] agent_locations table ready ✅");
-} catch (e: any) { console.error("[DB] agent_locations error:", e.message); }
-
-// POST /api/location — agent pushes their current location (called every 60s)
-app.post("/api/location", requireAuth, async (req: any, res) => {
-  try {
-    const { latitude, longitude, accuracy } = req.body;
-    if (!latitude || !longitude) return res.status(400).json({ message: "latitude and longitude required" });
-    await storage.query(
-      `INSERT INTO agent_locations (agent_id, latitude, longitude, accuracy, updated_at)
-       VALUES ($1, $2, $3, $4, NOW())
-       ON CONFLICT (agent_id) DO UPDATE
-         SET latitude=$2, longitude=$3, accuracy=$4, updated_at=NOW()`,
-      [req.agent.id, latitude, longitude, accuracy ?? null]
-    );
-    res.json({ ok: true });
-  } catch (e: any) { res.status(500).json({ message: e.message }); }
-});
-
-// GET /api/admin/live-locations — admin gets all agents' latest location
-app.get("/api/admin/live-locations", requireAdmin, async (_req, res) => {
-  try {
-    const result = await storage.query(
-      `SELECT al.agent_id, fa.name AS agent_name, al.latitude, al.longitude, al.accuracy, al.updated_at
-       FROM agent_locations al
-       JOIN fos_agents fa ON al.agent_id = fa.id
-       ORDER BY fa.name`
-    );
-    res.json({ locations: result.rows });
-  } catch (e: any) { res.status(500).json({ message: e.message }); }
-});
-
+  
 const httpServer = createServer(app);
 return httpServer;
 }
