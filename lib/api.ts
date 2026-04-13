@@ -5,37 +5,6 @@ import { getApiUrl } from "./query-client";
 const SESSION_KEY = "session_agent";
 const TOKEN_KEY = "auth_token";
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// SECTION 1 — Field visits  (paste inside the main `api = { ... }` object)
-// ═══════════════════════════════════════════════════════════════════════════════
- 
-  // ── Field visits ────────────────────────────────────────────────────────────
-  getFieldVisits: (caseId: number) =>
-    apiRequest("GET", `/api/cases/${caseId}/visits`),
- 
-  recordFieldVisit: (caseId: number, data: {
-    lat: number;
-    lng: number;
-    accuracy?: number;
-    case_type?: string;
-  }) => apiRequest("POST", `/api/cases/${caseId}/visit`, data),
- 
- 
-// ═══════════════════════════════════════════════════════════════════════════════
-// SECTION 2 — Case reassign  (paste inside `api.admin = { ... }`)
-// ═══════════════════════════════════════════════════════════════════════════════
- 
-    // ── Case reassign ──────────────────────────────────────────────────────────
-    reassignCase: (caseId: number, data: {
-      to_agent_id: number;
-      case_type?:  string;
-      reason?:     string;
-    }) => apiRequest("PATCH", `/api/admin/cases/${caseId}/reassign`, data),
- 
-    getReassignLog: (caseId: number) =>
-      apiRequest("GET", `/api/admin/cases/${caseId}/reassign-log`),
- 
-
 // ─── Agent cache ─────────────────────────────────────────────────────────────
 export const agentCache = {
   get: async (): Promise<any | null> => {
@@ -223,11 +192,7 @@ export const api = {
 
   // ── Auth ──────────────────────────────────────────────────────────────────
   login: async (username: string, password: string) => {
-    // FIX #3: clear any stale token BEFORE sending the login request
-    // previously, a leftover invalid token was being sent in the Authorization
-    // header of the login POST itself, causing the server to reject re-login
     await tokenStore.clear();
-
     const res = await apiRequest("POST", "/api/auth/login", { username, password });
     if (res?.agent) await agentCache.set(res.agent);
     if (res?.token && Platform.OS !== "web") await tokenStore.set(res.token);
@@ -238,10 +203,6 @@ export const api = {
     try { await apiRequest("POST", "/api/auth/logout"); } catch {}
   },
 
-  // FIX #2: removed the catch block that was masking errors by returning the
-  // cached agent on ANY non-401 error — this caused AuthContext to re-save
-  // stale cache data and obscured real error states. AuthContext already
-  // handles network errors correctly, so no catch needed here.
   me: async () => {
     const res = await apiRequest("GET", "/api/auth/me");
     if (res?.agent) {
@@ -277,10 +238,22 @@ export const api = {
   getTodayPtp: () => apiRequest("GET", "/api/today-ptp"),
 
   addExtraNumber: (id: number, number: string, table: string) =>
-  apiRequest("POST", `/api/cases/${id}/extra-numbers`, { number, table }),
+    apiRequest("POST", `/api/cases/${id}/extra-numbers`, { number, table }),
 
   removeExtraNumber: (id: number, number: string, table: string) =>
-  apiRequest("DELETE", `/api/cases/${id}/extra-numbers`, { number, table }),
+    apiRequest("DELETE", `/api/cases/${id}/extra-numbers`, { number, table }),
+
+  // ── Field visits ──────────────────────────────────────────────────────────
+  getFieldVisits: (caseId: number) =>
+    apiRequest("GET", `/api/cases/${caseId}/visits`),
+
+  recordFieldVisit: (caseId: number, data: {
+    lat: number,
+    lng: number,
+    accuracy?: number,
+    case_type?: string,
+  }) => apiRequest("POST", `/api/cases/${caseId}/visit`, data),
+
   // ── Attendance ────────────────────────────────────────────────────────────
   checkIn:  () => apiRequest("POST", "/api/attendance/checkin"),
   checkOut: () => apiRequest("POST", "/api/attendance/checkout"),
@@ -339,31 +312,31 @@ export const api = {
   // ── Push token ────────────────────────────────────────────────────────────
   savePushToken: (token: string) =>
     apiRequest("POST", "/api/push-token", { token }),
-  
-    // ── Receipt requests ──────────────────────────────────────────────────────
+
+  // ── Receipt requests ──────────────────────────────────────────────────────
   getReceiptPermission: () => apiRequest("GET", "/api/receipt-permission"),
 
   requestReceipt: (caseId: number, data: {
-  loan_no?: string;
-  customer_name?: string;
-  table_type?: string;
-  notes?: string;
-  emi_amount?: number;   // ← add these
-  cbc?: number;
-  lpp?: number;
-}) => apiRequest("POST", `/api/cases/${caseId}/request-receipt`, data),
-  getMyReceiptRequests: () => apiRequest("GET", "/api/receipt-requests"),
+    loan_no?: string,
+    customer_name?: string,
+    table_type?: string,
+    notes?: string,
+    emi_amount?: number,
+    cbc?: number,
+    lpp?: number,
+  }) => apiRequest("POST", `/api/cases/${caseId}/request-receipt`, data),
 
+  getMyReceiptRequests: () => apiRequest("GET", "/api/receipt-requests"),
 
   // ── Call recordings ───────────────────────────────────────────────────────
   getCallRecordings: () => apiRequest("GET", "/api/call-recordings"),
 
   // ── Twilio outbound call ──────────────────────────────────────────────────
   makeCall: (data: {
-    customerPhone: string;
-    agentName: string;
-    caseId: string | number;
-    loanNo: string;
+    customerPhone: string,
+    agentName: string,
+    caseId: string | number,
+    loanNo: string,
   }) => apiRequest("POST", "/api/make-call", data),
 
   // ─── ADMIN ────────────────────────────────────────────────────────────────
@@ -383,25 +356,35 @@ export const api = {
     createCase: (data: any) => apiRequest("POST", "/api/admin/cases", data),
 
     updateCaseStatus: (id: number, data: {
-      status: string;
-      rollback_yn?: boolean | null;
-      table: "loan" | "bkt";
+      status: string,
+      rollback_yn?: boolean | null,
+      table: "loan" | "bkt",
     }) => apiRequest("PUT", `/api/admin/cases/${id}/status`, data),
+
+    // ── Case reassign ────────────────────────────────────────────────────────
+    reassignCase: (caseId: number, data: {
+      to_agent_id: number,
+      case_type?: string,
+      reason?: string,
+    }) => apiRequest("PATCH", `/api/admin/cases/${caseId}/reassign`, data),
+
+    getReassignLog: (caseId: number) =>
+      apiRequest("GET", `/api/admin/cases/${caseId}/reassign-log`),
 
     // ── BKT cases ────────────────────────────────────────────────────────────
     getBktCases: (category?: string) =>
       apiRequest("GET", `/api/admin/bkt-cases${category ? `?category=${category}` : ""}`),
 
     // ── Feedback ─────────────────────────────────────────────────────────────
-   resetFeedbackForCase: (caseId: number, table: string) =>
-  apiRequest("POST", `/api/admin/reset-feedback/case/${caseId}`, { table }),
+    resetFeedbackForCase: (caseId: number, table: string) =>
+      apiRequest("POST", `/api/admin/reset-feedback/case/${caseId}`, { table }),
 
     resetMonthlyFeedbackForAgent: (agentId: number) =>
-    apiRequest("POST", `/api/admin/reset-monthly-feedback/agent/${agentId}`),
+      apiRequest("POST", `/api/admin/reset-monthly-feedback/agent/${agentId}`),
 
-  resetMonthlyFeedbackForCase: (caseId: number, table: string) =>
-  apiRequest("POST", `/api/admin/reset-monthly-feedback/case/${caseId}`, { table }),
-    
+    resetMonthlyFeedbackForCase: (caseId: number, table: string) =>
+      apiRequest("POST", `/api/admin/reset-monthly-feedback/case/${caseId}`, { table }),
+
     removeExtraNumber: (id: number, number: string, table: string) =>
       apiRequest("DELETE", `/api/admin/cases/${id}/extra-numbers`, { number, table }),
 
@@ -417,10 +400,10 @@ export const api = {
     // ── Required deposits ────────────────────────────────────────────────────
     getRequiredDeposits: () => apiRequest("GET", "/api/admin/required-deposits"),
     createRequiredDeposit: (data: {
-      agentId: number;
-      amount: number;
-      description?: string;
-      dueDate?: string;
+      agentId: number,
+      amount: number,
+      description?: string,
+      dueDate?: string,
     }) => apiRequest("POST", "/api/admin/required-deposits", data),
     deleteRequiredDeposit: (id: number) =>
       apiRequest("DELETE", `/api/admin/required-deposits/${id}`),
@@ -456,9 +439,8 @@ export const api = {
     // ── Call recordings ───────────────────────────────────────────────────────
     getCallRecordings: () => apiRequest("GET", "/api/admin/call-recordings"),
 
-    // ─── ADD THESE TO api.ts ───────────────────────────────────────────────────────
-
-getReceiptRequests: () => apiRequest("GET", "/api/admin/receipt-requests"),
+    // ── Receipt requests ──────────────────────────────────────────────────────
+    getReceiptRequests: () => apiRequest("GET", "/api/admin/receipt-requests"),
 
     resolveReceiptRequest: (id: number, status: "approved" | "rejected", notes?: string) =>
       apiRequest("PUT", `/api/admin/receipt-requests/${id}/resolve`, { status, notes }),
