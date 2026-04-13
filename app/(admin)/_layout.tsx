@@ -18,6 +18,7 @@ const ADMIN_MENU = [
   { key: "attendance",  label: "Attendance",        icon: "checkmark-circle" as const, screen: "/(admin)/attendance"     },
   { key: "receipts",      label: "Receipt Requests", icon: "receipt-outline"    as const, screen: "/(admin)/receipt-requests" },
   { key: "live-activity", label: "Live Activity",    icon: "pulse"              as const, screen: "/(admin)/live-activity" },
+  { key: "field-visits", label: "Field Visits", icon: "map", screen: "/(admin)/field-visits" }
 ];
 
 function AdminDrawer({ visible, onClose }: { visible: boolean; onClose: () => void }) {
