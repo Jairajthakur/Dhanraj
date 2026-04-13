@@ -351,7 +351,7 @@ export default function Dashboard() {
                     {s ? fmt(s.amount_collected) : "₹0"}
                   </Text>
                   <Text style={styles.twBoxSub}>
-                    {s ? `${s.count_paid}/${s.count_total} cases` : "0 cases"}
+                    {s ? `${s.count_paid} deposit${s.count_paid !== 1 ? "s" : ""}` : "no deposits"}
                   </Text>
                 </View>
               );
