@@ -1554,8 +1554,14 @@ res.json({ imported, updated: 0, skipped, agentsCreated, agentsRemoved, total: r
            bkt_key AS case_category,
            COUNT(*) FILTER (WHERE status = 'Paid')::int AS count_paid,
            COUNT(*)::int AS count_total,
-           COALESCE(SUM(pos::numeric) FILTER (WHERE status = 'Paid'), 0) AS amount_collected,
-           COALESCE(SUM(pos::numeric), 0) AS amount_total
+           COALESCE(SUM(pos::numeric), 0) AS amount_total,
+           COALESCE((
+             SELECT SUM(fd.amount)
+             FROM fos_depositions fd
+             WHERE fd.agent_id = $1
+               AND LOWER(REPLACE(fd.bkt, ' ', '')) = bkt_key
+               AND DATE_TRUNC('month', fd.deposition_date) = DATE_TRUNC('month', CURRENT_DATE)
+           ), 0) AS amount_collected
          FROM (
            SELECT 'bkt' || bkt::text AS bkt_key, pos, status
            FROM loan_cases
