@@ -31,6 +31,7 @@ const MENU_ITEMS = [
   { key: "salary",            label: "Salary",             icon: "wallet"           as const, screen: "/(app)/salary" },
   { key: "change-password",   label: "Change Password",    icon: "lock-closed"      as const, screen: "/(app)/change-password" },
   { key: "online-collection", label: "Online Collection",  icon: "card"             as const, screen: "/(app)/online-collection" },
+  { key: "visit-log",         label: "Visit Log",          icon: "map"              as const, screen: "/(app)/visit-log" },
 ];
 
 // ─── Attendance Modal ─────────────────────────────────────────────────────────
@@ -319,6 +320,7 @@ const styles = StyleSheet.create({
   // Tab bar
   tabBar: {
     flexDirection: "row",
+    flexWrap: "nowrap",
     backgroundColor: Colors.surface,
     borderTopWidth: 1,
     borderTopColor: Colors.border,
@@ -329,7 +331,7 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 12,
   },
-  tabItem:       { flex: 1, alignItems: "center", gap: 3 },
+  tabItem:       { flex: 1, alignItems: "center", justifyContent: "center", gap: 3 },
   tabIconWrap:   { position: "relative" },
   tabBadge:      { position: "absolute", top: -4, right: -8, backgroundColor: Colors.danger, borderRadius: 8, minWidth: 16, height: 16, alignItems: "center", justifyContent: "center", paddingHorizontal: 3 },
   tabBadgeText:  { fontSize: 9, fontWeight: "800", color: "#fff" },
