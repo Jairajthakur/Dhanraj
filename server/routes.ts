@@ -3051,6 +3051,98 @@ app.get("/api/receipt-requests", requireAuth, async (req, res) => {
     res.json({ requests: result.rows });
   } catch (e: any) { res.status(500).json({ message: e.message }); }
 });
+
+
+  // ── DB migration for field_visits ─────────────────────────────────────────────
+try {
+  await storage.query(`CREATE TABLE IF NOT EXISTS field_visits (
+    id            SERIAL PRIMARY KEY,
+    agent_id      INTEGER REFERENCES fos_agents(id),
+    case_id       TEXT,
+    customer_name TEXT        NOT NULL,
+    latitude      NUMERIC(10,7) NOT NULL,
+    longitude     NUMERIC(10,7) NOT NULL,
+    address       TEXT,
+    outcome       TEXT        NOT NULL
+                  CHECK (outcome IN ('Contacted','Not Home','Partial Payment','Paid','Refused')),
+    notes         TEXT        DEFAULT '',
+    visited_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  )`);
+  await storage.query(`CREATE INDEX IF NOT EXISTS idx_field_visits_agent   ON field_visits(agent_id)`);
+  await storage.query(`CREATE INDEX IF NOT EXISTS idx_field_visits_visited ON field_visits(visited_at DESC)`);
+  console.log("[DB] field_visits table ready ✅");
+} catch (e: any) { console.error("[DB] field_visits error:", e.message); }
+
+// ── POST /api/field-visits — agent logs a visit ───────────────────────────────
+app.post("/api/field-visits", requireAuth, async (req, res) => {
+  try {
+    const agentId = req.session.agentId!;
+    const { case_id, customer_name, latitude, longitude, address, outcome, notes } = req.body;
+    if (!customer_name || latitude == null || longitude == null || !outcome) {
+      return res.status(400).json({ message: "customer_name, latitude, longitude, outcome are required" });
+    }
+    const { rows } = await storage.query(
+      `INSERT INTO field_visits (agent_id, case_id, customer_name, latitude, longitude, address, outcome, notes)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
+      [agentId, case_id || null, customer_name, latitude, longitude, address || null, outcome, notes || ""]
+    );
+    res.status(201).json({ visit: rows[0] });
+  } catch (e: any) { res.status(500).json({ message: e.message }); }
+});
+
+// ── GET /api/field-visits — agent's own visit history ────────────────────────
+app.get("/api/field-visits", requireAuth, async (req, res) => {
+  try {
+    const { rows } = await storage.query(
+      `SELECT fv.*, fa.name AS agent_name FROM field_visits fv
+       LEFT JOIN fos_agents fa ON fa.id = fv.agent_id
+       WHERE fv.agent_id = $1 ORDER BY fv.visited_at DESC LIMIT 100`,
+      [req.session.agentId!]
+    );
+    res.json({ visits: rows });
+  } catch (e: any) { res.status(500).json({ message: e.message }); }
+});
+
+// ── GET /api/admin/field-visits — all visits (admin) ─────────────────────────
+app.get("/api/admin/field-visits", requireAdmin, async (req, res) => {
+  try {
+    const { agent_id, outcome, date } = req.query;
+    const conditions: string[] = [];
+    const params: any[] = [];
+    let idx = 1;
+    if (agent_id) { conditions.push(`fv.agent_id = $${idx++}`); params.push(agent_id); }
+    if (outcome)  { conditions.push(`fv.outcome = $${idx++}`);   params.push(outcome);  }
+    if (date)     { conditions.push(`fv.visited_at::date = $${idx++}`); params.push(date); }
+    const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+    const { rows } = await storage.query(
+      `SELECT fv.*, fa.name AS agent_name FROM field_visits fv
+       LEFT JOIN fos_agents fa ON fa.id = fv.agent_id
+       ${where} ORDER BY fv.visited_at DESC LIMIT 200`,
+      params
+    );
+    res.json({ visits: rows });
+  } catch (e: any) { res.status(500).json({ message: e.message }); }
+});
+
+// ── GET /api/admin/field-visits/stats ────────────────────────────────────────
+app.get("/api/admin/field-visits/stats", requireAdmin, async (req, res) => {
+  try {
+    const { rows } = await storage.query(`
+      SELECT
+        COUNT(*)::int                                                    AS total_visits,
+        COUNT(*) FILTER (WHERE visited_at::date = CURRENT_DATE)::int    AS today_visits,
+        COUNT(DISTINCT agent_id)::int                                   AS active_agents,
+        COUNT(*) FILTER (WHERE outcome = 'Paid')::int                   AS paid_count,
+        COUNT(*) FILTER (WHERE outcome = 'Partial Payment')::int        AS partial_count,
+        COUNT(*) FILTER (WHERE outcome = 'Not Home')::int               AS not_home_count,
+        COUNT(*) FILTER (WHERE outcome = 'Refused')::int                AS refused_count
+      FROM field_visits
+      WHERE visited_at >= NOW() - INTERVAL '30 days'
+    `);
+    res.json({ stats: rows[0] });
+  } catch (e: any) { res.status(500).json({ message: e.message }); }
+});
+
   
 const httpServer = createServer(app);
 return httpServer;
