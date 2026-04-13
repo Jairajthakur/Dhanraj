@@ -16,7 +16,8 @@ const ADMIN_MENU = [
   { key: "salary",      label: "Salary Management", icon: "wallet"           as const, screen: "/(admin)/salary"         },
   { key: "depositions", label: "Depositions",       icon: "cash"             as const, screen: "/(admin)/depositions"    },
   { key: "attendance",  label: "Attendance",        icon: "checkmark-circle" as const, screen: "/(admin)/attendance"     },
-  { key: "receipts", label: "Receipt Requests", icon: "receipt-outline" as const, screen: "/(admin)/receipt-requests" },
+  { key: "receipts",      label: "Receipt Requests", icon: "receipt-outline"    as const, screen: "/(admin)/receipt-requests" },
+  { key: "live-activity", label: "Live Activity",    icon: "pulse"              as const, screen: "/(admin)/live-activity" },
 ];
 
 function AdminDrawer({ visible, onClose }: { visible: boolean; onClose: () => void }) {
@@ -122,6 +123,7 @@ export default function AdminLayout() {
         <Stack.Screen name="salary" />
         <Stack.Screen name="depositions" />
         <Stack.Screen name="attendance" />
+        <Stack.Screen name="live-activity" options={{ title: "Live Activity" }} />
         <Stack.Screen name="agent/[id]" options={{ headerLeft: undefined, headerBackTitle: "Back" }} />
         <Stack.Screen name="receipt-requests" options={{ title: "Receipt Requests" }} />
       </Stack>
