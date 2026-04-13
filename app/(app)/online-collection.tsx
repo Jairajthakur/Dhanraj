@@ -6,7 +6,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQueryClient } from "@tanstack/react-query";
 import { Ionicons } from "@expo/vector-icons";
-import { router } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import Colors from "@/constants/colors";
 import { getApiUrl } from "@/lib/query-client";
 
@@ -15,8 +15,9 @@ const PAYMENT_TYPES = ["UPI", "NEFT", "IMPS", "RTGS"];
 export default function OnlineCollectionScreen() {
   const insets = useSafeAreaInsets();
   const qc = useQueryClient();
-  const [loanNo, setLoanNo] = useState("");
-  const [customerName, setCustomerName] = useState("");
+  const params = useLocalSearchParams<{ loanNo?: string; customerName?: string }>();
+  const [loanNo, setLoanNo] = useState(params.loanNo || "");
+  const [customerName, setCustomerName] = useState(params.customerName || "");
   const [amount, setAmount] = useState("");
   const [paymentType, setPaymentType] = useState("UPI");
   const [utrNo, setUtrNo] = useState("");
