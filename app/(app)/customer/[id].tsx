@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import {
   View, Text, StyleSheet, ScrollView, Pressable,
   Linking, Alert, Platform, TextInput, ActivityIndicator, Modal,
@@ -11,8 +11,8 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import Colors from "@/constants/colors";
 import { caseStore } from "@/lib/caseStore";
 import { api } from "@/lib/api";
-import { getApiUrl } from "@/lib/query-client";
 
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 function fmt(v: any, prefix = "") {
   if (v === null || v === undefined || v === "" || v === "0" || Number(v) === 0) return "—";
   const n = parseFloat(String(v).replace(/,/g, ""));
@@ -34,19 +34,10 @@ const STATUS_COLORS: Record<string, string> = {
   Paid:   Colors.statusPaid   ?? "#22C55E",
 };
 
-const VISIT_OUTCOMES = ["Contacted", "Not Home", "Partial Payment", "Paid", "Refused", "PTP"] as const;
-type VisitOutcome = (typeof VISIT_OUTCOMES)[number];
-
-const OUTCOME_COLORS: Record<string, string> = {
-  Paid:              Colors.success,
-  "Partial Payment": Colors.info ?? "#3B82F6",
-  Contacted:         Colors.primary,
-  "Not Home":        (Colors as any).warning ?? "#F59E0B",
-  Refused:           Colors.danger,
-  PTP:               (Colors as any).warning ?? "#F59E0B",
-};
-
-function SectionCard({ title, icon, children }: { title: string; icon: string; children: React.ReactNode }) {
+// ─── Sub-components ───────────────────────────────────────────────────────────
+function SectionCard({ title, icon, children }: {
+  title: string; icon: string; children: React.ReactNode;
+}) {
   return (
     <View style={styles.sectionCard}>
       <View style={styles.sectionHeader}>
@@ -58,7 +49,9 @@ function SectionCard({ title, icon, children }: { title: string; icon: string; c
   );
 }
 
-function Row({ label, value, valueColor }: { label: string; value: string; valueColor?: string }) {
+function Row({ label, value, valueColor }: {
+  label: string; value: string; valueColor?: string;
+}) {
   return (
     <View style={styles.row}>
       <Text style={styles.rowLabel}>{label}</Text>
@@ -67,205 +60,163 @@ function Row({ label, value, valueColor }: { label: string; value: string; value
   );
 }
 
-// ─── Visit Log Modal ──────────────────────────────────────────────────────────
-function VisitLogModal({ visible, item, onClose, onSaved }: {
-  visible: boolean; item: any; onClose: () => void; onSaved: () => void;
+// ─── Receipt Request Modal ────────────────────────────────────────────────────
+// ─── Receipt Request Modal ────────────────────────────────────────────────────
+function ReceiptRequestModal({
+  visible, item, onClose,
+}: {
+  visible: boolean;
+  item: any;
+  onClose: () => void;
 }) {
-  const [outcome, setOutcome] = useState<VisitOutcome | "">("");
-  const [note, setNote] = useState("");
-  const [ptpDate, setPtpDate] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [locLoading, setLocLoading] = useState(false);
-  const [coords, setCoords] = useState<{ lat: number; lng: number; address: string } | null>(null);
-
-  useEffect(() => { if (visible) grabLocation(); }, [visible]);
-
-  const grabLocation = async () => {
-    setLocLoading(true);
-    try {
-      let lat: number, lng: number;
-      if (Platform.OS === "web") {
-        const pos = await new Promise<GeolocationPosition>((res, rej) =>
-          navigator.geolocation.getCurrentPosition(res, rej, { timeout: 8000 })
-        );
-        lat = pos.coords.latitude; lng = pos.coords.longitude;
-      } else {
-        const Location = require("expo-location");
-        const { status } = await Location.requestForegroundPermissionsAsync();
-        if (status !== "granted") { setLocLoading(false); return; }
-        const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
-        lat = pos.coords.latitude; lng = pos.coords.longitude;
-      }
-      let address = `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
-      try {
-        const r = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json`, { headers: { "Accept-Language": "en" } });
-        const j = await r.json();
-        if (j?.display_name) address = j.display_name;
-      } catch {}
-      setCoords({ lat, lng, address });
-    } catch (e: any) {
-      Alert.alert("Location Error", e.message || "Could not get location");
-    } finally { setLocLoading(false); }
-  };
-
-  const reset = () => { setOutcome(""); setNote(""); setPtpDate(""); setCoords(null); };
-
-  const save = async () => {
-    if (!outcome) { Alert.alert("Error", "Please select an outcome"); return; }
-    if (!coords)  { Alert.alert("Error", "Location not captured yet. Please wait."); return; }
-    setLoading(true);
-    try {
-      await api.fieldVisits.create({
-        case_id: String(item.loan_no || item.id),
-        customer_name: item.customer_name,
-        latitude: coords.lat,
-        longitude: coords.lng,
-        address: coords.address,
-        outcome: outcome === "PTP" ? "Contacted" : (outcome as any),
-        notes: note,
-      });
-      await fetch(new URL("/api/visit-log", getApiUrl()).toString(), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ loan_no: item.loan_no, customer_name: item.customer_name, bkt: item.bkt, outcome, contact_type: "visit", note, lat: coords.lat, lng: coords.lng }),
-      });
-      if (outcome === "PTP" && ptpDate) {
-        const caseType = (item as any).case_type === "bkt" ? "bkt" : "loan";
-        await api.updateFeedback(item.id, { status: "PTP", ptp_date: ptpDate, table: caseType });
-      }
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      onSaved(); onClose(); reset();
-    } catch (e: any) {
-      Alert.alert("Error", e.message || "Failed to save visit");
-    } finally { setLoading(false); }
-  };
-
-  return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={() => { onClose(); reset(); }}>
-      <View style={vlStyles.overlay}>
-        <ScrollView style={vlStyles.sheet} keyboardShouldPersistTaps="handled">
-          <View style={vlStyles.handle} />
-          <View style={vlStyles.headerRow}>
-            <View style={vlStyles.headerIcon}>
-              <Ionicons name="walk" size={20} color={Colors.primary} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={vlStyles.title}>Log Field Visit</Text>
-              <Text style={vlStyles.subtitle} numberOfLines={1}>{item?.customer_name} · {item?.loan_no}</Text>
-            </View>
-          </View>
-
-          <View style={vlStyles.locBox}>
-            <Ionicons name="location" size={16} color={locLoading ? Colors.textMuted : Colors.success} />
-            <Text style={vlStyles.locText} numberOfLines={2}>
-              {locLoading ? "Capturing your location..." : coords ? coords.address : "Location unavailable"}
-            </Text>
-            {!locLoading && <Pressable onPress={grabLocation} style={vlStyles.locRefresh}><Ionicons name="refresh" size={14} color={Colors.primary} /></Pressable>}
-            {locLoading && <ActivityIndicator size="small" color={Colors.primary} />}
-          </View>
-
-          <Text style={vlStyles.label}>Outcome</Text>
-          <View style={vlStyles.outcomesGrid}>
-            {VISIT_OUTCOMES.map((o) => {
-              const col = OUTCOME_COLORS[o] ?? Colors.primary;
-              const selected = outcome === o;
-              return (
-                <Pressable key={o} style={[vlStyles.outcomeChip, selected && { backgroundColor: col, borderColor: col }]} onPress={() => setOutcome(o)}>
-                  <Text style={[vlStyles.outcomeText, selected && { color: "#fff" }]}>{o}</Text>
-                </Pressable>
-              );
-            })}
-          </View>
-
-          {outcome === "PTP" && (
-            <View style={vlStyles.ptpBox}>
-              <Ionicons name="calendar-outline" size={16} color={(Colors as any).warning ?? "#F59E0B"} />
-              <View style={{ flex: 1 }}>
-                <Text style={vlStyles.ptpLabel}>PTP Date</Text>
-                <TextInput style={vlStyles.ptpInput} placeholder="YYYY-MM-DD" placeholderTextColor={Colors.textMuted} value={ptpDate} onChangeText={setPtpDate} keyboardType="numbers-and-punctuation" />
-              </View>
-            </View>
-          )}
-
-          <Text style={vlStyles.label}>Notes (optional)</Text>
-          <TextInput style={[vlStyles.input, { minHeight: 70, textAlignVertical: "top" }]} placeholder="What happened? Next steps?" placeholderTextColor={Colors.textMuted} value={note} onChangeText={setNote} multiline />
-
-          <View style={{ flexDirection: "row", gap: 12, marginTop: 8, marginBottom: 32 }}>
-            <Pressable style={vlStyles.cancelBtn} onPress={() => { onClose(); reset(); }}><Text style={vlStyles.cancelText}>Cancel</Text></Pressable>
-            <Pressable style={[vlStyles.saveBtn, (loading || locLoading) && { opacity: 0.6 }]} onPress={save} disabled={loading || locLoading}>
-              {loading ? <ActivityIndicator size="small" color="#fff" /> : <><Ionicons name="checkmark-circle" size={16} color="#fff" /><Text style={vlStyles.saveText}>Save Visit</Text></>}
-            </Pressable>
-          </View>
-        </ScrollView>
-      </View>
-    </Modal>
-  );
-}
-
-// ─── Receipt Modal ────────────────────────────────────────────────────────────
-function ReceiptRequestModal({ visible, item, onClose }: { visible: boolean; item: any; onClose: () => void }) {
   const [loading, setLoading] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const insets = useSafeAreaInsets();
-  const [emiInput, setEmiInput] = useState(String(item?.emi_amount || ""));
-  const [cbcInput, setCbcInput] = useState(String(item?.cbc || ""));
-  const [lppInput, setLppInput] = useState(String(item?.lpp || ""));
-
-  const handleSubmit = async () => {
-    setLoading(true);
-    try {
-      await api.requestReceipt(item.id, { loan_no: item.loan_no, customer_name: item.customer_name, table_type: (item as any).case_type || "loan", emi_amount: emiInput ? parseFloat(emiInput) : undefined, cbc: cbcInput ? parseFloat(cbcInput) : undefined, lpp: lppInput ? parseFloat(lppInput) : undefined });
+  const [emiInput, setEmiInput]  = useState(String(item?.emi_amount || ""));
+  const [cbcInput, setCbcInput]  = useState(String(item?.cbc || ""));
+  const [lppInput, setLppInput]  = useState(String(item?.lpp || ""));
+ const handleSubmit = async () => {
+  setLoading(true);
+  try {
+    await api.requestReceipt(item.id, {
+      loan_no:       item.loan_no,
+      customer_name: item.customer_name,
+      table_type:    (item as any).case_type || "loan",
+      emi_amount:    emiInput ? parseFloat(emiInput) : undefined,
+      cbc:           cbcInput ? parseFloat(cbcInput) : undefined,
+      lpp:           lppInput ? parseFloat(lppInput) : undefined,
+    });
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    setSubmitted(true);
+  } catch (e: any) {
+    // 409 means already pending — treat as success
+    if (e.message?.includes("already") || e.message?.includes("pending")) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       setSubmitted(true);
-    } catch (e: any) {
-      if (e.message?.includes("already") || e.message?.includes("pending")) { Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success); setSubmitted(true); }
-      else Alert.alert("Error", e.message || "Failed to send request");
-    } finally { setLoading(false); }
-  };
-
-  const handleClose = () => { setSubmitted(false); setEmiInput(String(item?.emi_amount || "")); setCbcInput(String(item?.cbc || "")); setLppInput(String(item?.lpp || "")); onClose(); };
+    } else {
+      Alert.alert("Error", e.message || "Failed to send request");
+    }
+  } finally {
+    setLoading(false);
+  }
+};
+  const handleClose = () => {
+  setSubmitted(false);
+  setEmiInput(String(item?.emi_amount || ""));
+  setCbcInput(String(item?.cbc || ""));
+  setLppInput(String(item?.lpp || ""));
+  onClose();
+};
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={handleClose}>
       <View style={rrStyles.overlay}>
         <View style={[rrStyles.sheet, { paddingBottom: insets.bottom + 24 }]}>
           <View style={rrStyles.handle} />
+
           {submitted ? (
+            // ── Success state ──
             <View style={rrStyles.successContainer}>
-              <View style={rrStyles.successIcon}><Ionicons name="checkmark-circle" size={48} color={Colors.success} /></View>
+              <View style={rrStyles.successIcon}>
+                <Ionicons name="checkmark-circle" size={48} color={Colors.success} />
+              </View>
               <Text style={rrStyles.successTitle}>Request Sent!</Text>
-              <Text style={rrStyles.successMsg}>Admin has been notified and will process your receipt request for <Text style={{ fontWeight: "700" }}>{item?.customer_name}</Text>.</Text>
-              <Pressable style={rrStyles.doneBtn} onPress={handleClose}><Text style={rrStyles.doneBtnText}>Done</Text></Pressable>
+              <Text style={rrStyles.successMsg}>
+                Admin has been notified and will process your receipt request for{" "}
+                <Text style={{ fontWeight: "700" }}>{item?.customer_name}</Text>.
+              </Text>
+              <Pressable style={rrStyles.doneBtn} onPress={handleClose}>
+                <Text style={rrStyles.doneBtnText}>Done</Text>
+              </Pressable>
             </View>
           ) : (
+            // ── Request form ──
             <>
               <View style={rrStyles.headerRow}>
-                <View style={rrStyles.receiptIcon}><Ionicons name="receipt-outline" size={22} color={Colors.primary} /></View>
+                <View style={rrStyles.receiptIcon}>
+                  <Ionicons name="receipt-outline" size={22} color={Colors.primary} />
+                </View>
                 <View style={{ flex: 1 }}>
                   <Text style={rrStyles.title}>Request Receipt</Text>
-                  <Text style={rrStyles.subtitle} numberOfLines={1}>{item?.customer_name} · {item?.loan_no}</Text>
+                  <Text style={rrStyles.subtitle} numberOfLines={1}>
+                    {item?.customer_name} · {item?.loan_no}
+                  </Text>
                 </View>
               </View>
+
               <View style={rrStyles.infoBox}>
                 <Ionicons name="information-circle-outline" size={16} color={Colors.info} />
-                <Text style={rrStyles.infoText}>Admin will receive a notification and process your receipt request.</Text>
+                <Text style={rrStyles.infoText}>
+                  Admin will receive a notification and process your receipt request.
+                </Text>
               </View>
-              <View style={rrStyles.amountGrid}>
-                {[["EMI AMOUNT", emiInput, setEmiInput], ["CBC", cbcInput, setCbcInput], ["LPP", lppInput, setLppInput]].map(([label, val, setter]: any) => (
-                  <View key={label} style={rrStyles.amountCell}>
-                    <Text style={rrStyles.amountLabel}>{label}</Text>
-                    <View style={rrStyles.amountInputRow}>
-                      <Text style={rrStyles.amountRupee}>₹</Text>
-                      <TextInput style={rrStyles.amountInput} placeholder="0" placeholderTextColor={Colors.textMuted} value={val} onChangeText={setter} keyboardType="numeric" maxLength={10} />
-                    </View>
-                  </View>
-                ))}
-              </View>
+
+{/* ── Editable Amount Fields ── */}
+<View style={rrStyles.amountGrid}>
+  <View style={rrStyles.amountCell}>
+    <Text style={rrStyles.amountLabel}>EMI AMOUNT</Text>
+    <View style={rrStyles.amountInputRow}>
+      <Text style={rrStyles.amountRupee}>₹</Text>
+      <TextInput
+        style={rrStyles.amountInput}
+        placeholder="0"
+        placeholderTextColor={Colors.textMuted}
+        value={emiInput}
+        onChangeText={setEmiInput}
+        keyboardType="numeric"
+        maxLength={10}
+      />
+    </View>
+  </View>
+  <View style={rrStyles.amountCell}>
+    <Text style={rrStyles.amountLabel}>CBC</Text>
+    <View style={rrStyles.amountInputRow}>
+      <Text style={rrStyles.amountRupee}>₹</Text>
+      <TextInput
+        style={rrStyles.amountInput}
+        placeholder="0"
+        placeholderTextColor={Colors.textMuted}
+        value={cbcInput}
+        onChangeText={setCbcInput}
+        keyboardType="numeric"
+        maxLength={10}
+      />
+    </View>
+  </View>
+  <View style={rrStyles.amountCell}>
+    <Text style={rrStyles.amountLabel}>LPP</Text>
+    <View style={rrStyles.amountInputRow}>
+      <Text style={rrStyles.amountRupee}>₹</Text>
+      <TextInput
+        style={rrStyles.amountInput}
+        placeholder="0"
+        placeholderTextColor={Colors.textMuted}
+        value={lppInput}
+        onChangeText={setLppInput}
+        keyboardType="numeric"
+        maxLength={10}
+      />
+    </View>
+  </View>
+</View>
+
+              {/* ── Buttons ── */}
               <View style={rrStyles.btnRow}>
-                <Pressable style={rrStyles.cancelBtn} onPress={handleClose}><Text style={rrStyles.cancelText}>Cancel</Text></Pressable>
-                <Pressable style={[rrStyles.submitBtn, loading && { opacity: 0.6 }]} onPress={handleSubmit} disabled={loading}>
-                  {loading ? <ActivityIndicator size="small" color="#fff" /> : <><Ionicons name="paper-plane-outline" size={16} color="#fff" /><Text style={rrStyles.submitText}>Send Request</Text></>}
+                <Pressable style={rrStyles.cancelBtn} onPress={handleClose}>
+                  <Text style={rrStyles.cancelText}>Cancel</Text>
+                </Pressable>
+                <Pressable
+                  style={[rrStyles.submitBtn, loading && { opacity: 0.6 }]}
+                  onPress={handleSubmit}
+                  disabled={loading}
+                >
+                  {loading
+                    ? <ActivityIndicator size="small" color="#fff" />
+                    : <>
+                        <Ionicons name="paper-plane-outline" size={16} color="#fff" />
+                        <Text style={rrStyles.submitText}>Send Request</Text>
+                      </>
+                  }
                 </Pressable>
               </View>
             </>
@@ -275,12 +226,15 @@ function ReceiptRequestModal({ visible, item, onClose }: { visible: boolean; ite
     </Modal>
   );
 }
+    
+
 
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 export default function CustomerDetailScreen() {
   const insets = useSafeAreaInsets();
   const { id } = useLocalSearchParams();
   const qc = useQueryClient();
+
   const item = caseStore.get();
 
   const [extraNumbers, setExtraNumbers] = useState<string[]>((item as any)?.extra_numbers ?? []);
@@ -289,9 +243,13 @@ export default function CustomerDetailScreen() {
   const [saving, setSaving] = useState(false);
   const [removing, setRemoving] = useState<string | null>(null);
   const [showReceiptModal, setShowReceiptModal] = useState(false);
-  const [showVisitModal, setShowVisitModal] = useState(false);
 
-  const { data: permData } = useQuery({ queryKey: ["/api/receipt-permission"], queryFn: () => api.getReceiptPermission(), staleTime: 0 });
+  // Fetch receipt permission for current agent
+ const { data: permData } = useQuery({
+    queryKey: ["/api/receipt-permission"],
+    queryFn:  () => api.getReceiptPermission(),
+    staleTime: 0,
+  });
   const canRequestReceipt = permData?.canRequestReceipt === true;
 
   if (!item) {
@@ -299,7 +257,9 @@ export default function CustomerDetailScreen() {
       <View style={styles.empty}>
         <Ionicons name="alert-circle-outline" size={48} color={Colors.textMuted} />
         <Text style={styles.emptyText}>Case not found.</Text>
-        <Pressable style={styles.backBtn} onPress={() => router.back()}><Text style={styles.backBtnText}>Go Back</Text></Pressable>
+        <Pressable style={styles.backBtn} onPress={() => router.back()}>
+          <Text style={styles.backBtnText}>Go Back</Text>
+        </Pressable>
       </View>
     );
   }
@@ -308,16 +268,21 @@ export default function CustomerDetailScreen() {
   const caseType = (item as any).case_type === "bkt" ? "bkt" : "loan";
 
   const call = (number: string) => {
-    if (!number.trim()) return;
+    const num = number.trim();
+    if (!num) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    Linking.openURL(`tel:${number.trim()}`);
+    Linking.openURL(`tel:${num}`);
   };
 
-  const phones: string[] = (item.mobile_no ?? "").split(",").map((p: string) => p.trim()).filter(Boolean);
+  const phones: string[] = (item.mobile_no ?? "")
+    .split(",")
+    .map((p: string) => p.trim())
+    .filter(Boolean);
 
   const handleAddNumber = async () => {
     const trimmed = newNumberInput.trim();
-    if (!trimmed || trimmed.length < 7) { Alert.alert("Enter a valid phone number"); return; }
+    if (!trimmed) { Alert.alert("Enter a valid number"); return; }
+    if (trimmed.length < 7) { Alert.alert("Enter a valid phone number"); return; }
     setSaving(true);
     try {
       await api.addExtraNumber(item.id, trimmed, caseType);
@@ -326,37 +291,55 @@ export default function CustomerDetailScreen() {
       caseStore.set({ ...item, extra_numbers: updated });
       qc.invalidateQueries({ queryKey: ["/api/cases"] });
       qc.invalidateQueries({ queryKey: ["/api/bkt-cases"] });
-      setNewNumberInput(""); setShowAddNumber(false);
+      setNewNumberInput("");
+      setShowAddNumber(false);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    } catch (e: any) { Alert.alert("Error", String(e?.message ?? e)); }
-    finally { setSaving(false); }
+    } catch (e: any) {
+      Alert.alert("Error", String(e?.message ?? e) || "Failed to save number");
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleRemoveNumber = async (num: string) => {
-    Alert.alert("Remove Number", `Remove ${num}?`, [
-      { text: "Cancel", style: "cancel" },
-      { text: "Remove", style: "destructive", onPress: async () => {
-        setRemoving(num);
-        try {
-          await api.removeExtraNumber(item.id, num, caseType);
-          const updated = extraNumbers.filter(n => n !== num);
-          setExtraNumbers(updated);
-          caseStore.set({ ...item, extra_numbers: updated });
-          qc.invalidateQueries({ queryKey: ["/api/cases"] });
-          qc.invalidateQueries({ queryKey: ["/api/bkt-cases"] });
-        } catch { Alert.alert("Failed to remove number"); }
-        finally { setRemoving(null); }
-      }},
-    ]);
+    Alert.alert(
+      "Remove Number",
+      `Remove ${num}?`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Remove",
+          style: "destructive",
+          onPress: async () => {
+            setRemoving(num);
+            try {
+              await api.removeExtraNumber(item.id, num, caseType);
+              const updated = extraNumbers.filter(n => n !== num);
+              setExtraNumbers(updated);
+              caseStore.set({ ...item, extra_numbers: updated });
+              qc.invalidateQueries({ queryKey: ["/api/cases"] });
+              qc.invalidateQueries({ queryKey: ["/api/bkt-cases"] });
+            } catch {
+              Alert.alert("Failed to remove number");
+            } finally {
+              setRemoving(null);
+            }
+          },
+        },
+      ]
+    );
   };
 
   return (
     <>
       <ScrollView
         style={{ flex: 1, backgroundColor: Colors.background }}
-        contentContainerStyle={[styles.container, { paddingBottom: insets.bottom + 32, paddingTop: Platform.OS === "web" ? 72 : 12 }]}
+        contentContainerStyle={[
+          styles.container,
+          { paddingBottom: insets.bottom + 32, paddingTop: Platform.OS === "web" ? 72 : 12 },
+        ]}
       >
-        {/* ── Header card ── */}
+        {/* ── Header ── */}
         <View style={styles.heroCard}>
           <View style={styles.heroTop}>
             <View style={{ flex: 1 }}>
@@ -371,7 +354,7 @@ export default function CustomerDetailScreen() {
           <View style={styles.amountRow}>
             {[
               { label: "EMI DUE", value: fmt(item.emi_due, "₹"), color: Colors.danger },
-              { label: "POS",     value: fmt(item.pos,     "₹"), color: Colors.text },
+              { label: "POS",     value: fmt(item.pos,     "₹"), color: Colors.text  },
               { label: "CBC+LPP", value: fmt(item.cbc_lpp, "₹"), color: (Colors as any).warning ?? "#F59E0B" },
             ].map((a) => (
               <View key={a.label} style={styles.amountCell}>
@@ -391,56 +374,48 @@ export default function CustomerDetailScreen() {
               ))}
             </View>
           )}
-
-          {/* ── Log Visit Button ── */}
-          <Pressable style={styles.visitBtn} onPress={() => setShowVisitModal(true)}>
-            <View style={styles.visitBtnIcon}>
-              <Ionicons name="walk" size={18} color={Colors.primary} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.visitBtnTitle}>Log Field Visit</Text>
-              <Text style={styles.visitBtnSub}>Record outcome · set PTP · capture GPS location</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={16} color={Colors.primary} />
-          </Pressable>
         </View>
 
-        {/* ── Loan Details ── */}
+        {/* ── Loan / Case Info ── */}
         <SectionCard title="Loan Details" icon="document-text-outline">
-          <Row label="Loan No" value={fmtStr(item.loan_no)} />
-          <Row label="App ID" value={fmtStr(item.app_id)} />
-          <Row label="BKT" value={fmtStr(item.bkt)} valueColor={Colors.primary} />
-          <Row label="Product" value={fmtStr(item.pro)} />
-          <Row label="Tenor" value={fmtStr(item.tenor)} />
-          <Row label="EMI" value={fmt(item.emi_amount, "₹")} />
-          <Row label="EMI Due" value={fmt(item.emi_due, "₹")} valueColor={Colors.danger} />
-          <Row label="POS" value={fmt(item.pos, "₹")} />
-          <Row label="CBC" value={fmt(item.cbc, "₹")} />
-          <Row label="LPP" value={fmt(item.lpp, "₹")} />
-          <Row label="CBC + LPP" value={fmt(item.cbc_lpp, "₹")} valueColor={(Colors as any).warning ?? "#F59E0B"} />
-          {(item.rollback && Number(item.rollback) > 0) && <Row label="Rollback" value={fmt(item.rollback, "₹")} valueColor={Colors.info ?? "#3B82F6"} />}
-          {(item.clearance && Number(item.clearance) > 0) && <Row label="Clearance" value={fmt(item.clearance, "₹")} valueColor={Colors.success ?? "#22C55E"} />}
-          <Row label="First EMI Date" value={fmtDate(item.first_emi_due_date)} />
+          <Row label="Loan No"    value={fmtStr(item.loan_no)} />
+          <Row label="App ID"     value={fmtStr(item.app_id)} />
+          <Row label="BKT"        value={fmtStr(item.bkt)} valueColor={Colors.primary} />
+          <Row label="Product"    value={fmtStr(item.pro)} />
+          <Row label="Tenor"      value={fmtStr(item.tenor)} />
+          <Row label="EMI"        value={fmt(item.emi_amount, "₹")} />
+          <Row label="EMI Due"    value={fmt(item.emi_due,    "₹")} valueColor={Colors.danger} />
+          <Row label="POS"        value={fmt(item.pos,        "₹")} />
+          <Row label="CBC"        value={fmt(item.cbc,        "₹")} />
+          <Row label="LPP"        value={fmt(item.lpp,        "₹")} />
+          <Row label="CBC + LPP"  value={fmt(item.cbc_lpp,   "₹")} valueColor={(Colors as any).warning ?? "#F59E0B"} />
+          {(item.rollback && Number(item.rollback) > 0) && (
+            <Row label="Rollback"  value={fmt(item.rollback,  "₹")} valueColor={Colors.info ?? "#3B82F6"} />
+          )}
+          {(item.clearance && Number(item.clearance) > 0) && (
+            <Row label="Clearance" value={fmt(item.clearance, "₹")} valueColor={Colors.success ?? "#22C55E"} />
+          )}
+          <Row label="First EMI Date"     value={fmtDate(item.first_emi_due_date)} />
           <Row label="Loan Maturity Date" value={fmtDate(item.loan_maturity_date)} />
         </SectionCard>
 
         {/* ── Contact Details ── */}
         <SectionCard title="Contact Details" icon="call-outline">
-          <Row label="Mobile" value={fmtStr(item.mobile_no)} />
-          <Row label="Address" value={fmtStr(item.address)} />
+          <Row label="Mobile"            value={fmtStr(item.mobile_no)} />
+          <Row label="Address"           value={fmtStr(item.address)} />
           <Row label="Reference Address" value={fmtStr(item.reference_address)} />
-          {item.ref1_name   && <Row label="Ref 1 Name" value={fmtStr(item.ref1_name)} />}
+          {item.ref1_name   && <Row label="Ref 1 Name"   value={fmtStr(item.ref1_name)} />}
           {item.ref1_mobile && <Row label="Ref 1 Mobile" value={fmtStr(item.ref1_mobile)} />}
-          {item.ref2_name   && <Row label="Ref 2 Name" value={fmtStr(item.ref2_name)} />}
+          {item.ref2_name   && <Row label="Ref 2 Name"   value={fmtStr(item.ref2_name)} />}
           {item.ref2_mobile && <Row label="Ref 2 Mobile" value={fmtStr(item.ref2_mobile)} />}
         </SectionCard>
 
         {/* ── Vehicle Details ── */}
         <SectionCard title="Vehicle Details" icon="car-outline">
-          <Row label="Asset / Make" value={fmtStr(item.asset_make ?? item.asset_name)} />
+          <Row label="Asset / Make"    value={fmtStr(item.asset_make ?? item.asset_name)} />
           <Row label="Registration No" value={fmtStr(item.registration_no)} />
-          <Row label="Engine No" value={fmtStr(item.engine_no)} />
-          <Row label="Chassis No" value={fmtStr(item.chassis_no)} />
+          <Row label="Engine No"       value={fmtStr(item.engine_no)} />
+          <Row label="Chassis No"      value={fmtStr(item.chassis_no)} />
         </SectionCard>
 
         {/* ── Additional Numbers ── */}
@@ -451,6 +426,7 @@ export default function CustomerDetailScreen() {
               <Text style={styles.noNumbersText}>No additional numbers added yet</Text>
             </View>
           )}
+
           {extraNumbers.map((num, i) => (
             <View key={`${num}-${i}`} style={styles.extraNumberRow}>
               <View style={styles.extraNumberLabelWrap}>
@@ -458,21 +434,52 @@ export default function CustomerDetailScreen() {
                 <Text style={styles.extraNumberLabel}>Additional</Text>
               </View>
               <Pressable style={styles.extraNumberCallArea} onPress={() => call(num)}>
-                <View style={styles.extraNumberCallIcon}><Ionicons name="call" size={14} color="#fff" /></View>
+                <View style={styles.extraNumberCallIcon}>
+                  <Ionicons name="call" size={14} color="#fff" />
+                </View>
                 <Text style={styles.extraNumberValue}>{num}</Text>
               </Pressable>
-              <Pressable style={styles.extraNumberDeleteBtn} onPress={() => handleRemoveNumber(num)} disabled={removing === num}>
-                {removing === num ? <ActivityIndicator size="small" color={Colors.danger} /> : <Ionicons name="trash-outline" size={18} color={Colors.danger} />}
+              <Pressable
+                style={styles.extraNumberDeleteBtn}
+                onPress={() => handleRemoveNumber(num)}
+                disabled={removing === num}
+              >
+                {removing === num
+                  ? <ActivityIndicator size="small" color={Colors.danger} />
+                  : <Ionicons name="trash-outline" size={18} color={Colors.danger} />
+                }
               </Pressable>
             </View>
           ))}
+
           {showAddNumber ? (
             <View style={styles.addNumberForm}>
-              <TextInput style={styles.addNumberInput} placeholder="Enter phone number" placeholderTextColor={Colors.textMuted} value={newNumberInput} onChangeText={setNewNumberInput} keyboardType="phone-pad" maxLength={15} autoFocus />
+              <TextInput
+                style={styles.addNumberInput}
+                placeholder="Enter phone number"
+                placeholderTextColor={Colors.textMuted}
+                value={newNumberInput}
+                onChangeText={setNewNumberInput}
+                keyboardType="phone-pad"
+                maxLength={15}
+                autoFocus
+              />
               <View style={styles.addNumberBtns}>
-                <Pressable style={styles.addNumberCancelBtn} onPress={() => { setShowAddNumber(false); setNewNumberInput(""); }}><Text style={styles.addNumberCancelText}>Cancel</Text></Pressable>
-                <Pressable style={[styles.addNumberSaveBtn, saving && { opacity: 0.6 }]} onPress={handleAddNumber} disabled={saving}>
-                  {saving ? <ActivityIndicator size="small" color="#fff" /> : <Text style={styles.addNumberSaveText}>Save</Text>}
+                <Pressable
+                  style={styles.addNumberCancelBtn}
+                  onPress={() => { setShowAddNumber(false); setNewNumberInput(""); }}
+                >
+                  <Text style={styles.addNumberCancelText}>Cancel</Text>
+                </Pressable>
+                <Pressable
+                  style={[styles.addNumberSaveBtn, saving && { opacity: 0.6 }]}
+                  onPress={handleAddNumber}
+                  disabled={saving}
+                >
+                  {saving
+                    ? <ActivityIndicator size="small" color="#fff" />
+                    : <Text style={styles.addNumberSaveText}>Save</Text>
+                  }
                 </Pressable>
               </View>
             </View>
@@ -484,10 +491,15 @@ export default function CustomerDetailScreen() {
           )}
         </SectionCard>
 
-        {/* ── Request Receipt ── */}
+        {/* ── Request Receipt (only visible if admin granted permission) ── */}
         {canRequestReceipt && (
-          <Pressable style={styles.receiptRequestBtn} onPress={() => setShowReceiptModal(true)}>
-            <View style={styles.receiptBtnIconWrap}><Ionicons name="receipt-outline" size={22} color={Colors.primary} /></View>
+          <Pressable
+            style={styles.receiptRequestBtn}
+            onPress={() => setShowReceiptModal(true)}
+          >
+            <View style={styles.receiptBtnIconWrap}>
+              <Ionicons name="receipt-outline" size={22} color={Colors.primary} />
+            </View>
             <View style={{ flex: 1 }}>
               <Text style={styles.receiptBtnTitle}>Send Receipt</Text>
               <Text style={styles.receiptBtnSubtitle}>Request admin to send a receipt for this case</Text>
@@ -497,124 +509,261 @@ export default function CustomerDetailScreen() {
         )}
       </ScrollView>
 
-      <VisitLogModal
-        visible={showVisitModal} item={item}
-        onClose={() => setShowVisitModal(false)}
-        onSaved={() => {
-          qc.invalidateQueries({ queryKey: ["/api/visit-log/today"] });
-          qc.invalidateQueries({ queryKey: ["/api/field-visits"] });
-          qc.invalidateQueries({ queryKey: ["/api/admin/field-visits"] });
-        }}
+      {/* ── Receipt Request Modal ── */}
+      <ReceiptRequestModal
+        visible={showReceiptModal}
+        item={item}
+        onClose={() => setShowReceiptModal(false)}
       />
-      <ReceiptRequestModal visible={showReceiptModal} item={item} onClose={() => setShowReceiptModal(false)} />
     </>
   );
 }
 
+// ─── Styles ───────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
   container: { padding: 12, gap: 12 },
-  empty: { flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: Colors.background, gap: 12 },
+  empty: {
+    flex: 1, justifyContent: "center", alignItems: "center",
+    backgroundColor: Colors.background, gap: 12,
+  },
   emptyText: { fontSize: 16, color: Colors.textMuted },
-  backBtn: { marginTop: 8, paddingVertical: 10, paddingHorizontal: 24, backgroundColor: Colors.primary, borderRadius: 12 },
+  backBtn: {
+    marginTop: 8, paddingVertical: 10, paddingHorizontal: 24,
+    backgroundColor: Colors.primary, borderRadius: 12,
+  },
   backBtnText: { color: "#fff", fontWeight: "700", fontSize: 14 },
-  heroCard: { backgroundColor: Colors.surface, borderRadius: 16, padding: 16, gap: 12, borderWidth: 1, borderColor: Colors.border, shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.15, shadowRadius: 8, elevation: 4 },
+
+  heroCard: {
+    backgroundColor: Colors.surface,
+    borderRadius: 16, padding: 16, gap: 12,
+    borderWidth: 1, borderColor: Colors.border,
+    shadowColor: "#000", shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15, shadowRadius: 8, elevation: 4,
+  },
   heroTop: { flexDirection: "row", alignItems: "flex-start", gap: 10 },
-  customerName: { fontSize: 17, fontWeight: "800", color: Colors.text, textTransform: "uppercase", flexShrink: 1 },
+  customerName: {
+    fontSize: 17, fontWeight: "800", color: Colors.text,
+    textTransform: "uppercase", flexShrink: 1,
+  },
   loanNo: { fontSize: 12, color: Colors.textSecondary, marginTop: 2, fontWeight: "500" },
   statusBadge: { paddingHorizontal: 12, paddingVertical: 5, borderRadius: 20 },
-  statusText: { fontSize: 12, fontWeight: "700" },
+  statusText:  { fontSize: 12, fontWeight: "700" },
   amountRow: { flexDirection: "row", gap: 8 },
-  amountCell: { flex: 1, backgroundColor: Colors.surfaceAlt ?? Colors.background, borderRadius: 10, padding: 10, alignItems: "center" },
+  amountCell: {
+    flex: 1, backgroundColor: Colors.surfaceAlt ?? Colors.background,
+    borderRadius: 10, padding: 10, alignItems: "center",
+  },
   amountLabel: { fontSize: 9, fontWeight: "700", color: Colors.textMuted, textTransform: "uppercase" },
   amountValue: { fontSize: 13, fontWeight: "800", color: Colors.text, marginTop: 2 },
   callBtnRow: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  callBtn: { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: Colors.primary, borderRadius: 10, paddingVertical: 9, paddingHorizontal: 14, flex: 1, justifyContent: "center" },
+  callBtn: {
+    flexDirection: "row", alignItems: "center", gap: 6,
+    backgroundColor: Colors.primary, borderRadius: 10,
+    paddingVertical: 9, paddingHorizontal: 14, flex: 1, justifyContent: "center",
+  },
   callBtnText: { color: "#fff", fontWeight: "700", fontSize: 13 },
-  visitBtn: { flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: Colors.primary + "10", borderRadius: 12, padding: 12, borderWidth: 1.5, borderColor: Colors.primary + "30" },
-  visitBtnIcon: { width: 38, height: 38, borderRadius: 19, backgroundColor: Colors.primary + "20", alignItems: "center", justifyContent: "center" },
-  visitBtnTitle: { fontSize: 14, fontWeight: "800", color: Colors.primary },
-  visitBtnSub: { fontSize: 11, color: Colors.textSecondary, marginTop: 1 },
-  sectionCard: { backgroundColor: Colors.surface, borderRadius: 16, borderWidth: 1, borderColor: Colors.border, overflow: "hidden" },
-  sectionHeader: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: Colors.border, backgroundColor: Colors.surfaceAlt ?? Colors.background },
-  sectionTitle: { fontSize: 13, fontWeight: "700", color: Colors.text, textTransform: "uppercase", letterSpacing: 0.5 },
-  row: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", paddingHorizontal: 16, paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: Colors.border },
+
+  sectionCard: {
+    backgroundColor: Colors.surface, borderRadius: 16,
+    borderWidth: 1, borderColor: Colors.border, overflow: "hidden",
+  },
+  sectionHeader: {
+    flexDirection: "row", alignItems: "center", gap: 8,
+    paddingHorizontal: 16, paddingVertical: 12,
+    borderBottomWidth: 1, borderBottomColor: Colors.border,
+    backgroundColor: Colors.surfaceAlt ?? Colors.background,
+  },
+  sectionTitle: {
+    fontSize: 13, fontWeight: "700", color: Colors.text,
+    textTransform: "uppercase", letterSpacing: 0.5,
+  },
+  row: {
+    flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start",
+    paddingHorizontal: 16, paddingVertical: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: Colors.border,
+  },
   rowLabel: { fontSize: 12, color: Colors.textSecondary, fontWeight: "600", flex: 1 },
   rowValue: { fontSize: 12, color: Colors.text, fontWeight: "700", flex: 1.5, textAlign: "right" },
-  noNumbersRow: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 16, paddingVertical: 14 },
+
+  noNumbersRow: {
+    flexDirection: "row", alignItems: "center", gap: 8,
+    paddingHorizontal: 16, paddingVertical: 14,
+  },
   noNumbersText: { fontSize: 13, color: Colors.textMuted, fontStyle: "italic" },
-  extraNumberRow: { flexDirection: "row", alignItems: "center", paddingHorizontal: 12, paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: Colors.border, gap: 10, minHeight: 58 },
+
+  extraNumberRow: {
+    flexDirection: "row", alignItems: "center",
+    paddingHorizontal: 12, paddingVertical: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: Colors.border,
+    gap: 10, minHeight: 58,
+  },
   extraNumberLabelWrap: { alignItems: "center", width: 44 },
   extraNumberIndex: { fontSize: 13, fontWeight: "800", color: Colors.primary },
-  extraNumberLabel: { fontSize: 9, fontWeight: "600", color: Colors.textMuted, textTransform: "uppercase", marginTop: 1 },
-  extraNumberCallArea: { flex: 1, flexDirection: "row", alignItems: "center", gap: 10, backgroundColor: Colors.primary + "12", borderRadius: 10, paddingVertical: 10, paddingHorizontal: 12 },
-  extraNumberCallIcon: { width: 28, height: 28, borderRadius: 14, backgroundColor: Colors.primary, alignItems: "center", justifyContent: "center" },
+  extraNumberLabel: {
+    fontSize: 9, fontWeight: "600", color: Colors.textMuted,
+    textTransform: "uppercase", marginTop: 1,
+  },
+  extraNumberCallArea: {
+    flex: 1, flexDirection: "row", alignItems: "center", gap: 10,
+    backgroundColor: Colors.primary + "12", borderRadius: 10,
+    paddingVertical: 10, paddingHorizontal: 12,
+  },
+  extraNumberCallIcon: {
+    width: 28, height: 28, borderRadius: 14,
+    backgroundColor: Colors.primary, alignItems: "center", justifyContent: "center",
+  },
   extraNumberValue: { fontSize: 14, fontWeight: "700", color: Colors.primary, flex: 1, letterSpacing: 0.3 },
-  extraNumberDeleteBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: Colors.danger + "12", alignItems: "center", justifyContent: "center" },
-  addNumberForm: { padding: 14, gap: 10, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: Colors.border },
-  addNumberInput: { borderWidth: 1.5, borderColor: Colors.primary + "60", borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 16, color: Colors.text, backgroundColor: Colors.surfaceAlt, letterSpacing: 0.5 },
+  extraNumberDeleteBtn: {
+    width: 36, height: 36, borderRadius: 18,
+    backgroundColor: Colors.danger + "12", alignItems: "center", justifyContent: "center",
+  },
+
+  addNumberForm: {
+    padding: 14, gap: 10,
+    borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: Colors.border,
+  },
+  addNumberInput: {
+    borderWidth: 1.5, borderColor: Colors.primary + "60", borderRadius: 12,
+    paddingHorizontal: 14, paddingVertical: 12, fontSize: 16, color: Colors.text,
+    backgroundColor: Colors.surfaceAlt, letterSpacing: 0.5,
+  },
   addNumberBtns: { flexDirection: "row", gap: 10 },
-  addNumberCancelBtn: { flex: 1, paddingVertical: 12, borderRadius: 12, borderWidth: 1, borderColor: Colors.border, alignItems: "center" },
+  addNumberCancelBtn: {
+    flex: 1, paddingVertical: 12, borderRadius: 12,
+    borderWidth: 1, borderColor: Colors.border, alignItems: "center",
+  },
   addNumberCancelText: { color: Colors.textSecondary, fontWeight: "600", fontSize: 14 },
-  addNumberSaveBtn: { flex: 2, paddingVertical: 12, borderRadius: 12, backgroundColor: Colors.primary, alignItems: "center" },
+  addNumberSaveBtn: {
+    flex: 2, paddingVertical: 12, borderRadius: 12,
+    backgroundColor: Colors.primary, alignItems: "center",
+  },
   addNumberSaveText: { color: "#fff", fontWeight: "700", fontSize: 14 },
-  addNumberTrigger: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, margin: 12, paddingVertical: 14, borderRadius: 12, borderWidth: 1.5, borderColor: Colors.primary + "50", borderStyle: "dashed", backgroundColor: Colors.primary + "06" },
+  addNumberTrigger: {
+    flexDirection: "row", alignItems: "center", justifyContent: "center",
+    gap: 8, margin: 12, paddingVertical: 14, borderRadius: 12,
+    borderWidth: 1.5, borderColor: Colors.primary + "50", borderStyle: "dashed",
+    backgroundColor: Colors.primary + "06",
+  },
   addNumberTriggerText: { color: Colors.primary, fontWeight: "700", fontSize: 14 },
-  receiptRequestBtn: { flexDirection: "row", alignItems: "center", gap: 14, backgroundColor: Colors.surface, borderRadius: 16, padding: 16, borderWidth: 1.5, borderColor: Colors.primary + "40", shadowColor: Colors.primary, shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.08, shadowRadius: 6, elevation: 2 },
-  receiptBtnIconWrap: { width: 48, height: 48, borderRadius: 24, backgroundColor: Colors.primary + "15", alignItems: "center", justifyContent: "center" },
+
+  // ── Request Receipt Button ──
+  receiptRequestBtn: {
+    flexDirection: "row", alignItems: "center", gap: 14,
+    backgroundColor: Colors.surface, borderRadius: 16, padding: 16,
+    borderWidth: 1.5, borderColor: Colors.primary + "40",
+    shadowColor: Colors.primary, shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08, shadowRadius: 6, elevation: 2,
+  },
+  receiptBtnIconWrap: {
+    width: 48, height: 48, borderRadius: 24,
+    backgroundColor: Colors.primary + "15", alignItems: "center", justifyContent: "center",
+  },
   receiptBtnTitle: { fontSize: 15, fontWeight: "800", color: Colors.primary },
   receiptBtnSubtitle: { fontSize: 12, color: Colors.textSecondary, marginTop: 2 },
 });
 
-const vlStyles = StyleSheet.create({
-  overlay:      { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" },
-  sheet:        { backgroundColor: Colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, maxHeight: "92%" },
-  handle:       { width: 40, height: 4, backgroundColor: Colors.border, borderRadius: 2, alignSelf: "center", marginBottom: 12 },
-  headerRow:    { flexDirection: "row", alignItems: "center", gap: 12, marginBottom: 16 },
-  headerIcon:   { width: 44, height: 44, borderRadius: 22, backgroundColor: Colors.primary + "15", alignItems: "center", justifyContent: "center" },
-  title:        { fontSize: 17, fontWeight: "800", color: Colors.text },
-  subtitle:     { fontSize: 12, color: Colors.textSecondary, marginTop: 2 },
-  locBox:       { flexDirection: "row", alignItems: "flex-start", gap: 10, backgroundColor: Colors.success + "10", borderRadius: 12, padding: 12, borderWidth: 1, borderColor: Colors.success + "30", marginBottom: 16 },
-  locText:      { flex: 1, fontSize: 12, color: Colors.text, lineHeight: 17 },
-  locRefresh:   { padding: 4 },
-  label:        { fontSize: 11, fontWeight: "700", color: Colors.textSecondary, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 8 },
-  outcomesGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 16 },
-  outcomeChip:  { paddingHorizontal: 14, paddingVertical: 9, borderRadius: 10, borderWidth: 1.5, borderColor: Colors.border, backgroundColor: Colors.surfaceAlt },
-  outcomeText:  { fontSize: 13, fontWeight: "600", color: Colors.text },
-  ptpBox:       { flexDirection: "row", alignItems: "center", gap: 10, backgroundColor: "#FEF3C710", borderRadius: 12, padding: 12, marginBottom: 14, borderWidth: 1, borderColor: "#F59E0B30" },
-  ptpLabel:     { fontSize: 10, fontWeight: "700", color: Colors.textMuted, textTransform: "uppercase", marginBottom: 4 },
-  ptpInput:     { fontSize: 15, fontWeight: "700", color: Colors.text, borderBottomWidth: 1.5, borderBottomColor: Colors.primary + "60", paddingVertical: 2 },
-  input:        { borderWidth: 1, borderColor: Colors.border, borderRadius: 10, padding: 12, fontSize: 14, color: Colors.text, backgroundColor: Colors.surfaceAlt, marginBottom: 14 },
-  cancelBtn:    { flex: 1, paddingVertical: 14, borderRadius: 12, borderWidth: 1, borderColor: Colors.border, alignItems: "center" },
-  cancelText:   { fontSize: 15, fontWeight: "600", color: Colors.textSecondary },
-  saveBtn:      { flex: 2, paddingVertical: 14, borderRadius: 12, backgroundColor: Colors.primary, alignItems: "center", flexDirection: "row", justifyContent: "center", gap: 8 },
-  saveText:     { fontSize: 15, fontWeight: "700", color: "#fff" },
-});
-
 const rrStyles = StyleSheet.create({
-  overlay:          { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" },
-  sheet:            { backgroundColor: Colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, gap: 16 },
-  handle:           { width: 40, height: 4, backgroundColor: Colors.border, borderRadius: 2, alignSelf: "center", marginBottom: 4 },
-  headerRow:        { flexDirection: "row", alignItems: "center", gap: 12 },
-  receiptIcon:      { width: 48, height: 48, borderRadius: 24, backgroundColor: Colors.primary + "15", alignItems: "center", justifyContent: "center" },
-  title:            { fontSize: 18, fontWeight: "800", color: Colors.text },
-  subtitle:         { fontSize: 13, color: Colors.textSecondary, marginTop: 2 },
-  infoBox:          { flexDirection: "row", alignItems: "flex-start", gap: 10, backgroundColor: "#3B82F612", borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, borderWidth: 1, borderColor: "#3B82F630" },
-  infoText:         { flex: 1, fontSize: 13, color: "#3B82F6", lineHeight: 18 },
-  btnRow:           { flexDirection: "row", gap: 12 },
-  cancelBtn:        { flex: 1, paddingVertical: 14, borderRadius: 12, borderWidth: 1, borderColor: Colors.border, alignItems: "center" },
-  cancelText:       { fontSize: 15, fontWeight: "600", color: Colors.textSecondary },
-  submitBtn:        { flex: 2, paddingVertical: 14, borderRadius: 12, backgroundColor: Colors.primary, alignItems: "center", flexDirection: "row", justifyContent: "center", gap: 8 },
-  submitText:       { fontSize: 15, fontWeight: "700", color: "#fff" },
-  amountGrid:       { flexDirection: "row", gap: 8 },
-  amountCell:       { flex: 1, backgroundColor: Colors.surfaceAlt ?? Colors.background, borderRadius: 12, padding: 10, alignItems: "center", borderWidth: 1.5, borderColor: Colors.border },
-  amountLabel:      { fontSize: 9, fontWeight: "700", color: Colors.textMuted, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6 },
-  amountInputRow:   { flexDirection: "row", alignItems: "center", gap: 2, borderBottomWidth: 1.5, borderBottomColor: Colors.primary + "60", paddingBottom: 2, width: "100%" },
-  amountRupee:      { fontSize: 13, fontWeight: "800", color: Colors.primary },
-  amountInput:      { flex: 1, fontSize: 14, fontWeight: "800", color: Colors.text, paddingVertical: 2, textAlign: "center" },
+  overlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" },
+  sheet: {
+    backgroundColor: Colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24,
+    padding: 24, gap: 16,
+  },
+  handle: {
+    width: 40, height: 4, backgroundColor: Colors.border,
+    borderRadius: 2, alignSelf: "center", marginBottom: 4,
+  },
+  headerRow: { flexDirection: "row", alignItems: "center", gap: 12 },
+  receiptIcon: {
+    width: 48, height: 48, borderRadius: 24,
+    backgroundColor: Colors.primary + "15", alignItems: "center", justifyContent: "center",
+  },
+  title: { fontSize: 18, fontWeight: "800", color: Colors.text },
+  subtitle: { fontSize: 13, color: Colors.textSecondary, marginTop: 2 },
+  infoBox: {
+    flexDirection: "row", alignItems: "flex-start", gap: 10,
+    backgroundColor: "#3B82F612", borderRadius: 12,
+    paddingHorizontal: 14, paddingVertical: 12,
+    borderWidth: 1, borderColor: "#3B82F630",
+  },
+  infoText: { flex: 1, fontSize: 13, color: "#3B82F6", lineHeight: 18 },
+  notesLabel: { fontSize: 13, fontWeight: "700", color: Colors.textSecondary, textTransform: "uppercase" },
+  notesInput: {
+    borderWidth: 1, borderColor: Colors.border, borderRadius: 12,
+    padding: 12, fontSize: 14, color: Colors.text,
+    minHeight: 90, textAlignVertical: "top",
+    backgroundColor: Colors.surfaceAlt,
+  },
+  btnRow: { flexDirection: "row", gap: 12 },
+  cancelBtn: {
+    flex: 1, paddingVertical: 14, borderRadius: 12,
+    borderWidth: 1, borderColor: Colors.border, alignItems: "center",
+  },
+  cancelText: { fontSize: 15, fontWeight: "600", color: Colors.textSecondary },
+  submitBtn: {
+    flex: 2, paddingVertical: 14, borderRadius: 12,
+    backgroundColor: Colors.primary, alignItems: "center",
+    flexDirection: "row", justifyContent: "center", gap: 8,
+  },
+  submitText: { fontSize: 15, fontWeight: "700", color: "#fff" },
+  // Amount grid
+amountGrid: { flexDirection: "row", gap: 8 },
+  amountCell: {
+    flex: 1, backgroundColor: Colors.surfaceAlt ?? Colors.background,
+    borderRadius: 12, padding: 10, alignItems: "center",
+    borderWidth: 1.5, borderColor: Colors.border,
+  },
+  amountLabel: {
+    fontSize: 9, fontWeight: "700", color: Colors.textMuted,
+    textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6,
+  },
+  amountInputRow: {
+    flexDirection: "row", alignItems: "center", gap: 2,
+    borderBottomWidth: 1.5, borderBottomColor: Colors.primary + "60",
+    paddingBottom: 2, width: "100%",
+  },
+  amountRupee: {
+    fontSize: 13, fontWeight: "800", color: Colors.primary,
+  },
+  amountInput: {
+    flex: 1, fontSize: 14, fontWeight: "800", color: Colors.text,
+    paddingVertical: 2, textAlign: "center",
+  },
+
+  // Success
   successContainer: { alignItems: "center", gap: 12, paddingVertical: 16 },
-  successIcon:      { width: 80, height: 80, borderRadius: 40, backgroundColor: Colors.success + "15", alignItems: "center", justifyContent: "center" },
-  successTitle:     { fontSize: 20, fontWeight: "800", color: Colors.text },
-  successMsg:       { fontSize: 14, color: Colors.textSecondary, textAlign: "center", lineHeight: 22 },
-  doneBtn:          { marginTop: 8, paddingVertical: 14, paddingHorizontal: 32, backgroundColor: Colors.success, borderRadius: 14, alignItems: "center" },
-  doneBtnText:      { color: "#fff", fontWeight: "700", fontSize: 15 },
-});
+  successIcon: {
+    width: 80, height: 80, borderRadius: 40,
+    backgroundColor: Colors.success + "15", alignItems: "center", justifyContent: "center",
+  },
+  successTitle: { fontSize: 20, fontWeight: "800", color: Colors.text },
+  successMsg: { fontSize: 14, color: Colors.textSecondary, textAlign: "center", lineHeight: 22 },
+  doneBtn: {
+    marginTop: 8, paddingVertical: 14, paddingHorizontal: 32,
+    backgroundColor: Colors.success, borderRadius: 14, alignItems: "center",
+  },
+  doneBtnText: { color: "#fff", fontWeight: "700", fontSize: 15 },
+
+  // ── Manual Amount ──  👈 ADD HERE, before the closing });
+  manualAmountBox: {
+    borderWidth: 1.5,
+    borderColor: Colors.primary + "40",
+    borderRadius: 14,
+    padding: 14,
+    backgroundColor: Colors.primary + "06",
+  },
+  manualAmountLabel: {
+    fontSize: 9, fontWeight: "700", color: Colors.textMuted,
+    textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 8,
+  },
+  manualAmountInputRow: {
+    flexDirection: "row", alignItems: "center", gap: 6,
+  },
+  rupeeSymbol: {
+    fontSize: 20, fontWeight: "800", color: Colors.primary,
+  },
+  manualAmountInput: {
+    flex: 1, fontSize: 22, fontWeight: "800", color: Colors.text,
+    paddingVertical: 4,
+    borderBottomWidth: 1.5, borderBottomColor: Colors.primary + "50",
+  },
+});  // 👈 this is the closing }); of rrStyles
