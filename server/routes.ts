@@ -699,6 +699,145 @@ app.use("/api/fos-depositions", (req, res, next) => {
     try { res.json(await storage.getAgentStats(req.session.agentId!)); }
     catch (e: any) { res.status(500).json({ message: e.message }); }
   });
+  // ─────────────────────────────────────────────────────────────────────────────
+// PASTE THIS BLOCK right after the existing  app.get("/api/stats", ...)  route
+// in server/routes.ts  (around line 701)
+// ─────────────────────────────────────────────────────────────────────────────
+
+  app.get("/api/agent/notifications", requireAuth, async (req, res) => {
+    try {
+      const agentId = req.session.agentId!;
+      const notifications: any[] = [];
+
+      // ── 1. PTP cases due today ──────────────────────────────────────────────
+      const ptpResult = await storage.query(
+        `SELECT customer_name, loan_no, pos::numeric AS pos, ptp_date
+         FROM loan_cases
+         WHERE agent_id = $1
+           AND status = 'PTP'
+           AND (ptp_date = CURRENT_DATE OR telecaller_ptp_date = CURRENT_DATE)
+         UNION ALL
+         SELECT customer_name, loan_no, pos::numeric AS pos, ptp_date
+         FROM bkt_cases
+         WHERE agent_id = $1
+           AND status = 'PTP'
+           AND (ptp_date = CURRENT_DATE OR telecaller_ptp_date = CURRENT_DATE)`,
+        [agentId]
+      );
+      for (const row of ptpResult.rows) {
+        const amt = row.pos ? `₹${Number(row.pos).toLocaleString("en-IN")}` : "";
+        notifications.push({
+          id: `ptp-${row.loan_no}`,
+          type: "ptp_today",
+          title: `PTP Reminder — ${row.customer_name}`,
+          body: `${row.customer_name} has PTP due today. Collect ${amt}.`,
+          timeRaw: new Date().setHours(8, 0, 0, 0), // treat as 8 AM today
+          read: false,
+          meta: { loanNo: row.loan_no, screen: "/(app)/allocation" },
+        });
+      }
+
+      // ── 2. Cases auto-marked Paid via online collection (last 24 h) ─────────
+      const autoResult = await storage.query(
+        `SELECT oc.customer_name, oc.loan_no, oc.amount::numeric AS amount, oc.created_at
+         FROM online_collections oc
+         WHERE oc.agent_id = $1
+           AND oc.created_at >= NOW() - INTERVAL '24 hours'
+         ORDER BY oc.created_at DESC
+         LIMIT 10`,
+        [agentId]
+      );
+      for (const row of autoResult.rows) {
+        const amt = row.amount ? `₹${Number(row.amount).toLocaleString("en-IN")}` : "";
+        notifications.push({
+          id: `auto-paid-${row.loan_no}-${new Date(row.created_at).getTime()}`,
+          type: "auto_paid",
+          title: `Case auto-marked Paid — ${row.customer_name}`,
+          body: `${row.customer_name} (${row.loan_no}) marked Paid after your online deposit of ${amt}.`,
+          timeRaw: new Date(row.created_at).getTime(),
+          read: false,
+          meta: { loanNo: row.loan_no },
+        });
+      }
+
+      // ── 3. Pending depositions ──────────────────────────────────────────────
+      const depResult = await storage.query(
+        `SELECT COUNT(*)::int AS cnt, SUM(amount)::numeric AS total
+         FROM fos_depositions
+         WHERE agent_id = $1
+           AND payment_method = 'pending'`,
+        [agentId]
+      );
+      const depRow = depResult.rows[0];
+      if (depRow && depRow.cnt > 0) {
+        const totalAmt = depRow.total
+          ? `₹${Number(depRow.total).toLocaleString("en-IN")}`
+          : "";
+        notifications.push({
+          id: "pending-dep",
+          type: "pending_deposition",
+          title: "Pending deposition",
+          body: `You have ${depRow.cnt} deposition${depRow.cnt > 1 ? "s" : ""} (${totalAmt}) not submitted. Please submit before 6 PM.`,
+          timeRaw: new Date().setHours(12, 0, 0, 0),
+          read: false,
+          meta: { screen: "/(app)/deposition" },
+        });
+      }
+
+      // ── 4. Latest admin broadcast (last 7 days) ─────────────────────────────
+      // broadcasts table is optional — only query if it exists
+      try {
+        const bcResult = await storage.query(
+          `SELECT title, message, sent_at
+           FROM broadcasts
+           WHERE sent_at >= NOW() - INTERVAL '7 days'
+           ORDER BY sent_at DESC
+           LIMIT 3`
+        );
+        for (const row of bcResult.rows) {
+          notifications.push({
+            id: `bc-${new Date(row.sent_at).getTime()}`,
+            type: "broadcast",
+            title: row.title || "Admin",
+            body: row.message,
+            timeRaw: new Date(row.sent_at).getTime(),
+            read: true, // broadcasts treated as read
+            meta: {},
+          });
+        }
+      } catch {
+        // broadcasts table may not exist yet — safe to skip
+      }
+
+      // ── Sort newest first ───────────────────────────────────────────────────
+      notifications.sort((a, b) => Number(b.timeRaw) - Number(a.timeRaw));
+
+      // Convert epoch ms back to ISO strings for the client
+      const out = notifications.map((n) => ({
+        ...n,
+        timeRaw: new Date(n.timeRaw).toISOString(),
+        time: formatNotifTime(new Date(n.timeRaw)),
+      }));
+
+      res.json({ notifications: out });
+    } catch (e: any) {
+      console.error("[notifications]", e.message);
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+// Helper — same logic as fmtTime in the client
+function formatNotifTime(d: Date): string {
+  const now = new Date();
+  const diffMs = now.getTime() - d.getTime();
+  const diffMin = Math.floor(diffMs / 60000);
+  if (diffMin < 1)  return "Just now";
+  if (diffMin < 60) return `${diffMin}m ago`;
+  const diffH = Math.floor(diffMin / 60);
+  if (diffH < 24)
+    return `Today ${d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}`;
+  return `Yesterday ${d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}`;
+}
 
 app.get("/api/today-ptp", requireAuth, async (req, res) => {
   try {
