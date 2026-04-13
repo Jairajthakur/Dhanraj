@@ -1,37 +1,46 @@
+// app/(app)/_layout.tsx
 import React, { useState } from "react";
 import {
-  View, Text, Pressable, StyleSheet, Modal,
-  Animated, ScrollView, Platform, Alert,
+  View,
+  Text,
+  Pressable,
+  StyleSheet,
+  Modal,
+  Animated,
+  ScrollView,
+  Platform,
+  Alert,
 } from "react-native";
-import { Stack, router } from "expo-router";
+import { Stack, Tabs, router, useSegments } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
+import { useQuery } from "@tanstack/react-query";
 import Colors from "@/constants/colors";
 import { useAuth } from "@/context/AuthContext";
 import { api } from "@/lib/api";
 
+// ─── Drawer menu items ────────────────────────────────────────────────────────
 const MENU_ITEMS = [
-  { key: "dashboard",       label: "Dashboard",       icon: "home"             as const, screen: "/(app)/dashboard" },
-  { key: "allocation",      label: "My Cases",        icon: "list"             as const, screen: "/(app)/allocation" },
-  { key: "drr",             label: "DRR / Targets",   icon: "trending-up"      as const, screen: "/(app)/drr" },
-  { key: "ready-payment",   label: "Ready Payment",   icon: "phone-portrait"   as const, screen: "/(app)/ready-payment" },
-  { key: "deposition",      label: "Deposition",      icon: "cash"             as const, screen: "/(app)/deposition" },
-  { key: "performance",     label: "Performance",     icon: "stats-chart"      as const, screen: "/(app)/performance" },
-  { key: "id-card",         label: "ID Card",         icon: "card"             as const, screen: "/(app)/id-card" },
-  { key: "attendance",      label: "Attendance",      icon: "checkmark-circle" as const, screen: "attendance" },
-  { key: "salary",          label: "Salary",          icon: "wallet"           as const, screen: "/(app)/salary" },
-  { key: "change-password", label: "Change Password", icon: "lock-closed"      as const, screen: "/(app)/change-password" },
-  { key: "visit-log",       label: "Visit Log",       icon: "walk"             as const, screen: "/(app)/visit-log" },
-  { key: "online-collection", label: "Online Collection", icon: "card"         as const, screen: "/(app)/online-collection" },
+  { key: "dashboard",         label: "Dashboard",          icon: "home"             as const, screen: "/(app)/dashboard" },
+  { key: "drr",               label: "DRR / Targets",      icon: "trending-up"      as const, screen: "/(app)/drr" },
+  { key: "ready-payment",     label: "Ready Payment",      icon: "phone-portrait"   as const, screen: "/(app)/ready-payment" },
+  { key: "deposition",        label: "Deposition",         icon: "cash"             as const, screen: "/(app)/deposition" },
+  { key: "performance",       label: "Performance",        icon: "stats-chart"      as const, screen: "/(app)/performance" },
+  { key: "id-card",           label: "ID Card",            icon: "card"             as const, screen: "/(app)/id-card" },
+  { key: "attendance",        label: "Attendance",         icon: "checkmark-circle" as const, screen: "attendance" },
+  { key: "salary",            label: "Salary",             icon: "wallet"           as const, screen: "/(app)/salary" },
+  { key: "change-password",   label: "Change Password",    icon: "lock-closed"      as const, screen: "/(app)/change-password" },
+  { key: "online-collection", label: "Online Collection",  icon: "card"             as const, screen: "/(app)/online-collection" },
 ];
 
+// ─── Attendance Modal ─────────────────────────────────────────────────────────
 function AttendanceModal({ visible, onClose }: { visible: boolean; onClose: () => void }) {
   const [loading, setLoading] = useState(false);
   const handle = async (type: "in" | "out") => {
     setLoading(true);
     try {
-      if (type === "in") { await api.checkIn(); Alert.alert("Success", "Checked in successfully!"); }
-      else { await api.checkOut(); Alert.alert("Success", "Checked out successfully!"); }
+      if (type === "in") { await api.checkIn();  Alert.alert("Success", "Checked in successfully!"); }
+      else               { await api.checkOut(); Alert.alert("Success", "Checked out successfully!"); }
       onClose();
     } catch (e: any) { Alert.alert("Error", e.message); }
     finally { setLoading(false); }
@@ -61,12 +70,21 @@ function AttendanceModal({ visible, onClose }: { visible: boolean; onClose: () =
   );
 }
 
-function Drawer({ visible, onClose, agentName }: { visible: boolean; onClose: () => void; agentName: string }) {
+// ─── Drawer ───────────────────────────────────────────────────────────────────
+function Drawer({
+  visible,
+  onClose,
+  agentName,
+}: {
+  visible: boolean;
+  onClose: () => void;
+  agentName: string;
+}) {
   const insets = useSafeAreaInsets();
   const { logout } = useAuth();
   const [attVisible, setAttVisible] = useState(false);
 
-  const handleNav = (item: typeof MENU_ITEMS[0]) => {
+  const handleNav = (item: (typeof MENU_ITEMS)[0]) => {
     if (Platform.OS !== "web") {
       try { const Haptics = require("expo-haptics"); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); } catch (_) {}
     }
@@ -76,10 +94,7 @@ function Drawer({ visible, onClose, agentName }: { visible: boolean; onClose: ()
   };
 
   const handleLogout = async () => {
-    try {
-      await logout();
-      router.replace("/(app)/login");
-    } catch {}
+    try { await logout(); router.replace("/(app)/login"); } catch {}
   };
 
   const initials = agentName.split(" ").map((w) => w[0]).join("").toUpperCase().slice(0, 2);
@@ -105,8 +120,8 @@ function Drawer({ visible, onClose, agentName }: { visible: boolean; onClose: ()
               <View style={styles.menuSection}>
                 {MENU_ITEMS.map((item) => (
                   <Pressable key={item.key} style={({ pressed }) => [styles.drawerItem, pressed && styles.drawerItemPressed]} onPress={() => handleNav(item)}>
-                    <View style={[styles.drawerIconWrap, item.key === "drr" && { backgroundColor: Colors.primary + "25" }]}>
-                      <Ionicons name={item.icon} size={18} color={item.key === "drr" ? Colors.primary : Colors.primary} />
+                    <View style={styles.drawerIconWrap}>
+                      <Ionicons name={item.icon} size={18} color={Colors.primary} />
                     </View>
                     <Text style={styles.drawerItemText}>{item.label}</Text>
                     <Ionicons name="chevron-forward" size={14} color={Colors.textMuted} />
@@ -130,58 +145,198 @@ function Drawer({ visible, onClose, agentName }: { visible: boolean; onClose: ()
   );
 }
 
+// ─── Custom Tab Bar ───────────────────────────────────────────────────────────
+// Only shown on the three main tabs, hidden on drill-down screens.
+function CustomTabBar({
+  state,
+  descriptors,
+  navigation,
+  unreadCount,
+}: {
+  state: any;
+  descriptors: any;
+  navigation: any;
+  unreadCount: number;
+}) {
+  const insets = useSafeAreaInsets();
+
+  const TAB_CONFIG = [
+    { name: "allocation", label: "My Cases",    icon: "list" as const },
+    { name: "visit-log",  label: "Visit Log",   icon: "map" as const },
+    { name: "notifications", label: "Alerts",  icon: "notifications" as const },
+  ];
+
+  return (
+    <View style={[styles.tabBar, { paddingBottom: Math.max(insets.bottom, 8) }]}>
+      {TAB_CONFIG.map((tab, idx) => {
+        const route = state.routes.find((r: any) => r.name === tab.name);
+        if (!route) return null;
+        const routeIdx = state.routes.indexOf(route);
+        const isFocused = state.index === routeIdx;
+        const color = isFocused ? Colors.primary : Colors.textMuted;
+        const hasUnread = tab.name === "notifications" && unreadCount > 0;
+
+        const onPress = () => {
+          const event = navigation.emit({ type: "tabPress", target: route.key, canPreventDefault: true });
+          if (!isFocused && !event.defaultPrevented) {
+            navigation.navigate(route.name);
+          }
+        };
+
+        return (
+          <Pressable
+            key={tab.name}
+            style={({ pressed }) => [styles.tabItem, pressed && { opacity: 0.7 }]}
+            onPress={onPress}
+            accessibilityLabel={tab.label}
+          >
+            <View style={styles.tabIconWrap}>
+              <Ionicons
+                name={isFocused ? tab.icon : (`${tab.icon}-outline` as any)}
+                size={24}
+                color={color}
+              />
+              {hasUnread && (
+                <View style={styles.tabBadge}>
+                  <Text style={styles.tabBadgeText}>{unreadCount > 9 ? "9+" : unreadCount}</Text>
+                </View>
+              )}
+            </View>
+            <Text style={[styles.tabText, { color }]}>{tab.label}</Text>
+            {isFocused && <View style={[styles.tabIndicator, { backgroundColor: Colors.primary }]} />}
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
+// ─── Root Layout ──────────────────────────────────────────────────────────────
 export default function AppLayout() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const { agent } = useAuth();
+  const segments = useSegments();
+
+  // Unread notification count for badge
+  const { data: notifData } = useQuery<any[]>({
+    queryKey: ["/api/agent/notifications"],
+    queryFn: async () => {
+      const res = await api.getAgentNotifications();
+      return res.notifications ?? [];
+    },
+    refetchInterval: 60_000,
+    enabled: !!agent,
+  });
+  const unreadCount = (notifData ?? []).filter((n: any) => !n.read).length;
+
+  // Shared header options
+  const sharedHeader = {
+    headerStyle:      { backgroundColor: Colors.surface },
+    headerTintColor:  Colors.text,
+    headerTitleStyle: { fontWeight: "700" as const, fontSize: 16, color: Colors.text },
+    headerShadowVisible: false,
+    headerLeft: () => (
+      <Pressable onPress={() => setDrawerOpen(true)} style={styles.headerMenuBtn}>
+        <Ionicons name="menu" size={24} color={Colors.text} />
+      </Pressable>
+    ),
+    headerTitle: () => (
+      <Text style={{ color: Colors.primary, fontSize: 15, fontWeight: "800", letterSpacing: 0.5 }} numberOfLines={1}>
+        {agent?.name?.toUpperCase() || "FOS"}
+      </Text>
+    ),
+    headerRight: () => (
+      <View style={styles.headerLogo}>
+        <Ionicons name="logo-usd" size={16} color={Colors.primary} />
+      </View>
+    ),
+  };
 
   return (
     <>
-      <Stack
-        screenOptions={{
-          headerStyle: { backgroundColor: Colors.surface },
-          headerTintColor: Colors.text,
-          headerTitleStyle: { fontWeight: "700", fontSize: 16, color: Colors.text },
-          headerShadowVisible: false,
-          headerLeft: () => (
-            <Pressable onPress={() => setDrawerOpen(true)} style={styles.headerMenuBtn}>
-              <Ionicons name="menu" size={24} color={Colors.text} />
-            </Pressable>
-          ),
-          headerTitle: () => (
-            <Text style={{ color: Colors.primary, fontSize: 15, fontWeight: "800", letterSpacing: 0.5 }} numberOfLines={1}>
-              {agent?.name?.toUpperCase() || "FOS"}
-            </Text>
-          ),
-          headerRight: () => (
-            <View style={styles.headerLogo}>
-              <Ionicons name="logo-usd" size={16} color={Colors.primary} />
-            </View>
-          ),
-        }}
+      {/*
+        ── Bottom Tabs for the three main screens ──────────────────────────────
+        All other screens (customer detail, deposition, etc.) are stacked on
+        top via <Stack.Screen> inside each tab screen OR via push navigation,
+        so the tab bar hides automatically when you go deeper.
+      */}
+      <Tabs
+        tabBar={(props) => (
+          <CustomTabBar {...props} unreadCount={unreadCount} />
+        )}
+        screenOptions={sharedHeader}
       >
-        <Stack.Screen name="login" options={{ headerShown: false }} />
-        <Stack.Screen name="dashboard" />
-        <Stack.Screen name="allocation" />
-        <Stack.Screen name="drr" options={{ title: "DRR & Targets" }} />
-        <Stack.Screen name="customer/[id]" options={{ headerLeft: undefined, headerBackTitle: "Back" }} />
-        <Stack.Screen name="performance" />
-        <Stack.Screen name="salary" />
-        <Stack.Screen name="id-card" />
-        <Stack.Screen name="ready-payment" />
-        <Stack.Screen name="deposition" />
-        <Stack.Screen name="depositions" />
-        <Stack.Screen name="change-password" />
-        <Stack.Screen name="visit-log" options={{ title: "Visit Log" }} />
-        <Stack.Screen name="online-collection" options={{ title: "Online Collection" }} />
-      </Stack>
-      <Drawer visible={drawerOpen} onClose={() => setDrawerOpen(false)} agentName={agent?.name || "Agent"} />
+        {/* Tab 1 — My Cases */}
+        <Tabs.Screen
+          name="allocation"
+          options={{ title: "My Cases" }}
+        />
+
+        {/* Tab 2 — Visit Log */}
+        <Tabs.Screen
+          name="visit-log"
+          options={{ title: "Visit Log" }}
+        />
+
+        {/* Tab 3 — Notifications */}
+        <Tabs.Screen
+          name="notifications"
+          options={{ title: "Notifications", headerShown: false }}
+        />
+
+        {/* ── Non-tab screens (hidden from tab bar) ── */}
+        <Tabs.Screen name="login"             options={{ href: null, headerShown: false }} />
+        <Tabs.Screen name="dashboard"         options={{ href: null }} />
+        <Tabs.Screen name="drr"               options={{ href: null, title: "DRR & Targets" }} />
+        <Tabs.Screen name="customer/[id]"     options={{ href: null, headerLeft: undefined, headerBackTitle: "Back" }} />
+        <Tabs.Screen name="performance"       options={{ href: null }} />
+        <Tabs.Screen name="salary"            options={{ href: null }} />
+        <Tabs.Screen name="id-card"           options={{ href: null }} />
+        <Tabs.Screen name="ready-payment"     options={{ href: null }} />
+        <Tabs.Screen name="deposition"        options={{ href: null }} />
+        <Tabs.Screen name="depositions"       options={{ href: null }} />
+        <Tabs.Screen name="change-password"   options={{ href: null }} />
+        <Tabs.Screen name="online-collection" options={{ href: null, title: "Online Collection" }} />
+        <Tabs.Screen name="bkt-cases"         options={{ href: null }} />
+        <Tabs.Screen name="foreclose"         options={{ href: null }} />
+      </Tabs>
+
+      <Drawer
+        visible={drawerOpen}
+        onClose={() => setDrawerOpen(false)}
+        agentName={agent?.name || "Agent"}
+      />
     </>
   );
 }
 
+// ─── Styles ───────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
+  // Header
   headerMenuBtn:      { width: 36, height: 36, borderRadius: 10, alignItems: "center", justifyContent: "center", backgroundColor: Colors.surfaceAlt, marginLeft: -4 },
   headerLogo:         { width: 32, height: 32, borderRadius: 10, alignItems: "center", justifyContent: "center", backgroundColor: Colors.primary + "18" },
+
+  // Tab bar
+  tabBar: {
+    flexDirection: "row",
+    backgroundColor: Colors.surface,
+    borderTopWidth: 1,
+    borderTopColor: Colors.border,
+    paddingTop: 8,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    elevation: 12,
+  },
+  tabItem:       { flex: 1, alignItems: "center", gap: 3 },
+  tabIconWrap:   { position: "relative" },
+  tabBadge:      { position: "absolute", top: -4, right: -8, backgroundColor: Colors.danger, borderRadius: 8, minWidth: 16, height: 16, alignItems: "center", justifyContent: "center", paddingHorizontal: 3 },
+  tabBadgeText:  { fontSize: 9, fontWeight: "800", color: "#fff" },
+  tabText:       { fontSize: 10, fontWeight: "600" },
+  tabIndicator:  { position: "absolute", top: -8, width: 20, height: 3, borderRadius: 2 },
+
+  // Drawer
   drawerOverlay:      { flex: 1, flexDirection: "row" },
   drawerBackdrop:     { flex: 1, backgroundColor: "rgba(0,0,0,0.65)" },
   drawerContainer:    { width: "82%", maxWidth: 310, backgroundColor: Colors.surface, position: "absolute", left: 0, top: 0, bottom: 0, borderRightWidth: 1, borderRightColor: Colors.borderLight },
@@ -198,8 +353,8 @@ const styles = StyleSheet.create({
   drawerItemPressed:  { backgroundColor: Colors.border },
   drawerIconWrap:     { width: 32, height: 32, borderRadius: 9, backgroundColor: Colors.primary + "18", alignItems: "center", justifyContent: "center" },
   drawerItemText:     { flex: 1, fontSize: 14, color: Colors.text, fontWeight: "600" },
-  newBadge:           { backgroundColor: Colors.accent, borderRadius: 6, paddingHorizontal: 7, paddingVertical: 2 },
-  newBadgeText:       { fontSize: 9, fontWeight: "800", color: "#fff", letterSpacing: 0.5 },
+
+  // Attendance modal
   modalOverlay:       { flex: 1, backgroundColor: "rgba(0,0,0,0.65)", justifyContent: "center", alignItems: "center" },
   attendanceCard:     { width: 300, backgroundColor: Colors.surface, borderRadius: 20, overflow: "hidden", borderWidth: 1, borderColor: Colors.borderLight },
   attHeader:          { flexDirection: "row", alignItems: "center", gap: 10, padding: 20, paddingBottom: 18 },
