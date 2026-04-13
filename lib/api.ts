@@ -5,6 +5,37 @@ import { getApiUrl } from "./query-client";
 const SESSION_KEY = "session_agent";
 const TOKEN_KEY = "auth_token";
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// SECTION 1 — Field visits  (paste inside the main `api = { ... }` object)
+// ═══════════════════════════════════════════════════════════════════════════════
+ 
+  // ── Field visits ────────────────────────────────────────────────────────────
+  getFieldVisits: (caseId: number) =>
+    apiRequest("GET", `/api/cases/${caseId}/visits`),
+ 
+  recordFieldVisit: (caseId: number, data: {
+    lat: number;
+    lng: number;
+    accuracy?: number;
+    case_type?: string;
+  }) => apiRequest("POST", `/api/cases/${caseId}/visit`, data),
+ 
+ 
+// ═══════════════════════════════════════════════════════════════════════════════
+// SECTION 2 — Case reassign  (paste inside `api.admin = { ... }`)
+// ═══════════════════════════════════════════════════════════════════════════════
+ 
+    // ── Case reassign ──────────────────────────────────────────────────────────
+    reassignCase: (caseId: number, data: {
+      to_agent_id: number;
+      case_type?:  string;
+      reason?:     string;
+    }) => apiRequest("PATCH", `/api/admin/cases/${caseId}/reassign`, data),
+ 
+    getReassignLog: (caseId: number) =>
+      apiRequest("GET", `/api/admin/cases/${caseId}/reassign-log`),
+ 
+
 // ─── Agent cache ─────────────────────────────────────────────────────────────
 export const agentCache = {
   get: async (): Promise<any | null> => {
