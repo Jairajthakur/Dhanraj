@@ -236,6 +236,7 @@ export const api = {
     apiRequest("GET", `/api/bkt-cases${category ? `?category=${category}` : ""}`),
 
   getStats: () => apiRequest("GET", "/api/stats"),
+   getAgentNotifications: () => apiRequest("GET", "/api/agent/notifications"),
 
   updateFeedback: (id: number, data: any) =>
     apiRequest("PUT", `/api/cases/${id}/feedback`, data),
