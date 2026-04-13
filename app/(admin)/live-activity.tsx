@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import {
-  View, Text, StyleSheet, FlatList, Pressable,
+  View, Text, StyleSheet, Pressable, TextInput, Alert,
   ActivityIndicator, RefreshControl, ScrollView, Platform,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -28,7 +28,28 @@ export default function LiveActivityScreen() {
   const insets = useSafeAreaInsets();
   const qc = useQueryClient();
   const [refreshing, setRefreshing] = useState(false);
-  const [activeTab, setActiveTab] = useState<"agents" | "zero" | "report">("agents");
+  const [activeTab, setActiveTab] = useState<"agents" | "zero" | "report" | "broadcast">("agents");
+  const [broadcastTitle, setBroadcastTitle] = useState("");
+  const [broadcastMsg, setBroadcastMsg] = useState("");
+  const [broadcasting, setBroadcasting] = useState(false);
+
+  const sendBroadcast = async () => {
+    if (!broadcastMsg.trim()) { Alert.alert("Error", "Please enter a message"); return; }
+    setBroadcasting(true);
+    try {
+      const url = new URL("/api/admin/broadcast", getApiUrl()).toString();
+      const res = await fetch(url, {
+        method: "POST", credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: broadcastTitle.trim() || "Admin Message", message: broadcastMsg.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || "Failed");
+      Alert.alert("Sent!", `Message delivered to ${data.sent} agent${data.sent !== 1 ? "s" : ""}.`);
+      setBroadcastTitle(""); setBroadcastMsg("");
+    } catch (e: any) { Alert.alert("Error", e.message); }
+    finally { setBroadcasting(false); }
+  };
 
   const { data: activityData, isLoading: actLoading } = useQuery({
     queryKey: ["/api/admin/live-activity"],
@@ -96,7 +117,7 @@ export default function LiveActivityScreen() {
           </View>
         </View>
         <View style={styles.tabRow}>
-          {([["agents", "Agents"], ["zero", "Stale Cases"], ["report", "Daily Report"]] as const).map(([key, label]) => (
+          {([["agents", "Agents"], ["zero", "Stale"], ["report", "Report"], ["broadcast", "Broadcast"]] as const).map(([key, label]) => (
             <Pressable key={key} style={[styles.tab, activeTab === key && styles.tabActive]} onPress={() => setActiveTab(key)}>
               <Text style={[styles.tabText, activeTab === key && styles.tabTextActive]}>{label}</Text>
             </Pressable>
@@ -216,6 +237,61 @@ export default function LiveActivityScreen() {
               </View>
             );
           })}
+          {activeTab === "broadcast" && (
+            <View style={{ gap: 12 }}>
+              <View style={styles.broadcastCard}>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 12 }}>
+                  <Ionicons name="megaphone" size={18} color={Colors.warning} />
+                  <Text style={{ fontSize: 14, fontWeight: "700", color: Colors.text }}>Send to all agents</Text>
+                </View>
+                <Text style={styles.fieldLabel}>Title (optional)</Text>
+                <TextInput
+                  style={styles.fieldInput}
+                  placeholder="e.g. Today's Target"
+                  placeholderTextColor={Colors.textMuted}
+                  value={broadcastTitle}
+                  onChangeText={setBroadcastTitle}
+                />
+                <Text style={styles.fieldLabel}>Message *</Text>
+                <TextInput
+                  style={[styles.fieldInput, { minHeight: 90, textAlignVertical: "top" }]}
+                  placeholder="Type your message to all agents..."
+                  placeholderTextColor={Colors.textMuted}
+                  value={broadcastMsg}
+                  onChangeText={setBroadcastMsg}
+                  multiline
+                />
+                <Pressable
+                  style={[styles.broadcastBtn, broadcasting && { opacity: 0.6 }]}
+                  onPress={sendBroadcast}
+                  disabled={broadcasting}
+                >
+                  {broadcasting
+                    ? <ActivityIndicator color="#fff" size="small" />
+                    : <><Ionicons name="send" size={16} color="#fff" /><Text style={styles.broadcastBtnText}>Send to all {agents.length} agents</Text></>
+                  }
+                </Pressable>
+              </View>
+
+              <View style={styles.broadcastCard}>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                  <Ionicons name="information-circle" size={16} color={Colors.info} />
+                  <Text style={{ fontSize: 12, fontWeight: "700", color: Colors.info }}>Auto notifications already running</Text>
+                </View>
+                {[
+                  { icon: "alarm", text: "8 AM — PTP reminder to agents with cases due today", color: Colors.warning },
+                  { icon: "checkmark-circle", text: "Auto — Case marked Paid when online collection submitted", color: Colors.success },
+                  { icon: "alert-circle", text: "6 PM — Alert to agents with pending depositions", color: Colors.danger },
+                  { icon: "bar-chart", text: "7 PM — End of day summary to all agents", color: Colors.primary },
+                ].map((n) => (
+                  <View key={n.text} style={{ flexDirection: "row", alignItems: "flex-start", gap: 8, marginTop: 8 }}>
+                    <Ionicons name={n.icon as any} size={14} color={n.color} style={{ marginTop: 1 }} />
+                    <Text style={{ flex: 1, fontSize: 11, color: Colors.textSecondary, lineHeight: 16 }}>{n.text}</Text>
+                  </View>
+                ))}
+              </View>
+            </View>
+          )}
         </ScrollView>
       )}
     </View>
@@ -262,5 +338,10 @@ const styles = StyleSheet.create({
   perfBadge:    { borderRadius: 8, paddingHorizontal: 10, paddingVertical: 4 },
   perfBadgeText:{ fontSize: 11, fontWeight: "700" },
   empty:        { alignItems: "center", justifyContent: "center", gap: 12, paddingVertical: 60 },
+  broadcastCard: { backgroundColor: Colors.surface, borderRadius: 14, padding: 16, borderWidth: 1, borderColor: Colors.border },
+  fieldLabel:   { fontSize: 11, fontWeight: "700", color: Colors.textSecondary, textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 6, marginTop: 4 },
+  fieldInput:   { borderWidth: 1, borderColor: Colors.border, borderRadius: 10, padding: 12, fontSize: 14, color: Colors.text, backgroundColor: Colors.surfaceAlt, marginBottom: 10 },
+  broadcastBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, backgroundColor: Colors.primary, borderRadius: 12, paddingVertical: 14, marginTop: 4 },
+  broadcastBtnText: { fontSize: 14, fontWeight: "700", color: "#fff" },
   emptyText:    { fontSize: 14, color: Colors.textMuted, fontWeight: "600" },
 });
