@@ -2729,7 +2729,7 @@ app.use(async (_req, _res, next) => {
 })();
  
 // ── POST /api/cases/:id/visit — agent records a geo check-in ────────────────
-app.get("/api/cases/:id/visits", requireAuth, async (req: Request, res: Response) => {
+app.post("/api/cases/:id/visit", requireAgent, async (req: Request, res: Response) => {
   try {
     const caseId   = Number(req.params.id);
     const agentId  = req.session.agentId!;
@@ -2756,7 +2756,7 @@ app.get("/api/cases/:id/visits", requireAuth, async (req: Request, res: Response
 });
  
 // ── GET /api/cases/:id/visits — agent fetches visit history for a case ──────
-app.get("/api/cases/:id/visits", requireAuth, async (req: Request, res: Response) => {
+app.get("/api/cases/:id/visits", requireAgent, async (req: Request, res: Response) => {
   try {
     const caseId = Number(req.params.id);
  
