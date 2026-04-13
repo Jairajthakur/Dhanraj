@@ -1951,6 +1951,35 @@ app.post("/api/admin/reset-monthly-feedback/case/:caseId", requireAdmin, async (
   }
   runFosDepositionReminderJob(); setInterval(runFosDepositionReminderJob, 60 * 60 * 1000);
 
+  // ── 6 PM pending deposition alert ─────────────────────────────────────────
+  const pendingDepAlert6pmSent = new Set<string>();
+  async function run6pmPendingDepAlert() {
+    try {
+      const { hour, todayKey } = getISTHour();
+      if (hour !== 18) return;
+      const slotKey = `${todayKey}-6pm-dep`;
+      if (pendingDepAlert6pmSent.has(slotKey)) return;
+      const result = await storage.query(
+        `SELECT fa.id, fa.push_token, fa.name, COUNT(fd.id)::int AS cnt
+         FROM fos_agents fa
+         JOIN fos_depositions fd ON fd.agent_id=fa.id AND fd.payment_method='pending'
+         WHERE fa.push_token IS NOT NULL AND fa.push_token<>'' AND fa.role='fos'
+         GROUP BY fa.id, fa.push_token, fa.name HAVING COUNT(fd.id)>0`
+      );
+      for (const row of result.rows) {
+        await sendPush(row.push_token, "⚠️ Pending Depositions",
+          `You have ${row.cnt} pending deposition${row.cnt > 1 ? "s" : ""} not submitted. Please submit before end of day.`,
+          { screen: "deposition", type: "pending_dep_6pm" });
+      }
+      pendingDepAlert6pmSent.add(slotKey);
+      if (pendingDepAlert6pmSent.size > 7) pendingDepAlert6pmSent.delete(pendingDepAlert6pmSent.values().next().value);
+    } catch (e: any) { console.error("[6pm-dep-alert]", e.message); }
+  }
+  run6pmPendingDepAlert(); setInterval(run6pmPendingDepAlert, 10 * 60 * 1000);
+
+  // ── Auto-notify admin when agent submits online collection ─────────────────
+  // (handled inline in /api/online-collection endpoint above)
+
   const batchReminderSentDates = new Set<string>();
   async function runBatchReminderJob() {
     try {
