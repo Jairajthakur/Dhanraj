@@ -16,7 +16,7 @@ const JWT_SECRET = process.env.JWT_SECRET || process.env.SESSION_SECRET || "fos-
 
 function base64url(str: string): string {
   return Buffer.from(str).toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
-}f
+}
 
 function signToken(payload: { agentId: number; role: string }): string {
   const header = base64url(JSON.stringify({ alg: "HS256", typ: "JWT" }));
