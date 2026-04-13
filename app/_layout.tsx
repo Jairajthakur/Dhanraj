@@ -117,7 +117,7 @@ function RootLayoutNav() {
 
       const roleHome: Record<string, string> = {
         admin: "/(admin)",
-        fos:   "/(app)/dashboard",
+        fos:   "/(app)/allocation",
         repo:  "/(repo)",
       };
       const home = roleHome[agent.role];
