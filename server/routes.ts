@@ -2701,6 +2701,205 @@ app.get("/api/receipt-requests", requireAuth, async (req, res) => {
     res.json({ requests: result.rows });
   } catch (e: any) { res.status(500).json({ message: e.message }); }
 });
+
+  // ── Auto-create table on first run ──────────────────────────────────────────
+app.use(async (_req, _res, next) => {
+  // This runs once on server start. The middleware just calls next() immediately
+  // after the async setup so it doesn't block requests.
+  next();
+});
+ 
+(async () => {
+  try {
+    await storage.query(`
+      CREATE TABLE IF NOT EXISTS field_visits (
+        id          SERIAL PRIMARY KEY,
+        case_id     INTEGER NOT NULL,
+        case_type   TEXT    NOT NULL DEFAULT 'loan',
+        agent_id    INTEGER REFERENCES fos_agents(id) ON DELETE SET NULL,
+        lat         NUMERIC(11, 7) NOT NULL,
+        lng         NUMERIC(11, 7) NOT NULL,
+        accuracy    NUMERIC(8, 2),
+        visited_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+  } catch (e) {
+    console.error("[field_visits] Table creation error:", e);
+  }
+})();
+ 
+// ── POST /api/cases/:id/visit — agent records a geo check-in ────────────────
+app.post("/api/cases/:id/visit", requireAgent, async (req: Request, res: Response) => {
+  try {
+    const caseId   = Number(req.params.id);
+    const agentId  = req.session.agentId!;
+    const { lat, lng, accuracy, case_type = "loan" } = req.body as {
+      lat: number; lng: number; accuracy?: number; case_type?: string;
+    };
+ 
+    if (!lat || !lng) {
+      return res.status(400).json({ message: "lat and lng are required" });
+    }
+ 
+    const result = await storage.query(
+      `INSERT INTO field_visits (case_id, case_type, agent_id, lat, lng, accuracy)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       RETURNING *`,
+      [caseId, case_type, agentId, lat, lng, accuracy ?? null]
+    );
+ 
+    res.json({ visit: result.rows[0] });
+  } catch (e: any) {
+    console.error("[POST /api/cases/:id/visit]", e);
+    res.status(500).json({ message: e.message });
+  }
+});
+ 
+// ── GET /api/cases/:id/visits — agent fetches visit history for a case ──────
+app.get("/api/cases/:id/visits", requireAgent, async (req: Request, res: Response) => {
+  try {
+    const caseId = Number(req.params.id);
+ 
+    const result = await storage.query(
+      `SELECT fv.*, fa.name AS agent_name
+       FROM   field_visits fv
+       LEFT JOIN fos_agents fa ON fa.id = fv.agent_id
+       WHERE  fv.case_id = $1
+       ORDER  BY fv.visited_at DESC
+       LIMIT  20`,
+      [caseId]
+    );
+ 
+    res.json({ visits: result.rows });
+  } catch (e: any) {
+    console.error("[GET /api/cases/:id/visits]", e);
+    res.status(500).json({ message: e.message });
+  }
+});
+ 
+// ── GET /api/admin/field-visits — admin sees all visits with filters ─────────
+app.get("/api/admin/field-visits", requireAdmin, async (req: Request, res: Response) => {
+  try {
+    const { agent_id, case_id, date } = req.query;
+ 
+    let sql = `
+      SELECT fv.*, fa.name AS agent_name,
+             lc.customer_name, lc.loan_no
+      FROM   field_visits fv
+      LEFT JOIN fos_agents fa ON fa.id = fv.agent_id
+      LEFT JOIN loan_cases  lc ON lc.id = fv.case_id AND fv.case_type = 'loan'
+      WHERE 1=1
+    `;
+    const params: any[] = [];
+ 
+    if (agent_id) { params.push(Number(agent_id)); sql += ` AND fv.agent_id = $${params.length}`; }
+    if (case_id)  { params.push(Number(case_id));  sql += ` AND fv.case_id  = $${params.length}`; }
+    if (date)     { params.push(date);              sql += ` AND fv.visited_at::date = $${params.length}`; }
+ 
+    sql += " ORDER BY fv.visited_at DESC LIMIT 200";
+ 
+    const result = await storage.query(sql, params);
+    res.json({ visits: result.rows });
+  } catch (e: any) {
+    console.error("[GET /api/admin/field-visits]", e);
+    res.status(500).json({ message: e.message });
+  }
+});
+ 
+ 
+// ═══════════════════════════════════════════════════════════════════════════════
+// BLOCK B — CASE REASSIGN  (paste inside setupAdminRoutes, near other admin
+//           case routes, e.g. after the GET /api/admin/cases route ~line 754)
+// ═══════════════════════════════════════════════════════════════════════════════
+ 
+// ── Auto-create log table ────────────────────────────────────────────────────
+(async () => {
+  try {
+    await storage.query(`
+      CREATE TABLE IF NOT EXISTS case_reassign_log (
+        id              SERIAL PRIMARY KEY,
+        case_id         INTEGER NOT NULL,
+        case_type       TEXT    NOT NULL DEFAULT 'loan',
+        from_agent_id   INTEGER REFERENCES fos_agents(id) ON DELETE SET NULL,
+        to_agent_id     INTEGER NOT NULL REFERENCES fos_agents(id) ON DELETE CASCADE,
+        reason          TEXT,
+        reassigned_by   INTEGER NOT NULL REFERENCES fos_agents(id),
+        reassigned_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+  } catch (e) {
+    console.error("[case_reassign_log] Table creation error:", e);
+  }
+})();
+ 
+// ── PATCH /api/admin/cases/:id/reassign ─────────────────────────────────────
+app.patch("/api/admin/cases/:id/reassign", requireAdmin, async (req: Request, res: Response) => {
+  try {
+    const caseId        = Number(req.params.id);
+    const adminId       = req.session.agentId!;
+    const { to_agent_id, case_type = "loan", reason } = req.body as {
+      to_agent_id: number; case_type?: string; reason?: string;
+    };
+ 
+    if (!to_agent_id) {
+      return res.status(400).json({ message: "to_agent_id is required" });
+    }
+ 
+    // 1. Fetch current agent for the log
+    const table = case_type === "bkt" ? "bkt_cases" : "loan_cases";
+    const current = await storage.query(
+      `SELECT agent_id FROM ${table} WHERE id = $1`,
+      [caseId]
+    );
+    if (!current.rows.length) {
+      return res.status(404).json({ message: "Case not found" });
+    }
+    const fromAgentId: number | null = current.rows[0].agent_id ?? null;
+ 
+    // 2. Update agent_id on the case
+    await storage.query(
+      `UPDATE ${table} SET agent_id = $1 WHERE id = $2`,
+      [to_agent_id, caseId]
+    );
+ 
+    // 3. Write audit log
+    await storage.query(
+      `INSERT INTO case_reassign_log
+         (case_id, case_type, from_agent_id, to_agent_id, reason, reassigned_by)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [caseId, case_type, fromAgentId, to_agent_id, reason ?? null, adminId]
+    );
+ 
+    res.json({ success: true, case_id: caseId, to_agent_id });
+  } catch (e: any) {
+    console.error("[PATCH /api/admin/cases/:id/reassign]", e);
+    res.status(500).json({ message: e.message });
+  }
+});
+ 
+// ── GET /api/admin/cases/:id/reassign-log — audit trail for one case ─────────
+app.get("/api/admin/cases/:id/reassign-log", requireAdmin, async (req: Request, res: Response) => {
+  try {
+    const caseId = Number(req.params.id);
+    const result = await storage.query(
+      `SELECT crl.*,
+              f.name AS from_agent_name,
+              t.name AS to_agent_name,
+              r.name AS reassigned_by_name
+       FROM   case_reassign_log crl
+       LEFT JOIN fos_agents f ON f.id = crl.from_agent_id
+       LEFT JOIN fos_agents t ON t.id = crl.to_agent_id
+       LEFT JOIN fos_agents r ON r.id = crl.reassigned_by
+       WHERE  crl.case_id = $1
+       ORDER  BY crl.reassigned_at DESC`,
+      [caseId]
+    );
+    res.json({ log: result.rows });
+  } catch (e: any) {
+    console.error("[GET /api/admin/cases/:id/reassign-log]", e);
+    res.status(500).json({ message: e.message });
+  }
+});
   
 const httpServer = createServer(app);
 return httpServer;
