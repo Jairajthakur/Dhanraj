@@ -3143,7 +3143,50 @@ app.get("/api/admin/field-visits/stats", requireAdmin, async (req, res) => {
   } catch (e: any) { res.status(500).json({ message: e.message }); }
 });
 
-  
+// ── Live Location ─────────────────────────────────────────────────────────────
+// DB migration — create table if not exists
+try {
+  await storage.query(`CREATE TABLE IF NOT EXISTS agent_locations (
+    id          SERIAL PRIMARY KEY,
+    agent_id    INTEGER NOT NULL REFERENCES fos_agents(id) ON DELETE CASCADE,
+    latitude    DECIMAL(10,8) NOT NULL,
+    longitude   DECIMAL(11,8) NOT NULL,
+    accuracy    DECIMAL(10,2),
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE(agent_id)
+  )`);
+  console.log("[DB] agent_locations table ready ✅");
+} catch (e: any) { console.error("[DB] agent_locations error:", e.message); }
+
+// POST /api/location — agent pushes their current location (called every 60s)
+app.post("/api/location", requireAuth, async (req: any, res) => {
+  try {
+    const { latitude, longitude, accuracy } = req.body;
+    if (!latitude || !longitude) return res.status(400).json({ message: "latitude and longitude required" });
+    await storage.query(
+      `INSERT INTO agent_locations (agent_id, latitude, longitude, accuracy, updated_at)
+       VALUES ($1, $2, $3, $4, NOW())
+       ON CONFLICT (agent_id) DO UPDATE
+         SET latitude=$2, longitude=$3, accuracy=$4, updated_at=NOW()`,
+      [req.agent.id, latitude, longitude, accuracy ?? null]
+    );
+    res.json({ ok: true });
+  } catch (e: any) { res.status(500).json({ message: e.message }); }
+});
+
+// GET /api/admin/live-locations — admin gets all agents' latest location
+app.get("/api/admin/live-locations", requireAdmin, async (_req, res) => {
+  try {
+    const result = await storage.query(
+      `SELECT al.agent_id, fa.name AS agent_name, al.latitude, al.longitude, al.accuracy, al.updated_at
+       FROM agent_locations al
+       JOIN fos_agents fa ON al.agent_id = fa.id
+       ORDER BY fa.name`
+    );
+    res.json({ locations: result.rows });
+  } catch (e: any) { res.status(500).json({ message: e.message }); }
+});
+
 const httpServer = createServer(app);
 return httpServer;
 }
