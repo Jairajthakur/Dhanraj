@@ -21,6 +21,8 @@ const MENU_ITEMS = [
   { key: "attendance",      label: "Attendance",      icon: "checkmark-circle" as const, screen: "attendance" },
   { key: "salary",          label: "Salary",          icon: "wallet"           as const, screen: "/(app)/salary" },
   { key: "change-password", label: "Change Password", icon: "lock-closed"      as const, screen: "/(app)/change-password" },
+  { key: "visit-log",       label: "Visit Log",       icon: "walk"             as const, screen: "/(app)/visit-log" },
+  { key: "online-collection", label: "Online Collection", icon: "card"         as const, screen: "/(app)/online-collection" },
 ];
 
 function AttendanceModal({ visible, onClose }: { visible: boolean; onClose: () => void }) {
@@ -169,6 +171,8 @@ export default function AppLayout() {
         <Stack.Screen name="deposition" />
         <Stack.Screen name="depositions" />
         <Stack.Screen name="change-password" />
+        <Stack.Screen name="visit-log" options={{ title: "Visit Log" }} />
+        <Stack.Screen name="online-collection" options={{ title: "Online Collection" }} />
       </Stack>
       <Drawer visible={drawerOpen} onClose={() => setDrawerOpen(false)} agentName={agent?.name || "Agent"} />
     </>
