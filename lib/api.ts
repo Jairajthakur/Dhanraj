@@ -31,6 +31,46 @@ export const agentCache = {
     } catch {}
   },
 };
+export interface CreateFieldVisitPayload {
+  case_id:       string;
+  customer_name: string;
+  latitude:      number;
+  longitude:     number;
+  address:       string;
+  outcome:       "Contacted" | "Not Home" | "Partial Payment" | "Paid" | "Refused";
+  notes:         string;
+}
+ 
+// ─── Agent API methods ────────────────────────────────────────────────────────
+// Add inside your `api` export object:
+ 
+fieldVisits: {
+  // Log a new visit (agent)
+  create: (payload: CreateFieldVisitPayload) =>
+    fetchWithAuth("/api/field-visits", {
+      method: "POST",
+      body:   JSON.stringify(payload),
+    }),
+ 
+  // Get this agent's own visit history
+  list: (limit = 50) =>
+    fetchWithAuth(`/api/field-visits?limit=${limit}`),
+},
+ 
+// ─── Admin API methods ────────────────────────────────────────────────────────
+// Add inside your `api.admin` object:
+ 
+getFieldVisits: (filters?: { agent_id?: string; outcome?: string; date?: string }) => {
+  const params = new URLSearchParams();
+  if (filters?.agent_id) params.set("agent_id", filters.agent_id);
+  if (filters?.outcome)  params.set("outcome",  filters.outcome);
+  if (filters?.date)     params.set("date",      filters.date);
+  const qs = params.toString();
+  return fetchWithAuth(`/api/admin/field-visits${qs ? `?${qs}` : ""}`);
+},
+ 
+getFieldVisitStats: () =>
+  fetchWithAuth("/api/admin/field-visits/stats"),
 
 // ─── Token store ─────────────────────────────────────────────────────────────
 export const tokenStore = {
