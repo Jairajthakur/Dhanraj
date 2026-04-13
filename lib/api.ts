@@ -348,6 +348,10 @@ export const api = {
       apiRequest("GET", `/api/field-visits?limit=${limit}`),
   },
 
+  // ── Live Location ─────────────────────────────────────────────────────────────
+  pushLocation: (latitude: number, longitude: number, accuracy?: number) =>
+    apiRequest("POST", "/api/location", { latitude, longitude, accuracy }),
+
   // ─── ADMIN ────────────────────────────────────────────────────────────────
   admin: {
 
@@ -459,6 +463,10 @@ export const api = {
 
     getFieldVisitStats: () =>
       apiRequest("GET", "/api/admin/field-visits/stats"),
+
+    // ── Live Locations ────────────────────────────────────────────────────────
+    getLiveLocations: () =>
+      apiRequest("GET", "/api/admin/live-locations"),
 
     // ── Exports ──────────────────────────────────────────────────────────────
     exportPtp: async () => {
