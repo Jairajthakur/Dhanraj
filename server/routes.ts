@@ -2718,6 +2718,17 @@ app.get("/api/receipt-requests", requireAuth, async (req, res) => {
   } catch (e) {
     console.error("[field_visits] Table creation error:", e);
   }
+
+  // ── Migrate field_visits: add case_type column if missing ───────────────────
+  try {
+    await storage.query(`
+      ALTER TABLE field_visits
+        ADD COLUMN IF NOT EXISTS case_type TEXT NOT NULL DEFAULT 'loan'
+    `);
+    console.log("[DB] field_visits.case_type column ensured ✅");
+  } catch (e) {
+    console.error("[field_visits] Migration error (case_type):", e);
+  }
  
 // ── POST /api/cases/:id/visit — agent records a geo check-in ────────────────
 app.post("/api/cases/:id/visit", requireAuth, async (req: Request, res: Response) => {
