@@ -2521,9 +2521,7 @@ app.delete("/api/admin/cases/:id/extra-numbers", requireAdmin, async (req, res) 
   } catch (e: any) { res.status(500).json({ message: e.message }); }
 });
 
-  // ─── PASTE THIS BLOCK INTO routes.ts BEFORE "const httpServer = createServer(app)" ───
-
-// ── DB migrations for receipt requests ────────────────────────────────────────
+  // ── DB migrations for receipt requests ────────────────────────────────────────
 try {
   await storage.query(`ALTER TABLE fos_agents ADD COLUMN IF NOT EXISTS can_request_receipt BOOLEAN DEFAULT FALSE`);
   console.log("[DB] fos_agents.can_request_receipt column ready ✅");
@@ -2702,14 +2700,7 @@ app.get("/api/receipt-requests", requireAuth, async (req, res) => {
   } catch (e: any) { res.status(500).json({ message: e.message }); }
 });
 
-  // ── Auto-create table on first run ──────────────────────────────────────────
-app.use(async (_req, _res, next) => {
-  // This runs once on server start. The middleware just calls next() immediately
-  // after the async setup so it doesn't block requests.
-  next();
-});
- 
-(async () => {
+  // ── Auto-create field_visits table ──────────────────────────────────────────
   try {
     await storage.query(`
       CREATE TABLE IF NOT EXISTS field_visits (
@@ -2723,10 +2714,10 @@ app.use(async (_req, _res, next) => {
         visited_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
     `);
+    console.log("[DB] field_visits table ready ✅");
   } catch (e) {
     console.error("[field_visits] Table creation error:", e);
   }
-})();
  
 // ── POST /api/cases/:id/visit — agent records a geo check-in ────────────────
 app.post("/api/cases/:id/visit", requireAuth, async (req: Request, res: Response) => {
@@ -2807,13 +2798,9 @@ app.get("/api/admin/field-visits", requireAdmin, async (req: Request, res: Respo
 });
  
  
-// ═══════════════════════════════════════════════════════════════════════════════
-// BLOCK B — CASE REASSIGN  (paste inside setupAdminRoutes, near other admin
-//           case routes, e.g. after the GET /api/admin/cases route ~line 754)
-// ═══════════════════════════════════════════════════════════════════════════════
+  // ── Case Reassign ────────────────────────────────────────────────────────────
  
-// ── Auto-create log table ────────────────────────────────────────────────────
-(async () => {
+  // ── Auto-create case_reassign_log table ─────────────────────────────────────
   try {
     await storage.query(`
       CREATE TABLE IF NOT EXISTS case_reassign_log (
@@ -2827,10 +2814,10 @@ app.get("/api/admin/field-visits", requireAdmin, async (req: Request, res: Respo
         reassigned_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
     `);
+    console.log("[DB] case_reassign_log table ready ✅");
   } catch (e) {
     console.error("[case_reassign_log] Table creation error:", e);
   }
-})();
  
 // ── PATCH /api/admin/cases/:id/reassign ─────────────────────────────────────
 app.patch("/api/admin/cases/:id/reassign", requireAdmin, async (req: Request, res: Response) => {
