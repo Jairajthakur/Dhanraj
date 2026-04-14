@@ -386,6 +386,7 @@ export default function AdminDashboard() {
             { label: "Salary",         icon: "wallet"           as const, screen: "/(admin)/salary"        },
             { label: "Depositions",    icon: "cash"             as const, screen: "/(admin)/depositions"   },
             { label: "Attendance",     icon: "checkmark-circle" as const, screen: "/(admin)/attendance"    },
+            { label: "Field Visits",   icon: "location"         as const, screen: "/(admin)/field-visits"  },
           ].map((item) => (
             <Pressable key={item.label} style={({ pressed }) => [styles.quickLink, pressed && { opacity: 0.8 }]} onPress={() => router.push(item.screen as any)}>
               <Ionicons name={item.icon} size={22} color={Colors.primary} />
