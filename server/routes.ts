@@ -2785,7 +2785,7 @@ app.get("/api/admin/field-visits", requireAdmin, async (req: Request, res: Respo
  
     if (agent_id) { params.push(Number(agent_id)); sql += ` AND fv.agent_id = $${params.length}`; }
     if (case_id)  { params.push(Number(case_id));  sql += ` AND fv.case_id  = $${params.length}`; }
-    if (date)     { params.push(date);              sql += ` AND fv.visited_at::date = $${params.length}`; }
+    if (date)     { params.push(date);              sql += ` AND fv.visited_at::date = $${params.length}::date`; }
  
     sql += " ORDER BY fv.visited_at DESC LIMIT 200";
  
