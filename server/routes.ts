@@ -2772,23 +2772,23 @@ app.get("/api/cases/:id/visits", requireAuth, async (req: Request, res: Response
 app.get("/api/admin/field-visits", requireAdmin, async (req: Request, res: Response) => {
   try {
     const { agent_id, case_id, date } = req.query;
- 
+
     let sql = `
       SELECT fv.*, fa.name AS agent_name,
              lc.customer_name, lc.loan_no
       FROM   field_visits fv
-      LEFT JOIN fos_agents fa ON fa.id = fv.agent_id
-      LEFT JOIN loan_cases  lc ON lc.id = fv.case_id AND fv.case_type = 'loan'
+      LEFT JOIN fos_agents fa ON fa.id = fv.agent_id::integer
+      LEFT JOIN loan_cases  lc ON lc.id = fv.case_id::integer AND fv.case_type = 'loan'
       WHERE 1=1
     `;
     const params: any[] = [];
- 
-    if (agent_id) { params.push(Number(agent_id)); sql += ` AND fv.agent_id = $${params.length}::integer`; }
-    if (case_id)  { params.push(Number(case_id));  sql += ` AND fv.case_id  = $${params.length}::integer`; }
+
+    if (agent_id) { params.push(Number(agent_id)); sql += ` AND fv.agent_id::integer = $${params.length}`; }
+    if (case_id)  { params.push(Number(case_id));  sql += ` AND fv.case_id::integer  = $${params.length}`; }
     if (date) { params.push(String(date)); sql += ` AND DATE(fv.visited_at AT TIME ZONE 'Asia/Kolkata') = $${params.length}::date`; }
- 
+
     sql += " ORDER BY fv.visited_at DESC LIMIT 200";
- 
+
     const result = await storage.query(sql, params);
     res.json({ visits: result.rows });
   } catch (e: any) {
@@ -2796,7 +2796,6 @@ app.get("/api/admin/field-visits", requireAdmin, async (req: Request, res: Respo
     res.status(500).json({ message: e.message });
   }
 });
- 
  
   // ── Case Reassign ────────────────────────────────────────────────────────────
  
