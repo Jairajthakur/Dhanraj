@@ -1,7 +1,7 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useCallback, useRef } from "react";
 import {
   View, Text, StyleSheet, FlatList, Pressable, TextInput, Linking,
-  Alert, ActivityIndicator, Modal, ScrollView, Platform, Image
+  Alert, ActivityIndicator, Modal, ScrollView, Platform, Image,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -14,9 +14,12 @@ import Colors from "@/constants/colors";
 import { api } from "@/lib/api";
 import { caseStore } from "@/lib/caseStore";
 
-// ─── All tab added ────────────────────────────────────────────────────────────
-const STATUS_TABS = ["All", "Unpaid", "PTP", "Paid"];
-const TABS = ["Unpaid", "PTP", "Paid", "Monthly Feedback"];
+// ─── Constants ────────────────────────────────────────────────────────────────
+const STATUS_TABS = ["All", "Unpaid", "PTP", "Paid"] as const;
+type StatusTab = typeof STATUS_TABS[number];
+
+const TABS = ["Unpaid", "PTP", "Paid", "Monthly Feedback"] as const;
+type FeedbackTab = typeof TABS[number];
 
 const STATUS_COLORS: Record<string, string> = {
   All:    Colors.primary,
@@ -33,8 +36,8 @@ const UNPAID_DETAIL_OPTIONS = [
   "CUSTOMER INTENATIONALLY DEFULTER",
   "CUSTOMER VEHICLE SOMEONE MORTGAGE & CUSTOMER SKIP",
 ];
-const PTP_DETAIL_OPTIONS = ["PTP DATE SET", "WILL PAY TOMORROW", "WILL ARRANGE FUNDS", "CALL LATER"];
-const MONTHLY_FEEDBACK_OPTIONS = [
+const PTP_DETAIL_OPTIONS        = ["PTP DATE SET", "WILL PAY TOMORROW", "WILL ARRANGE FUNDS", "CALL LATER"];
+const MONTHLY_FEEDBACK_OPTIONS  = [
   "SWITCH OFF", "NOT AVAILABLE", "DISCONNECTED", "REFUSED TO PAY",
   "DISPUTED", "NOT AT HOME", "CUSTOMER MET - WILL PAY", "CUSTOMER MET - REFUSED",
   "PARTIAL PAYMENT DONE", "RESCHEDULED", "SKIP TRACE", "LEGAL ACTION INITIATED",
@@ -42,32 +45,118 @@ const MONTHLY_FEEDBACK_OPTIONS = [
 const FEEDBACK_CODES     = ["PAID", "RTP", "SKIP", "PTP", "CAVNA", "ANF", "EXP", "SFT", "VSL"];
 const PROJECTION_OPTIONS = ["ST", "RF", "RB"];
 
-function fmt(v: any, prefix = "") {
+// Field Visit constants
+const VISIT_OUTCOMES = [
+  "PTP",
+  "Paid",
+  "Refused to Pay",
+  "Customer Absent",
+  "Skip / Not Found",
+] as const;
+type VisitOutcome = typeof VISIT_OUTCOMES[number];
+
+const VISIT_OUTCOME_COLORS: Record<VisitOutcome, string> = {
+  "PTP":              Colors.statusPTP,
+  "Paid":             Colors.success,
+  "Refused to Pay":   Colors.danger,
+  "Customer Absent":  Colors.warning,
+  "Skip / Not Found": Colors.textSecondary,
+};
+
+const MAX_PHOTOS       = 4;
+const GPS_TIMEOUT_MS   = 20_000;
+const GPS_MAX_AGE_MS   = 10_000;
+const PTP_DATE_REGEX   = /^\d{2}-\d{2}-\d{4}$/;
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+function fmt(v: unknown, prefix = ""): string {
   if (v === null || v === undefined || v === "") return "—";
   const n = parseFloat(String(v).replace(/,/g, ""));
   if (!isNaN(n)) return prefix + n.toLocaleString("en-IN", { maximumFractionDigits: 0 });
   return String(v);
 }
 
-function fmtRaw(v: any) {
+function fmtRaw(v: unknown): string {
   if (v === null || v === undefined || v === "" || v === "0" || Number(v) === 0) return "—";
   return String(v);
 }
 
-// ─── Call Picker Modal ────────────────────────────────────────────────────────
-function CallPickerModal({
-  visible, phones, onClose,
-}: {
+function toIsoDate(val: string): string {
+  const parts = val.trim().split(/[-\/]/);
+  if (parts.length === 3 && parts[2].length === 4)
+    return `${parts[2]}-${parts[1].padStart(2, "0")}-${parts[0].padStart(2, "0")}`;
+  return val;
+}
+
+function navigateToDetail(item: CaseItem) {
+  caseStore.set(item);
+  router.push({ pathname: "/(app)/customer/[id]", params: { id: String(item.id) } });
+}
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+interface CaseItem {
+  id: number;
+  customer_name: string;
+  loan_no: string;
+  app_id?: string;
+  mobile_no?: string;
+  status: string;
+  bkt?: string | number;
+  emi_amount?: number;
+  emi_due?: number;
+  pos?: number;
+  cbc?: number;
+  lpp?: number;
+  cbc_lpp?: number;
+  rollback?: unknown;
+  clearance?: unknown;
+  tenor?: unknown;
+  rollback_yn?: boolean;
+  feedback_code?: string;
+  latest_feedback?: string;
+  monthly_feedback?: string;
+  ptp_date?: string;
+  telecaller_ptp_date?: string;
+  feedback_comments?: string;
+  registration_no?: string;
+  address?: string;
+  city?: string;
+  customer_available?: boolean | null;
+  vehicle_available?: boolean | null;
+  third_party?: boolean | null;
+  third_party_name?: string;
+  third_party_number?: string;
+  projection?: string;
+  non_starter?: boolean | null;
+  kyc_purchase?: boolean | null;
+  workable?: boolean | null;
+}
+
+interface GpsCoords {
+  lat: number;
+  lng: number;
+  accuracy: number;
+}
+
+interface PhotoAsset {
+  uri: string;
+  fileName: string;
+  mimeType: string;
+}
+
+// ─── CallPickerModal ──────────────────────────────────────────────────────────
+interface CallPickerModalProps {
   visible: boolean;
   phones: string[];
   onClose: () => void;
-}) {
+}
+
+function CallPickerModal({ visible, phones, onClose }: CallPickerModalProps) {
   const call = (num: string) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     Linking.openURL(`tel:${num}`);
     onClose();
   };
-
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <Pressable style={cpStyles.overlay} onPress={onClose}>
@@ -106,7 +195,7 @@ const cpStyles = StyleSheet.create({
   cancelText:  { fontSize: 15, fontWeight: "600", color: Colors.textSecondary },
 });
 
-// ─── YN Toggle ────────────────────────────────────────────────────────────────
+// ─── YNToggle ─────────────────────────────────────────────────────────────────
 function YNToggle({ label, value, onChange }: {
   label: string; value: boolean | null; onChange: (v: boolean | null) => void;
 }) {
@@ -137,8 +226,8 @@ function YNToggle({ label, value, onChange }: {
   );
 }
 
-// ─── Locked view shown inside modal when monthly feedback already exists ──────
-function LockedFeedbackView({ item, onClose }: { item: any; onClose: () => void }) {
+// ─── LockedFeedbackView ───────────────────────────────────────────────────────
+function LockedFeedbackView({ item, onClose }: { item: CaseItem; onClose: () => void }) {
   const rows = [
     item.status           && { label: "Status",          value: item.status,            color: STATUS_COLORS[item.status] || Colors.text },
     item.feedback_code    && { label: "Feedback Code",   value: item.feedback_code,      color: Colors.accent },
@@ -156,7 +245,6 @@ function LockedFeedbackView({ item, onClose }: { item: any; onClose: () => void 
           Monthly feedback locked — contact admin to reset before editing
         </Text>
       </View>
-
       {rows.length > 0 ? (
         <View style={fbStyles.lockedRows}>
           {rows.map((r) => (
@@ -175,9 +263,17 @@ function LockedFeedbackView({ item, onClose }: { item: any; onClose: () => void 
   );
 }
 
-// ─── Feedback Modal ────────────────────────────────────────────────────────────
-function FeedbackModal({ visible, caseItem, onClose, isMonthlyLocked = false, extraNumbers = [] }: any) {
-  const [activeTab, setActiveTab] = useState("Unpaid");
+// ─── FeedbackModal ────────────────────────────────────────────────────────────
+interface FeedbackModalProps {
+  visible: boolean;
+  caseItem: CaseItem | null;
+  onClose: () => void;
+  isMonthlyLocked?: boolean;
+  extraNumbers?: string[];
+}
+
+function FeedbackModal({ visible, caseItem, onClose, isMonthlyLocked = false, extraNumbers = [] }: FeedbackModalProps) {
+  const [activeTab, setActiveTab] = useState<FeedbackTab>("Unpaid");
 
   const [detailFeedback,    setDetailFeedback]    = useState(caseItem?.latest_feedback   || "");
   const [monthlyFeedback,   setMonthlyFeedback]   = useState(caseItem?.monthly_feedback  || "");
@@ -186,15 +282,11 @@ function FeedbackModal({ visible, caseItem, onClose, isMonthlyLocked = false, ex
   const [ptpDate,           setPtpDate]           = useState(
     caseItem?.ptp_date ? String(caseItem.ptp_date).slice(0, 10) : ""
   );
-
-  // Paid-only fields
   const [paidDetailFeedback, setPaidDetailFeedback] = useState(caseItem?.latest_feedback   || "");
   const [paidComments,       setPaidComments]       = useState(caseItem?.feedback_comments || "");
   const [paidRollbackYn, setPaidRollbackYn] = useState<boolean | null>(
     caseItem?.rollback_yn != null ? Boolean(caseItem.rollback_yn) : null
   );
-
-  // Monthly Feedback extra fields
   const [customerAvailable, setCustomerAvailable] = useState<boolean | null>(caseItem?.customer_available ?? null);
   const [vehicleAvailable,  setVehicleAvailable]  = useState<boolean | null>(caseItem?.vehicle_available  ?? null);
   const [thirdParty,        setThirdParty]        = useState<boolean | null>(caseItem?.third_party        ?? null);
@@ -204,23 +296,14 @@ function FeedbackModal({ visible, caseItem, onClose, isMonthlyLocked = false, ex
   const [nonStarter,        setNonStarter]        = useState<boolean | null>(caseItem?.non_starter  ?? null);
   const [kycPurchase,       setKycPurchase]       = useState<boolean | null>(caseItem?.kyc_purchase  ?? null);
   const [workable,          setWorkable]          = useState<boolean | null>(caseItem?.workable      ?? null);
-
   const [loading, setLoading] = useState(false);
   const [callPickerVisible, setCallPickerVisible] = useState(false);
 
   const qc = useQueryClient();
 
-  // Merge original phones + extra numbers added from detail screen
   const primaryPhones: string[] = (caseItem?.mobile_no ?? "")
-    .split(",").map((p: string) => p.trim()).filter(Boolean);
-  const allPhones = [...primaryPhones, ...extraNumbers.filter((n: string) => !primaryPhones.includes(n))];
-
-  const toIsoDate = (val: string) => {
-    const parts = val.trim().split(/[-\/]/);
-    if (parts.length === 3 && parts[2].length === 4)
-      return `${parts[2]}-${parts[1].padStart(2, "0")}-${parts[0].padStart(2, "0")}`;
-    return val;
-  };
+    .split(",").map((p) => p.trim()).filter(Boolean);
+  const allPhones = [...primaryPhones, ...extraNumbers.filter((n) => !primaryPhones.includes(n))];
 
   const save = async () => {
     if (activeTab === "Monthly Feedback" && !feedbackCode) {
@@ -229,16 +312,16 @@ function FeedbackModal({ visible, caseItem, onClose, isMonthlyLocked = false, ex
     if (activeTab === "PTP" && !ptpDate) {
       Alert.alert("Error", "Please enter a PTP date"); return;
     }
+    if (!caseItem) return;
 
     let finalStatus = "Unpaid";
     if (activeTab === "Paid")                  finalStatus = "Paid";
     else if (activeTab === "PTP")              finalStatus = "PTP";
-    else if (activeTab === "Unpaid")           finalStatus = "Unpaid";
     else if (activeTab === "Monthly Feedback") finalStatus = "Unpaid";
 
     setLoading(true);
     try {
-      const payload: Record<string, any> = {
+      const payload: Record<string, unknown> = {
         status:   finalStatus,
         feedback: activeTab === "Paid" ? paidDetailFeedback : detailFeedback,
         comments: activeTab === "Paid" ? paidComments       : comments,
@@ -250,7 +333,6 @@ function FeedbackModal({ visible, caseItem, onClose, isMonthlyLocked = false, ex
         third_party_name:   thirdParty ? thirdPartyName   : null,
         third_party_number: thirdParty ? thirdPartyNumber : null,
       };
-
       if (activeTab === "Monthly Feedback") {
         payload.feedback_code    = feedbackCode;
         payload.projection       = projection;
@@ -259,15 +341,14 @@ function FeedbackModal({ visible, caseItem, onClose, isMonthlyLocked = false, ex
         payload.workable         = workable;
         payload.monthly_feedback = monthlyFeedback || "SUBMITTED";
       }
-
       await api.updateFeedback(caseItem.id, payload);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       qc.invalidateQueries({ queryKey: ["/api/cases"] });
       qc.invalidateQueries({ queryKey: ["/api/stats"] });
       qc.invalidateQueries({ queryKey: ["/api/bkt-perf-summary"] });
       onClose();
-    } catch (e: any) {
-      Alert.alert("Error", e.message);
+    } catch (e: unknown) {
+      Alert.alert("Error", e instanceof Error ? e.message : "Something went wrong");
     } finally {
       setLoading(false);
     }
@@ -281,17 +362,12 @@ function FeedbackModal({ visible, caseItem, onClose, isMonthlyLocked = false, ex
       {options.map((opt) => (
         <Pressable
           key={opt}
-          style={[
-            fbStyles.detailOptionBtn,
-            val === opt && { backgroundColor: activeColor + "20", borderColor: activeColor },
-          ]}
+          style={[fbStyles.detailOptionBtn, val === opt && { backgroundColor: activeColor + "20", borderColor: activeColor }]}
           onPress={() => setVal(val === opt ? "" : opt)}
         >
           <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
             <View style={[fbStyles.detailOptionDot, val === opt && { backgroundColor: activeColor }]} />
-            <Text style={[fbStyles.detailOptionText, val === opt && { color: activeColor, fontWeight: "700" }]}>
-              {opt}
-            </Text>
+            <Text style={[fbStyles.detailOptionText, val === opt && { color: activeColor, fontWeight: "700" }]}>{opt}</Text>
           </View>
           {val === opt && <Ionicons name="checkmark-circle" size={20} color={activeColor} />}
         </Pressable>
@@ -311,7 +387,6 @@ function FeedbackModal({ visible, caseItem, onClose, isMonthlyLocked = false, ex
             {caseItem?.customer_name} · {caseItem?.loan_no}
           </Text>
 
-          {/* ── All available numbers with call button ── */}
           {allPhones.length > 0 && (
             <View style={fbStyles.numbersSection}>
               <Text style={fbStyles.numbersSectionLabel}>
@@ -322,22 +397,16 @@ function FeedbackModal({ visible, caseItem, onClose, isMonthlyLocked = false, ex
                   <Pressable
                     key={i}
                     style={[fbStyles.numberChip, i >= primaryPhones.length && fbStyles.numberChipExtra]}
-                    onPress={() => {
-                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                      Linking.openURL(`tel:${ph}`);
-                    }}
+                    onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); Linking.openURL(`tel:${ph}`); }}
                   >
                     <Ionicons name="call" size={12} color={i >= primaryPhones.length ? Colors.success : "#fff"} />
-                    <Text style={[fbStyles.numberChipText, i >= primaryPhones.length && fbStyles.numberChipTextExtra]}>
-                      {ph}
-                    </Text>
+                    <Text style={[fbStyles.numberChipText, i >= primaryPhones.length && fbStyles.numberChipTextExtra]}>{ph}</Text>
                   </Pressable>
                 ))}
               </View>
             </View>
           )}
 
-          {/* Rollback / Clearance chips */}
           <View style={fbStyles.caseInfoRow}>
             {caseItem?.rollback && fmtRaw(caseItem.rollback) !== "—" && (
               <View style={[fbStyles.caseInfoChip, { backgroundColor: Colors.info + "18" }]}>
@@ -353,7 +422,6 @@ function FeedbackModal({ visible, caseItem, onClose, isMonthlyLocked = false, ex
             )}
           </View>
 
-          {/* Tab row */}
           <View style={fbStyles.tabRow}>
             {TABS.map((t) => {
               const isActive = activeTab === t;
@@ -368,28 +436,13 @@ function FeedbackModal({ visible, caseItem, onClose, isMonthlyLocked = false, ex
                   style={[
                     fbStyles.tabChip,
                     isActive && { backgroundColor: color, borderColor: color },
-                    isThisTabLocked && !isActive && {
-                      borderColor: Colors.warning + "60",
-                      backgroundColor: Colors.warning + "10",
-                    },
+                    isThisTabLocked && !isActive && { borderColor: Colors.warning + "60", backgroundColor: Colors.warning + "10" },
                   ]}
                   onPress={() => setActiveTab(t)}
                 >
                   <View style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
-                    {isThisTabLocked && (
-                      <Ionicons
-                        name="lock-closed"
-                        size={11}
-                        color={isActive ? "#fff" : Colors.warning}
-                      />
-                    )}
-                    <Text style={[
-                      fbStyles.tabChipText,
-                      isActive && { color: "#fff" },
-                      isThisTabLocked && !isActive && { color: Colors.warning },
-                    ]}>
-                      {t}
-                    </Text>
+                    {isThisTabLocked && <Ionicons name="lock-closed" size={11} color={isActive ? "#fff" : Colors.warning} />}
+                    <Text style={[fbStyles.tabChipText, isActive && { color: "#fff" }, isThisTabLocked && !isActive && { color: Colors.warning }]}>{t}</Text>
                   </View>
                 </Pressable>
               );
@@ -397,37 +450,25 @@ function FeedbackModal({ visible, caseItem, onClose, isMonthlyLocked = false, ex
           </View>
 
           <ScrollView showsVerticalScrollIndicator={false} style={{ flexGrow: 1, flexShrink: 1 }}>
-
-            {/* ====== UNPAID ====== */}
             {activeTab === "Unpaid" && (
               <>
                 <Text style={fbStyles.sectionLabel}>Detail Feedback</Text>
                 {renderDetailOptions(MONTHLY_FEEDBACK_OPTIONS, detailFeedback, setDetailFeedback, Colors.statusUnpaid)}
                 <Text style={fbStyles.sectionLabel}>Comments (Optional)</Text>
-                <TextInput
-                  style={fbStyles.commentInput}
-                  placeholder="Add comments..."
-                  placeholderTextColor={Colors.textMuted}
-                  value={comments}
-                  onChangeText={setComments}
-                  multiline
-                  numberOfLines={4}
-                />
+                <TextInput style={fbStyles.commentInput} placeholder="Add comments..." placeholderTextColor={Colors.textMuted} value={comments} onChangeText={setComments} multiline numberOfLines={4} />
               </>
             )}
 
-            {/* ====== MONTHLY FEEDBACK ====== */}
             {activeTab === "Monthly Feedback" && (
               <>
                 {isMonthlyLocked ? (
-                  <LockedFeedbackView item={caseItem} onClose={onClose} />
+                  <LockedFeedbackView item={caseItem!} onClose={onClose} />
                 ) : (
                   <>
                     <View style={fbStyles.divider} />
                     <YNToggle label="Customer Available" value={customerAvailable} onChange={setCustomerAvailable} />
                     <YNToggle label="Vehicle Available"  value={vehicleAvailable}  onChange={setVehicleAvailable}  />
                     <YNToggle label="Third Party"        value={thirdParty}        onChange={setThirdParty}        />
-
                     {thirdParty === true && (
                       <>
                         <Text style={fbStyles.sectionLabel}>Third Party Name</Text>
@@ -436,20 +477,14 @@ function FeedbackModal({ visible, caseItem, onClose, isMonthlyLocked = false, ex
                         <TextInput style={[fbStyles.commentInput, { minHeight: 44, marginBottom: 8 }]} placeholder="Enter number" placeholderTextColor={Colors.textMuted} value={thirdPartyNumber} onChangeText={setThirdPartyNumber} keyboardType="phone-pad" />
                       </>
                     )}
-
                     <Text style={fbStyles.sectionLabel}>Feedback Code</Text>
                     <View style={fbStyles.chipWrapRow}>
                       {FEEDBACK_CODES.map((f) => (
-                        <Pressable
-                          key={f}
-                          style={[fbStyles.tabChip, feedbackCode === f && { backgroundColor: Colors.accent, borderColor: Colors.accent }]}
-                          onPress={() => setFeedbackCode(f)}
-                        >
+                        <Pressable key={f} style={[fbStyles.tabChip, feedbackCode === f && { backgroundColor: Colors.accent, borderColor: Colors.accent }]} onPress={() => setFeedbackCode(f)}>
                           <Text style={[fbStyles.tabChipText, feedbackCode === f && { color: "#fff" }]}>{f}</Text>
                         </Pressable>
                       ))}
                     </View>
-
                     <Text style={fbStyles.sectionLabel}>Detail Feedback</Text>
                     {feedbackCode === "PTP" ? (
                       <>
@@ -460,42 +495,30 @@ function FeedbackModal({ visible, caseItem, onClose, isMonthlyLocked = false, ex
                     ) : (
                       <>
                         {renderDetailOptions(UNPAID_DETAIL_OPTIONS, detailFeedback, setDetailFeedback, Colors.statusUnpaid)}
-                        <TextInput style={[fbStyles.commentInput, { minHeight: 44 }]} placeholder="Or type custom feedback..." placeholderTextColor={Colors.textMuted} value={detailFeedback && !UNPAID_DETAIL_OPTIONS.includes(detailFeedback) ? detailFeedback : ""} onChangeText={(t) => setDetailFeedback(t)} multiline numberOfLines={2} />
+                        <TextInput style={[fbStyles.commentInput, { minHeight: 44 }]} placeholder="Or type custom feedback..." placeholderTextColor={Colors.textMuted} value={detailFeedback && !UNPAID_DETAIL_OPTIONS.includes(detailFeedback) ? detailFeedback : ""} onChangeText={setDetailFeedback} multiline numberOfLines={2} />
                       </>
                     )}
-
                     <Text style={fbStyles.sectionLabel}>Projection</Text>
                     <View style={{ flexDirection: "row", gap: 8, marginBottom: 12 }}>
                       {PROJECTION_OPTIONS.map((p) => (
-                        <Pressable
-                          key={p}
-                          style={[fbStyles.feedbackOption, { flex: 1, alignItems: "center" }, projection === p && { backgroundColor: Colors.primary, borderColor: Colors.primary }]}
-                          onPress={() => setProjection(projection === p ? "" : p)}
-                        >
+                        <Pressable key={p} style={[fbStyles.feedbackOption, { flex: 1, alignItems: "center" }, projection === p && { backgroundColor: Colors.primary, borderColor: Colors.primary }]} onPress={() => setProjection(projection === p ? "" : p)}>
                           <Text style={[fbStyles.feedbackOptionText, projection === p && { color: "#fff" }]}>{p}</Text>
                         </Pressable>
                       ))}
                     </View>
-
                     <YNToggle label="Non Starter"  value={nonStarter}  onChange={setNonStarter}  />
                     <YNToggle label="KYC Purchase"  value={kycPurchase}  onChange={setKycPurchase}  />
-
                     <Text style={fbStyles.sectionLabel}>Workable</Text>
                     <View style={{ flexDirection: "row", gap: 8, marginBottom: 12 }}>
                       {(["Workable", "Non Workable"] as const).map((w) => {
                         const val = w === "Workable";
                         return (
-                          <Pressable
-                            key={w}
-                            style={[fbStyles.feedbackOption, { flex: 1, alignItems: "center" }, workable === val && { backgroundColor: val ? Colors.success : Colors.danger, borderColor: val ? Colors.success : Colors.danger }]}
-                            onPress={() => setWorkable(workable === val ? null : val)}
-                          >
+                          <Pressable key={w} style={[fbStyles.feedbackOption, { flex: 1, alignItems: "center" }, workable === val && { backgroundColor: val ? Colors.success : Colors.danger, borderColor: val ? Colors.success : Colors.danger }]} onPress={() => setWorkable(workable === val ? null : val)}>
                             <Text style={[fbStyles.feedbackOptionText, workable === val && { color: "#fff" }]}>{w}</Text>
                           </Pressable>
                         );
                       })}
                     </View>
-
                     <Text style={fbStyles.sectionLabel}>Comments (Optional)</Text>
                     <TextInput style={fbStyles.commentInput} placeholder="Add comments..." placeholderTextColor={Colors.textMuted} value={comments} onChangeText={setComments} multiline numberOfLines={3} />
                   </>
@@ -503,7 +526,6 @@ function FeedbackModal({ visible, caseItem, onClose, isMonthlyLocked = false, ex
               </>
             )}
 
-            {/* ====== PAID ====== */}
             {activeTab === "Paid" && (
               <>
                 <Text style={fbStyles.sectionLabel}>Detail Feedback</Text>
@@ -514,7 +536,6 @@ function FeedbackModal({ visible, caseItem, onClose, isMonthlyLocked = false, ex
               </>
             )}
 
-            {/* ====== PTP ====== */}
             {activeTab === "PTP" && (
               <>
                 <Text style={fbStyles.sectionLabel}>Detail Feedback</Text>
@@ -525,16 +546,12 @@ function FeedbackModal({ visible, caseItem, onClose, isMonthlyLocked = false, ex
                 <TextInput style={fbStyles.commentInput} placeholder="Add comments..." placeholderTextColor={Colors.textMuted} value={comments} onChangeText={setComments} multiline numberOfLines={3} />
               </>
             )}
-
             <View style={{ height: 16 }} />
           </ScrollView>
 
-          {/* Action buttons */}
           <View style={fbStyles.btnRow}>
             <Pressable style={fbStyles.cancelBtn} onPress={onClose}>
-              <Text style={fbStyles.cancelText}>
-                {isMonthlyTabLocked ? "Close" : "Cancel"}
-              </Text>
+              <Text style={fbStyles.cancelText}>{isMonthlyTabLocked ? "Close" : "Cancel"}</Text>
             </Pressable>
             {!isMonthlyTabLocked && (
               <Pressable
@@ -557,104 +574,218 @@ function FeedbackModal({ visible, caseItem, onClose, isMonthlyLocked = false, ex
           <View style={{ height: 24 }} />
         </View>
       </View>
-
-      {/* Call picker inside feedback modal */}
-      <CallPickerModal
-        visible={callPickerVisible}
-        phones={allPhones}
-        onClose={() => setCallPickerVisible(false)}
-      />
+      <CallPickerModal visible={callPickerVisible} phones={allPhones} onClose={() => setCallPickerVisible(false)} />
     </Modal>
   );
 }
 
-// ─── Field Visit Modal ────────────────────────────────────────────────────────
-const VISIT_OUTCOMES = ["PTP", "Paid", "Refused to Pay", "Customer Absent", "Skip / Not Found"];
-const VISIT_OUTCOME_COLORS: Record<string, string> = {
-  "PTP":               Colors.statusPTP,
-  "Paid":              Colors.success,
-  "Refused to Pay":    Colors.danger,
-  "Customer Absent":   Colors.warning,
-  "Skip / Not Found":  Colors.textSecondary,
-};
+// ─── FieldVisitModal ──────────────────────────────────────────────────────────
+interface FieldVisitModalProps {
+  visible: boolean;
+  caseItem: CaseItem | null;
+  onClose: () => void;
+}
 
-function FieldVisitModal({ visible, caseItem, onClose }: { visible: boolean; caseItem: any; onClose: () => void }) {
-  const [outcome,    setOutcome]    = useState("");
+function FieldVisitModal({ visible, caseItem, onClose }: FieldVisitModalProps) {
+  // ── form state ──────────────────────────────────────────────────────────────
+  const [outcome,    setOutcome]    = useState<VisitOutcome | "">("");
   const [remarks,    setRemarks]    = useState("");
   const [ptpDate,    setPtpDate]    = useState("");
-  const [photos,     setPhotos]     = useState<string[]>([]);
-  const [location,   setLocation]   = useState<{ lat: number; lng: number } | null>(null);
-  const [locLoading, setLocLoading] = useState(false);
-  const [saving,     setSaving]     = useState(false);
+  const [photos,     setPhotos]     = useState<PhotoAsset[]>([]);
+  const [gps,        setGps]        = useState<GpsCoords | null>(null);
+
+  // ── async state ─────────────────────────────────────────────────────────────
+  const [locLoading,  setLocLoading]  = useState(false);
+  const [saving,      setSaving]      = useState(false);
+  const [photoError,  setPhotoError]  = useState("");
 
   const qc = useQueryClient();
+  const saveGuardRef = useRef(false); // prevent double-submit
 
-  const reset = () => {
-    setOutcome(""); setRemarks(""); setPtpDate(""); setPhotos([]); setLocation(null);
-  };
+  // ── reset on close ──────────────────────────────────────────────────────────
+  const reset = useCallback(() => {
+    setOutcome("");
+    setRemarks("");
+    setPtpDate("");
+    setPhotos([]);
+    setGps(null);
+    setLocLoading(false);
+    setSaving(false);
+    setPhotoError("");
+    saveGuardRef.current = false;
+  }, []);
 
-  const handleClose = () => { reset(); onClose(); };
+  const handleClose = useCallback(() => {
+    if (saving) return; // block close while saving
+    reset();
+    onClose();
+  }, [saving, reset, onClose]);
 
-  const captureLocation = async () => {
+  // ── GPS capture ─────────────────────────────────────────────────────────────
+  const captureGps = useCallback(async () => {
+    if (locLoading) return;
     setLocLoading(true);
     try {
       const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== "granted") { Alert.alert("Permission denied", "Location permission is required."); return; }
-      const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
-      setLocation({ lat: loc.coords.latitude, lng: loc.coords.longitude });
+      if (status !== "granted") {
+        Alert.alert(
+          "Location Permission Denied",
+          "Please enable location access in your device settings to record field visits.",
+          [{ text: "OK" }]
+        );
+        return;
+      }
+      const loc = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.High,
+        timeInterval: GPS_TIMEOUT_MS,
+        maximumAge: GPS_MAX_AGE_MS,
+      } as any);
+      setGps({
+        lat:      loc.coords.latitude,
+        lng:      loc.coords.longitude,
+        accuracy: Math.round(loc.coords.accuracy ?? 0),
+      });
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    } catch { Alert.alert("Error", "Could not capture location."); }
-    finally { setLocLoading(false); }
-  };
-
-  const pickPhoto = async () => {
-    if (photos.length >= 4) { Alert.alert("Limit reached", "Maximum 4 photos allowed."); return; }
-    const { status } = await ImagePicker.requestCameraPermissionsAsync();
-    if (status !== "granted") { Alert.alert("Permission denied", "Camera permission is required."); return; }
-    const result = await ImagePicker.launchCameraAsync({ quality: 0.6, base64: false });
-    if (!result.canceled && result.assets[0]) {
-      setPhotos((prev) => [...prev, result.assets[0].uri]);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Could not capture GPS. Try again.";
+      Alert.alert("GPS Error", msg);
+    } finally {
+      setLocLoading(false);
     }
+  }, [locLoading]);
+
+  // ── Photo capture ───────────────────────────────────────────────────────────
+  const pickPhoto = useCallback(async () => {
+    setPhotoError("");
+    if (photos.length >= MAX_PHOTOS) {
+      setPhotoError(`Maximum ${MAX_PHOTOS} photos allowed.`);
+      return;
+    }
+    const { status } = await ImagePicker.requestCameraPermissionsAsync();
+    if (status !== "granted") {
+      Alert.alert(
+        "Camera Permission Denied",
+        "Please enable camera access in your device settings to add photo proof.",
+        [{ text: "OK" }]
+      );
+      return;
+    }
+    const result = await ImagePicker.launchCameraAsync({
+      quality:       0.65,
+      base64:        false,
+      allowsEditing: false,
+      mediaTypes:    ImagePicker.MediaTypeOptions.Images,
+    });
+    if (!result.canceled && result.assets[0]) {
+      const asset = result.assets[0];
+      const ext   = (asset.uri.split(".").pop() ?? "jpg").toLowerCase();
+      const mime  = ext === "png" ? "image/png" : "image/jpeg";
+      setPhotos((prev) => [
+        ...prev,
+        {
+          uri:      asset.uri,
+          fileName: `visit_${Date.now()}_${prev.length}.${ext}`,
+          mimeType: mime,
+        },
+      ]);
+    }
+  }, [photos.length]);
+
+  const removePhoto = useCallback((index: number) => {
+    setPhotoError("");
+    setPhotos((prev) => prev.filter((_, i) => i !== index));
+  }, []);
+
+  // ── Validation ──────────────────────────────────────────────────────────────
+  const validate = (): string | null => {
+    if (!outcome)                               return "Please select a visit outcome.";
+    if (!gps)                                   return "GPS location is required. Tap 'Capture GPS' before saving.";
+    if (outcome === "PTP" && !ptpDate.trim())   return "PTP date is required when outcome is PTP.";
+    if (outcome === "PTP" && !PTP_DATE_REGEX.test(ptpDate.trim()))
+      return "PTP date must be in DD-MM-YYYY format.";
+    if (!remarks.trim())                        return "Visit remarks are required.";
+    if (remarks.trim().length < 10)             return "Remarks must be at least 10 characters.";
+    return null;
   };
 
-  const removePhoto = (index: number) => setPhotos((prev) => prev.filter((_, i) => i !== index));
+  // ── Save ────────────────────────────────────────────────────────────────────
+  const save = useCallback(async () => {
+    if (saveGuardRef.current) return;
+    const err = validate();
+    if (err) { Alert.alert("Validation Error", err); return; }
+    if (!caseItem) return;
 
-  const save = async () => {
-    if (!outcome) { Alert.alert("Required", "Please select a visit outcome."); return; }
-    if (outcome === "PTP" && !ptpDate) { Alert.alert("Required", "Please enter a PTP date for PTP outcome."); return; }
+    saveGuardRef.current = true;
     setSaving(true);
+
     try {
-      const payload: Record<string, any> = {
-        visit_outcome:   outcome,
-        visit_remarks:   remarks,
-        visit_location:  location ? `${location.lat.toFixed(6)},${location.lng.toFixed(6)}` : null,
-        visit_ptp_date:  outcome === "PTP" ? ptpDate : null,
+      // 1. Record the field visit via the dedicated API endpoint
+      await api.recordFieldVisit(caseItem.id, {
+        lat:       gps!.lat,
+        lng:       gps!.lng,
+        accuracy:  gps!.accuracy,
+        case_type: "allocation",
+      });
+
+      // 2. Push the visit outcome as a feedback update so it surfaces in the case list
+      const feedbackPayload: Record<string, unknown> = {
+        visit_outcome:     outcome,
+        visit_remarks:     remarks.trim(),
+        visit_location:    `${gps!.lat.toFixed(6)},${gps!.lng.toFixed(6)}`,
         visit_photo_count: photos.length,
-        visited_at:      new Date().toISOString(),
+        visited_at:        new Date().toISOString(),
       };
-      await api.updateFeedback(caseItem.id, payload);
+
+      if (outcome === "PTP") {
+        feedbackPayload.ptp_date = toIsoDate(ptpDate.trim());
+        feedbackPayload.status   = "PTP";
+      } else if (outcome === "Paid") {
+        feedbackPayload.status = "Paid";
+      }
+
+      await api.updateFeedback(caseItem.id, feedbackPayload);
+
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       qc.invalidateQueries({ queryKey: ["/api/cases"] });
-      handleClose();
-      Alert.alert("Saved", "Field visit recorded successfully.");
-    } catch (e: any) {
-      Alert.alert("Error", e.message);
+      qc.invalidateQueries({ queryKey: ["/api/stats"] });
+
+      reset();
+      onClose();
+
+      // Brief delay so the modal closes before Alert fires
+      setTimeout(() => {
+        Alert.alert("Visit Recorded", "Field visit has been saved successfully.");
+      }, 300);
+
+    } catch (e: unknown) {
+      saveGuardRef.current = false;
+      const msg = e instanceof Error ? e.message : "Something went wrong. Please try again.";
+      Alert.alert("Save Failed", msg);
     } finally {
       setSaving(false);
     }
-  };
+  }, [outcome, gps, remarks, ptpDate, photos, caseItem, qc, reset, onClose]);
 
+  // ── Guard against null case ─────────────────────────────────────────────────
   if (!caseItem) return null;
 
-  const outcomeColor = VISIT_OUTCOME_COLORS[outcome] || Colors.primary;
+  const outcomeColor = outcome ? VISIT_OUTCOME_COLORS[outcome as VisitOutcome] : Colors.border;
+  const canSave      = !!outcome && !!gps && remarks.trim().length >= 10;
 
+  // ── Render ──────────────────────────────────────────────────────────────────
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={handleClose}>
+    <Modal
+      visible={visible}
+      transparent
+      animationType="slide"
+      onRequestClose={handleClose}
+      statusBarTranslucent
+    >
       <View style={fvStyles.overlay}>
         <View style={fvStyles.sheet}>
           <View style={fvStyles.handle} />
 
-          {/* Header */}
+          {/* ── Header ── */}
           <View style={fvStyles.headerRow}>
             <View style={fvStyles.headerIconWrap}>
               <Ionicons name="location" size={18} color={Colors.primary} />
@@ -662,147 +793,242 @@ function FieldVisitModal({ visible, caseItem, onClose }: { visible: boolean; cas
             <View style={{ flex: 1 }}>
               <Text style={fvStyles.title}>Field Visit</Text>
               <Text style={fvStyles.subtitle} numberOfLines={1}>
-                {caseItem.customer_name}  ·  {caseItem.loan_no}  ·  BKT {caseItem.bkt}
+                {caseItem.customer_name}  ·  {caseItem.loan_no}  ·  BKT {caseItem.bkt ?? "—"}
               </Text>
             </View>
-            <Pressable style={fvStyles.closeBtn} onPress={handleClose}>
-              <Ionicons name="close" size={20} color={Colors.textSecondary} />
+            <Pressable style={fvStyles.closeBtn} onPress={handleClose} disabled={saving}>
+              <Ionicons name="close" size={20} color={saving ? Colors.textMuted : Colors.textSecondary} />
             </Pressable>
           </View>
 
-          {/* Amount chip */}
+          {/* ── Case summary chips ── */}
           <View style={fvStyles.amountRow}>
             <View style={fvStyles.amountChip}>
               <Text style={fvStyles.amountLabel}>EMI DUE</Text>
-              <Text style={fvStyles.amountValue}>{fmt(caseItem.emi_due, "₹")}</Text>
+              <Text style={[fvStyles.amountValue, { color: Colors.danger }]}>{fmt(caseItem.emi_due, "₹")}</Text>
             </View>
             <View style={fvStyles.amountChip}>
               <Text style={fvStyles.amountLabel}>POS</Text>
               <Text style={fvStyles.amountValue}>{fmt(caseItem.pos, "₹")}</Text>
             </View>
-            <View style={[fvStyles.amountChip, { flex: 1.2 }]}>
+            <View style={[fvStyles.amountChip, { flex: 1.4 }]}>
               <Text style={fvStyles.amountLabel}>ADDRESS</Text>
-              <Text style={[fvStyles.amountValue, { fontSize: 11 }]} numberOfLines={1}>
+              <Text style={[fvStyles.amountValue, { fontSize: 11 }]} numberOfLines={2}>
                 {caseItem.address || caseItem.city || "—"}
               </Text>
             </View>
           </View>
 
-          <ScrollView showsVerticalScrollIndicator={false} style={{ flexShrink: 1 }}>
+          <ScrollView showsVerticalScrollIndicator={false} style={{ flexShrink: 1 }} keyboardShouldPersistTaps="handled">
 
-            {/* GPS Location */}
-            <Text style={fvStyles.sectionLabel}>GPS Location</Text>
+            {/* ── GPS Location (REQUIRED) ── */}
+            <View style={fvStyles.sectionRow}>
+              <Text style={fvStyles.sectionLabel}>GPS Location</Text>
+              <View style={fvStyles.requiredBadge}><Text style={fvStyles.requiredText}>Required</Text></View>
+            </View>
+
             <Pressable
-              style={[fvStyles.locationBtn, location && fvStyles.locationBtnCaptured]}
-              onPress={captureLocation}
-              disabled={locLoading}
+              style={[
+                fvStyles.locationBtn,
+                gps        && fvStyles.locationBtnCaptured,
+                locLoading && fvStyles.locationBtnLoading,
+              ]}
+              onPress={captureGps}
+              disabled={locLoading || saving}
             >
               {locLoading ? (
                 <ActivityIndicator size="small" color={Colors.primary} />
               ) : (
                 <Ionicons
-                  name={location ? "checkmark-circle" : "locate"}
-                  size={18}
-                  color={location ? Colors.success : Colors.primary}
+                  name={gps ? "checkmark-circle" : "locate"}
+                  size={20}
+                  color={gps ? Colors.success : Colors.primary}
                 />
               )}
-              <Text style={[fvStyles.locationBtnText, location && { color: Colors.success }]}>
-                {locLoading
-                  ? "Capturing GPS…"
-                  : location
-                  ? `${location.lat.toFixed(5)}, ${location.lng.toFixed(5)}`
-                  : "Tap to capture current location"}
-              </Text>
+              <View style={{ flex: 1 }}>
+                <Text style={[fvStyles.locationBtnText, gps && { color: Colors.success, fontWeight: "700" }]}>
+                  {locLoading
+                    ? "Acquiring GPS signal…"
+                    : gps
+                    ? `${gps.lat.toFixed(5)}, ${gps.lng.toFixed(5)}`
+                    : "Tap to capture current location"}
+                </Text>
+                {gps && (
+                  <Text style={fvStyles.locationAccuracy}>
+                    Accuracy: ±{gps.accuracy}m
+                  </Text>
+                )}
+              </View>
+              {!gps && !locLoading && (
+                <Ionicons name="chevron-forward" size={16} color={Colors.textMuted} />
+              )}
+              {gps && (
+                <Pressable
+                  style={fvStyles.reCaptureBtnSmall}
+                  onPress={captureGps}
+                  disabled={locLoading || saving}
+                >
+                  <Ionicons name="refresh" size={14} color={Colors.primary} />
+                  <Text style={fvStyles.reCaptureText}>Re-capture</Text>
+                </Pressable>
+              )}
             </Pressable>
 
-            {/* Visit Outcome */}
-            <Text style={fvStyles.sectionLabel}>Visit Outcome</Text>
-            <View style={{ gap: 8, marginBottom: 12 }}>
+            {/* ── Visit Outcome (REQUIRED) ── */}
+            <View style={fvStyles.sectionRow}>
+              <Text style={fvStyles.sectionLabel}>Visit Outcome</Text>
+              <View style={fvStyles.requiredBadge}><Text style={fvStyles.requiredText}>Required</Text></View>
+            </View>
+            <View style={{ gap: 8, marginBottom: 16 }}>
               {VISIT_OUTCOMES.map((opt) => {
-                const color = VISIT_OUTCOME_COLORS[opt];
+                const color      = VISIT_OUTCOME_COLORS[opt];
                 const isSelected = outcome === opt;
                 return (
                   <Pressable
                     key={opt}
-                    style={[fvStyles.outcomeBtn, isSelected && { backgroundColor: color + "20", borderColor: color }]}
-                    onPress={() => setOutcome(isSelected ? "" : opt)}
+                    style={[
+                      fvStyles.outcomeBtn,
+                      isSelected && { backgroundColor: color + "18", borderColor: color, borderWidth: 2 },
+                    ]}
+                    onPress={() => { setOutcome(isSelected ? "" : opt); setPtpDate(""); }}
+                    disabled={saving}
                   >
-                    <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-                      <View style={[fvStyles.outcomeDot, isSelected && { backgroundColor: color }]} />
-                      <Text style={[fvStyles.outcomeText, isSelected && { color, fontWeight: "700" }]}>{opt}</Text>
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+                      <View style={[fvStyles.outcomeDot, { backgroundColor: isSelected ? color : Colors.border }]} />
+                      <Text style={[fvStyles.outcomeText, isSelected && { color, fontWeight: "700" }]}>
+                        {opt}
+                      </Text>
                     </View>
-                    {isSelected && <Ionicons name="checkmark-circle" size={20} color={color} />}
+                    {isSelected && <Ionicons name="checkmark-circle" size={22} color={color} />}
                   </Pressable>
                 );
               })}
             </View>
 
-            {/* PTP date — only when PTP selected */}
+            {/* ── PTP Date (conditional, REQUIRED when outcome=PTP) ── */}
             {outcome === "PTP" && (
               <>
-                <Text style={fvStyles.sectionLabel}>PTP Date</Text>
+                <View style={fvStyles.sectionRow}>
+                  <Text style={fvStyles.sectionLabel}>PTP Date</Text>
+                  <View style={fvStyles.requiredBadge}><Text style={fvStyles.requiredText}>Required</Text></View>
+                </View>
                 <TextInput
-                  style={fvStyles.input}
+                  style={[
+                    fvStyles.input,
+                    ptpDate && !PTP_DATE_REGEX.test(ptpDate) && fvStyles.inputError,
+                  ]}
                   placeholder="DD-MM-YYYY"
                   placeholderTextColor={Colors.textMuted}
                   value={ptpDate}
                   onChangeText={setPtpDate}
                   keyboardType="numeric"
+                  maxLength={10}
+                  editable={!saving}
                 />
+                {ptpDate && !PTP_DATE_REGEX.test(ptpDate) && (
+                  <Text style={fvStyles.fieldError}>Enter date as DD-MM-YYYY</Text>
+                )}
               </>
             )}
 
-            {/* Remarks */}
-            <Text style={fvStyles.sectionLabel}>Visit Remarks</Text>
+            {/* ── Remarks (REQUIRED, min 10 chars) ── */}
+            <View style={fvStyles.sectionRow}>
+              <Text style={fvStyles.sectionLabel}>Visit Remarks</Text>
+              <View style={fvStyles.requiredBadge}><Text style={fvStyles.requiredText}>Required · min 10 chars</Text></View>
+            </View>
             <TextInput
-              style={[fvStyles.input, { minHeight: 80, textAlignVertical: "top" }]}
-              placeholder="Enter details about this visit…"
+              style={[
+                fvStyles.input,
+                { minHeight: 90, textAlignVertical: "top" },
+                remarks.trim().length > 0 && remarks.trim().length < 10 && fvStyles.inputError,
+              ]}
+              placeholder="Describe what happened during this visit — customer status, conversation outcome, address confirmed, etc."
               placeholderTextColor={Colors.textMuted}
               value={remarks}
               onChangeText={setRemarks}
               multiline
               numberOfLines={4}
+              editable={!saving}
             />
+            {remarks.trim().length > 0 && remarks.trim().length < 10 && (
+              <Text style={fvStyles.fieldError}>Minimum 10 characters ({remarks.trim().length}/10)</Text>
+            )}
 
-            {/* Photos */}
-            <Text style={fvStyles.sectionLabel}>Proof Photos ({photos.length}/4)</Text>
+            {/* ── Photo Proof (optional) ── */}
+            <Text style={fvStyles.sectionLabel}>
+              Photo Proof <Text style={fvStyles.sectionOptional}>({photos.length}/{MAX_PHOTOS} · optional)</Text>
+            </Text>
+            {photoError ? <Text style={fvStyles.fieldError}>{photoError}</Text> : null}
             <View style={fvStyles.photoGrid}>
-              {photos.map((uri, i) => (
+              {photos.map((photo, i) => (
                 <View key={i} style={fvStyles.photoThumb}>
-                  <Image source={{ uri }} style={fvStyles.photoImg} />
-                  <Pressable style={fvStyles.photoRemove} onPress={() => removePhoto(i)}>
-                    <Ionicons name="close-circle" size={18} color={Colors.danger} />
-                  </Pressable>
+                  <Image source={{ uri: photo.uri }} style={fvStyles.photoImg} resizeMode="cover" />
+                  {!saving && (
+                    <Pressable style={fvStyles.photoRemoveBtn} onPress={() => removePhoto(i)}>
+                      <View style={fvStyles.photoRemoveBg}>
+                        <Ionicons name="close" size={12} color="#fff" />
+                      </View>
+                    </Pressable>
+                  )}
+                  <View style={fvStyles.photoIndexBadge}>
+                    <Text style={fvStyles.photoIndexText}>{i + 1}</Text>
+                  </View>
                 </View>
               ))}
-              {photos.length < 4 && (
-                <Pressable style={fvStyles.photoAdd} onPress={pickPhoto}>
-                  <Ionicons name="camera" size={22} color={Colors.textMuted} />
+              {photos.length < MAX_PHOTOS && !saving && (
+                <Pressable style={fvStyles.photoAddBtn} onPress={pickPhoto}>
+                  <Ionicons name="camera-outline" size={24} color={Colors.textMuted} />
                   <Text style={fvStyles.photoAddText}>Add Photo</Text>
                 </Pressable>
               )}
             </View>
 
-            <View style={{ height: 16 }} />
+            {/* ── Validation summary ── */}
+            {!canSave && (outcome || gps || remarks) && (
+              <View style={fvStyles.validationBox}>
+                <Ionicons name="information-circle-outline" size={15} color={Colors.warning} />
+                <Text style={fvStyles.validationText}>
+                  {!outcome   ? "Select a visit outcome." :
+                   !gps       ? "Capture GPS location." :
+                   remarks.trim().length < 10 ? "Add visit remarks (min 10 chars)." :
+                   outcome === "PTP" && !PTP_DATE_REGEX.test(ptpDate) ? "Enter PTP date as DD-MM-YYYY." :
+                   ""}
+                </Text>
+              </View>
+            )}
+
+            <View style={{ height: 20 }} />
           </ScrollView>
 
-          {/* Action buttons */}
+          {/* ── Actions ── */}
           <View style={fvStyles.btnRow}>
-            <Pressable style={fvStyles.cancelBtn} onPress={handleClose}>
-              <Text style={fvStyles.cancelText}>Cancel</Text>
+            <Pressable style={fvStyles.cancelBtn} onPress={handleClose} disabled={saving}>
+              <Text style={[fvStyles.cancelText, saving && { color: Colors.textMuted }]}>Cancel</Text>
             </Pressable>
             <Pressable
-              style={[fvStyles.saveBtn, { backgroundColor: outcome ? outcomeColor : Colors.border }]}
+              style={[
+                fvStyles.saveBtn,
+                {
+                  backgroundColor: canSave ? outcomeColor : Colors.border,
+                  opacity: saving ? 0.8 : 1,
+                },
+              ]}
               onPress={save}
-              disabled={saving || !outcome}
+              disabled={saving || !canSave}
             >
-              {saving
-                ? <ActivityIndicator color="#fff" size="small" />
-                : <>
-                    <Ionicons name="location" size={16} color="#fff" />
-                    <Text style={fvStyles.saveText}>Save Visit</Text>
-                  </>
-              }
+              {saving ? (
+                <>
+                  <ActivityIndicator color="#fff" size="small" />
+                  <Text style={fvStyles.saveText}>Saving…</Text>
+                </>
+              ) : (
+                <>
+                  <Ionicons name="location" size={16} color={canSave ? "#fff" : Colors.textMuted} />
+                  <Text style={[fvStyles.saveText, !canSave && { color: Colors.textMuted }]}>
+                    Save Visit
+                  </Text>
+                </>
+              )}
             </Pressable>
           </View>
           <View style={{ height: 24 }} />
@@ -812,18 +1038,18 @@ function FieldVisitModal({ visible, caseItem, onClose }: { visible: boolean; cas
   );
 }
 
-// ─── Navigate to Detail ───────────────────────────────────────────────────────
-function navigateToDetail(item: any) {
-  caseStore.set(item);
-  router.push({ pathname: "/(app)/customer/[id]", params: { id: String(item.id) } });
+// ─── CaseCard ─────────────────────────────────────────────────────────────────
+interface CaseCardProps {
+  item: CaseItem;
+  onFeedback:   (item: CaseItem) => void;
+  onFieldVisit: (item: CaseItem) => void;
 }
 
-// ─── Case Card ────────────────────────────────────────────────────────────────
-function CaseCard({ item, onFeedback, onFieldVisit }: { item: any; onFeedback: (item: any) => void; onFieldVisit: (item: any) => void }) {
+function CaseCard({ item, onFeedback, onFieldVisit }: CaseCardProps) {
   const [callPickerVisible, setCallPickerVisible] = useState(false);
 
   const phones: string[] = (item.mobile_no ?? "")
-    .split(",").map((p: string) => p.trim()).filter(Boolean);
+    .split(",").map((p) => p.trim()).filter(Boolean);
 
   const call = () => {
     if (!phones.length) { Alert.alert("No number available"); return; }
@@ -835,16 +1061,13 @@ function CaseCard({ item, onFeedback, onFieldVisit }: { item: any; onFeedback: (
     }
   };
 
-  // ── Feedback button is ONLY shown when the case has been uploaded
-  //    (treat "uploaded" = case has a loan_no, which means it came from an upload)
-  const isUploaded = !!item.loan_no;
-  const isMonthlyLocked = !!item.monthly_feedback;
-
-  const statusColor  = STATUS_COLORS[item.status] || Colors.textMuted;
-  const rollbackRaw  = (item.rollback  !== null && item.rollback  !== undefined && item.rollback  !== "" && item.rollback  !== "0" && Number(item.rollback)  !== 0) ? "RollBack"  : "—";
-  const clearanceRaw = (item.clearance !== null && item.clearance !== undefined && item.clearance !== "" && item.clearance !== "0" && Number(item.clearance) !== 0) ? "Clearance" : "—";
-  const hasRollback  = rollbackRaw  !== "—";
-  const hasClearance = clearanceRaw !== "—";
+  const isUploaded       = !!item.loan_no;
+  const isMonthlyLocked  = !!item.monthly_feedback;
+  const statusColor      = STATUS_COLORS[item.status] || Colors.textMuted;
+  const rollbackRaw      = (item.rollback  != null && item.rollback  !== "" && item.rollback  !== "0" && Number(item.rollback)  !== 0) ? "RollBack"  : "—";
+  const clearanceRaw     = (item.clearance != null && item.clearance !== "" && item.clearance !== "0" && Number(item.clearance) !== 0) ? "Clearance" : "—";
+  const hasRollback      = rollbackRaw  !== "—";
+  const hasClearance     = clearanceRaw !== "—";
 
   return (
     <View style={styles.card}>
@@ -972,35 +1195,35 @@ function CaseCard({ item, onFeedback, onFieldVisit }: { item: any; onFeedback: (
         </View>
       )}
 
-      {/* ── Card Actions: Call + Details always shown; Feedback only when uploaded ── */}
+      {/* ── Card Actions ── */}
       <View style={styles.cardActions}>
         <Pressable style={[styles.actionBtn, styles.callBtn]} onPress={call}>
-          <Ionicons name="call" size={16} color="#fff" />
+          <Ionicons name="call" size={15} color="#fff" />
           <Text style={styles.actionBtnText}>Call</Text>
         </Pressable>
+
         <Pressable style={[styles.actionBtn, styles.detailBtn]} onPress={() => navigateToDetail(item)}>
-          <Ionicons name="eye" size={16} color={Colors.textSecondary} />
+          <Ionicons name="eye" size={15} color={Colors.textSecondary} />
           <Text style={[styles.actionBtnText, { color: Colors.textSecondary }]}>Details</Text>
         </Pressable>
+
         {isUploaded && (
-          <Pressable
-            style={[styles.actionBtn, styles.feedbackBtn]}
-            onPress={() => onFeedback(item)}
-          >
-            <Ionicons name="chatbox" size={16} color="#fff" />
+          <Pressable style={[styles.actionBtn, styles.feedbackBtn]} onPress={() => onFeedback(item)}>
+            <Ionicons name="chatbox" size={15} color="#fff" />
             <Text style={styles.actionBtnText}>Feedback</Text>
           </Pressable>
         )}
+
+        {/* ── Field Visit button — always visible on My Cases ── */}
         <Pressable
           style={[styles.actionBtn, styles.visitBtn]}
           onPress={() => onFieldVisit(item)}
         >
-          <Ionicons name="location" size={16} color="#fff" />
+          <Ionicons name="location" size={15} color="#fff" />
           <Text style={styles.actionBtnText}>Visit</Text>
         </Pressable>
       </View>
 
-      {/* Multi-number call picker */}
       <CallPickerModal
         visible={callPickerVisible}
         phones={phones}
@@ -1010,72 +1233,71 @@ function CaseCard({ item, onFeedback, onFieldVisit }: { item: any; onFeedback: (
   );
 }
 
-// ─── Main Screen ──────────────────────────────────────────────────────────────
+// ─── AllocationScreen ─────────────────────────────────────────────────────────
 export default function AllocationScreen() {
-  const insets     = useSafeAreaInsets();
-  const qc         = useQueryClient();
-  const [activeTab,    setActiveTab]    = useState("All");
-  const [search,       setSearch]       = useState("");
-  const [feedbackItem, setFeedbackItem] = useState<any>(null);
-  const [visitItem,    setVisitItem]    = useState<any>(null);
+  const insets  = useSafeAreaInsets();
+  const qc      = useQueryClient();
 
-  // extra numbers added in detail screen, keyed by case id
-  const [extraNumbersMap, setExtraNumbersMap] = useState<Record<string, string[]>>({});
+  const [activeTab,    setActiveTab]    = useState<StatusTab>("All");
+  const [search,       setSearch]       = useState("");
+  const [feedbackItem, setFeedbackItem] = useState<CaseItem | null>(null);
+  const [visitItem,    setVisitItem]    = useState<CaseItem | null>(null);
+  const [extraNumbersMap] = useState<Record<string, string[]>>({});
 
   const { data, isLoading } = useQuery({
     queryKey: ["/api/cases"],
     queryFn:  () => api.getCases(),
   });
 
-  const allCases: any[] = data?.cases || [];
+  const allCases: CaseItem[] = data?.cases || [];
 
   const filtered = useMemo(() => {
+    const q = search.toLowerCase();
     return allCases
-      .filter((c: any) => activeTab === "All" || c.status === activeTab)
-      .filter((c: any) =>
-        !search ||
-        c.customer_name?.toLowerCase().includes(search.toLowerCase())  ||
-        c.loan_no?.toLowerCase().includes(search.toLowerCase())         ||
-        c.app_id?.toLowerCase().includes(search.toLowerCase())          ||
-        c.registration_no?.toLowerCase().includes(search.toLowerCase())
+      .filter((c) => activeTab === "All" || c.status === activeTab)
+      .filter((c) =>
+        !q ||
+        c.customer_name?.toLowerCase().includes(q) ||
+        c.loan_no?.toLowerCase().includes(q)        ||
+        c.app_id?.toLowerCase().includes(q)         ||
+        c.registration_no?.toLowerCase().includes(q)
       );
   }, [allCases, activeTab, search]);
 
   const counts = useMemo(() => ({
     All:    allCases.length,
-    Unpaid: allCases.filter((c: any) => c.status === "Unpaid").length,
-    PTP:    allCases.filter((c: any) => c.status === "PTP").length,
-    Paid:   allCases.filter((c: any) => c.status === "Paid").length,
+    Unpaid: allCases.filter((c) => c.status === "Unpaid").length,
+    PTP:    allCases.filter((c) => c.status === "PTP").length,
+    Paid:   allCases.filter((c) => c.status === "Paid").length,
   }), [allCases]);
 
   const feedbackItemMonthlyLocked = feedbackItem ? !!feedbackItem.monthly_feedback : false;
-  const feedbackExtraNumbers = feedbackItem ? (extraNumbersMap[String(feedbackItem.id)] ?? []) : [];
+  const feedbackExtraNumbers      = feedbackItem ? (extraNumbersMap[String(feedbackItem.id)] ?? []) : [];
 
   return (
     <View style={{ flex: 1, backgroundColor: Colors.background }}>
+      {/* ── Tabs ── */}
       <View style={[styles.tabsContainer, { paddingTop: Platform.OS === "web" ? 67 : 12 }]}>
         {STATUS_TABS.map((tab) => (
           <Pressable
             key={tab}
             style={[
               styles.tab,
-              activeTab === tab && [
-                styles.tabActive,
-                { backgroundColor: STATUS_COLORS[tab] ?? Colors.primary },
-              ],
+              activeTab === tab && [styles.tabActive, { backgroundColor: STATUS_COLORS[tab] ?? Colors.primary }],
             ]}
             onPress={() => setActiveTab(tab)}
           >
             <Text style={[styles.tabText, activeTab === tab && styles.tabTextActive]}>{tab}</Text>
             <View style={[styles.tabCount, activeTab === tab && { backgroundColor: "rgba(255,255,255,0.3)" }]}>
               <Text style={[styles.tabCountText, activeTab === tab && { color: "#fff" }]}>
-                {counts[tab as keyof typeof counts]}
+                {counts[tab]}
               </Text>
             </View>
           </Pressable>
         ))}
       </View>
 
+      {/* ── Search ── */}
       <View style={styles.searchContainer}>
         <Ionicons name="search" size={18} color={Colors.textMuted} style={{ marginRight: 8 }} />
         <TextInput
@@ -1092,6 +1314,7 @@ export default function AllocationScreen() {
         ) : null}
       </View>
 
+      {/* ── List ── */}
       {isLoading ? (
         <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
           <ActivityIndicator color={Colors.primary} size="large" />
@@ -1120,6 +1343,7 @@ export default function AllocationScreen() {
         />
       )}
 
+      {/* ── Feedback modal ── */}
       {feedbackItem && (
         <FeedbackModal
           visible={!!feedbackItem}
@@ -1130,6 +1354,7 @@ export default function AllocationScreen() {
         />
       )}
 
+      {/* ── Field Visit modal ── */}
       <FieldVisitModal
         visible={!!visitItem}
         caseItem={visitItem}
@@ -1141,160 +1366,149 @@ export default function AllocationScreen() {
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  tabsContainer: {
-    flexDirection: "row",
-    backgroundColor: Colors.surface,
-    paddingHorizontal: 8,
-    paddingBottom: 12,
-    gap: 6,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: Colors.border,
-  },
-  tab: {
-    flex: 1,
-    alignItems: "center",
-    paddingVertical: 10,
-    paddingHorizontal: 2,
-    borderRadius: 10,
-    backgroundColor: Colors.surfaceAlt,
-    gap: 4,
-  },
-  tabActive: {
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.15,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  tabText:        { fontSize: 11, fontWeight: "600", color: Colors.textSecondary, textAlign: "center" },
-  tabTextActive:  { color: "#fff" },
-  tabCount:       { backgroundColor: Colors.border, borderRadius: 10, paddingHorizontal: 5, paddingVertical: 1, minWidth: 18, alignItems: "center" },
-  tabCountText:   { fontSize: 10, fontWeight: "700", color: Colors.textSecondary },
-  searchContainer:{ flexDirection: "row", alignItems: "center", margin: 12, backgroundColor: Colors.surface, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, borderWidth: 1, borderColor: Colors.border },
-  searchInput:    { flex: 1, fontSize: 14, color: Colors.text },
-  list:           { padding: 12, gap: 12 },
-  card:           { backgroundColor: Colors.surface, borderRadius: 16, padding: 14, gap: 8, borderWidth: 1, borderColor: Colors.border, shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 4 },
-  cardTapArea:    { gap: 8 },
-  cardHeader:     { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  cardNameRow:    { flex: 1, flexDirection: "row", alignItems: "center", gap: 8 },
-  cardName:       { flex: 1, fontSize: 15, fontWeight: "700", color: Colors.text, textTransform: "uppercase" },
-  lockBadge:      { width: 18, height: 18, borderRadius: 9, backgroundColor: Colors.warning + "20", alignItems: "center", justifyContent: "center" },
-  statusBadge:    { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20 },
-  statusText:     { fontSize: 11, fontWeight: "700" },
-  infoRow:        { flexDirection: "row", gap: 6 },
-  infoCell:       { flex: 1, backgroundColor: Colors.surfaceAlt, borderRadius: 8, padding: 8 },
-  infoCellSmall:  { width: 52, backgroundColor: Colors.surfaceAlt, borderRadius: 8, padding: 8 },
-  infoLabel:      { fontSize: 9,  fontWeight: "700", color: Colors.textMuted, textTransform: "uppercase", marginBottom: 2 },
-  infoValue:      { fontSize: 12, fontWeight: "700", color: Colors.text },
-  phoneRow:       { flexDirection: "row", alignItems: "center", gap: 6, paddingVertical: 4 },
-  phoneText:      { fontSize: 13, color: Colors.info, fontWeight: "500" },
-  feedbackRow:    { flexDirection: "row", alignItems: "center", flexWrap: "wrap" },
-  feedbackLabel:  { fontSize: 12, color: Colors.textSecondary, fontWeight: "600" },
-  feedbackValue:  { fontSize: 12, color: Colors.text, fontWeight: "500" },
+  tabsContainer:       { flexDirection: "row", backgroundColor: Colors.surface, paddingHorizontal: 8, paddingBottom: 12, gap: 6, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: Colors.border },
+  tab:                 { flex: 1, alignItems: "center", paddingVertical: 10, paddingHorizontal: 2, borderRadius: 10, backgroundColor: Colors.surfaceAlt, gap: 4 },
+  tabActive:           { shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.15, shadowRadius: 4, elevation: 3 },
+  tabText:             { fontSize: 11, fontWeight: "600", color: Colors.textSecondary, textAlign: "center" },
+  tabTextActive:       { color: "#fff" },
+  tabCount:            { backgroundColor: Colors.border, borderRadius: 10, paddingHorizontal: 5, paddingVertical: 1, minWidth: 18, alignItems: "center" },
+  tabCountText:        { fontSize: 10, fontWeight: "700", color: Colors.textSecondary },
+  searchContainer:     { flexDirection: "row", alignItems: "center", margin: 12, backgroundColor: Colors.surface, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, borderWidth: 1, borderColor: Colors.border },
+  searchInput:         { flex: 1, fontSize: 14, color: Colors.text },
+  list:                { padding: 12, gap: 12 },
+  card:                { backgroundColor: Colors.surface, borderRadius: 16, padding: 14, gap: 8, borderWidth: 1, borderColor: Colors.border, shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 4 },
+  cardTapArea:         { gap: 8 },
+  cardHeader:          { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  cardNameRow:         { flex: 1, flexDirection: "row", alignItems: "center", gap: 8 },
+  cardName:            { flex: 1, fontSize: 15, fontWeight: "700", color: Colors.text, textTransform: "uppercase" },
+  lockBadge:           { width: 18, height: 18, borderRadius: 9, backgroundColor: Colors.warning + "20", alignItems: "center", justifyContent: "center" },
+  statusBadge:         { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20 },
+  statusText:          { fontSize: 11, fontWeight: "700" },
+  infoRow:             { flexDirection: "row", gap: 6 },
+  infoCell:            { flex: 1, backgroundColor: Colors.surfaceAlt, borderRadius: 8, padding: 8 },
+  infoCellSmall:       { width: 52, backgroundColor: Colors.surfaceAlt, borderRadius: 8, padding: 8 },
+  infoLabel:           { fontSize: 9, fontWeight: "700", color: Colors.textMuted, textTransform: "uppercase", marginBottom: 2 },
+  infoValue:           { fontSize: 12, fontWeight: "700", color: Colors.text },
+  phoneRow:            { flexDirection: "row", alignItems: "center", gap: 6, paddingVertical: 4 },
+  phoneText:           { fontSize: 13, color: Colors.info, fontWeight: "500" },
+  feedbackRow:         { flexDirection: "row", alignItems: "center", flexWrap: "wrap" },
+  feedbackLabel:       { fontSize: 12, color: Colors.textSecondary, fontWeight: "600" },
+  feedbackValue:       { fontSize: 12, color: Colors.text, fontWeight: "500" },
   monthlyFeedbackRow:  { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: Colors.primary + "12", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 5 },
   monthlyFeedbackText: { fontSize: 12, color: Colors.primary, fontWeight: "600", flex: 1 },
-  rollbackYnBadge:{ flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: Colors.info + "15", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 4, alignSelf: "flex-start" },
-  rollbackYnText: { fontSize: 11, color: Colors.info, fontWeight: "700" },
-  ptpDateRow:     { flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: Colors.statusPTP + "12", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
-  ptpDateLabel:   { fontSize: 12, color: Colors.statusPTP, fontWeight: "600" },
-  ptpDateValue:   { fontSize: 12, color: Colors.statusPTP, fontWeight: "700" },
-  cardActions:    { flexDirection: "row", gap: 8, marginTop: 4 },
-  actionBtn:      { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", paddingVertical: 10, borderRadius: 10, gap: 5 },
+  rollbackYnBadge:     { flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: Colors.info + "15", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 4, alignSelf: "flex-start" },
+  rollbackYnText:      { fontSize: 11, color: Colors.info, fontWeight: "700" },
+  ptpDateRow:          { flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: Colors.statusPTP + "12", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
+  ptpDateLabel:        { fontSize: 12, color: Colors.statusPTP, fontWeight: "600" },
+  ptpDateValue:        { fontSize: 12, color: Colors.statusPTP, fontWeight: "700" },
+  cardActions:         { flexDirection: "row", gap: 7, marginTop: 4 },
+  actionBtn:           { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", paddingVertical: 10, borderRadius: 10, gap: 4 },
   callBtn:             { backgroundColor: Colors.primary },
   detailBtn:           { backgroundColor: Colors.surfaceElevated, borderWidth: 1, borderColor: Colors.borderLight },
   feedbackBtn:         { backgroundColor: Colors.accent },
   visitBtn:            { backgroundColor: "#0F6E56" },
-  feedbackBtnLocked:   { backgroundColor: Colors.warning + "18", borderWidth: 1, borderColor: Colors.warning + "50" },
-  actionBtnText:  { color: "#fff", fontSize: 13, fontWeight: "700" },
-  empty:          { flex: 1, justifyContent: "center", alignItems: "center", gap: 12, paddingVertical: 60 },
-  emptyText:      { fontSize: 16, color: Colors.textMuted },
+  actionBtnText:       { color: "#fff", fontSize: 12, fontWeight: "700" },
+  empty:               { flex: 1, justifyContent: "center", alignItems: "center", gap: 12, paddingVertical: 60 },
+  emptyText:           { fontSize: 16, color: Colors.textMuted },
 });
 
 const fbStyles = StyleSheet.create({
-  overlay:        { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" },
-  sheet:          { backgroundColor: Colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, maxHeight: "92%", flexShrink: 1 },
-  handle:         { width: 40, height: 4, backgroundColor: Colors.border, borderRadius: 2, alignSelf: "center", marginBottom: 12 },
-  title:          { fontSize: 20, fontWeight: "700", color: Colors.text, marginBottom: 4 },
-  customerName:   { fontSize: 13, color: Colors.textSecondary, marginBottom: 8, textTransform: "uppercase" },
-  sectionLabel:   { fontSize: 13, fontWeight: "700", color: Colors.textSecondary, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 8 },
-  divider:        { height: 1, backgroundColor: Colors.border, marginVertical: 12 },
-  caseInfoRow:    { flexDirection: "row", gap: 8, marginBottom: 12 },
-  caseInfoChip:   { flex: 1, borderRadius: 10, padding: 10, gap: 2 },
-  caseInfoLabel:  { fontSize: 9,  fontWeight: "700", color: Colors.textMuted, textTransform: "uppercase" },
-  caseInfoValue:  { fontSize: 13, fontWeight: "800" },
-  lockBanner: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    backgroundColor: Colors.warning + "18",
-    borderWidth: 1,
-    borderColor: Colors.warning + "40",
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    marginBottom: 16,
-  },
-  lockBannerText: { flex: 1, fontSize: 13, color: Colors.warning, fontWeight: "600" },
-  lockedRows:     { gap: 2, marginBottom: 8 },
-  lockedRow:      { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingVertical: 10, paddingHorizontal: 12, backgroundColor: Colors.surfaceAlt, borderRadius: 10, marginBottom: 4 },
-  lockedRowLabel: { fontSize: 12, color: Colors.textSecondary, fontWeight: "600" },
-  lockedRowValue: { fontSize: 13, fontWeight: "700", flex: 1, textAlign: "right" },
-  tabRow:         { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 16 },
-  chipWrapRow:    { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 12 },
-  tabChip:        { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, backgroundColor: Colors.surfaceElevated, borderWidth: 1, borderColor: Colors.border },
-  tabChipText:    { fontSize: 13, fontWeight: "600", color: Colors.text, fontFamily: Platform.OS === "android" ? "Roboto" : undefined },
-  feedbackOption: { paddingVertical: 12, paddingHorizontal: 16, borderRadius: 10, borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.surfaceAlt },
-  feedbackOptionText: { fontSize: 14, fontWeight: "600", color: Colors.text },
-  detailOptionBtn:{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 14, paddingHorizontal: 16, borderRadius: 12, borderWidth: 1.5, borderColor: Colors.border, backgroundColor: Colors.surfaceAlt, marginBottom: 4 },
-  detailOptionDot:{ width: 10, height: 10, borderRadius: 5, backgroundColor: Colors.border },
-  detailOptionText: { fontSize: 14, fontWeight: "600", color: Colors.text, flex: 1 },
-  commentInput:   { borderWidth: 1, borderColor: Colors.border, borderRadius: 12, padding: 12, fontSize: 14, color: Colors.text, minHeight: 80, textAlignVertical: "top", backgroundColor: Colors.surfaceAlt, marginBottom: 12 },
-  btnRow:         { flexDirection: "row", gap: 12, marginTop: 8 },
-  cancelBtn:      { flex: 1, paddingVertical: 14, borderRadius: 12, borderWidth: 1, borderColor: Colors.border, alignItems: "center" },
-  cancelText:     { fontSize: 15, fontWeight: "600", color: Colors.textSecondary },
-  saveBtn:        { flex: 2, paddingVertical: 14, borderRadius: 12, alignItems: "center" },
-  saveText:       { fontSize: 15, fontWeight: "700", color: "#fff" },
-  // Numbers in feedback modal
-  numbersSection: { marginBottom: 12 },
+  overlay:             { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" },
+  sheet:               { backgroundColor: Colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, maxHeight: "92%", flexShrink: 1 },
+  handle:              { width: 40, height: 4, backgroundColor: Colors.border, borderRadius: 2, alignSelf: "center", marginBottom: 12 },
+  title:               { fontSize: 20, fontWeight: "700", color: Colors.text, marginBottom: 4 },
+  customerName:        { fontSize: 13, color: Colors.textSecondary, marginBottom: 8, textTransform: "uppercase" },
+  sectionLabel:        { fontSize: 13, fontWeight: "700", color: Colors.textSecondary, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 8 },
+  divider:             { height: 1, backgroundColor: Colors.border, marginVertical: 12 },
+  caseInfoRow:         { flexDirection: "row", gap: 8, marginBottom: 12 },
+  caseInfoChip:        { flex: 1, borderRadius: 10, padding: 10, gap: 2 },
+  caseInfoLabel:       { fontSize: 9, fontWeight: "700", color: Colors.textMuted, textTransform: "uppercase" },
+  caseInfoValue:       { fontSize: 13, fontWeight: "800" },
+  lockBanner:          { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: Colors.warning + "18", borderWidth: 1, borderColor: Colors.warning + "40", borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, marginBottom: 16 },
+  lockBannerText:      { flex: 1, fontSize: 13, color: Colors.warning, fontWeight: "600" },
+  lockedRows:          { gap: 2, marginBottom: 8 },
+  lockedRow:           { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingVertical: 10, paddingHorizontal: 12, backgroundColor: Colors.surfaceAlt, borderRadius: 10, marginBottom: 4 },
+  lockedRowLabel:      { fontSize: 12, color: Colors.textSecondary, fontWeight: "600" },
+  lockedRowValue:      { fontSize: 13, fontWeight: "700", flex: 1, textAlign: "right" },
+  tabRow:              { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 16 },
+  chipWrapRow:         { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 12 },
+  tabChip:             { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, backgroundColor: Colors.surfaceElevated, borderWidth: 1, borderColor: Colors.border },
+  tabChipText:         { fontSize: 13, fontWeight: "600", color: Colors.text, fontFamily: Platform.OS === "android" ? "Roboto" : undefined },
+  feedbackOption:      { paddingVertical: 12, paddingHorizontal: 16, borderRadius: 10, borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.surfaceAlt },
+  feedbackOptionText:  { fontSize: 14, fontWeight: "600", color: Colors.text },
+  detailOptionBtn:     { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 14, paddingHorizontal: 16, borderRadius: 12, borderWidth: 1.5, borderColor: Colors.border, backgroundColor: Colors.surfaceAlt, marginBottom: 4 },
+  detailOptionDot:     { width: 10, height: 10, borderRadius: 5, backgroundColor: Colors.border },
+  detailOptionText:    { fontSize: 14, fontWeight: "600", color: Colors.text, flex: 1 },
+  commentInput:        { borderWidth: 1, borderColor: Colors.border, borderRadius: 12, padding: 12, fontSize: 14, color: Colors.text, minHeight: 80, textAlignVertical: "top", backgroundColor: Colors.surfaceAlt, marginBottom: 12 },
+  btnRow:              { flexDirection: "row", gap: 12, marginTop: 8 },
+  cancelBtn:           { flex: 1, paddingVertical: 14, borderRadius: 12, borderWidth: 1, borderColor: Colors.border, alignItems: "center" },
+  cancelText:          { fontSize: 15, fontWeight: "600", color: Colors.textSecondary },
+  saveBtn:             { flex: 2, paddingVertical: 14, borderRadius: 12, alignItems: "center" },
+  saveText:            { fontSize: 15, fontWeight: "700", color: "#fff" },
+  numbersSection:      { marginBottom: 12 },
   numbersSectionLabel: { fontSize: 11, fontWeight: "700", color: Colors.textMuted, textTransform: "uppercase", marginBottom: 6 },
-  numbersRow:     { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  numberChip:     { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: Colors.primary, borderRadius: 10, paddingVertical: 8, paddingHorizontal: 12 },
-  numberChipExtra:{ backgroundColor: Colors.success + "18", borderWidth: 1, borderColor: Colors.success + "50" },
-  numberChipText: { color: "#fff", fontWeight: "700", fontSize: 13 },
+  numbersRow:          { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  numberChip:          { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: Colors.primary, borderRadius: 10, paddingVertical: 8, paddingHorizontal: 12 },
+  numberChipExtra:     { backgroundColor: Colors.success + "18", borderWidth: 1, borderColor: Colors.success + "50" },
+  numberChipText:      { color: "#fff", fontWeight: "700", fontSize: 13 },
   numberChipTextExtra: { color: Colors.success },
 });
 
 // ─── Field Visit Styles ───────────────────────────────────────────────────────
 const fvStyles = StyleSheet.create({
-  overlay:          { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" },
-  sheet:            { backgroundColor: Colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, maxHeight: "92%", flexShrink: 1 },
-  handle:           { width: 40, height: 4, backgroundColor: Colors.border, borderRadius: 2, alignSelf: "center", marginBottom: 16 },
-  headerRow:        { flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 12 },
-  headerIconWrap:   { width: 38, height: 38, borderRadius: 10, backgroundColor: Colors.primary + "14", alignItems: "center", justifyContent: "center" },
-  title:            { fontSize: 18, fontWeight: "700", color: Colors.text },
-  subtitle:         { fontSize: 12, color: Colors.textSecondary, marginTop: 1, textTransform: "uppercase" },
-  closeBtn:         { width: 32, height: 32, borderRadius: 16, backgroundColor: Colors.surfaceAlt, alignItems: "center", justifyContent: "center" },
-  amountRow:        { flexDirection: "row", gap: 8, marginBottom: 16 },
-  amountChip:       { flex: 1, backgroundColor: Colors.surfaceAlt, borderRadius: 10, padding: 10, borderWidth: 1, borderColor: Colors.border },
-  amountLabel:      { fontSize: 9, fontWeight: "700", color: Colors.textMuted, textTransform: "uppercase", marginBottom: 2 },
-  amountValue:      { fontSize: 13, fontWeight: "700", color: Colors.text },
-  sectionLabel:     { fontSize: 11, fontWeight: "700", color: Colors.textSecondary, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 8 },
-  locationBtn:      { flexDirection: "row", alignItems: "center", gap: 10, backgroundColor: Colors.surfaceAlt, borderRadius: 12, borderWidth: 1, borderColor: Colors.border, padding: 14, marginBottom: 16 },
-  locationBtnCaptured: { borderColor: Colors.success + "60", backgroundColor: Colors.success + "10" },
-  locationBtnText:  { flex: 1, fontSize: 13, color: Colors.textSecondary },
-  outcomeBtn:       { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 14, paddingHorizontal: 16, borderRadius: 12, borderWidth: 1.5, borderColor: Colors.border, backgroundColor: Colors.surfaceAlt, marginBottom: 4 },
-  outcomeDot:       { width: 10, height: 10, borderRadius: 5, backgroundColor: Colors.border },
-  outcomeText:      { fontSize: 14, fontWeight: "600", color: Colors.text, flex: 1 },
-  input:            { borderWidth: 1, borderColor: Colors.border, borderRadius: 12, padding: 12, fontSize: 14, color: Colors.text, backgroundColor: Colors.surfaceAlt, marginBottom: 12 },
-  photoGrid:        { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 12 },
-  photoThumb:       { width: 76, height: 76, borderRadius: 10, overflow: "hidden", position: "relative" },
-  photoImg:         { width: "100%", height: "100%" },
-  photoRemove:      { position: "absolute", top: 2, right: 2 },
-  photoAdd:         { width: 76, height: 76, borderRadius: 10, borderWidth: 1.5, borderColor: Colors.border, borderStyle: "dashed", backgroundColor: Colors.surfaceAlt, alignItems: "center", justifyContent: "center", gap: 4 },
-  photoAddText:     { fontSize: 10, color: Colors.textMuted, fontWeight: "600" },
-  btnRow:           { flexDirection: "row", gap: 12, marginTop: 8 },
-  cancelBtn:        { flex: 1, paddingVertical: 14, borderRadius: 12, borderWidth: 1, borderColor: Colors.border, alignItems: "center" },
-  cancelText:       { fontSize: 15, fontWeight: "600", color: Colors.textSecondary },
-  saveBtn:          { flex: 2, paddingVertical: 14, borderRadius: 12, alignItems: "center", flexDirection: "row", justifyContent: "center", gap: 8 },
-  saveText:         { fontSize: 15, fontWeight: "700", color: "#fff" },
+  overlay:             { flex: 1, backgroundColor: "rgba(0,0,0,0.55)", justifyContent: "flex-end" },
+  sheet:               { backgroundColor: Colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, maxHeight: "94%", flexShrink: 1 },
+  handle:              { width: 40, height: 4, backgroundColor: Colors.border, borderRadius: 2, alignSelf: "center", marginBottom: 16 },
+
+  headerRow:           { flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 12 },
+  headerIconWrap:      { width: 40, height: 40, borderRadius: 12, backgroundColor: Colors.primary + "14", alignItems: "center", justifyContent: "center" },
+  title:               { fontSize: 18, fontWeight: "800", color: Colors.text },
+  subtitle:            { fontSize: 11, color: Colors.textSecondary, marginTop: 2, textTransform: "uppercase", letterSpacing: 0.3 },
+  closeBtn:            { width: 34, height: 34, borderRadius: 17, backgroundColor: Colors.surfaceAlt, alignItems: "center", justifyContent: "center" },
+
+  amountRow:           { flexDirection: "row", gap: 8, marginBottom: 16 },
+  amountChip:          { flex: 1, backgroundColor: Colors.surfaceAlt, borderRadius: 10, padding: 10, borderWidth: 1, borderColor: Colors.border },
+  amountLabel:         { fontSize: 9, fontWeight: "700", color: Colors.textMuted, textTransform: "uppercase", marginBottom: 3 },
+  amountValue:         { fontSize: 13, fontWeight: "700", color: Colors.text },
+
+  sectionRow:          { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 8 },
+  sectionLabel:        { fontSize: 11, fontWeight: "700", color: Colors.textSecondary, textTransform: "uppercase", letterSpacing: 0.5 },
+  sectionOptional:     { fontSize: 10, fontWeight: "500", color: Colors.textMuted, textTransform: "none" },
+  requiredBadge:       { backgroundColor: Colors.danger + "15", borderRadius: 6, paddingHorizontal: 7, paddingVertical: 2 },
+  requiredText:        { fontSize: 9, fontWeight: "700", color: Colors.danger, textTransform: "uppercase" },
+
+  locationBtn:         { flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: Colors.surfaceAlt, borderRadius: 14, borderWidth: 1.5, borderColor: Colors.border, padding: 14, marginBottom: 16 },
+  locationBtnCaptured: { borderColor: Colors.success + "80", backgroundColor: Colors.success + "0C" },
+  locationBtnLoading:  { borderColor: Colors.primary + "60", backgroundColor: Colors.primary + "08" },
+  locationBtnText:     { fontSize: 13, color: Colors.textSecondary, fontWeight: "500" },
+  locationAccuracy:    { fontSize: 11, color: Colors.textMuted, marginTop: 2 },
+  reCaptureBtnSmall:   { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, backgroundColor: Colors.primary + "14" },
+  reCaptureText:       { fontSize: 11, color: Colors.primary, fontWeight: "700" },
+
+  outcomeBtn:          { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 14, paddingHorizontal: 16, borderRadius: 12, borderWidth: 1.5, borderColor: Colors.border, backgroundColor: Colors.surfaceAlt },
+  outcomeDot:          { width: 10, height: 10, borderRadius: 5 },
+  outcomeText:         { fontSize: 14, fontWeight: "600", color: Colors.text, flex: 1, marginLeft: 2 },
+
+  input:               { borderWidth: 1.5, borderColor: Colors.border, borderRadius: 12, padding: 13, fontSize: 14, color: Colors.text, backgroundColor: Colors.surfaceAlt, marginBottom: 4 },
+  inputError:          { borderColor: Colors.danger + "90", backgroundColor: Colors.danger + "08" },
+  fieldError:          { fontSize: 11, color: Colors.danger, fontWeight: "600", marginBottom: 10, marginLeft: 2 },
+
+  photoGrid:           { flexDirection: "row", flexWrap: "wrap", gap: 10, marginBottom: 16 },
+  photoThumb:          { width: 80, height: 80, borderRadius: 12, overflow: "hidden", position: "relative", borderWidth: 1, borderColor: Colors.border },
+  photoImg:            { width: "100%", height: "100%" },
+  photoRemoveBtn:      { position: "absolute", top: 4, right: 4 },
+  photoRemoveBg:       { width: 20, height: 20, borderRadius: 10, backgroundColor: Colors.danger, alignItems: "center", justifyContent: "center" },
+  photoIndexBadge:     { position: "absolute", bottom: 4, left: 4, backgroundColor: "rgba(0,0,0,0.55)", borderRadius: 5, paddingHorizontal: 5, paddingVertical: 1 },
+  photoIndexText:      { fontSize: 10, color: "#fff", fontWeight: "700" },
+  photoAddBtn:         { width: 80, height: 80, borderRadius: 12, borderWidth: 1.5, borderColor: Colors.border, borderStyle: "dashed", backgroundColor: Colors.surfaceAlt, alignItems: "center", justifyContent: "center", gap: 4 },
+  photoAddText:        { fontSize: 10, color: Colors.textMuted, fontWeight: "600" },
+
+  validationBox:       { flexDirection: "row", alignItems: "flex-start", gap: 8, backgroundColor: Colors.warning + "14", borderRadius: 10, borderWidth: 1, borderColor: Colors.warning + "40", paddingHorizontal: 12, paddingVertical: 10, marginBottom: 8 },
+  validationText:      { flex: 1, fontSize: 12, color: Colors.warning, fontWeight: "600" },
+
+  btnRow:              { flexDirection: "row", gap: 12, marginTop: 12 },
+  cancelBtn:           { flex: 1, paddingVertical: 14, borderRadius: 12, borderWidth: 1.5, borderColor: Colors.border, alignItems: "center" },
+  cancelText:          { fontSize: 15, fontWeight: "600", color: Colors.textSecondary },
+  saveBtn:             { flex: 2, paddingVertical: 14, borderRadius: 12, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 },
+  saveText:            { fontSize: 15, fontWeight: "700", color: "#fff" },
 });
