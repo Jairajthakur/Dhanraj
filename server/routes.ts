@@ -2783,8 +2783,8 @@ app.get("/api/admin/field-visits", requireAdmin, async (req: Request, res: Respo
     `;
     const params: any[] = [];
  
-    if (agent_id) { params.push(Number(agent_id)); sql += ` AND fv.agent_id = $${params.length}`; }
-    if (case_id)  { params.push(Number(case_id));  sql += ` AND fv.case_id  = $${params.length}`; }
+    if (agent_id) { params.push(Number(agent_id)); sql += ` AND fv.agent_id = $${params.length}::integer`; }
+    if (case_id)  { params.push(Number(case_id));  sql += ` AND fv.case_id  = $${params.length}::integer`; }
     if (date) { params.push(String(date)); sql += ` AND DATE(fv.visited_at AT TIME ZONE 'Asia/Kolkata') = $${params.length}::date`; }
  
     sql += " ORDER BY fv.visited_at DESC LIMIT 200";
