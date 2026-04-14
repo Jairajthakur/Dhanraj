@@ -423,6 +423,15 @@ export const api = {
     deleteFosDeposition: (id: number) =>
       apiRequest("DELETE", `/api/admin/fos-depositions/${id}`),
 
+    // ── Field Visits ─────────────────────────────────────────────────────────
+    getAdminFieldVisits: (params?: { agent_id?: number; date?: string }) => {
+      const qs = new URLSearchParams();
+      if (params?.agent_id) qs.set("agent_id", String(params.agent_id));
+      if (params?.date)     qs.set("date", params.date);
+      const suffix = qs.toString() ? `?${qs.toString()}` : "";
+      return apiRequest("GET", `/api/admin/field-visits${suffix}`);
+    },
+
     // ── Attendance ───────────────────────────────────────────────────────────
     getAllAttendance:  () => apiRequest("GET", "/api/admin/attendance"),
     getAttendance:    () => apiRequest("GET", "/api/admin/attendance"),
