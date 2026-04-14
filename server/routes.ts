@@ -2729,6 +2729,14 @@ app.get("/api/receipt-requests", requireAuth, async (req, res) => {
   } catch (e) {
     console.error("[field_visits] Migration error (case_type):", e);
   }
+  try {
+    await storage.query(`ALTER TABLE field_visits ADD COLUMN IF NOT EXISTS lat NUMERIC(11, 7)`);
+    await storage.query(`ALTER TABLE field_visits ADD COLUMN IF NOT EXISTS lng NUMERIC(11, 7)`);
+    await storage.query(`ALTER TABLE field_visits ADD COLUMN IF NOT EXISTS accuracy NUMERIC(8, 2)`);
+    console.log("[DB] field_visits lat/lng/accuracy columns ensured ✅");
+  } catch (e) {
+    console.error("[field_visits] Migration error (lat/lng):", e);
+  }
  
 // ── POST /api/cases/:id/visit — agent records a geo check-in ────────────────
 app.post("/api/cases/:id/visit", requireAuth, async (req: Request, res: Response) => {
