@@ -247,12 +247,51 @@ export const api = {
   getFieldVisits: (caseId: number) =>
     apiRequest("GET", `/api/cases/${caseId}/visits`),
 
-  recordFieldVisit: (caseId: number, data: {
-    lat: number,
-    lng: number,
-    accuracy?: number,
-    case_type?: string,
-  }) => apiRequest("POST", `/api/cases/${caseId}/visit`, data),
+recordFieldVisit: async (
+  caseId: number,
+  data: {
+    lat: number;
+    lng: number;
+    accuracy?: number;
+    case_type?: string;
+    photo?: { uri: string; name?: string; mimeType?: string } | null;
+  }
+) => {
+  if (data.photo) {
+    const baseUrl = getApiUrl();
+    const url = buildUrl(`/api/cases/${caseId}/visit`, baseUrl);
+    const token = await tokenStore.get();
+
+    const form = new FormData();
+    form.append("lat",  String(data.lat));
+    form.append("lng",  String(data.lng));
+    if (data.accuracy != null) form.append("accuracy", String(data.accuracy));
+    if (data.case_type)        form.append("case_type", data.case_type);
+    form.append("photo", {
+      uri:  data.photo.uri,
+      name: data.photo.name  || "visit.jpg",
+      type: data.photo.mimeType || "image/jpeg",
+    } as any);
+
+    const r = await fetch(url, {
+      method: "POST",
+      credentials: "include",
+      headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      body: form,
+    });
+    const json = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(json.message || `HTTP ${r.status}`);
+    return json;
+  }
+
+  // No photo — plain JSON (existing callers unaffected)
+  return apiRequest("POST", `/api/cases/${caseId}/visit`, {
+    lat:       data.lat,
+    lng:       data.lng,
+    accuracy:  data.accuracy,
+    case_type: data.case_type,
+  });
+},
 
   // ── Attendance ────────────────────────────────────────────────────────────
   checkIn:  () => apiRequest("POST", "/api/attendance/checkin"),
