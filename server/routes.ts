@@ -550,6 +550,13 @@ app.use("/api/fos-depositions", (req, res, next) => {
   }
   express.json()(req, res, next);
 });
+
+  app.use("/api/cases", (req, res, next) => {
+  if (req.headers["content-type"]?.includes("multipart/form-data")) {
+    return next(); // skip json parser, let multer handle it
+  }
+  next();
+});
   const PgStore = connectPgSimple(session);
   app.use(session({
     store: new PgStore({ conString: process.env.DATABASE_URL, tableName: "user_sessions", createTableIfMissing: true }),
@@ -2763,18 +2770,10 @@ app.get("/api/receipt-requests", requireAuth, async (req, res) => {
 // ── POST /api/cases/:id/visit — agent records a geo check-in ────────────────
 
  
-// SINGLE unified visit route — replaces BOTH existing ones
 app.post(
   "/api/cases/:id/visit",
   requireAuth,
-  (req, res, next) => {
-    // If multipart (has photo), use screenshotUpload; otherwise skip
-    const ct = req.headers["content-type"] || "";
-    if (ct.includes("multipart/form-data")) {
-      return screenshotUpload.single("photo")(req, res, next);
-    }
-    next();
-  },
+  screenshotUpload.single("photo"),   // always run multer; it's a no-op if no file
   async (req: Request, res: Response) => {
     try {
       const caseId  = Number(req.params.id);
@@ -2790,11 +2789,11 @@ app.post(
       }
 
       let photoUrl: string | null = null;
-      if ((req as any).file) {
+      if (req.file) {
         const baseUrl = process.env.RAILWAY_PUBLIC_DOMAIN
           ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`
           : "";
-        photoUrl = `${baseUrl}/uploads/screenshots/${(req as any).file.filename}`;
+        photoUrl = `${baseUrl}/uploads/screenshots/${req.file.filename}`;
       }
 
       const result = await storage.query(
