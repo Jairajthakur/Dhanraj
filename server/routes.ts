@@ -2737,6 +2737,12 @@ app.get("/api/receipt-requests", requireAuth, async (req, res) => {
   } catch (e) {
     console.error("[field_visits] Migration error (lat/lng):", e);
   }
+
+  try {
+    await storage.query(`ALTER TABLE field_visits ADD COLUMN IF NOT EXISTS customer_name TEXT`);
+    await storage.query(`ALTER TABLE field_visits ALTER COLUMN customer_name DROP NOT NULL`);
+    console.log("[DB] field_visits.customer_name nullable ✅");
+  } catch (e: any) { console.error("[DB] field_visits customer_name migration:", e.message); }
  
 // ── POST /api/cases/:id/visit — agent records a geo check-in ────────────────
 app.post("/api/cases/:id/visit", requireAuth, async (req: Request, res: Response) => {
