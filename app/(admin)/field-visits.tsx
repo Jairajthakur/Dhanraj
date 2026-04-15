@@ -49,7 +49,9 @@ interface FieldVisit {
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function todayISO(): string {
-  return new Date().toISOString().split("T")[0]; // YYYY-MM-DD
+  const now = new Date();
+  const ist = new Date(now.getTime() + 5.5 * 60 * 60 * 1000);
+  return ist.toISOString().split("T")[0];
 }
 
 function fmtTime(iso: string): string {
