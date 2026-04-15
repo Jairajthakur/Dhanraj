@@ -2773,7 +2773,7 @@ app.get("/api/receipt-requests", requireAuth, async (req, res) => {
 app.post(
   "/api/cases/:id/visit",
   requireAuth,
-  screenshotUpload.single("photo"),   // always run multer; it's a no-op if no file
+  upload.single("photo"),   // memory storage — buffer stored as base64 in DB, survives Railway restarts
   async (req: Request, res: Response) => {
     try {
       const caseId  = Number(req.params.id);
@@ -2788,14 +2788,12 @@ app.post(
         return res.status(400).json({ message: "lat and lng are required" });
       }
 
+      // Store photo as base64 data URL directly in PostgreSQL so it is never
+      // lost when the Railway container restarts (ephemeral filesystem).
       let photoUrl: string | null = null;
       if (req.file) {
-        const baseUrl = process.env.RAILWAY_PUBLIC_DOMAIN
-          ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`
-          : process.env.BASE_URL
-          ? process.env.BASE_URL
-          : `${req.protocol}://${req.get("host")}`;
-        photoUrl = `${baseUrl}/uploads/screenshots/${req.file.filename}`;
+        const mime = req.file.mimetype || "image/jpeg";
+        photoUrl = `data:${mime};base64,${req.file.buffer.toString("base64")}`;
       }
 
       const result = await storage.query(
