@@ -2739,19 +2739,22 @@ app.get("/api/receipt-requests", requireAuth, async (req, res) => {
   }
 
   try {
-    await storage.query(`ALTER TABLE field_visits ADD COLUMN IF NOT EXISTS customer_name TEXT`);
-    await storage.query(`ALTER TABLE field_visits ALTER COLUMN customer_name DROP NOT NULL`);
-    console.log("[DB] field_visits.customer_name nullable ✅");
-  } catch (e: any) { console.error("[DB] field_visits customer_name migration:", e.message); }
+    const dropNotNulls = [
+      `ALTER TABLE field_visits ALTER COLUMN outcome DROP NOT NULL`,
+      `ALTER TABLE field_visits ALTER COLUMN latitude DROP NOT NULL`,
+      `ALTER TABLE field_visits ALTER COLUMN longitude DROP NOT NULL`,
+      `ALTER TABLE field_visits ALTER COLUMN customer_name DROP NOT NULL`,
+      `ALTER TABLE field_visits ALTER COLUMN loan_no DROP NOT NULL`,
+      `ALTER TABLE field_visits ALTER COLUMN remarks DROP NOT NULL`,
+      `ALTER TABLE field_visits ALTER COLUMN status DROP NOT NULL`,
+    ];
+    for (const sql of dropNotNulls) {
+      try { await storage.query(sql); } catch {}
+    }
+    console.log("[DB] field_visits all NOT NULL constraints dropped ✅");
+  } catch (e: any) { console.error("[DB] field_visits constraint migration:", e.message); }
+  
 
-
-  try {
-    await storage.query(`ALTER TABLE field_visits ADD COLUMN IF NOT EXISTS latitude NUMERIC(11, 7)`);
-    await storage.query(`ALTER TABLE field_visits ADD COLUMN IF NOT EXISTS longitude NUMERIC(11, 7)`);
-    await storage.query(`ALTER TABLE field_visits ALTER COLUMN latitude DROP NOT NULL`);
-    await storage.query(`ALTER TABLE field_visits ALTER COLUMN longitude DROP NOT NULL`);
-    console.log("[DB] field_visits latitude/longitude nullable ✅");
-  } catch (e: any) { console.error("[DB] field_visits latitude/longitude migration:", e.message); }
 // ── POST /api/cases/:id/visit — agent records a geo check-in ────────────────
 app.post("/api/cases/:id/visit", requireAuth, async (req: Request, res: Response) => {
   try {
