@@ -30,6 +30,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import Colors from "@/constants/colors";
 import { api } from "@/lib/api";
+import { getApiUrl } from "@/lib/query-client";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -48,7 +49,7 @@ interface FieldVisit {
   pos: number | null;
   latest_feedback: string | null;
   case_status: string | null;
-  photo_url: string | null; 
+  has_photo: boolean; // photo served via /api/field-visits/:id/photo
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -125,6 +126,12 @@ function VisitCard({ visit }: { visit: FieldVisit }) {
     (visit.loan_no ? `Loan ${visit.loan_no}` : `Case #${visit.case_id}`);
   const typeTag   = visit.case_type === "bkt" ? "BKT" : "Loan";
   const typeColor = visit.case_type === "bkt" ? Colors.warning : Colors.info;
+
+  // Build photo URL from dedicated endpoint (avoids embedding MB of base64 in the list response)
+  const { getApiUrl } = require("@/lib/query-client");
+  const photoUrl = visit.has_photo
+    ? `${getApiUrl()}/api/field-visits/${visit.id}/photo`
+    : null;
 
   return (
     <View style={styles.card}>
