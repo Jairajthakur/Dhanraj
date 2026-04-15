@@ -452,7 +452,15 @@ function FieldVisitModal({ visible, item, onClose }: { visible: boolean; item: a
     setSaving(true);
     const caseType = (item as any).case_type === "bkt" ? "bkt" : "loan";
     try {
-      await api.recordFieldVisit(item.id, { lat: gps!.lat, lng: gps!.lng, accuracy: gps!.accuracy, case_type: caseType });
+      await api.recordFieldVisit(item.id, {
+        lat: gps!.lat,
+        lng: gps!.lng,
+        accuracy: gps!.accuracy,
+        case_type: caseType,
+        photo: photos.length > 0
+          ? { uri: photos[0].uri, name: photos[0].fileName, mimeType: photos[0].mimeType }
+          : null,
+      });
       const feedbackPayload: Record<string, unknown> = {
         visit_outcome: outcome, visit_remarks: remarks.trim(),
         visit_location: `${gps!.lat.toFixed(6)},${gps!.lng.toFixed(6)}`,
