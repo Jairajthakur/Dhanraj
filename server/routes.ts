@@ -2729,6 +2729,11 @@ app.get("/api/receipt-requests", requireAuth, async (req, res) => {
   } catch (e) {
     console.error("[field_visits] Migration error (case_type):", e);
   }
+
+  try {
+  await storage.query(`ALTER TABLE field_visits ADD COLUMN IF NOT EXISTS photo_url TEXT`);
+  console.log("[DB] field_visits.photo_url column ready ✅");
+} catch (e: any) { console.error("[DB] field_visits.photo_url migration:", e.message); }
   try {
     await storage.query(`ALTER TABLE field_visits ADD COLUMN IF NOT EXISTS lat NUMERIC(11, 7)`);
     await storage.query(`ALTER TABLE field_visits ADD COLUMN IF NOT EXISTS lng NUMERIC(11, 7)`);
@@ -2782,28 +2787,46 @@ app.post("/api/cases/:id/visit", requireAuth, async (req: Request, res: Response
   }
 });
  
-// ── GET /api/cases/:id/visits — agent fetches visit history for a case ──────
-app.get("/api/cases/:id/visits", requireAuth, async (req: Request, res: Response) => {
-  try {
-    const caseId = Number(req.params.id);
- 
-    const result = await storage.query(
-      `SELECT fv.*, fa.name AS agent_name
-       FROM   field_visits fv
-       LEFT JOIN fos_agents fa ON fa.id = fv.agent_id
-       WHERE  fv.case_id = $1
-       ORDER  BY fv.visited_at DESC
-       LIMIT  20`,
-      [caseId]
-    );
- 
-    res.json({ visits: result.rows });
-  } catch (e: any) {
-    console.error("[GET /api/cases/:id/visits]", e);
-    res.status(500).json({ message: e.message });
+app.post(
+  "/api/cases/:id/visit",
+  requireAuth,
+  screenshotUpload.single("photo"),
+  async (req: Request, res: Response) => {
+    try {
+      const caseId  = Number(req.params.id);
+      const agentId = req.session.agentId!;
+
+      const lat       = Number(req.body.lat);
+      const lng       = Number(req.body.lng);
+      const accuracy  = req.body.accuracy ? Number(req.body.accuracy) : null;
+      const case_type = req.body.case_type || "loan";
+
+      if (!lat || !lng) {
+        return res.status(400).json({ message: "lat and lng are required" });
+      }
+
+      let photoUrl: string | null = null;
+      if (req.file) {
+        const baseUrl = process.env.RAILWAY_PUBLIC_DOMAIN
+          ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`
+          : "";
+        photoUrl = `${baseUrl}/uploads/screenshots/${req.file.filename}`;
+      }
+
+      const result = await storage.query(
+        `INSERT INTO field_visits (case_id, case_type, agent_id, lat, lng, accuracy, photo_url)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
+         RETURNING *`,
+        [caseId, case_type, agentId, lat, lng, accuracy, photoUrl]
+      );
+
+      res.json({ visit: result.rows[0] });
+    } catch (e: any) {
+      console.error("[POST /api/cases/:id/visit]", e);
+      res.status(500).json({ message: e.message });
+    }
   }
-});
- 
+);
 // ── GET /api/admin/field-visits — admin sees all visits with filters ─────────
 app.get("/api/admin/field-visits", requireAdmin, async (req: Request, res: Response) => {
   try {
