@@ -22,6 +22,7 @@ import {
   Linking,
   RefreshControl,
   Platform,
+  Image,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQuery } from "@tanstack/react-query";
@@ -47,6 +48,7 @@ interface FieldVisit {
   pos: number | null;
   latest_feedback: string | null;
   case_status: string | null;
+  photo_url: string | null; 
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -119,8 +121,9 @@ function VisitCard({ visit }: { visit: FieldVisit }) {
     visit.accuracy != null ? `±${Math.round(Number(visit.accuracy))} m` : null;
 
   const caseLabel =
-    visit.customer_name || (visit.loan_no ? `Loan ${visit.loan_no}` : `Case #${visit.case_id}`);
-  const typeTag = visit.case_type === "bkt" ? "BKT" : "Loan";
+    visit.customer_name ||
+    (visit.loan_no ? `Loan ${visit.loan_no}` : `Case #${visit.case_id}`);
+  const typeTag   = visit.case_type === "bkt" ? "BKT" : "Loan";
   const typeColor = visit.case_type === "bkt" ? Colors.warning : Colors.info;
 
   return (
@@ -139,10 +142,25 @@ function VisitCard({ visit }: { visit: FieldVisit }) {
       </View>
 
       {/* Case name */}
-      <Text style={styles.caseName} numberOfLines={1}>
-        {caseLabel}
-      </Text>
+      <Text style={styles.caseName} numberOfLines={1}>{caseLabel}</Text>
 
+      {/* Photo thumbnail — tappable, opens full image in browser */}
+      {visit.photo_url && (
+        <Pressable
+          onPress={() => Linking.openURL(visit.photo_url!)}
+          style={({ pressed }) => [styles.photoWrapper, pressed && { opacity: 0.8 }]}
+        >
+          <Image
+            source={{ uri: visit.photo_url }}
+            style={styles.photoThumb}
+            resizeMode="cover"
+          />
+          <View style={styles.photoOverlay}>
+            <Ionicons name="expand-outline" size={14} color="#fff" />
+            <Text style={styles.photoOverlayText}>View photo</Text>
+          </View>
+        </Pressable>
+      )}
 
       {/* Case details row */}
       <View style={styles.detailsRow}>
@@ -155,30 +173,30 @@ function VisitCard({ visit }: { visit: FieldVisit }) {
           </View>
         )}
         {visit.case_status != null && (
-          <View style={[styles.detailChip, { 
-            backgroundColor: visit.case_status === "Paid" 
-              ? Colors.success + "18" 
-              : visit.case_status === "PTP" 
-              ? Colors.warning + "18" 
-              : Colors.danger + "18" 
+          <View style={[styles.detailChip, {
+            backgroundColor:
+              visit.case_status === "Paid"  ? Colors.success + "18" :
+              visit.case_status === "PTP"   ? Colors.warning + "18" :
+                                              Colors.danger  + "18",
           }]}>
-            <Text style={[styles.detailChipValue, { 
-              color: visit.case_status === "Paid" 
-                ? Colors.success 
-                : visit.case_status === "PTP" 
-                ? Colors.warning 
-                : Colors.danger 
+            <Text style={[styles.detailChipValue, {
+              color:
+                visit.case_status === "Paid"  ? Colors.success :
+                visit.case_status === "PTP"   ? Colors.warning :
+                                                Colors.danger,
             }]}>
               {visit.case_status}
             </Text>
           </View>
         )}
       </View>
+
       {visit.latest_feedback != null && (
         <Text style={styles.feedbackText} numberOfLines={1}>
           💬 {visit.latest_feedback}
         </Text>
       )}
+
       {/* GPS row */}
       <View style={styles.gpsRow}>
         <Ionicons name="location-outline" size={13} color={Colors.textMuted} />
@@ -186,12 +204,8 @@ function VisitCard({ visit }: { visit: FieldVisit }) {
           {Number(visit.lat).toFixed(5)}, {Number(visit.lng).toFixed(5)}
           {accText ? ` · ${accText}` : ""}
         </Text>
-
         <Pressable
-          style={({ pressed }) => [
-            styles.mapBtn,
-            pressed && { opacity: 0.7 },
-          ]}
+          style={({ pressed }) => [styles.mapBtn, pressed && { opacity: 0.7 }]}
           onPress={() => openInMaps(Number(visit.lat), Number(visit.lng), caseLabel)}
           hitSlop={8}
         >
