@@ -121,7 +121,8 @@ function SummaryBar({
 
 function VisitCard({ visit }: { visit: FieldVisit }) {
   const accText =
-    visit.accuracy != null ? `±${Math.round(visit.accuracy)} m` : null;
+    visit.accuracy != null ? `±${Math.round(Number(visit.accuracy))} m` : null;
+
   const caseLabel =
     visit.customer_name || (visit.loan_no ? `Loan ${visit.loan_no}` : `Case #${visit.case_id}`);
   const typeTag = visit.case_type === "bkt" ? "BKT" : "Loan";
@@ -151,7 +152,7 @@ function VisitCard({ visit }: { visit: FieldVisit }) {
       <View style={styles.gpsRow}>
         <Ionicons name="location-outline" size={13} color={Colors.textMuted} />
         <Text style={styles.coordText}>
-          {visit.lat.toFixed(5)}, {visit.lng.toFixed(5)}
+          {Number(visit.lat).toFixed(5)}, {Number(visit.lng).toFixed(5)}
           {accText ? ` · ${accText}` : ""}
         </Text>
 
@@ -160,7 +161,7 @@ function VisitCard({ visit }: { visit: FieldVisit }) {
             styles.mapBtn,
             pressed && { opacity: 0.7 },
           ]}
-          onPress={() => openInMaps(visit.lat, visit.lng, caseLabel)}
+          onPress={() => openInMaps(Number(visit.lat), Number(visit.lng), caseLabel)}
           hitSlop={8}
         >
           <Ionicons name="map-outline" size={13} color={Colors.primary} />
