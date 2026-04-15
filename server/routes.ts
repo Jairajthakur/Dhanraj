@@ -2761,36 +2761,20 @@ app.get("/api/receipt-requests", requireAuth, async (req, res) => {
   
 
 // ── POST /api/cases/:id/visit — agent records a geo check-in ────────────────
-app.post("/api/cases/:id/visit", requireAuth, async (req: Request, res: Response) => {
-  try {
-    const caseId   = Number(req.params.id);
-    const agentId  = req.session.agentId!;
-    const { lat, lng, accuracy, case_type = "loan" } = req.body as {
-      lat: number; lng: number; accuracy?: number; case_type?: string;
-    };
+
  
-    if (!lat || !lng) {
-      return res.status(400).json({ message: "lat and lng are required" });
-    }
- 
-    const result = await storage.query(
-      `INSERT INTO field_visits (case_id, case_type, agent_id, lat, lng, accuracy)
-       VALUES ($1, $2, $3, $4, $5, $6)
-       RETURNING *`,
-      [caseId, case_type, agentId, lat, lng, accuracy ?? null]
-    );
- 
-    res.json({ visit: result.rows[0] });
-  } catch (e: any) {
-    console.error("[POST /api/cases/:id/visit]", e);
-    res.status(500).json({ message: e.message });
-  }
-});
- 
+// SINGLE unified visit route — replaces BOTH existing ones
 app.post(
   "/api/cases/:id/visit",
   requireAuth,
-  screenshotUpload.single("photo"),
+  (req, res, next) => {
+    // If multipart (has photo), use screenshotUpload; otherwise skip
+    const ct = req.headers["content-type"] || "";
+    if (ct.includes("multipart/form-data")) {
+      return screenshotUpload.single("photo")(req, res, next);
+    }
+    next();
+  },
   async (req: Request, res: Response) => {
     try {
       const caseId  = Number(req.params.id);
@@ -2806,11 +2790,11 @@ app.post(
       }
 
       let photoUrl: string | null = null;
-      if (req.file) {
+      if ((req as any).file) {
         const baseUrl = process.env.RAILWAY_PUBLIC_DOMAIN
           ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`
           : "";
-        photoUrl = `${baseUrl}/uploads/screenshots/${req.file.filename}`;
+        photoUrl = `${baseUrl}/uploads/screenshots/${(req as any).file.filename}`;
       }
 
       const result = await storage.query(
@@ -2833,23 +2817,54 @@ app.get("/api/admin/field-visits", requireAdmin, async (req: Request, res: Respo
     const { agent_id, case_id, date } = req.query;
 
     let sql = `
-     SELECT fv.*, fa.name AS agent_name,
-       COALESCE(lc.customer_name, bc.customer_name) AS customer_name,
-       COALESCE(lc.loan_no, bc.loan_no) AS loan_no,
-       COALESCE(lc.pos::numeric, bc.pos::numeric) AS pos,
-       COALESCE(lc.latest_feedback, bc.latest_feedback) AS latest_feedback,
-       COALESCE(lc.status, bc.status) AS case_status
-FROM   field_visits fv
-LEFT JOIN fos_agents fa ON fa.id = fv.agent_id::integer
-LEFT JOIN loan_cases lc ON lc.id = fv.case_id::integer AND fv.case_type = 'loan'
-LEFT JOIN bkt_cases bc ON bc.id = fv.case_id::integer AND fv.case_type = 'bkt'
+      SELECT
+        fv.*,
+        fa.name AS agent_name,
+        CASE
+          WHEN LOWER(TRIM(fv.case_type)) = 'bkt'
+          THEN bc.customer_name
+          ELSE lc.customer_name
+        END AS customer_name,
+        CASE
+          WHEN LOWER(TRIM(fv.case_type)) = 'bkt'
+          THEN bc.loan_no
+          ELSE lc.loan_no
+        END AS loan_no,
+        CASE
+          WHEN LOWER(TRIM(fv.case_type)) = 'bkt'
+          THEN bc.pos::numeric
+          ELSE lc.pos::numeric
+        END AS pos,
+        CASE
+          WHEN LOWER(TRIM(fv.case_type)) = 'bkt'
+          THEN bc.latest_feedback
+          ELSE lc.latest_feedback
+        END AS latest_feedback,
+        CASE
+          WHEN LOWER(TRIM(fv.case_type)) = 'bkt'
+          THEN bc.status
+          ELSE lc.status
+        END AS case_status
+      FROM field_visits fv
+      LEFT JOIN fos_agents fa  ON fa.id  = fv.agent_id::integer
+      LEFT JOIN loan_cases lc  ON lc.id  = fv.case_id::integer
+      LEFT JOIN bkt_cases  bc  ON bc.id  = fv.case_id::integer
       WHERE 1=1
     `;
     const params: any[] = [];
 
-    if (agent_id) { params.push(Number(agent_id)); sql += ` AND fv.agent_id::integer = $${params.length}`; }
-    if (case_id)  { params.push(Number(case_id));  sql += ` AND fv.case_id::integer  = $${params.length}`; }
-    if (date) { params.push(String(date)); sql += ` AND DATE(fv.visited_at AT TIME ZONE 'Asia/Kolkata') = $${params.length}::date`; }
+    if (agent_id) {
+      params.push(Number(agent_id));
+      sql += ` AND fv.agent_id::integer = $${params.length}`;
+    }
+    if (case_id) {
+      params.push(Number(case_id));
+      sql += ` AND fv.case_id::integer = $${params.length}`;
+    }
+    if (date) {
+      params.push(String(date));
+      sql += ` AND DATE(fv.visited_at AT TIME ZONE 'Asia/Kolkata') = $${params.length}::date`;
+    }
 
     sql += " ORDER BY fv.visited_at DESC LIMIT 200";
 
