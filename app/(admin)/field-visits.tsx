@@ -669,4 +669,34 @@ const styles = StyleSheet.create({
     fontStyle: "italic",
     marginTop: 2,
   },
+
+  photoWrapper: {
+  borderRadius: 8,
+  overflow: "hidden",
+  marginTop: 4,
+  marginBottom: 2,
+  height: 140,
+  backgroundColor: Colors.surfaceAlt,
+},
+photoThumb: {
+  width: "100%",
+  height: "100%",
+},
+photoOverlay: {
+  position: "absolute",
+  bottom: 6,
+  right: 8,
+  flexDirection: "row",
+  alignItems: "center",
+  gap: 3,
+  backgroundColor: "rgba(0,0,0,0.45)",
+  paddingHorizontal: 7,
+  paddingVertical: 3,
+  borderRadius: 6,
+},
+photoOverlayText: {
+  fontSize: 11,
+  fontWeight: "600",
+  color: "#fff",
+},
 });
