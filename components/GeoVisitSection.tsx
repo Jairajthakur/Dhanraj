@@ -10,6 +10,7 @@ import * as ImagePicker from "expo-image-picker";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import Colors from "@/constants/colors";
 import { api } from "@/lib/api";
+import { getApiUrl } from "@/lib/query-client";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface FieldVisit {
@@ -19,7 +20,7 @@ interface FieldVisit {
   accuracy: number | null;
   visited_at: string;
   agent_name?: string;
-  photo_url?: string | null;
+  has_photo?: boolean;
 }
 
 interface Props {
@@ -239,9 +240,9 @@ export function GeoVisitSection({ caseId, caseType }: Props) {
                 <Text style={styles.accuracy}>Accuracy ±{Math.round(visits[0].accuracy)}m</Text>
               )}
               {/* Show photo from last visit if exists */}
-              {visits[0].photo_url ? (
+              {visits[0].has_photo ? (
                 <Image
-                  source={{ uri: visits[0].photo_url }}
+                  source={{ uri: `${getApiUrl()}/api/field-visits/${visits[0].id}/photo` }}
                   style={styles.visitPhoto}
                   resizeMode="cover"
                 />
@@ -334,9 +335,9 @@ export function GeoVisitSection({ caseId, caseType }: Props) {
                 <View style={{ flex: 1 }}>
                   <Text style={styles.historyDate}>{fmtVisitDate(v.visited_at)}</Text>
                   <Text style={styles.historyCoords}>{fmtCoords(v.lat, v.lng)}</Text>
-                  {v.photo_url ? (
+                  {v.has_photo ? (
                     <Image
-                      source={{ uri: v.photo_url }}
+                      source={{ uri: `${getApiUrl()}/api/field-visits/${v.id}/photo` }}
                       style={styles.historyPhoto}
                       resizeMode="cover"
                     />
