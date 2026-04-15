@@ -338,14 +338,16 @@ export default function AdminFieldVisitsScreen() {
             <Text style={styles.retryText}>Retry</Text>
           </Pressable>
         </View>
-      ) : allVisits.length === 0 ? (
+     ) : allVisits.length === 0 ? (
         <View style={styles.centered}>
           <Ionicons name="location-outline" size={44} color={Colors.textMuted} />
           <Text style={styles.emptyTitle}>No visits recorded</Text>
           <Text style={styles.emptySubtitle}>
-            {agentFilter
-              ? "This agent hasn't logged any field visits on this date."
-              : "No agents logged field visits on this date."}
+            {JSON.stringify({ 
+              date: selectedDate, 
+              data: visitsQuery.data,
+              error: visitsQuery.error?.message 
+            })}
           </Text>
         </View>
       ) : (
