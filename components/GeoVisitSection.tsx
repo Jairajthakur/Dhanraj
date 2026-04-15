@@ -1,15 +1,16 @@
 import React, { useState, useCallback } from "react";
 import {
   View, Text, StyleSheet, Pressable,
-  ActivityIndicator, Alert,
+  ActivityIndicator, Alert, Image,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import * as Location from "expo-location";
 import * as Haptics from "expo-haptics";
+import * as ImagePicker from "expo-image-picker";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import Colors from "@/constants/colors";
 import { api } from "@/lib/api";
- 
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface FieldVisit {
   id: number;
@@ -18,18 +19,19 @@ interface FieldVisit {
   accuracy: number | null;
   visited_at: string;
   agent_name?: string;
+  photo_url?: string | null;
 }
- 
+
 interface Props {
   caseId: number;
   caseType: "loan" | "bkt";
 }
- 
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 function fmtCoords(lat: number, lng: number): string {
   return `${Math.abs(lat).toFixed(4)}°${lat >= 0 ? "N" : "S"}  ${Math.abs(lng).toFixed(4)}°${lng >= 0 ? "E" : "W"}`;
 }
- 
+
 function fmtVisitDate(iso: string): string {
   try {
     const d = new Date(iso);
@@ -40,13 +42,16 @@ function fmtVisitDate(iso: string): string {
     });
   } catch { return iso.slice(0, 16).replace("T", " "); }
 }
- 
+
 // ─── Component ────────────────────────────────────────────────────────────────
 export function GeoVisitSection({ caseId, caseType }: Props) {
   const qc = useQueryClient();
   const [checking, setChecking] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
- 
+  const [pendingPhoto, setPendingPhoto] = useState<{
+    uri: string; name: string; mimeType: string;
+  } | null>(null);
+
   // ── Fetch visit history ──
   const queryKey = [`/api/cases/${caseId}/visits`];
   const { data, isLoading } = useQuery<{ visits: FieldVisit[] }>({
@@ -54,18 +59,90 @@ export function GeoVisitSection({ caseId, caseType }: Props) {
     queryFn: () => api.getFieldVisits(caseId),
     staleTime: 60_000,
   });
- 
+
   const visits = data?.visits ?? [];
   const todayStr = new Date().toDateString();
   const hasCheckedInToday = visits.some(
     (v) => new Date(v.visited_at).toDateString() === todayStr
   );
- 
+
+  // ── Photo picker ──
+  const handlePickPhoto = useCallback(async () => {
+    // Try camera first, fall back to library
+    const { status: camStatus } = await ImagePicker.requestCameraPermissionsAsync();
+    if (camStatus !== "granted") {
+      // Fall back to gallery
+      const { status: libStatus } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (libStatus !== "granted") {
+        Alert.alert("Permission Required", "Please allow camera or photo library access.");
+        return;
+      }
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        quality: 0.7,
+        allowsEditing: false,
+      });
+      if (!result.canceled && result.assets[0]) {
+        const asset = result.assets[0];
+        setPendingPhoto({
+          uri: asset.uri,
+          name: asset.fileName || `visit_${Date.now()}.jpg`,
+          mimeType: asset.mimeType || "image/jpeg",
+        });
+      }
+      return;
+    }
+
+    Alert.alert(
+      "Add Photo",
+      "Take a new photo or choose from gallery?",
+      [
+        {
+          text: "Camera",
+          onPress: async () => {
+            const result = await ImagePicker.launchCameraAsync({
+              mediaTypes: ImagePicker.MediaTypeOptions.Images,
+              quality: 0.7,
+              allowsEditing: false,
+            });
+            if (!result.canceled && result.assets[0]) {
+              const asset = result.assets[0];
+              setPendingPhoto({
+                uri: asset.uri,
+                name: asset.fileName || `visit_${Date.now()}.jpg`,
+                mimeType: asset.mimeType || "image/jpeg",
+              });
+            }
+          },
+        },
+        {
+          text: "Gallery",
+          onPress: async () => {
+            const result = await ImagePicker.launchImageLibraryAsync({
+              mediaTypes: ImagePicker.MediaTypeOptions.Images,
+              quality: 0.7,
+              allowsEditing: false,
+            });
+            if (!result.canceled && result.assets[0]) {
+              const asset = result.assets[0];
+              setPendingPhoto({
+                uri: asset.uri,
+                name: asset.fileName || `visit_${Date.now()}.jpg`,
+                mimeType: asset.mimeType || "image/jpeg",
+              });
+            }
+          },
+        },
+        { text: "Cancel", style: "cancel" },
+      ]
+    );
+  }, []);
+
   // ── Check-in handler ──
   const handleCheckIn = useCallback(async () => {
     setChecking(true);
     try {
-      // 1. Request permission
+      // 1. Request location permission
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== "granted") {
         Alert.alert(
@@ -75,29 +152,31 @@ export function GeoVisitSection({ caseId, caseType }: Props) {
         );
         return;
       }
- 
+
       // 2. Get position
       const pos = await Location.getCurrentPositionAsync({
         accuracy: Location.Accuracy.High,
       });
- 
-      // 3. Post to server
+
+      // 3. Post to server (with or without photo)
       await api.recordFieldVisit(caseId, {
         case_type: caseType,
         lat:       pos.coords.latitude,
         lng:       pos.coords.longitude,
         accuracy:  pos.coords.accuracy ?? undefined,
+        photo:     pendingPhoto ?? undefined,
       });
- 
+
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      setPendingPhoto(null); // clear staged photo after successful submit
       await qc.invalidateQueries({ queryKey });
     } catch (e: any) {
       Alert.alert("Check-in Failed", e.message || "Could not record location.");
     } finally {
       setChecking(false);
     }
-  }, [caseId, caseType, qc, queryKey]);
- 
+  }, [caseId, caseType, pendingPhoto, qc, queryKey]);
+
   // ── Confirm before check-in if already done today ──
   const handlePress = () => {
     if (hasCheckedInToday) {
@@ -113,7 +192,7 @@ export function GeoVisitSection({ caseId, caseType }: Props) {
       handleCheckIn();
     }
   };
- 
+
   return (
     <View style={[
       styles.sectionCard,
@@ -135,7 +214,7 @@ export function GeoVisitSection({ caseId, caseType }: Props) {
         ]}>
           Field Visit
         </Text>
- 
+
         {hasCheckedInToday && (
           <View style={styles.doneBadge}>
             <Ionicons name="checkmark" size={10} color={Colors.success} />
@@ -143,10 +222,10 @@ export function GeoVisitSection({ caseId, caseType }: Props) {
           </View>
         )}
       </View>
- 
+
       {/* ── Body ── */}
       <View style={styles.body}>
- 
+
         {/* Latest visit info */}
         {isLoading ? (
           <ActivityIndicator size="small" color={Colors.primary} style={{ marginVertical: 8 }} />
@@ -159,6 +238,14 @@ export function GeoVisitSection({ caseId, caseType }: Props) {
               {visits[0].accuracy != null && (
                 <Text style={styles.accuracy}>Accuracy ±{Math.round(visits[0].accuracy)}m</Text>
               )}
+              {/* Show photo from last visit if exists */}
+              {visits[0].photo_url ? (
+                <Image
+                  source={{ uri: visits[0].photo_url }}
+                  style={styles.visitPhoto}
+                  resizeMode="cover"
+                />
+              ) : null}
             </View>
           </View>
         ) : (
@@ -167,7 +254,41 @@ export function GeoVisitSection({ caseId, caseType }: Props) {
             <Text style={styles.noVisitText}>No visits recorded yet</Text>
           </View>
         )}
- 
+
+        {/* ── Staged photo preview ── */}
+        {pendingPhoto && (
+          <View style={styles.pendingPhotoWrapper}>
+            <Image source={{ uri: pendingPhoto.uri }} style={styles.pendingPhoto} resizeMode="cover" />
+            <Pressable
+              style={styles.removePhotoBtn}
+              onPress={() => setPendingPhoto(null)}
+              hitSlop={8}
+            >
+              <Ionicons name="close-circle" size={22} color="#fff" />
+            </Pressable>
+            <View style={styles.pendingPhotoLabel}>
+              <Ionicons name="camera" size={12} color="#fff" />
+              <Text style={styles.pendingPhotoLabelText}>Photo ready to upload</Text>
+            </View>
+          </View>
+        )}
+
+        {/* ── Photo picker row ── */}
+        <Pressable
+          style={({ pressed }) => [styles.photoBtn, pressed && { opacity: 0.7 }]}
+          onPress={handlePickPhoto}
+          disabled={checking}
+        >
+          <Ionicons
+            name={pendingPhoto ? "camera" : "camera-outline"}
+            size={15}
+            color={pendingPhoto ? Colors.success : Colors.primary}
+          />
+          <Text style={[styles.photoBtnText, pendingPhoto && { color: Colors.success }]}>
+            {pendingPhoto ? "Change Photo" : "Add Photo (optional)"}
+          </Text>
+        </Pressable>
+
         {/* Action buttons */}
         <View style={styles.btnRow}>
           <Pressable
@@ -186,7 +307,7 @@ export function GeoVisitSection({ caseId, caseType }: Props) {
               </>
             )}
           </Pressable>
- 
+
           {visits.length > 1 && (
             <Pressable
               style={styles.historyBtn}
@@ -203,7 +324,7 @@ export function GeoVisitSection({ caseId, caseType }: Props) {
             </Pressable>
           )}
         </View>
- 
+
         {/* Visit history list */}
         {showHistory && visits.length > 1 && (
           <View style={styles.historyList}>
@@ -213,6 +334,13 @@ export function GeoVisitSection({ caseId, caseType }: Props) {
                 <View style={{ flex: 1 }}>
                   <Text style={styles.historyDate}>{fmtVisitDate(v.visited_at)}</Text>
                   <Text style={styles.historyCoords}>{fmtCoords(v.lat, v.lng)}</Text>
+                  {v.photo_url ? (
+                    <Image
+                      source={{ uri: v.photo_url }}
+                      style={styles.historyPhoto}
+                      resizeMode="cover"
+                    />
+                  ) : null}
                 </View>
               </View>
             ))}
@@ -222,9 +350,8 @@ export function GeoVisitSection({ caseId, caseType }: Props) {
     </View>
   );
 }
- 
+
 // ─── Styles ───────────────────────────────────────────────────────────────────
-// Mirrors the existing SectionCard / styles exactly from customer/[id].tsx
 const styles = StyleSheet.create({
   sectionCard: {
     backgroundColor: Colors.surface,
@@ -300,6 +427,12 @@ const styles = StyleSheet.create({
     color: Colors.textMuted,
     marginTop: 2,
   },
+  visitPhoto: {
+    width: "100%",
+    height: 120,
+    borderRadius: 8,
+    marginTop: 8,
+  },
   noVisitRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -311,6 +444,59 @@ const styles = StyleSheet.create({
     color: Colors.textMuted,
     fontStyle: "italic",
   },
+
+  // Pending photo
+  pendingPhotoWrapper: {
+    borderRadius: 10,
+    overflow: "hidden",
+    height: 160,
+    backgroundColor: Colors.surfaceAlt,
+  },
+  pendingPhoto: {
+    width: "100%",
+    height: "100%",
+  },
+  removePhotoBtn: {
+    position: "absolute",
+    top: 8,
+    right: 8,
+  },
+  pendingPhotoLabel: {
+    position: "absolute",
+    bottom: 8,
+    left: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  pendingPhotoLabelText: {
+    fontSize: 11,
+    fontWeight: "600",
+    color: "#fff",
+  },
+
+  // Photo button
+  photoBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingVertical: 9,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    borderStyle: "dashed",
+  },
+  photoBtnText: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: Colors.primary,
+  },
+
   btnRow: {
     flexDirection: "row",
     gap: 8,
@@ -372,5 +558,10 @@ const styles = StyleSheet.create({
     marginTop: 1,
     fontFamily: "monospace",
   },
+  historyPhoto: {
+    width: "100%",
+    height: 80,
+    borderRadius: 6,
+    marginTop: 6,
+  },
 });
- 
