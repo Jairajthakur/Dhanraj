@@ -44,6 +44,9 @@ interface FieldVisit {
   visited_at: string;
   customer_name: string | null;
   loan_no: string | null;
+  pos: number | null;
+  latest_feedback: string | null;
+  case_status: string | null;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -140,6 +143,42 @@ function VisitCard({ visit }: { visit: FieldVisit }) {
         {caseLabel}
       </Text>
 
+
+      {/* Case details row */}
+      <View style={styles.detailsRow}>
+        {visit.pos != null && (
+          <View style={styles.detailChip}>
+            <Text style={styles.detailChipLabel}>POS</Text>
+            <Text style={styles.detailChipValue}>
+              ₹{Number(visit.pos).toLocaleString("en-IN")}
+            </Text>
+          </View>
+        )}
+        {visit.case_status != null && (
+          <View style={[styles.detailChip, { 
+            backgroundColor: visit.case_status === "Paid" 
+              ? Colors.success + "18" 
+              : visit.case_status === "PTP" 
+              ? Colors.warning + "18" 
+              : Colors.danger + "18" 
+          }]}>
+            <Text style={[styles.detailChipValue, { 
+              color: visit.case_status === "Paid" 
+                ? Colors.success 
+                : visit.case_status === "PTP" 
+                ? Colors.warning 
+                : Colors.danger 
+            }]}>
+              {visit.case_status}
+            </Text>
+          </View>
+        )}
+      </View>
+      {visit.latest_feedback != null && (
+        <Text style={styles.feedbackText} numberOfLines={1}>
+          💬 {visit.latest_feedback}
+        </Text>
+      )}
       {/* GPS row */}
       <View style={styles.gpsRow}>
         <Ionicons name="location-outline" size={13} color={Colors.textMuted} />
@@ -598,5 +637,36 @@ const styles = StyleSheet.create({
     color: Colors.textMuted,
     marginTop: 8,
     marginBottom: 20,
+  },
+
+  detailsRow: {
+    flexDirection: "row",
+    gap: 6,
+    marginTop: 2,
+  },
+  detailChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    backgroundColor: Colors.surfaceAlt,
+    borderRadius: 6,
+  },
+  detailChipLabel: {
+    fontSize: 10,
+    color: Colors.textMuted,
+    fontWeight: "600",
+  },
+  detailChipValue: {
+    fontSize: 11,
+    color: Colors.text,
+    fontWeight: "700",
+  },
+  feedbackText: {
+    fontSize: 11,
+    color: Colors.textSecondary,
+    fontStyle: "italic",
+    marginTop: 2,
   },
 });
