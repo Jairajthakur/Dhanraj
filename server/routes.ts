@@ -2810,6 +2810,56 @@ app.post(
     }
   }
 );
+// ── GET /api/cases/:id/visits — agent fetches their own visit history ─────────
+app.get("/api/cases/:id/visits", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const caseId  = Number(req.params.id);
+    const agentId = req.session.agentId!;
+    const result  = await storage.query(
+      `SELECT id, case_id, case_type, agent_id, lat, lng, accuracy, visited_at,
+              (photo_url IS NOT NULL AND photo_url <> '') AS has_photo
+       FROM field_visits
+       WHERE case_id = $1 AND agent_id = $2
+       ORDER BY visited_at DESC
+       LIMIT 50`,
+      [caseId, agentId]
+    );
+    res.json({ visits: result.rows });
+  } catch (e: any) {
+    console.error("[GET /api/cases/:id/visits]", e);
+    res.status(500).json({ message: e.message });
+  }
+});
+
+// ── GET /api/field-visits/:id/photo — serve visit photo as image ────────────
+app.get("/api/field-visits/:id/photo", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const visitId = Number(req.params.id);
+    const result = await storage.query(
+      `SELECT photo_url FROM field_visits WHERE id = $1`,
+      [visitId]
+    );
+    const row = result.rows[0];
+    if (!row || !row.photo_url) {
+      return res.status(404).json({ message: "No photo found" });
+    }
+    const dataUrl: string = row.photo_url;
+    // dataUrl is like: "data:image/jpeg;base64,<data>"
+    const match = dataUrl.match(/^data:([^;]+);base64,(.+)$/s);
+    if (!match) {
+      return res.status(500).json({ message: "Invalid photo format" });
+    }
+    const mimeType = match[1];
+    const buffer = Buffer.from(match[2], "base64");
+    res.setHeader("Content-Type", mimeType);
+    res.setHeader("Cache-Control", "public, max-age=86400");
+    res.send(buffer);
+  } catch (e: any) {
+    console.error("[GET /api/field-visits/:id/photo]", e);
+    res.status(500).json({ message: e.message });
+  }
+});
+
 // ── GET /api/admin/field-visits — admin sees all visits with filters ─────────
 app.get("/api/admin/field-visits", requireAdmin, async (req: Request, res: Response) => {
   try {
@@ -2817,7 +2867,9 @@ app.get("/api/admin/field-visits", requireAdmin, async (req: Request, res: Respo
 
     let sql = `
       SELECT
-        fv.*,
+        fv.id, fv.case_id, fv.case_type, fv.agent_id, fv.lat, fv.lng,
+        fv.accuracy, fv.visited_at,
+        (fv.photo_url IS NOT NULL AND fv.photo_url <> '') AS has_photo,
         fa.name AS agent_name,
         CASE
           WHEN LOWER(TRIM(fv.case_type)) = 'bkt'
