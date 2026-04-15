@@ -78,16 +78,8 @@ function shiftDate(iso: string, delta: number): string {
 }
 
 function openInMaps(lat: number, lng: number, label?: string | null) {
-  const query = label ? encodeURIComponent(label) : `${lat},${lng}`;
-  const url =
-    Platform.OS === "ios"
-      ? `maps:0,0?q=${query}@${lat},${lng}`
-      : `geo:${lat},${lng}?q=${lat},${lng}(${query})`;
-  Linking.openURL(url).catch(() =>
-    Linking.openURL(
-      `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`
-    )
-  );
+  const url = `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`;
+  Linking.openURL(url);
 }
 
 // ─── Sub-components ──────────────────────────────────────────────────────────
