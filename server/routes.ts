@@ -2792,7 +2792,9 @@ app.post(
       if (req.file) {
         const baseUrl = process.env.RAILWAY_PUBLIC_DOMAIN
           ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`
-          : "";
+          : process.env.BASE_URL
+          ? process.env.BASE_URL
+          : `${req.protocol}://${req.get("host")}`;
         photoUrl = `${baseUrl}/uploads/screenshots/${req.file.filename}`;
       }
 
