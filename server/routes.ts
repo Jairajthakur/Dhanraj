@@ -2810,11 +2810,16 @@ app.get("/api/admin/field-visits", requireAdmin, async (req: Request, res: Respo
     const { agent_id, case_id, date } = req.query;
 
     let sql = `
-      SELECT fv.*, fa.name AS agent_name,
-             lc.customer_name, lc.loan_no
-      FROM   field_visits fv
-      LEFT JOIN fos_agents fa ON fa.id = fv.agent_id::integer
-      LEFT JOIN loan_cases  lc ON lc.id = fv.case_id::integer AND fv.case_type = 'loan'
+     SELECT fv.*, fa.name AS agent_name,
+       COALESCE(lc.customer_name, bc.customer_name) AS customer_name,
+       COALESCE(lc.loan_no, bc.loan_no) AS loan_no,
+       COALESCE(lc.pos::numeric, bc.pos::numeric) AS pos,
+       COALESCE(lc.latest_feedback, bc.latest_feedback) AS latest_feedback,
+       COALESCE(lc.status, bc.status) AS case_status
+FROM   field_visits fv
+LEFT JOIN fos_agents fa ON fa.id = fv.agent_id::integer
+LEFT JOIN loan_cases lc ON lc.id = fv.case_id::integer AND fv.case_type = 'loan'
+LEFT JOIN bkt_cases bc ON bc.id = fv.case_id::integer AND fv.case_type = 'bkt'
       WHERE 1=1
     `;
     const params: any[] = [];
