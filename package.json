@@ -12,10 +12,8 @@
     "server:build": "esbuild server/index.ts --platform=node --packages=external --bundle --format=cjs --outdir=server_dist",
     "server:prod": "NODE_ENV=production node server_dist/index.js",
     "db:push": "drizzle-kit push",
-
     "build": "npx expo export -p web --output-dir static-build && npm run server:build",
     "start": "NODE_ENV=production node server_dist/index.js",
-
     "lint": "npx expo lint",
     "lint:fix": "npx expo lint --fix",
     "homepage": "https://jairajthakur.github.io/Dhanraj"
@@ -82,7 +80,9 @@
     "tsx": "^4.20.6",
     "ws": "^8.18.0",
     "zod": "^3.24.2",
-    "zod-validation-error": "^3.4.0"
+    "zod-validation-error": "^3.4.0",
+    "expo-print": "~14.0.3",
+    "expo-file-system": "~18.0.12"
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",
