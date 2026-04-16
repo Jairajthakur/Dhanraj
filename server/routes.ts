@@ -2832,8 +2832,27 @@ app.get("/api/cases/:id/visits", requireAuth, async (req: Request, res: Response
 });
 
 // ── GET /api/field-visits/:id/photo — serve visit photo as image ────────────
-app.get("/api/field-visits/:id/photo", requireAuth, async (req: Request, res: Response) => {
+// Accepts auth via: session cookie, Authorization header, OR ?token= query param
+// (React Native <Image> cannot set headers, so query param is needed)
+app.get("/api/field-visits/:id/photo", async (req: Request, res: Response) => {
   try {
+    // Auth check: session, Bearer header, or ?token= query param
+    let authed = false;
+    if (req.session.agentId) {
+      authed = true;
+    } else {
+      const authHeader = req.headers.authorization;
+      const queryToken = req.query.token as string | undefined;
+      const rawToken = authHeader?.startsWith("Bearer ")
+        ? authHeader.slice(7)
+        : queryToken;
+      if (rawToken) {
+        const payload = verifyToken(rawToken);
+        if (payload) authed = true;
+      }
+    }
+    if (!authed) return res.status(401).json({ message: "Unauthorized" });
+
     const visitId = Number(req.params.id);
     const result = await storage.query(
       `SELECT photo_url FROM field_visits WHERE id = $1`,
@@ -2844,7 +2863,6 @@ app.get("/api/field-visits/:id/photo", requireAuth, async (req: Request, res: Re
       return res.status(404).json({ message: "No photo found" });
     }
     const dataUrl: string = row.photo_url;
-    // dataUrl is like: "data:image/jpeg;base64,<data>"
     const match = dataUrl.match(/^data:([^;]+);base64,(.+)$/s);
     if (!match) {
       return res.status(500).json({ message: "Invalid photo format" });
