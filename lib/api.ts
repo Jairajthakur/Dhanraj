@@ -486,6 +486,10 @@ recordFieldVisit: async (
       return apiRequest("GET", `/api/admin/field-visits${suffix}`);
     },
 
+     getDailyReport: (date?: string) => {\
+      const qs = date ? `?date=${encodeURIComponent(date)}` : "";
+      return apiRequest("GET", `/api/admin/daily-report${qs}`);
+    },
     // ── Attendance ───────────────────────────────────────────────────────────
     getAllAttendance:  () => apiRequest("GET", "/api/admin/attendance"),
     getAttendance:    () => apiRequest("GET", "/api/admin/attendance"),
