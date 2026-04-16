@@ -1061,167 +1061,75 @@ function CaseCard({ item, onFeedback, onFieldVisit }: CaseCardProps) {
     }
   };
 
-  const isUploaded       = !!item.loan_no;
-  const isMonthlyLocked  = !!item.monthly_feedback;
-  const statusColor      = STATUS_COLORS[item.status] || Colors.textMuted;
-  const rollbackRaw      = (item.rollback  != null && item.rollback  !== "" && item.rollback  !== "0" && Number(item.rollback)  !== 0) ? "RollBack"  : "—";
-  const clearanceRaw     = (item.clearance != null && item.clearance !== "" && item.clearance !== "0" && Number(item.clearance) !== 0) ? "Clearance" : "—";
-  const hasRollback      = rollbackRaw  !== "—";
-  const hasClearance     = clearanceRaw !== "—";
+  const isUploaded      = !!item.loan_no;
+  const isMonthlyLocked = !!item.monthly_feedback;
+  const primaryPhone    = phones[0] ?? "";
+
+  // Company name derived from loan_no prefix or a fixed label
+  const companyName = item.loan_no ? "Bajaj Auto Finance LTD" : "—";
 
   return (
-    <View style={styles.card}>
-      <Pressable style={styles.cardTapArea} onPress={() => navigateToDetail(item)}>
-        <View style={styles.cardHeader}>
-          <View style={styles.cardNameRow}>
-            <Ionicons name="person-circle" size={20} color={Colors.primary} />
-            <Text style={styles.cardName} numberOfLines={1}>{item.customer_name}</Text>
-          </View>
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-            {isMonthlyLocked && (
-              <View style={styles.lockBadge}>
-                <Ionicons name="lock-closed" size={10} color={Colors.warning} />
-              </View>
-            )}
-            <View style={[styles.statusBadge, { backgroundColor: statusColor + "22" }]}>
-              <Text style={[styles.statusText, { color: statusColor }]}>{item.status}</Text>
-            </View>
-          </View>
+    <Pressable style={styles.card} onPress={() => navigateToDetail(item)}>
+      {/* ── Name row ── */}
+      <View style={styles.cardHeader}>
+        <View style={styles.cardNameRow}>
+          <Ionicons name="person" size={16} color={Colors.textSecondary} />
+          <Text style={styles.cardName} numberOfLines={1}>{item.customer_name}</Text>
         </View>
-
-        <View style={styles.infoRow}>
-          <View style={styles.infoCell}>
-            <Text style={styles.infoLabel}>LOAN NO</Text>
-            <Text style={styles.infoValue} numberOfLines={1}>{item.loan_no || "—"}</Text>
-          </View>
-          <View style={styles.infoCell}>
-            <Text style={styles.infoLabel}>APP ID</Text>
-            <Text style={styles.infoValue} numberOfLines={1}>{item.app_id || "—"}</Text>
-          </View>
-          <View style={styles.infoCellSmall}>
-            <Text style={styles.infoLabel}>BKT</Text>
-            <Text style={[styles.infoValue, { color: Colors.primary }]}>{item.bkt ?? "—"}</Text>
-          </View>
+        <View style={styles.bucketBadge}>
+          {isMonthlyLocked && (
+            <Ionicons name="lock-closed" size={10} color={Colors.warning} style={{ marginRight: 3 }} />
+          )}
+          <Text style={styles.bucketText}>Bucket: {item.bkt ?? "—"}</Text>
         </View>
+      </View>
 
-        <View style={styles.infoRow}>
-          <View style={styles.infoCell}>
-            <Text style={styles.infoLabel}>EMI</Text>
-            <Text style={styles.infoValue}>{fmt(item.emi_amount, "₹")}</Text>
-          </View>
-          <View style={styles.infoCell}>
-            <Text style={styles.infoLabel}>EMI DUE</Text>
-            <Text style={[styles.infoValue, { color: Colors.danger }]}>{fmt(item.emi_due, "₹")}</Text>
-          </View>
-          <View style={styles.infoCell}>
-            <Text style={styles.infoLabel}>POS</Text>
-            <Text style={styles.infoValue}>{fmt(item.pos, "₹")}</Text>
-          </View>
+      {/* ── Company row ── */}
+      <View style={styles.metaRow}>
+        <Ionicons name="briefcase" size={14} color={Colors.textSecondary} />
+        <Text style={styles.metaText} numberOfLines={1}>{companyName}</Text>
+      </View>
+
+      {/* ── Phone row ── */}
+      {primaryPhone ? (
+        <View style={styles.metaRow}>
+          <Ionicons name="call" size={14} color={Colors.textSecondary} />
+          <Text style={styles.metaText}>{primaryPhone}</Text>
         </View>
+      ) : null}
 
-        <View style={styles.infoRow}>
-          <View style={styles.infoCell}>
-            <Text style={styles.infoLabel}>CBC</Text>
-            <Text style={styles.infoValue}>{fmt(item.cbc, "₹")}</Text>
-          </View>
-          <View style={styles.infoCell}>
-            <Text style={styles.infoLabel}>LPP</Text>
-            <Text style={styles.infoValue}>{fmt(item.lpp, "₹")}</Text>
-          </View>
-          <View style={styles.infoCell}>
-            <Text style={styles.infoLabel}>CBC+LPP</Text>
-            <Text style={[styles.infoValue, { color: Colors.warning }]}>{fmt(item.cbc_lpp, "₹")}</Text>
-          </View>
+      {/* ── PTP / feedback badges ── */}
+      {item.ptp_date ? (
+        <View style={styles.ptpDateRow}>
+          <Ionicons name="calendar" size={12} color={Colors.statusPTP} />
+          <Text style={styles.ptpDateText}>PTP: {String(item.ptp_date).slice(0, 10)}</Text>
         </View>
-
-        <View style={styles.infoRow}>
-          <View style={[styles.infoCell, hasRollback  && { borderWidth: 1, borderColor: Colors.info    + "60" }]}>
-            <Text style={styles.infoLabel}>ROLLBACK</Text>
-            <Text style={[styles.infoValue, hasRollback  && { color: Colors.info,    fontWeight: "800" }]}>{rollbackRaw}</Text>
-          </View>
-          <View style={[styles.infoCell, hasClearance && { borderWidth: 1, borderColor: Colors.success + "60" }]}>
-            <Text style={styles.infoLabel}>CLEARANCE</Text>
-            <Text style={[styles.infoValue, hasClearance && { color: Colors.success, fontWeight: "800" }]}>{clearanceRaw}</Text>
-          </View>
-          <View style={styles.infoCellSmall}>
-            <Text style={styles.infoLabel}>TEN</Text>
-            <Text style={styles.infoValue}>{item.tenor ?? "—"}</Text>
-          </View>
-        </View>
-
-        {item.rollback_yn === true && (
-          <View style={styles.rollbackYnBadge}>
-            <Ionicons name="refresh-circle" size={13} color={Colors.info} />
-            <Text style={styles.rollbackYnText}>Rollback Marked</Text>
-          </View>
-        )}
-      </Pressable>
-
-      {item.mobile_no && (
-        <Pressable style={styles.phoneRow} onPress={call}>
-          <Ionicons name="call" size={14} color={Colors.info} />
-          <Text style={styles.phoneText}>{item.mobile_no}</Text>
-        </Pressable>
-      )}
-
-      {item.feedback_code && (
-        <View style={styles.feedbackRow}>
-          <Text style={styles.feedbackLabel}>FB Code: </Text>
-          <Text style={styles.feedbackValue}>{item.feedback_code}</Text>
-          {item.latest_feedback ? <Text style={styles.feedbackValue}> · {item.latest_feedback}</Text> : null}
-        </View>
-      )}
-
-      {item.monthly_feedback && item.monthly_feedback !== "SUBMITTED" && (
+      ) : null}
+      {item.monthly_feedback && item.monthly_feedback !== "SUBMITTED" ? (
         <View style={styles.monthlyFeedbackRow}>
-          <Ionicons name="calendar-outline" size={13} color={Colors.primary} />
+          <Ionicons name="calendar-outline" size={12} color={Colors.primary} />
           <Text style={styles.monthlyFeedbackText}>{item.monthly_feedback}</Text>
         </View>
-      )}
+      ) : null}
 
-      {item.ptp_date && (
-        <View style={styles.ptpDateRow}>
-          <Ionicons name="calendar" size={13} color={Colors.statusPTP} />
-          <Text style={styles.ptpDateLabel}>PTP Date: </Text>
-          <Text style={styles.ptpDateValue}>{String(item.ptp_date).slice(0, 10)}</Text>
-        </View>
-      )}
-
-      {item.telecaller_ptp_date && (
-        <View style={[styles.ptpDateRow, { backgroundColor: Colors.info + "12" }]}>
-          <Ionicons name="calendar-outline" size={13} color={Colors.info} />
-          <Text style={[styles.ptpDateLabel, { color: Colors.info }]}>Telecaller PTP: </Text>
-          <Text style={[styles.ptpDateValue,  { color: Colors.info }]}>{String(item.telecaller_ptp_date).slice(0, 10)}</Text>
-        </View>
-      )}
-
-      {/* ── Card Actions ── */}
+      {/* ── Action buttons ── */}
       <View style={styles.cardActions}>
-        <Pressable style={[styles.actionBtn, styles.callBtn]} onPress={call}>
-          <Ionicons name="call" size={15} color="#fff" />
+        <Pressable style={[styles.actionBtn, styles.callBtn]} onPress={(e) => { e.stopPropagation?.(); call(); }}>
+          <Ionicons name="call" size={16} color="#fff" />
           <Text style={styles.actionBtnText}>Call</Text>
         </Pressable>
 
-        <Pressable style={[styles.actionBtn, styles.detailBtn]} onPress={() => navigateToDetail(item)}>
-          <Ionicons name="eye" size={15} color={Colors.textSecondary} />
-          <Text style={[styles.actionBtnText, { color: Colors.textSecondary }]}>Details</Text>
-        </Pressable>
-
-        {isUploaded && (
-          <Pressable style={[styles.actionBtn, styles.feedbackBtn]} onPress={() => onFeedback(item)}>
-            <Ionicons name="chatbox" size={15} color="#fff" />
+        {isUploaded ? (
+          <Pressable style={[styles.actionBtn, styles.feedbackBtn]} onPress={(e) => { e.stopPropagation?.(); onFeedback(item); }}>
+            <Ionicons name="create" size={16} color="#fff" />
             <Text style={styles.actionBtnText}>Feedback</Text>
           </Pressable>
+        ) : (
+          <Pressable style={[styles.actionBtn, styles.visitBtn]} onPress={(e) => { e.stopPropagation?.(); onFieldVisit(item); }}>
+            <Ionicons name="location" size={16} color="#fff" />
+            <Text style={styles.actionBtnText}>Visit</Text>
+          </Pressable>
         )}
-
-        {/* ── Field Visit button — always visible on My Cases ── */}
-        <Pressable
-          style={[styles.actionBtn, styles.visitBtn]}
-          onPress={() => onFieldVisit(item)}
-        >
-          <Ionicons name="location" size={15} color="#fff" />
-          <Text style={styles.actionBtnText}>Visit</Text>
-        </Pressable>
       </View>
 
       <CallPickerModal
@@ -1229,7 +1137,7 @@ function CaseCard({ item, onFeedback, onFieldVisit }: CaseCardProps) {
         phones={phones}
         onClose={() => setCallPickerVisible(false)}
       />
-    </View>
+    </Pressable>
   );
 }
 
@@ -1275,7 +1183,7 @@ export default function AllocationScreen() {
   const feedbackExtraNumbers      = feedbackItem ? (extraNumbersMap[String(feedbackItem.id)] ?? []) : [];
 
   return (
-    <View style={{ flex: 1, backgroundColor: Colors.background }}>
+    <View style={{ flex: 1, backgroundColor: "#EFEFEF" }}>
       {/* ── Tabs ── */}
       <View style={[styles.tabsContainer, { paddingTop: Platform.OS === "web" ? 67 : 12 }]}>
         {STATUS_TABS.map((tab) => (
@@ -1375,39 +1283,32 @@ const styles = StyleSheet.create({
   tabCountText:        { fontSize: 10, fontWeight: "700", color: Colors.textSecondary },
   searchContainer:     { flexDirection: "row", alignItems: "center", margin: 12, backgroundColor: Colors.surface, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, borderWidth: 1, borderColor: Colors.border },
   searchInput:         { flex: 1, fontSize: 14, color: Colors.text },
-  list:                { padding: 12, gap: 12 },
-  card:                { backgroundColor: Colors.surface, borderRadius: 16, padding: 14, gap: 8, borderWidth: 1, borderColor: Colors.border, shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 4 },
-  cardTapArea:         { gap: 8 },
-  cardHeader:          { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  cardNameRow:         { flex: 1, flexDirection: "row", alignItems: "center", gap: 8 },
-  cardName:            { flex: 1, fontSize: 15, fontWeight: "700", color: Colors.text, textTransform: "uppercase" },
-  lockBadge:           { width: 18, height: 18, borderRadius: 9, backgroundColor: Colors.warning + "20", alignItems: "center", justifyContent: "center" },
-  statusBadge:         { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20 },
-  statusText:          { fontSize: 11, fontWeight: "700" },
-  infoRow:             { flexDirection: "row", gap: 6 },
-  infoCell:            { flex: 1, backgroundColor: Colors.surfaceAlt, borderRadius: 8, padding: 8 },
-  infoCellSmall:       { width: 52, backgroundColor: Colors.surfaceAlt, borderRadius: 8, padding: 8 },
-  infoLabel:           { fontSize: 9, fontWeight: "700", color: Colors.textMuted, textTransform: "uppercase", marginBottom: 2 },
-  infoValue:           { fontSize: 12, fontWeight: "700", color: Colors.text },
-  phoneRow:            { flexDirection: "row", alignItems: "center", gap: 6, paddingVertical: 4 },
-  phoneText:           { fontSize: 13, color: Colors.info, fontWeight: "500" },
-  feedbackRow:         { flexDirection: "row", alignItems: "center", flexWrap: "wrap" },
-  feedbackLabel:       { fontSize: 12, color: Colors.textSecondary, fontWeight: "600" },
-  feedbackValue:       { fontSize: 12, color: Colors.text, fontWeight: "500" },
-  monthlyFeedbackRow:  { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: Colors.primary + "12", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 5 },
-  monthlyFeedbackText: { fontSize: 12, color: Colors.primary, fontWeight: "600", flex: 1 },
-  rollbackYnBadge:     { flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: Colors.info + "15", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 4, alignSelf: "flex-start" },
-  rollbackYnText:      { fontSize: 11, color: Colors.info, fontWeight: "700" },
-  ptpDateRow:          { flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: Colors.statusPTP + "12", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
-  ptpDateLabel:        { fontSize: 12, color: Colors.statusPTP, fontWeight: "600" },
-  ptpDateValue:        { fontSize: 12, color: Colors.statusPTP, fontWeight: "700" },
-  cardActions:         { flexDirection: "row", gap: 7, marginTop: 4 },
-  actionBtn:           { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", paddingVertical: 10, borderRadius: 10, gap: 4 },
-  callBtn:             { backgroundColor: Colors.primary },
-  detailBtn:           { backgroundColor: Colors.surfaceElevated, borderWidth: 1, borderColor: Colors.borderLight },
-  feedbackBtn:         { backgroundColor: Colors.accent },
-  visitBtn:            { backgroundColor: "#0F6E56" },
-  actionBtnText:       { color: "#fff", fontSize: 12, fontWeight: "700" },
+  list:                { padding: 12, gap: 10 },
+
+  // ── Clean card (matches screenshot) ──
+  card:                { backgroundColor: "#fff", borderRadius: 14, padding: 14, gap: 6, shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.08, shadowRadius: 6, elevation: 3 },
+
+  cardHeader:          { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 2 },
+  cardNameRow:         { flex: 1, flexDirection: "row", alignItems: "center", gap: 7 },
+  cardName:            { flex: 1, fontSize: 14, fontWeight: "700", color: "#111", textTransform: "uppercase", letterSpacing: 0.2 },
+  bucketBadge:         { flexDirection: "row", alignItems: "center", backgroundColor: "#f0f0f0", borderRadius: 8, paddingHorizontal: 9, paddingVertical: 3 },
+  bucketText:          { fontSize: 11, fontWeight: "600", color: "#555" },
+
+  metaRow:             { flexDirection: "row", alignItems: "center", gap: 7 },
+  metaText:            { fontSize: 13, color: "#444", fontWeight: "500" },
+
+  ptpDateRow:          { flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: Colors.statusPTP + "12", borderRadius: 7, paddingHorizontal: 9, paddingVertical: 4, alignSelf: "flex-start" },
+  ptpDateText:         { fontSize: 12, color: Colors.statusPTP, fontWeight: "600" },
+  monthlyFeedbackRow:  { flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: Colors.primary + "10", borderRadius: 7, paddingHorizontal: 9, paddingVertical: 4, alignSelf: "flex-start" },
+  monthlyFeedbackText: { fontSize: 12, color: Colors.primary, fontWeight: "600" },
+
+  cardActions:         { flexDirection: "row", gap: 10, marginTop: 6 },
+  actionBtn:           { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", paddingVertical: 12, borderRadius: 10, gap: 6 },
+  callBtn:             { backgroundColor: "#2DB56C" },
+  feedbackBtn:         { backgroundColor: "#2DB56C" },
+  visitBtn:            { backgroundColor: "#2DB56C" },
+  actionBtnText:       { color: "#fff", fontSize: 14, fontWeight: "700" },
+
   empty:               { flex: 1, justifyContent: "center", alignItems: "center", gap: 12, paddingVertical: 60 },
   emptyText:           { fontSize: 16, color: Colors.textMuted },
 });
