@@ -129,11 +129,37 @@ function VisitCard({ visit, authToken }: { visit: FieldVisit; authToken: string 
   const typeTag   = visit.case_type === "bkt" ? "BKT" : "Loan";
   const typeColor = visit.case_type === "bkt" ? Colors.warning : Colors.info;
 
-  // Build photo URL — append JWT token as query param so React Native <Image>
-  // can authenticate without custom headers (which Image doesn't support)
-  const photoUrl = visit.has_photo
+  // Raw photo URL with token query param (works on native)
+  const rawPhotoUrl = visit.has_photo
     ? `${getApiUrl()}/api/field-visits/${visit.id}/photo${authToken ? `?token=${encodeURIComponent(authToken)}` : ""}`
     : null;
+
+  // On web: fetch photo as blob → object URL so cookies/auth header work
+  const [webPhotoUrl, setWebPhotoUrl] = useState<string | null>(null);
+  useEffect(() => {
+    if (!visit.has_photo || Platform.OS !== "web") return;
+    let objectUrl: string | null = null;
+    (async () => {
+      try {
+        const token = authToken || (typeof localStorage !== "undefined" ? localStorage.getItem("auth_token") : null);
+        const res = await fetch(
+          `${getApiUrl()}/api/field-visits/${visit.id}/photo`,
+          {
+            credentials: "include",
+            headers: token ? { Authorization: `Bearer ${token}` } : {},
+          }
+        );
+        if (!res.ok) return;
+        const blob = await res.blob();
+        objectUrl = URL.createObjectURL(blob);
+        setWebPhotoUrl(objectUrl);
+      } catch {}
+    })();
+    return () => { if (objectUrl) URL.revokeObjectURL(objectUrl); };
+  }, [visit.id, visit.has_photo, authToken]);
+
+  // Effective photo URL: blob on web, raw URL with token on native
+  const photoUrl = Platform.OS === "web" ? webPhotoUrl : rawPhotoUrl;
 
   return (
     <View style={styles.card}>
