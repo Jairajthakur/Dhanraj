@@ -255,6 +255,8 @@ recordFieldVisit: async (
     accuracy?: number;
     case_type?: string;
     photo?: { uri: string; name?: string; mimeType?: string } | null;
+    visit_outcome?: string;
+    visit_remarks?: string;
   }
 ) => {
   if (data.photo) {
@@ -267,6 +269,8 @@ recordFieldVisit: async (
     form.append("lng",  String(data.lng));
     if (data.accuracy != null) form.append("accuracy", String(data.accuracy));
     if (data.case_type)        form.append("case_type", data.case_type);
+    if (data.visit_outcome)    form.append("visit_outcome", data.visit_outcome);
+    if (data.visit_remarks)    form.append("visit_remarks", data.visit_remarks);
 
     if (Platform.OS === "web") {
       // On web, fetch the data URI and convert to a Blob for proper multipart upload
@@ -295,10 +299,12 @@ recordFieldVisit: async (
 
   // No photo — plain JSON (existing callers unaffected)
   return apiRequest("POST", `/api/cases/${caseId}/visit`, {
-    lat:       data.lat,
-    lng:       data.lng,
-    accuracy:  data.accuracy,
-    case_type: data.case_type,
+    lat:           data.lat,
+    lng:           data.lng,
+    accuracy:      data.accuracy,
+    case_type:     data.case_type,
+    visit_outcome: data.visit_outcome,
+    visit_remarks: data.visit_remarks,
   });
 },
 
