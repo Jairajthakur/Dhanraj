@@ -445,8 +445,7 @@ function FeedbackModal({
       if (!gps)                                                                      return "GPS location is required. Tap 'Capture GPS' before saving.";
       if (visitOutcome === "PTP" && !visitPtpDate.trim())                            return "PTP date is required when outcome is PTP.";
       if (visitOutcome === "PTP" && !PTP_DATE_REGEX.test(visitPtpDate.trim()))       return "PTP date must be DD-MM-YYYY.";
-      if (!visitRemarks.trim())                                                      return "Visit remarks are required.";
-      if (visitRemarks.trim().length < 10)                                           return "Remarks must be at least 10 characters.";
+     if (!visitRemarks.trim())                                                      return "Visit remarks are required.";
       return null;
     }
     return null;
@@ -573,9 +572,8 @@ function FeedbackModal({
 
   const isMonthlyTabLocked = isMonthlyLocked && activeTab === "Monthly Feedback";
 
-  const visitCanSave = !!visitOutcome && !!gps && visitRemarks.trim().length >= 10
+const visitCanSave = !!visitOutcome && !!gps
     && (visitOutcome !== "PTP" || PTP_DATE_REGEX.test(visitPtpDate.trim()));
-
   const saveBtnColor = (): string => {
     if (activeTab === "Field Visit")
       return visitCanSave ? (VISIT_OUTCOME_COLORS[visitOutcome as VisitOutcome] ?? Colors.border) : Colors.border;
@@ -956,7 +954,7 @@ function FeedbackModal({
                 {/* Remarks */}
                 <View style={fvStyles.sectionRow}>
                   <Text style={fvStyles.sectionLabel}>Visit Remarks</Text>
-                  <View style={fvStyles.requiredBadge}><Text style={fvStyles.requiredText}>Required · min 10 chars</Text></View>
+                  <View style={fvStyles.requiredBadge}><Text style={fvStyles.requiredText}>Optional</Text></View>
                 </View>
                 <TextInput
                   style={[
@@ -972,14 +970,10 @@ function FeedbackModal({
                   numberOfLines={4}
                   editable={!loading}
                 />
-                {visitRemarks.trim().length > 0 && visitRemarks.trim().length < 10 && (
-                  <Text style={fvStyles.fieldError}>
-                    Minimum 10 characters ({visitRemarks.trim().length}/10)
-                  </Text>
-                )}
+               {/* remarks error removed */}
 
                 {/* Photos */}
-                <Text style={fvStyles.sectionLabel}>
+               <Text style={fvStyles.sectionLabel}>
                   Photo Proof{" "}
                   <Text style={fvStyles.sectionOptional}>({photos.length}/{MAX_PHOTOS} · optional)</Text>
                 </Text>
@@ -1017,9 +1011,7 @@ function FeedbackModal({
                         ? "Select a visit outcome."
                         : !gps
                           ? "Capture GPS location."
-                          : visitRemarks.trim().length < 10
-                            ? `Add visit remarks (min 10 chars, ${visitRemarks.trim().length}/10).`
-                            : visitOutcome === "PTP" && !PTP_DATE_REGEX.test(visitPtpDate)
+                          : visitOutcome === "PTP" && !PTP_DATE_REGEX.test(visitPtpDate)
                               ? "Enter PTP date as DD-MM-YYYY."
                               : ""}
                     </Text>
