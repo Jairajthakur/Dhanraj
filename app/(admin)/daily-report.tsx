@@ -3,18 +3,15 @@
  * Route: /(admin)/daily-report
  *
  * Shows a full-day summary for every FOS agent:
- *  • Attendance  – status (Present / Checked-In / Absent), check-in time,
- *                  check-out time, total working hours
- *  • Field Visits – GPS check-ins recorded during the day
+ *  • Attendance  – status (Present / Checked-In / Absent), check-in/out, duration
+ *  • Field Visits – GPS check-ins during the day
  *  • PTP         – Promise-to-Pay cases targeted for this date
- *  • Paid        – cases marked Paid on this date + total collected amount
- *  • Depositions – deposits submitted on this date + total amount
- *  • Break       – placeholder (ready for future break-tracking feature)
+ *  • Paid        – cases marked Paid + total collected amount
+ *  • Depositions – deposits submitted + total amount
+ *  • Performance – overall all-time stats (total, paid, unpaid, PTP, resolution%)
  *
- * Usage:
- *  - Admin picks a date with the ◀ / ▶ navigator (defaults to today)
- *  - Tap a card to expand the full metric breakdown for that agent
- *  - Pull to refresh; auto-refreshes every 60 s while screen is open
+ * PDF is generated as real selectable text (not a screenshot image).
+ * Share sheet opens natively — works with WhatsApp, email, etc.
  */
 
 import React, { useState, useMemo, useCallback } from "react";
@@ -28,14 +25,13 @@ import {
   RefreshControl,
   Platform,
   Alert,
-  Linking,
 } from "react-native";
-import * as Print from "expo-print";
-import * as Sharing from "expo-sharing";
-import * as FileSystem from "expo-file-system";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQuery } from "@tanstack/react-query";
 import { Ionicons } from "@expo/vector-icons";
+import * as Print from "expo-print";
+import * as Sharing from "expo-sharing";
+import * as FileSystem from "expo-file-system";
 import Colors from "@/constants/colors";
 import { api } from "@/lib/api";
 
@@ -56,6 +52,15 @@ interface AgentDayReport {
   depositionAmount: number;
   breakCount: number;
   breakMinutes: number;
+}
+
+interface AgentPerformance {
+  id: number;
+  name: string;
+  total: number;
+  paid: number;
+  notProcess: number;
+  ptp: number;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -99,111 +104,265 @@ function formatDuration(minutes: number | null): string {
 }
 
 function formatAmount(n: number): string {
-  if (n === 0) return "₹0";
-  return "₹" + n.toLocaleString("en-IN", { maximumFractionDigits: 0 });
+  if (n === 0) return "Rs.0";
+  return "Rs." + n.toLocaleString("en-IN", { maximumFractionDigits: 0 });
 }
 
-// ─── PDF / WhatsApp Helpers ───────────────────────────────────────────────────
+function pctStr(a: number, b: number): string {
+  if (b === 0) return "0%";
+  return ((a / b) * 100).toFixed(1) + "%";
+}
 
-function generateReportHTML(report: AgentDayReport[], date: string): string {
+// ─── PDF HTML Generator ───────────────────────────────────────────────────────
+
+function generateReportHTML(
+  report: AgentDayReport[],
+  perfMap: Map<number, AgentPerformance>,
+  date: string
+): string {
   const dateLabel = formatDate(date);
-  const present   = report.filter((r) => r.attendanceStatus !== "Absent").length;
+  const present = report.filter((r) => r.attendanceStatus !== "Absent").length;
   const totalVisits = report.reduce((s, r) => s + r.fieldVisits, 0);
-  const totalPaid   = report.reduce((s, r) => s + Number(r.paidAmount), 0);
-  const totalDep    = report.reduce((s, r) => s + Number(r.depositionAmount), 0);
+  const totalPaid = report.reduce((s, r) => s + Number(r.paidAmount), 0);
+  const totalDep = report.reduce((s, r) => s + Number(r.depositionAmount), 0);
+  const totalPaidCases = report.reduce((s, r) => s + r.paidCount, 0);
 
   const rows = report
-    .map(
-      (r) => `
+    .map((r) => {
+      const perf = perfMap.get(r.agentId);
+      const resolution = perf && perf.total > 0 ? pctStr(perf.paid, perf.total) : "—";
+      const attClass =
+        r.attendanceStatus === "Present"
+          ? "present"
+          : r.attendanceStatus === "Checked-In"
+          ? "checkin"
+          : "absent";
+
+      return `
       <tr>
-        <td>${r.agentName}</td>
-        <td class="badge ${r.attendanceStatus === "Present" ? "present" : r.attendanceStatus === "Checked-In" ? "checkin" : "absent"}">${r.attendanceStatus}</td>
+        <td class="name-col">${r.agentName}</td>
+        <td><span class="badge ${attClass}">${r.attendanceStatus}</span></td>
         <td>${formatTime(r.checkIn)}</td>
         <td>${formatTime(r.checkOut)}</td>
         <td>${formatDuration(r.durationMinutes)}</td>
-        <td>${r.fieldVisits}</td>
-        <td>${r.ptpCount}</td>
-        <td>${r.paidCount}<br/><small>${r.paidAmount > 0 ? formatAmount(Number(r.paidAmount)) : ""}</small></td>
-        <td>${r.depositionCount}<br/><small>${r.depositionAmount > 0 ? formatAmount(Number(r.depositionAmount)) : ""}</small></td>
-      </tr>`
-    )
+        <td class="num">${r.fieldVisits}</td>
+        <td class="num">${r.ptpCount}</td>
+        <td class="num">${r.paidCount}${r.paidAmount > 0 ? `<br/><span class="sub">${formatAmount(Number(r.paidAmount))}</span>` : ""}</td>
+        <td class="num">${r.depositionCount}${r.depositionAmount > 0 ? `<br/><span class="sub">${formatAmount(Number(r.depositionAmount))}</span>` : ""}</td>
+        <td class="num">${perf ? perf.total : "—"}</td>
+        <td class="num perf-paid">${perf ? perf.paid : "—"}</td>
+        <td class="num perf-unpaid">${perf ? perf.notProcess : "—"}</td>
+        <td class="num perf-ptp">${perf ? perf.ptp : "—"}</td>
+        <td class="num">${resolution}</td>
+      </tr>`;
+    })
     .join("");
 
   return `<!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
 <meta charset="utf-8"/>
 <style>
-  body { font-family: Arial, sans-serif; margin: 24px; color: #1a1a2e; font-size: 12px; }
-  h1 { font-size: 20px; margin: 0; color: #1a1a2e; }
-  h2 { font-size: 13px; color: #6b7280; font-weight: normal; margin: 4px 0 20px; }
-  .summary { display: flex; gap: 12px; margin-bottom: 20px; }
-  .pill { flex: 1; border-radius: 10px; padding: 10px 14px; text-align: center; }
-  .pill-label { font-size: 10px; color: #6b7280; }
-  .pill-value { font-size: 16px; font-weight: 700; }
-  .pill-green { background: #f0fdf4; color: #16a34a; border: 1px solid #bbf7d0; }
-  .pill-blue  { background: #eff6ff; color: #2563eb; border: 1px solid #bfdbfe; }
-  .pill-teal  { background: #f0fdfa; color: #0d9488; border: 1px solid #99f6e4; }
-  .pill-amber { background: #fffbeb; color: #d97706; border: 1px solid #fde68a; }
-  table { width: 100%; border-collapse: collapse; }
-  th { background: #1a1a2e; color: #fff; padding: 8px 6px; text-align: left; font-size: 11px; }
-  td { padding: 7px 6px; border-bottom: 1px solid #e5e7eb; font-size: 11px; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: Arial, sans-serif;
+    font-size: 11px;
+    color: #111;
+    background: #fff;
+    padding: 20px;
+  }
+
+  .header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    border-bottom: 2px solid #111;
+    padding-bottom: 10px;
+    margin-bottom: 14px;
+  }
+  .header h1  { font-size: 18px; font-weight: 800; }
+  .header p   { font-size: 11px; color: #555; margin-top: 2px; }
+  .header-meta { text-align: right; font-size: 9px; color: #888; line-height: 1.7; }
+
+  .summary {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 14px;
+  }
+  .pill {
+    flex: 1;
+    border-radius: 6px;
+    padding: 8px 10px;
+    text-align: center;
+  }
+  .pill-val   { font-size: 14px; font-weight: 800; }
+  .pill-lbl   { font-size: 8px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px; margin-top: 2px; }
+  .p-green  { background: #f0fdf4; border: 1px solid #bbf7d0; color: #15803d; }
+  .p-blue   { background: #eff6ff; border: 1px solid #bfdbfe; color: #1d4ed8; }
+  .p-teal   { background: #f0fdfa; border: 1px solid #99f6e4; color: #0f766e; }
+  .p-amber  { background: #fffbeb; border: 1px solid #fde68a; color: #b45309; }
+  .p-indigo { background: #eef2ff; border: 1px solid #c7d2fe; color: #4338ca; }
+
+  .section-label {
+    font-size: 9px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: #888;
+    margin-bottom: 6px;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 9.5px;
+  }
+  thead { display: table-header-group; }
+  tr    { page-break-inside: avoid; }
+
+  th {
+    background: #111;
+    color: #fff;
+    padding: 6px 5px;
+    text-align: left;
+    font-size: 8.5px;
+    font-weight: 700;
+    letter-spacing: 0.2px;
+    white-space: nowrap;
+  }
+  th.perf-head { background: #333; }
+  th.num, td.num { text-align: center; }
+
+  td {
+    padding: 6px 5px;
+    border-bottom: 1px solid #e5e7eb;
+    vertical-align: middle;
+  }
   tr:nth-child(even) td { background: #f9fafb; }
-  small { color: #6b7280; }
-  .badge { font-weight: 700; font-size: 10px; border-radius: 6px; padding: 2px 6px; }
-  .present { color: #16a34a; background: #f0fdf4; }
-  .checkin { color: #2563eb; background: #eff6ff; }
-  .absent  { color: #dc2626; background: #fef2f2; }
-  .footer  { margin-top: 16px; font-size: 10px; color: #9ca3af; text-align: right; }
+
+  .name-col { font-weight: 700; min-width: 100px; }
+  .sub      { font-size: 8.5px; color: #6b7280; }
+
+  .badge {
+    display: inline-block;
+    font-size: 8px;
+    font-weight: 700;
+    padding: 2px 6px;
+    border-radius: 20px;
+    white-space: nowrap;
+  }
+  .present { background: #f0fdf4; color: #15803d; border: 1px solid #bbf7d0; }
+  .checkin { background: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe; }
+  .absent  { background: #fef2f2; color: #dc2626; border: 1px solid #fecaca; }
+
+  .perf-paid   { color: #15803d; font-weight: 700; }
+  .perf-unpaid { color: #dc2626; font-weight: 700; }
+  .perf-ptp    { color: #7c3aed; font-weight: 700; }
+
+  .footer {
+    margin-top: 14px;
+    padding-top: 8px;
+    border-top: 1px solid #e5e7eb;
+    display: flex;
+    justify-content: space-between;
+    font-size: 8px;
+    color: #9ca3af;
+  }
 </style>
 </head>
 <body>
-  <h1>Daily Agent Report</h1>
-  <h2>${dateLabel}</h2>
+
+  <div class="header">
+    <div>
+      <h1>Daily Agent Report</h1>
+      <p>${dateLabel}</p>
+    </div>
+    <div class="header-meta">
+      Generated: ${new Date().toLocaleString("en-IN")}<br/>
+      Total Agents: ${report.length} &nbsp;|&nbsp; Present: ${present}/${report.length}
+    </div>
+  </div>
 
   <div class="summary">
-    <div class="pill pill-green"><div class="pill-value">${present}/${report.length}</div><div class="pill-label">Present</div></div>
-    <div class="pill pill-blue"><div class="pill-value">${totalVisits}</div><div class="pill-label">Field Visits</div></div>
-    <div class="pill pill-teal"><div class="pill-value">${formatAmount(totalPaid)}</div><div class="pill-label">Collected</div></div>
-    <div class="pill pill-amber"><div class="pill-value">${formatAmount(totalDep)}</div><div class="pill-label">Deposited</div></div>
+    <div class="pill p-green">
+      <div class="pill-val">${present}/${report.length}</div>
+      <div class="pill-lbl">Present</div>
+    </div>
+    <div class="pill p-blue">
+      <div class="pill-val">${totalVisits}</div>
+      <div class="pill-lbl">Field Visits</div>
+    </div>
+    <div class="pill p-teal">
+      <div class="pill-val">${totalPaidCases}</div>
+      <div class="pill-lbl">Cases Paid Today</div>
+    </div>
+    <div class="pill p-amber">
+      <div class="pill-val">${formatAmount(totalPaid)}</div>
+      <div class="pill-lbl">Collected Today</div>
+    </div>
+    <div class="pill p-indigo">
+      <div class="pill-val">${formatAmount(totalDep)}</div>
+      <div class="pill-lbl">Deposited Today</div>
+    </div>
   </div>
+
+  <p class="section-label">Agent-wise Breakdown &mdash; Daily + Overall Performance</p>
 
   <table>
     <thead>
       <tr>
-        <th>Agent</th><th>Status</th><th>Check-In</th><th>Check-Out</th><th>Duration</th>
-        <th>Visits</th><th>PTP</th><th>Paid</th><th>Depositions</th>
+        <th>Agent Name</th>
+        <th>Attendance</th>
+        <th>Check-In</th>
+        <th>Check-Out</th>
+        <th>Duration</th>
+        <th class="num">Visits</th>
+        <th class="num">PTP Today</th>
+        <th class="num">Paid Today</th>
+        <th class="num">Depositions</th>
+        <th class="num perf-head">Total Cases</th>
+        <th class="num perf-head">Paid</th>
+        <th class="num perf-head">Unpaid</th>
+        <th class="num perf-head">PTP</th>
+        <th class="num perf-head">Resolution</th>
       </tr>
     </thead>
-    <tbody>${rows}</tbody>
+    <tbody>
+      ${rows}
+    </tbody>
   </table>
 
-  <div class="footer">Generated on ${new Date().toLocaleString("en-IN")}</div>
+  <div class="footer">
+    <span>Dhanraj Daily Report &mdash; ${dateLabel}</span>
+    <span>Confidential &mdash; Internal Use Only</span>
+  </div>
+
 </body>
 </html>`;
 }
 
-async function downloadReportPDF(report: AgentDayReport[], date: string): Promise<string | null> {
-  try {
-    const html = generateReportHTML(report, date);
-    const { uri } = await Print.printToFileAsync({ html, base64: false });
-    // Move to a named file in the cache directory
-    const dest = `${FileSystem.cacheDirectory}DailyReport_${date}.pdf`;
-    await FileSystem.moveAsync({ from: uri, to: dest });
-    return dest;
-  } catch (e: any) {
-    Alert.alert("Error", e?.message ?? "Failed to generate PDF");
-    return null;
-  }
-}
+// ─── PDF Export + Share ───────────────────────────────────────────────────────
 
-async function shareViaWhatsApp(pdfUri: string, date: string) {
-  const available = await Sharing.isAvailableAsync();
-  if (!available) {
-    Alert.alert("Sharing not available", "Your device does not support file sharing.");
-    return;
-  }
-  await Sharing.shareAsync(pdfUri, {
+async function exportAndShare(
+  report: AgentDayReport[],
+  perfMap: Map<number, AgentPerformance>,
+  date: string
+): Promise<void> {
+  const html = generateReportHTML(report, perfMap, date);
+
+  // printToFileAsync with explicit width/height renders as vector text PDF
+  const { uri } = await Print.printToFileAsync({
+    html,
+    base64: false,
+    width: 842,   // A4 landscape pts
+    height: 595,
+  });
+
+  // Move to a named file so WhatsApp shows a proper filename
+  const dest = `${FileSystem.cacheDirectory}DailyReport_${date}.pdf`;
+  await FileSystem.moveAsync({ from: uri, to: dest });
+
+  await Sharing.shareAsync(dest, {
     mimeType: "application/pdf",
     dialogTitle: `Daily Report — ${formatDate(date)}`,
     UTI: "com.adobe.pdf",
@@ -213,16 +372,16 @@ async function shareViaWhatsApp(pdfUri: string, date: string) {
 // ─── Summary Totals Bar ───────────────────────────────────────────────────────
 
 function TotalsBar({ report }: { report: AgentDayReport[] }) {
-  const present    = report.filter((r) => r.attendanceStatus !== "Absent").length;
-  const visits     = report.reduce((s, r) => s + r.fieldVisits, 0);
-  const paidAmt    = report.reduce((s, r) => s + Number(r.paidAmount), 0);
-  const depAmt     = report.reduce((s, r) => s + Number(r.depositionAmount), 0);
+  const present = report.filter((r) => r.attendanceStatus !== "Absent").length;
+  const visits  = report.reduce((s, r) => s + r.fieldVisits, 0);
+  const paidAmt = report.reduce((s, r) => s + Number(r.paidAmount), 0);
+  const depAmt  = report.reduce((s, r) => s + Number(r.depositionAmount), 0);
 
   const pills = [
-    { label: "Present",    value: `${present}/${report.length}`, icon: "people",         color: Colors.success },
-    { label: "Visits",     value: String(visits),                icon: "location",        color: Colors.info    },
-    { label: "Collected",  value: formatAmount(paidAmt),         icon: "cash",            color: Colors.statusPaid },
-    { label: "Deposited",  value: formatAmount(depAmt),          icon: "wallet",          color: Colors.warning },
+    { label: "Present",   value: `${present}/${report.length}`, icon: "people",   color: Colors.success },
+    { label: "Visits",    value: String(visits),                 icon: "location", color: Colors.info },
+    { label: "Collected", value: formatAmount(paidAmt),          icon: "cash",     color: Colors.statusPaid },
+    { label: "Deposited", value: formatAmount(depAmt),           icon: "wallet",   color: Colors.warning },
   ] as const;
 
   return (
@@ -242,9 +401,9 @@ function TotalsBar({ report }: { report: AgentDayReport[] }) {
 
 function AttBadge({ status }: { status: AgentDayReport["attendanceStatus"] }) {
   const cfg = {
-    Present:    { color: Colors.success, icon: "checkmark-circle" as const },
-    "Checked-In": { color: Colors.info,  icon: "time"             as const },
-    Absent:     { color: Colors.danger,  icon: "close-circle"     as const },
+    Present:      { color: Colors.success, icon: "checkmark-circle" as const },
+    "Checked-In": { color: Colors.info,    icon: "time"             as const },
+    Absent:       { color: Colors.danger,  icon: "close-circle"     as const },
   }[status];
 
   return (
@@ -258,17 +417,9 @@ function AttBadge({ status }: { status: AgentDayReport["attendanceStatus"] }) {
 // ─── Metric Row ───────────────────────────────────────────────────────────────
 
 function MetricRow({
-  icon,
-  label,
-  value,
-  sub,
-  color,
+  icon, label, value, sub, color,
 }: {
-  icon: string;
-  label: string;
-  value: string;
-  sub?: string;
-  color: string;
+  icon: string; label: string; value: string; sub?: string; color: string;
 }) {
   return (
     <View style={styles.metricRow}>
@@ -284,60 +435,97 @@ function MetricRow({
   );
 }
 
+// ─── Performance Panel ────────────────────────────────────────────────────────
+
+function PerfPanel({ perf }: { perf: AgentPerformance | undefined }) {
+  if (!perf || perf.total === 0) return null;
+  const resolution = Math.round((perf.paid / perf.total) * 100);
+  const barColor =
+    resolution >= 70 ? Colors.success : resolution >= 40 ? Colors.warning : Colors.danger;
+
+  return (
+    <View style={styles.perfSection}>
+      <Text style={styles.detailSectionTitle}>Overall Performance</Text>
+
+      <View style={styles.perfStats}>
+        {[
+          { label: "Total",   value: String(perf.total),      color: Colors.text },
+          { label: "Paid",    value: String(perf.paid),       color: Colors.statusPaid },
+          { label: "Unpaid",  value: String(perf.notProcess), color: Colors.danger },
+          { label: "PTP",     value: String(perf.ptp),        color: Colors.statusPTP },
+          { label: "Res%",    value: `${resolution}%`,        color: barColor },
+        ].map((s) => (
+          <View key={s.label} style={styles.perfStat}>
+            <Text style={[styles.perfStatVal, { color: s.color }]}>{s.value}</Text>
+            <Text style={styles.perfStatLabel}>{s.label}</Text>
+          </View>
+        ))}
+      </View>
+
+      <View style={styles.resBarWrap}>
+        <View style={styles.resBarBg}>
+          <View
+            style={[
+              styles.resBarFill,
+              { width: `${Math.min(resolution, 100)}%` as any, backgroundColor: barColor },
+            ]}
+          />
+        </View>
+        <Text style={[styles.resBarLabel, { color: barColor }]}>{resolution}% resolved</Text>
+      </View>
+    </View>
+  );
+}
+
 // ─── Agent Card ───────────────────────────────────────────────────────────────
 
-function AgentCard({ item }: { item: AgentDayReport }) {
+function AgentCard({
+  item,
+  perf,
+}: {
+  item: AgentDayReport;
+  perf: AgentPerformance | undefined;
+}) {
   const [expanded, setExpanded] = useState(false);
-
-  const initials = item.agentName
-    .split(" ")
-    .map((w) => w[0])
-    .slice(0, 2)
-    .join("")
-    .toUpperCase();
-
   const isAbsent = item.attendanceStatus === "Absent";
+  const initials = item.agentName.split(" ").map((w) => w[0]).slice(0, 2).join("").toUpperCase();
+  const resolution = perf && perf.total > 0 ? Math.round((perf.paid / perf.total) * 100) : null;
 
   return (
     <Pressable
       onPress={() => setExpanded((e) => !e)}
       style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}
     >
-      {/* ── Header row ── */}
       <View style={styles.cardHeader}>
         <View style={[styles.avatar, isAbsent && styles.avatarAbsent]}>
-          <Text style={[styles.avatarText, isAbsent && styles.avatarTextAbsent]}>
-            {initials}
-          </Text>
+          <Text style={[styles.avatarText, isAbsent && styles.avatarTextAbsent]}>{initials}</Text>
         </View>
 
         <View style={styles.cardMeta}>
-          <Text style={styles.agentName} numberOfLines={1}>
-            {item.agentName}
-          </Text>
+          <Text style={styles.agentName} numberOfLines={1}>{item.agentName}</Text>
           <AttBadge status={item.attendanceStatus} />
         </View>
 
-        {/* Quick stats strip */}
         <View style={styles.quickStats}>
           <View style={styles.quickStat}>
             <Ionicons name="location" size={11} color={Colors.info} />
-            <Text style={[styles.quickStatVal, { color: Colors.info }]}>
-              {item.fieldVisits}
-            </Text>
+            <Text style={[styles.quickStatVal, { color: Colors.info }]}>{item.fieldVisits}</Text>
           </View>
           <View style={styles.quickStat}>
             <Ionicons name="cash" size={11} color={Colors.success} />
-            <Text style={[styles.quickStatVal, { color: Colors.success }]}>
-              {item.paidCount}
-            </Text>
+            <Text style={[styles.quickStatVal, { color: Colors.success }]}>{item.paidCount}</Text>
           </View>
           <View style={styles.quickStat}>
             <Ionicons name="time-outline" size={11} color={Colors.statusPTP} />
-            <Text style={[styles.quickStatVal, { color: Colors.statusPTP }]}>
-              {item.ptpCount}
-            </Text>
+            <Text style={[styles.quickStatVal, { color: Colors.statusPTP }]}>{item.ptpCount}</Text>
           </View>
+          {resolution !== null && (
+            <View style={[styles.quickStat, styles.quickStatPerf]}>
+              <Text style={[styles.quickStatVal, { color: Colors.primary, fontSize: 10 }]}>
+                {resolution}%
+              </Text>
+            </View>
+          )}
         </View>
 
         <Ionicons
@@ -348,45 +536,30 @@ function AgentCard({ item }: { item: AgentDayReport }) {
         />
       </View>
 
-      {/* ── Expanded detail ── */}
       {expanded && (
         <View style={styles.detail}>
-          {/* Attendance timing */}
+          {/* Attendance */}
           <View style={styles.detailSection}>
             <Text style={styles.detailSectionTitle}>Attendance</Text>
             <View style={styles.timingRow}>
-              <View style={styles.timingCell}>
-                <Text style={styles.timingLabel}>Check-In</Text>
-                <Text style={styles.timingValue}>{formatTime(item.checkIn)}</Text>
-              </View>
-              <View style={[styles.timingCell, styles.timingCellMid]}>
-                <Text style={styles.timingLabel}>Check-Out</Text>
-                <Text style={styles.timingValue}>{formatTime(item.checkOut)}</Text>
-              </View>
-              <View style={styles.timingCell}>
-                <Text style={styles.timingLabel}>Duration</Text>
-                <Text style={styles.timingValue}>
-                  {formatDuration(item.durationMinutes)}
-                </Text>
-              </View>
+              {[
+                { label: "Check-In",  value: formatTime(item.checkIn) },
+                { label: "Check-Out", value: formatTime(item.checkOut) },
+                { label: "Duration",  value: formatDuration(item.durationMinutes) },
+              ].map((t) => (
+                <View key={t.label} style={styles.timingCell}>
+                  <Text style={styles.timingLabel}>{t.label}</Text>
+                  <Text style={styles.timingValue}>{t.value}</Text>
+                </View>
+              ))}
             </View>
           </View>
 
           {/* Field Activity */}
           <View style={styles.detailSection}>
             <Text style={styles.detailSectionTitle}>Field Activity</Text>
-            <MetricRow
-              icon="location"
-              label="Field Visits"
-              value={String(item.fieldVisits)}
-              color={Colors.info}
-            />
-            <MetricRow
-              icon="time-outline"
-              label="PTP Cases Today"
-              value={String(item.ptpCount)}
-              color={Colors.statusPTP}
-            />
+            <MetricRow icon="location"     label="Field Visits"       value={String(item.fieldVisits)} color={Colors.info} />
+            <MetricRow icon="time-outline" label="PTP Cases Today"    value={String(item.ptpCount)}    color={Colors.statusPTP} />
             <MetricRow
               icon="walk-outline"
               label="Break Sessions"
@@ -398,7 +571,7 @@ function AgentCard({ item }: { item: AgentDayReport }) {
 
           {/* Collections */}
           <View style={styles.detailSection}>
-            <Text style={styles.detailSectionTitle}>Collections</Text>
+            <Text style={styles.detailSectionTitle}>Collections Today</Text>
             <MetricRow
               icon="checkmark-circle"
               label="Cases Paid"
@@ -410,14 +583,13 @@ function AgentCard({ item }: { item: AgentDayReport }) {
               icon="wallet"
               label="Depositions"
               value={String(item.depositionCount)}
-              sub={
-                item.depositionAmount > 0
-                  ? formatAmount(Number(item.depositionAmount))
-                  : undefined
-              }
+              sub={item.depositionAmount > 0 ? formatAmount(Number(item.depositionAmount)) : undefined}
               color={Colors.warning}
             />
           </View>
+
+          {/* Overall Performance */}
+          <PerfPanel perf={perf} />
         </View>
       )}
     </Pressable>
@@ -438,39 +610,44 @@ export default function AdminDailyReportScreen() {
     retry: 2,
   });
 
-  const report: AgentDayReport[] = useMemo(
-    () => data?.report ?? [],
-    [data]
-  );
+  const { data: agentsData } = useQuery({
+    queryKey: ["/api/admin/agents"],
+    queryFn: () => api.admin.getAgents(),
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const report: AgentDayReport[] = useMemo(() => data?.report ?? [], [data]);
+
+  const perfMap = useMemo(() => {
+    const map = new Map<number, AgentPerformance>();
+    const stats: AgentPerformance[] = (agentsData as any)?.stats ?? [];
+    for (const s of stats) map.set(s.id, s);
+    return map;
+  }, [agentsData]);
 
   const onRefresh = useCallback(() => { refetch(); }, [refetch]);
+  const isToday = date === todayISO();
 
-  const handleExport = useCallback(async (sendToWhatsApp: boolean) => {
+  const handleExport = useCallback(async () => {
     if (report.length === 0) {
       Alert.alert("No Data", "Nothing to export for this date.");
       return;
     }
+    const ok = await Sharing.isAvailableAsync();
+    if (!ok) {
+      Alert.alert("Not Supported", "File sharing is not available on this device.");
+      return;
+    }
     setIsExporting(true);
     try {
-      const pdfUri = await downloadReportPDF(report, date);
-      if (!pdfUri) return;
-      if (sendToWhatsApp) {
-        await shareViaWhatsApp(pdfUri, date);
-      } else {
-        await Sharing.shareAsync(pdfUri, {
-          mimeType: "application/pdf",
-          dialogTitle: `Daily Report — ${formatDate(date)}`,
-          UTI: "com.adobe.pdf",
-        });
-      }
+      await exportAndShare(report, perfMap, date);
+    } catch (e: any) {
+      Alert.alert("Export Failed", e?.message ?? "Could not generate PDF.");
     } finally {
       setIsExporting(false);
     }
-  }, [report, date]);
+  }, [report, perfMap, date]);
 
-  const isToday = date === todayISO();
-
-  // ── Render ──
   return (
     <View style={[styles.root, { paddingBottom: insets.bottom }]}>
       {/* Date Navigator */}
@@ -511,32 +688,43 @@ export default function AdminDailyReportScreen() {
       {/* Summary totals */}
       {report.length > 0 && <TotalsBar report={report} />}
 
-      {/* Export / Share buttons */}
+      {/* Export bar */}
       {report.length > 0 && (
         <View style={styles.exportBar}>
           <Pressable
-            style={({ pressed }) => [styles.exportBtn, pressed && styles.exportBtnPressed]}
-            onPress={() => handleExport(false)}
+            style={({ pressed }) => [
+              styles.exportBtn,
+              pressed && styles.exportBtnPressed,
+              isExporting && { opacity: 0.6 },
+            ]}
+            onPress={handleExport}
             disabled={isExporting}
           >
-            {isExporting
-              ? <ActivityIndicator size="small" color="#fff" />
-              : <Ionicons name="download-outline" size={16} color="#fff" />}
-            <Text style={styles.exportBtnText}>Download PDF</Text>
+            {isExporting ? (
+              <ActivityIndicator size="small" color="#fff" />
+            ) : (
+              <Ionicons name="document-text-outline" size={16} color="#fff" />
+            )}
+            <Text style={styles.exportBtnText}>
+              {isExporting ? "Generating…" : "Download PDF"}
+            </Text>
           </Pressable>
 
           <Pressable
-            style={({ pressed }) => [styles.exportBtn, styles.waBtn, pressed && styles.exportBtnPressed]}
-            onPress={() => handleExport(true)}
+            style={({ pressed }) => [
+              styles.waBtn,
+              pressed && styles.exportBtnPressed,
+              isExporting && { opacity: 0.6 },
+            ]}
+            onPress={handleExport}
             disabled={isExporting}
           >
-            <Ionicons name="logo-whatsapp" size={16} color="#fff" />
-            <Text style={styles.exportBtnText}>Send on WhatsApp</Text>
+            <Ionicons name="logo-whatsapp" size={20} color="#fff" />
+            <Text style={styles.exportBtnText}>WhatsApp</Text>
           </Pressable>
         </View>
       )}
 
-      {/* Loading */}
       {isLoading && (
         <View style={styles.center}>
           <ActivityIndicator size="large" color={Colors.primary} />
@@ -544,7 +732,6 @@ export default function AdminDailyReportScreen() {
         </View>
       )}
 
-      {/* Error */}
       {isError && !isLoading && (
         <View style={styles.center}>
           <Ionicons name="alert-circle-outline" size={40} color={Colors.danger} />
@@ -557,20 +744,20 @@ export default function AdminDailyReportScreen() {
         </View>
       )}
 
-      {/* Empty */}
       {!isLoading && !isError && report.length === 0 && (
         <View style={styles.center}>
           <Ionicons name="document-outline" size={40} color={Colors.textMuted} />
-          <Text style={styles.emptyText}>No agents found</Text>
+          <Text style={styles.emptyText}>No agents found for this date</Text>
         </View>
       )}
 
-      {/* Agent list */}
       {!isLoading && !isError && report.length > 0 && (
         <FlatList
           data={report}
           keyExtractor={(item) => String(item.agentId)}
-          renderItem={({ item }) => <AgentCard item={item} />}
+          renderItem={({ item }) => (
+            <AgentCard item={item} perf={perfMap.get(item.agentId)} />
+          )}
           contentContainerStyle={styles.list}
           showsVerticalScrollIndicator={false}
           refreshControl={
@@ -589,12 +776,8 @@ export default function AdminDailyReportScreen() {
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-  root: {
-    flex: 1,
-    backgroundColor: Colors.background,
-  },
+  root: { flex: 1, backgroundColor: Colors.background },
 
-  // Date navigator
   dateNav: {
     flexDirection: "row",
     alignItems: "center",
@@ -606,312 +789,175 @@ const styles = StyleSheet.create({
     borderBottomColor: Colors.border,
   },
   dateBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    alignItems: "center",
-    justifyContent: "center",
+    width: 36, height: 36, borderRadius: 18,
+    alignItems: "center", justifyContent: "center",
     backgroundColor: Colors.background,
-    borderWidth: 1,
-    borderColor: Colors.border,
+    borderWidth: 1, borderColor: Colors.border,
   },
   dateBtnPressed: { opacity: 0.6 },
   dateBtnDisabled: { opacity: 0.35 },
-  dateLabelWrap: {
-    alignItems: "center",
-    gap: 4,
-  },
-  dateLabel: {
-    fontSize: 15,
-    fontWeight: "600",
-    color: Colors.text,
-  },
+  dateLabelWrap: { alignItems: "center", gap: 4 },
+  dateLabel: { fontSize: 15, fontWeight: "600", color: Colors.text },
   todayBadge: {
-    backgroundColor: Colors.primary + "15",
-    borderRadius: 8,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
+    backgroundColor: Colors.primary + "15", borderRadius: 8,
+    paddingHorizontal: 8, paddingVertical: 2,
   },
   todayBadgeText: {
-    fontSize: 10,
-    fontWeight: "700",
-    color: Colors.primary,
-    letterSpacing: 0.5,
+    fontSize: 10, fontWeight: "700", color: Colors.primary, letterSpacing: 0.5,
   },
 
-  // Totals bar
   totalsBar: {
-    flexDirection: "row",
-    gap: 8,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
+    flexDirection: "row", gap: 8,
+    paddingHorizontal: 16, paddingVertical: 10,
     backgroundColor: Colors.surface,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
+    borderBottomWidth: 1, borderBottomColor: Colors.border,
   },
   totalsPill: {
-    flex: 1,
-    alignItems: "center",
-    gap: 2,
-    paddingVertical: 8,
-    borderRadius: 10,
-    borderWidth: 1,
-    backgroundColor: Colors.background,
+    flex: 1, alignItems: "center", gap: 2,
+    paddingVertical: 8, borderRadius: 10,
+    borderWidth: 1, backgroundColor: Colors.background,
   },
-  totalsValue: {
-    fontSize: 13,
-    fontWeight: "700",
-  },
+  totalsValue: { fontSize: 13, fontWeight: "700" },
   totalsLabel: {
-    fontSize: 9,
-    color: Colors.textMuted,
-    fontWeight: "500",
-    letterSpacing: 0.3,
+    fontSize: 9, color: Colors.textMuted, fontWeight: "500", letterSpacing: 0.3,
   },
 
-  // List
-  list: {
-    padding: 16,
-    gap: 10,
-    paddingBottom: 32,
+  exportBar: {
+    flexDirection: "row", gap: 8,
+    paddingHorizontal: 16, paddingVertical: 10,
+    backgroundColor: Colors.surface,
+    borderBottomWidth: 1, borderBottomColor: Colors.border,
   },
+  exportBtn: {
+    flex: 1, flexDirection: "row", alignItems: "center",
+    justifyContent: "center", gap: 8,
+    backgroundColor: Colors.primary,
+    borderRadius: 10, paddingVertical: 11,
+  },
+  waBtn: {
+    flexDirection: "row", alignItems: "center",
+    justifyContent: "center", gap: 6,
+    paddingHorizontal: 14,
+    backgroundColor: "#25D366",
+    borderRadius: 10, paddingVertical: 11,
+  },
+  exportBtnPressed: { opacity: 0.7 },
+  exportBtnText: { color: "#fff", fontWeight: "700", fontSize: 13 },
 
-  // Agent card
+  list: { padding: 16, gap: 10, paddingBottom: 32 },
+
   card: {
     backgroundColor: Colors.surface,
-    borderRadius: 14,
-    overflow: "hidden",
-    borderWidth: 1,
-    borderColor: Colors.border,
+    borderRadius: 14, overflow: "hidden",
+    borderWidth: 1, borderColor: Colors.border,
     ...Platform.select({
       ios: {
-        shadowColor: "#000",
-        shadowOffset: { width: 0, height: 1 },
-        shadowOpacity: 0.06,
-        shadowRadius: 4,
+        shadowColor: "#000", shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.06, shadowRadius: 4,
       },
       android: { elevation: 2 },
     }),
   },
   cardPressed: { opacity: 0.85 },
   cardHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    padding: 14,
-    gap: 10,
+    flexDirection: "row", alignItems: "center",
+    padding: 14, gap: 10,
   },
   avatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 40, height: 40, borderRadius: 20,
     backgroundColor: Colors.primary,
-    alignItems: "center",
-    justifyContent: "center",
+    alignItems: "center", justifyContent: "center",
   },
-  avatarAbsent: {
-    backgroundColor: Colors.surfaceElevated,
-  },
-  avatarText: {
-    fontSize: 14,
-    fontWeight: "700",
-    color: "#fff",
-  },
-  avatarTextAbsent: {
-    color: Colors.textMuted,
-  },
-  cardMeta: {
-    flex: 1,
-    gap: 4,
-  },
-  agentName: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: Colors.text,
-  },
+  avatarAbsent: { backgroundColor: Colors.surfaceElevated },
+  avatarText: { fontSize: 14, fontWeight: "700", color: "#fff" },
+  avatarTextAbsent: { color: Colors.textMuted },
+  cardMeta: { flex: 1, gap: 4 },
+  agentName: { fontSize: 14, fontWeight: "600", color: Colors.text },
   attBadge: {
-    flexDirection: "row",
-    alignItems: "center",
-    alignSelf: "flex-start",
-    gap: 4,
-    paddingHorizontal: 7,
-    paddingVertical: 2,
-    borderRadius: 8,
+    flexDirection: "row", alignItems: "center",
+    alignSelf: "flex-start", gap: 4,
+    paddingHorizontal: 7, paddingVertical: 2, borderRadius: 8,
   },
-  attBadgeText: {
-    fontSize: 10,
-    fontWeight: "600",
-  },
+  attBadgeText: { fontSize: 10, fontWeight: "600" },
 
-  // Quick stats
-  quickStats: {
-    flexDirection: "row",
-    gap: 6,
-  },
+  quickStats: { flexDirection: "row", gap: 5 },
   quickStat: {
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 1,
-    backgroundColor: Colors.background,
-    borderRadius: 8,
-    paddingHorizontal: 7,
-    paddingVertical: 5,
-    borderWidth: 1,
-    borderColor: Colors.border,
+    alignItems: "center", justifyContent: "center", gap: 1,
+    backgroundColor: Colors.background, borderRadius: 8,
+    paddingHorizontal: 6, paddingVertical: 5,
+    borderWidth: 1, borderColor: Colors.border,
   },
-  quickStatVal: {
-    fontSize: 11,
-    fontWeight: "700",
+  quickStatPerf: {
+    backgroundColor: Colors.primary + "10",
+    borderColor: Colors.primary + "30",
   },
+  quickStatVal: { fontSize: 11, fontWeight: "700" },
 
-  // Expanded detail
   detail: {
-    borderTopWidth: 1,
-    borderTopColor: Colors.border,
-    paddingHorizontal: 14,
-    paddingBottom: 14,
+    borderTopWidth: 1, borderTopColor: Colors.border,
+    paddingHorizontal: 14, paddingBottom: 14,
   },
-  detailSection: {
-    marginTop: 12,
-    gap: 6,
-  },
+  detailSection: { marginTop: 12, gap: 6 },
   detailSectionTitle: {
-    fontSize: 11,
-    fontWeight: "700",
-    color: Colors.textMuted,
-    letterSpacing: 0.8,
-    textTransform: "uppercase",
-    marginBottom: 2,
+    fontSize: 11, fontWeight: "700", color: Colors.textMuted,
+    letterSpacing: 0.8, textTransform: "uppercase", marginBottom: 2,
   },
 
-  // Timing row
-  timingRow: {
-    flexDirection: "row",
-    gap: 8,
-  },
+  timingRow: { flexDirection: "row", gap: 8 },
   timingCell: {
-    flex: 1,
-    backgroundColor: Colors.background,
-    borderRadius: 10,
-    padding: 10,
-    alignItems: "center",
-    borderWidth: 1,
-    borderColor: Colors.border,
+    flex: 1, backgroundColor: Colors.background,
+    borderRadius: 10, padding: 10,
+    alignItems: "center", borderWidth: 1, borderColor: Colors.border,
   },
-  timingCellMid: {},
   timingLabel: {
-    fontSize: 10,
-    color: Colors.textMuted,
-    fontWeight: "500",
-    marginBottom: 2,
+    fontSize: 10, color: Colors.textMuted, fontWeight: "500", marginBottom: 2,
   },
-  timingValue: {
-    fontSize: 13,
-    fontWeight: "700",
-    color: Colors.text,
-  },
+  timingValue: { fontSize: 13, fontWeight: "700", color: Colors.text },
 
-  // Metric rows
   metricRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    backgroundColor: Colors.background,
-    borderRadius: 10,
-    paddingVertical: 8,
-    paddingHorizontal: 10,
-    borderWidth: 1,
-    borderColor: Colors.border,
+    flexDirection: "row", alignItems: "center", gap: 8,
+    backgroundColor: Colors.background, borderRadius: 10,
+    paddingVertical: 8, paddingHorizontal: 10,
+    borderWidth: 1, borderColor: Colors.border,
   },
   metricIcon: {
-    width: 28,
-    height: 28,
-    borderRadius: 8,
-    alignItems: "center",
-    justifyContent: "center",
+    width: 28, height: 28, borderRadius: 8,
+    alignItems: "center", justifyContent: "center",
   },
-  metricLabel: {
-    flex: 1,
-    fontSize: 12,
-    color: Colors.textSecondary,
-    fontWeight: "500",
-  },
-  metricRight: {
-    alignItems: "flex-end",
-    gap: 1,
-  },
-  metricValue: {
-    fontSize: 13,
-    fontWeight: "700",
-  },
-  metricSub: {
-    fontSize: 10,
-    color: Colors.textMuted,
-    fontWeight: "500",
-  },
+  metricLabel: { flex: 1, fontSize: 12, color: Colors.textSecondary, fontWeight: "500" },
+  metricRight: { alignItems: "flex-end", gap: 1 },
+  metricValue: { fontSize: 13, fontWeight: "700" },
+  metricSub: { fontSize: 10, color: Colors.textMuted, fontWeight: "500" },
 
-  // States
+  perfSection: { marginTop: 12, gap: 8 },
+  perfStats: { flexDirection: "row", gap: 6 },
+  perfStat: {
+    flex: 1, alignItems: "center",
+    backgroundColor: Colors.background, borderRadius: 10,
+    paddingVertical: 8, borderWidth: 1, borderColor: Colors.border,
+  },
+  perfStatVal: { fontSize: 14, fontWeight: "800" },
+  perfStatLabel: {
+    fontSize: 9, color: Colors.textMuted,
+    fontWeight: "600", letterSpacing: 0.3, marginTop: 2,
+  },
+  resBarWrap: { flexDirection: "row", alignItems: "center", gap: 8 },
+  resBarBg: {
+    flex: 1, height: 6,
+    backgroundColor: Colors.surfaceElevated, borderRadius: 3, overflow: "hidden",
+  },
+  resBarFill: { height: 6, borderRadius: 3 },
+  resBarLabel: { fontSize: 10, fontWeight: "600", minWidth: 80, textAlign: "right" },
+
   center: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 12,
-    padding: 32,
+    flex: 1, alignItems: "center", justifyContent: "center", gap: 12, padding: 32,
   },
-  loadingText: {
-    fontSize: 14,
-    color: Colors.textSecondary,
-  },
-  errorText: {
-    fontSize: 14,
-    color: Colors.danger,
-    textAlign: "center",
-  },
-  emptyText: {
-    fontSize: 14,
-    color: Colors.textMuted,
-    textAlign: "center",
-  },
+  loadingText: { fontSize: 14, color: Colors.textSecondary },
+  errorText: { fontSize: 14, color: Colors.danger, textAlign: "center" },
+  emptyText: { fontSize: 14, color: Colors.textMuted, textAlign: "center" },
   retryBtn: {
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    backgroundColor: Colors.primary,
-    borderRadius: 10,
+    paddingHorizontal: 20, paddingVertical: 10,
+    backgroundColor: Colors.primary, borderRadius: 10,
   },
-  retryText: {
-    color: "#fff",
-    fontWeight: "600",
-    fontSize: 14,
-  },
-
-  // Export / Share
-  exportBar: {
-    flexDirection: "row",
-    gap: 8,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    backgroundColor: Colors.surface,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
-  },
-  exportBtn: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 6,
-    backgroundColor: Colors.primary,
-    borderRadius: 10,
-    paddingVertical: 10,
-  },
-  waBtn: {
-    backgroundColor: "#25D366",
-  },
-  exportBtnPressed: {
-    opacity: 0.75,
-  },
-  exportBtnText: {
-    color: "#fff",
-    fontWeight: "700",
-    fontSize: 13,
-  },
+  retryText: { color: "#fff", fontWeight: "600", fontSize: 14 },
 });
