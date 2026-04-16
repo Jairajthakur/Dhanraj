@@ -52,6 +52,11 @@ interface AgentDayReport {
   depositionAmount: number;
   breakCount: number;
   breakMinutes: number;
+  // overall all-time performance (now included directly in report)
+  perfTotal: number;
+  perfPaid: number;
+  perfUnpaid: number;
+  perfPtp: number;
 }
 
 interface AgentPerformance {
@@ -645,20 +650,23 @@ export default function AdminDailyReportScreen() {
     retry: 2,
   });
 
-  const { data: agentsData } = useQuery({
-    queryKey: ["/api/admin/agents"],
-    queryFn: () => api.admin.getAgents(),
-    staleTime: 5 * 60 * 1000,
-  });
-
   const report: AgentDayReport[] = useMemo(() => data?.report ?? [], [data]);
 
+  // Build perfMap directly from the report (perf fields are now embedded in the API response)
   const perfMap = useMemo(() => {
     const map = new Map<number, AgentPerformance>();
-    const stats: AgentPerformance[] = (agentsData as any)?.stats ?? [];
-    for (const s of stats) map.set(s.id, s);
+    for (const r of report) {
+      map.set(r.agentId, {
+        id:         r.agentId,
+        name:       r.agentName,
+        total:      r.perfTotal      ?? 0,
+        paid:       r.perfPaid       ?? 0,
+        notProcess: r.perfUnpaid     ?? 0,
+        ptp:        r.perfPtp        ?? 0,
+      });
+    }
     return map;
-  }, [agentsData]);
+  }, [report]);
 
   const onRefresh = useCallback(() => { refetch(); }, [refetch]);
   const isToday = date === todayISO();
