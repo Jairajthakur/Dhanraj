@@ -3068,6 +3068,161 @@ app.get("/api/admin/cases/:id/reassign-log", requireAdmin, async (req: Request, 
   }
 });
   
+// ── Daily Report ─────────────────────────────────────────────────────────────
+app.get("/api/admin/daily-report", requireAdmin, async (req: Request, res: Response) => {
+  try {
+    const date: string = typeof req.query.date === "string" && req.query.date
+      ? req.query.date
+      : new Date().toISOString().split("T")[0];
+
+    // 1. All FOS agents
+    const agentsResult = await storage.query(
+      `SELECT id, name FROM fos_agents WHERE role = 'fos' ORDER BY name`
+    );
+    const agents: { id: number; name: string }[] = agentsResult.rows;
+
+    // 2. Attendance for the day
+    const attResult = await storage.query(
+      `SELECT agent_id, check_in, check_out FROM attendance WHERE date = $1`,
+      [date]
+    );
+    const attMap = new Map<number, { checkIn: string | null; checkOut: string | null }>();
+    for (const row of attResult.rows) {
+      attMap.set(Number(row.agent_id), { checkIn: row.check_in, checkOut: row.check_out });
+    }
+
+    // 3. Field visits for the day
+    const fvResult = await storage.query(
+      `SELECT agent_id, COUNT(*)::int AS visit_count
+       FROM field_visits
+       WHERE DATE(visited_at AT TIME ZONE 'Asia/Kolkata') = $1
+       GROUP BY agent_id`,
+      [date]
+    );
+    const fvMap = new Map<number, number>();
+    for (const row of fvResult.rows) {
+      fvMap.set(Number(row.agent_id), Number(row.visit_count));
+    }
+
+    // 4. PTP set for this date (across loan_cases + bkt_cases)
+    const ptpResult = await storage.query(
+      `SELECT agent_id, COUNT(*)::int AS ptp_count
+       FROM (
+         SELECT agent_id FROM loan_cases
+         WHERE status = 'PTP' AND (ptp_date = $1 OR telecaller_ptp_date = $1)
+         UNION ALL
+         SELECT agent_id FROM bkt_cases
+         WHERE status = 'PTP' AND (ptp_date = $1 OR telecaller_ptp_date = $1)
+       ) t
+       GROUP BY agent_id`,
+      [date]
+    );
+    const ptpMap = new Map<number, number>();
+    for (const row of ptpResult.rows) {
+      ptpMap.set(Number(row.agent_id), Number(row.ptp_count));
+    }
+
+    // 5. Paid cases on this date (feedback_date = date, status = Paid)
+    const paidResult = await storage.query(
+      `SELECT agent_id,
+              COUNT(*)::int                     AS paid_count,
+              COALESCE(SUM(pos::numeric), 0)    AS paid_amount
+       FROM (
+         SELECT agent_id, pos, feedback_date FROM loan_cases
+         WHERE status = 'Paid'
+           AND DATE(feedback_date AT TIME ZONE 'Asia/Kolkata') = $1
+         UNION ALL
+         SELECT agent_id, pos, feedback_date FROM bkt_cases
+         WHERE status = 'Paid'
+           AND DATE(feedback_date AT TIME ZONE 'Asia/Kolkata') = $1
+       ) t
+       GROUP BY agent_id`,
+      [date]
+    );
+    const paidMap = new Map<number, { count: number; amount: number }>();
+    for (const row of paidResult.rows) {
+      paidMap.set(Number(row.agent_id), {
+        count: Number(row.paid_count),
+        amount: Number(row.paid_amount),
+      });
+    }
+
+    // 6. Depositions submitted on this date
+    const depResult = await storage.query(
+      `SELECT agent_id,
+              COUNT(*)::int                       AS dep_count,
+              COALESCE(SUM(amount::numeric), 0)   AS dep_amount
+       FROM depositions
+       WHERE deposition_date = $1
+       GROUP BY agent_id`,
+      [date]
+    );
+    const depMap = new Map<number, { count: number; amount: number }>();
+    for (const row of depResult.rows) {
+      depMap.set(Number(row.agent_id), {
+        count: Number(row.dep_count),
+        amount: Number(row.dep_amount),
+      });
+    }
+
+    // 7. Assemble one row per agent
+    const report = agents.map((agent) => {
+      const att = attMap.get(agent.id);
+      const checkIn = att?.checkIn ?? null;
+      const checkOut = att?.checkOut ?? null;
+
+      let durationMinutes: number | null = null;
+      if (checkIn && checkOut) {
+        durationMinutes = Math.round(
+          (new Date(checkOut).getTime() - new Date(checkIn).getTime()) / 60000
+        );
+      }
+
+      const attendanceStatus = checkIn
+        ? checkOut
+          ? "Present"
+          : "Checked-In"
+        : "Absent";
+
+      const paid = paidMap.get(agent.id) ?? { count: 0, amount: 0 };
+      const dep  = depMap.get(agent.id)  ?? { count: 0, amount: 0 };
+
+      return {
+        agentId:           agent.id,
+        agentName:         agent.name,
+        attendanceStatus,
+        checkIn,
+        checkOut,
+        durationMinutes,
+        fieldVisits:       fvMap.get(agent.id)  ?? 0,
+        ptpCount:          ptpMap.get(agent.id) ?? 0,
+        paidCount:         paid.count,
+        paidAmount:        paid.amount,
+        depositionCount:   dep.count,
+        depositionAmount:  dep.amount,
+        // break tracking placeholder — add break_sessions table later
+        breakCount:        0,
+        breakMinutes:      0,
+      };
+    });
+
+    res.json({ date, report });
+  } catch (e: any) {
+    console.error("[GET /api/admin/daily-report]", e);
+    res.status(500).json({ message: e.message });
+  }
+});
+
 const httpServer = createServer(app);
 return httpServer;
 }
+
+// ── Daily Report ─────────────────────────────────────────────────────────────
+// GET /api/admin/daily-report?date=YYYY-MM-DD
+// Returns one row per agent with aggregated day metrics:
+//   attendance (check-in / check-out / duration)
+//   field visits count
+//   PTP count (cases whose ptp_date = selected date)
+//   paid count + paid amount (feedback_date on selected date)
+//   depositions count + amount on selected date
+//   break sessions (not tracked yet → 0, ready for future extension)
