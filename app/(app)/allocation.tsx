@@ -634,7 +634,7 @@ function FeedbackModal({
           )}
 
           {/* ── Tab bar ── */}
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 16 }}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
             <View style={{ flexDirection: "row", gap: 8, paddingRight: 8 }}>
               {FEEDBACK_TABS.map((t) => {
                 const isActive       = activeTab === t;
@@ -1340,10 +1340,10 @@ const styles = StyleSheet.create({
 
 const fbStyles = StyleSheet.create({
   overlay:             { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" },
-  sheet:               { backgroundColor: Colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, maxHeight: "94%", flexShrink: 1 },
+sheet:               { backgroundColor: Colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 16, paddingTop: 20, maxHeight: "94%", flexShrink: 1 },
   handle:              { width: 40, height: 4, backgroundColor: Colors.border, borderRadius: 2, alignSelf: "center", marginBottom: 12 },
-  title:               { fontSize: 20, fontWeight: "700", color: Colors.text, marginBottom: 4 },
-  customerName:        { fontSize: 13, color: Colors.textSecondary, marginBottom: 8, textTransform: "uppercase" },
+  title:               { fontSize: 18, fontWeight: "700", color: Colors.text, marginBottom: 2 },
+customerName:        { fontSize: 12, color: Colors.textSecondary, marginBottom: 6, textTransform: "uppercase" },
   sectionLabel:        { fontSize: 13, fontWeight: "700", color: Colors.textSecondary, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 8 },
   divider:             { height: 1, backgroundColor: Colors.border, marginVertical: 12 },
   caseInfoRow:         { flexDirection: "row", gap: 8, marginBottom: 12 },
@@ -1375,7 +1375,7 @@ const fbStyles = StyleSheet.create({
   saveBtn:             { flex: 2, paddingVertical: 14, borderRadius: 12, alignItems: "center", flexDirection: "row", justifyContent: "center", gap: 7 },
   saveText:            { fontSize: 15, fontWeight: "700", color: "#fff" },
 
-  numbersSection:      { marginBottom: 12 },
+  numbersSection:      { marginBottom: 8 },
   numbersSectionLabel: { fontSize: 11, fontWeight: "700", color: Colors.textMuted, textTransform: "uppercase", marginBottom: 6 },
   numbersRow:          { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   numberChip:          { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: Colors.primary, borderRadius: 10, paddingVertical: 8, paddingHorizontal: 12 },
