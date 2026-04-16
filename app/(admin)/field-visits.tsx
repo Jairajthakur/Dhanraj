@@ -10,7 +10,7 @@
  *   • Pull-to-refresh + auto-refresh every 60 s
  */
 
-import React, { useState, useMemo, useCallback } from "react";
+import React, { useState, useMemo, useCallback, useEffect } from "react";
 import {
   View,
   Text,
@@ -29,7 +29,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import Colors from "@/constants/colors";
-import { api } from "@/lib/api";
+import { api, tokenStore } from "@/lib/api";
 import { getApiUrl } from "@/lib/query-client";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -117,7 +117,7 @@ function SummaryBar({
   );
 }
 
-function VisitCard({ visit }: { visit: FieldVisit }) {
+function VisitCard({ visit, authToken }: { visit: FieldVisit; authToken: string | null }) {
   const accText =
     visit.accuracy != null ? `±${Math.round(Number(visit.accuracy))} m` : null;
 
@@ -127,10 +127,10 @@ function VisitCard({ visit }: { visit: FieldVisit }) {
   const typeTag   = visit.case_type === "bkt" ? "BKT" : "Loan";
   const typeColor = visit.case_type === "bkt" ? Colors.warning : Colors.info;
 
-  // Build photo URL from dedicated endpoint (avoids embedding MB of base64 in the list response)
-  const { getApiUrl } = require("@/lib/query-client");
+  // Build photo URL — append JWT token as query param so React Native <Image>
+  // can authenticate without custom headers (which Image doesn't support)
   const photoUrl = visit.has_photo
-    ? `${getApiUrl()}/api/field-visits/${visit.id}/photo`
+    ? `${getApiUrl()}/api/field-visits/${visit.id}/photo${authToken ? `?token=${encodeURIComponent(authToken)}` : ""}`
     : null;
 
   return (
@@ -152,13 +152,13 @@ function VisitCard({ visit }: { visit: FieldVisit }) {
       <Text style={styles.caseName} numberOfLines={1}>{caseLabel}</Text>
 
       {/* Photo thumbnail — tappable, opens full image in browser */}
-      {visit.photo_url && (
+      {photoUrl && (
         <Pressable
-          onPress={() => Linking.openURL(visit.photo_url!)}
+          onPress={() => Linking.openURL(photoUrl)}
           style={({ pressed }) => [styles.photoWrapper, pressed && { opacity: 0.8 }]}
         >
           <Image
-            source={{ uri: visit.photo_url }}
+            source={{ uri: photoUrl }}
             style={styles.photoThumb}
             resizeMode="cover"
           />
@@ -231,6 +231,12 @@ export default function AdminFieldVisitsScreen() {
 
   const [selectedDate, setSelectedDate] = useState<string>(todayISO());
   const [agentFilter, setAgentFilter] = useState<number | null>(null); // null = All
+  const [authToken, setAuthToken] = useState<string | null>(null);
+
+  // Load JWT token once so VisitCard can embed it in photo URLs
+  useEffect(() => {
+    tokenStore.get().then(setAuthToken).catch(() => {});
+  }, []);
 
   // ── Data ──────────────────────────────────────────────────────────────────
 
@@ -407,7 +413,7 @@ export default function AdminFieldVisitsScreen() {
         <FlatList
           data={allVisits}
           keyExtractor={(item) => String(item.id)}
-          renderItem={({ item }) => <VisitCard visit={item} />}
+          renderItem={({ item }) => <VisitCard visit={item} authToken={authToken} />}
           contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
           refreshControl={
