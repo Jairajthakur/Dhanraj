@@ -460,6 +460,8 @@ function FieldVisitModal({ visible, item, onClose }: { visible: boolean; item: a
         photo: photos.length > 0
           ? { uri: photos[0].uri, name: photos[0].fileName, mimeType: photos[0].mimeType }
           : null,
+        visit_outcome: outcome,
+        visit_remarks: remarks.trim(),
       });
       const feedbackPayload: Record<string, unknown> = {
         visit_outcome: outcome, visit_remarks: remarks.trim(),
