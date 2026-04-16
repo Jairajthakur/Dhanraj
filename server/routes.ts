@@ -2742,6 +2742,11 @@ app.get("/api/receipt-requests", requireAuth, async (req, res) => {
   console.log("[DB] field_visits.photo_url column ready ✅");
 } catch (e: any) { console.error("[DB] field_visits.photo_url migration:", e.message); }
   try {
+    await storage.query(`ALTER TABLE field_visits ADD COLUMN IF NOT EXISTS visit_outcome TEXT`);
+    await storage.query(`ALTER TABLE field_visits ADD COLUMN IF NOT EXISTS visit_remarks TEXT`);
+    console.log("[DB] field_visits.visit_outcome/visit_remarks columns ready ✅");
+  } catch (e: any) { console.error("[DB] field_visits outcome/remarks migration:", e.message); }
+  try {
     await storage.query(`ALTER TABLE field_visits ADD COLUMN IF NOT EXISTS lat NUMERIC(11, 7)`);
     await storage.query(`ALTER TABLE field_visits ADD COLUMN IF NOT EXISTS lng NUMERIC(11, 7)`);
     await storage.query(`ALTER TABLE field_visits ADD COLUMN IF NOT EXISTS accuracy NUMERIC(8, 2)`);
@@ -2796,11 +2801,14 @@ app.post(
         photoUrl = `data:${mime};base64,${req.file.buffer.toString("base64")}`;
       }
 
+      const visit_outcome = req.body.visit_outcome ? String(req.body.visit_outcome) : null;
+      const visit_remarks = req.body.visit_remarks ? String(req.body.visit_remarks) : null;
+
       const result = await storage.query(
-        `INSERT INTO field_visits (case_id, case_type, agent_id, lat, lng, accuracy, photo_url)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)
+        `INSERT INTO field_visits (case_id, case_type, agent_id, lat, lng, accuracy, photo_url, visit_outcome, visit_remarks)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
          RETURNING *`,
-        [caseId, case_type, agentId, lat, lng, accuracy, photoUrl]
+        [caseId, case_type, agentId, lat, lng, accuracy, photoUrl, visit_outcome, visit_remarks]
       );
 
       res.json({ visit: result.rows[0] });
@@ -2905,6 +2913,8 @@ app.get("/api/admin/field-visits", requireAdmin, async (req: Request, res: Respo
       SELECT
         fv.id, fv.case_id, fv.case_type, fv.agent_id, fv.lat, fv.lng,
         fv.accuracy, fv.visited_at,
+        fv.visit_outcome,
+        fv.visit_remarks,
         (fv.photo_url IS NOT NULL AND fv.photo_url <> '') AS has_photo,
         fa.name AS agent_name,
         CASE
