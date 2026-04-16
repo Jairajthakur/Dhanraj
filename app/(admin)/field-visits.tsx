@@ -49,6 +49,8 @@ interface FieldVisit {
   pos: number | null;
   latest_feedback: string | null;
   case_status: string | null;
+  visit_outcome: string | null;  // outcome selected by agent: Paid, PTP, Refused to Pay, etc.
+  visit_remarks: string | null;  // free-text remarks entered by agent
   has_photo: boolean; // photo served via /api/field-visits/:id/photo
 }
 
@@ -179,7 +181,42 @@ function VisitCard({ visit, authToken }: { visit: FieldVisit; authToken: string 
             </Text>
           </View>
         )}
-        {visit.case_status != null && (
+        {visit.visit_outcome != null && (
+          <View style={[styles.detailChip, {
+            backgroundColor:
+              visit.visit_outcome === "Paid"           ? Colors.success + "18" :
+              visit.visit_outcome === "PTP"            ? Colors.warning + "18" :
+              visit.visit_outcome === "Refused to Pay" ? Colors.danger  + "18" :
+                                                         Colors.surfaceAlt,
+          }]}>
+            <Ionicons
+              name={
+                visit.visit_outcome === "Paid"           ? "checkmark-circle-outline" :
+                visit.visit_outcome === "PTP"            ? "time-outline" :
+                visit.visit_outcome === "Refused to Pay" ? "close-circle-outline" :
+                                                           "help-circle-outline"
+              }
+              size={11}
+              color={
+                visit.visit_outcome === "Paid"           ? Colors.success :
+                visit.visit_outcome === "PTP"            ? Colors.warning :
+                visit.visit_outcome === "Refused to Pay" ? Colors.danger  :
+                                                           Colors.textMuted
+              }
+            />
+            <Text style={[styles.detailChipValue, {
+              color:
+                visit.visit_outcome === "Paid"           ? Colors.success :
+                visit.visit_outcome === "PTP"            ? Colors.warning :
+                visit.visit_outcome === "Refused to Pay" ? Colors.danger  :
+                                                           Colors.text,
+            }]}>
+              {visit.visit_outcome}
+            </Text>
+          </View>
+        )}
+        {/* Fallback: show case_status if no visit_outcome (legacy visits) */}
+        {visit.visit_outcome == null && visit.case_status != null && (
           <View style={[styles.detailChip, {
             backgroundColor:
               visit.case_status === "Paid"  ? Colors.success + "18" :
@@ -198,7 +235,14 @@ function VisitCard({ visit, authToken }: { visit: FieldVisit; authToken: string 
         )}
       </View>
 
-      {visit.latest_feedback != null && (
+      {/* Visit remarks entered by agent */}
+      {visit.visit_remarks != null && (
+        <Text style={styles.feedbackText} numberOfLines={2}>
+          💬 {visit.visit_remarks}
+        </Text>
+      )}
+      {/* Fallback: latest_feedback for legacy visits without remarks */}
+      {visit.visit_remarks == null && visit.latest_feedback != null && (
         <Text style={styles.feedbackText} numberOfLines={1}>
           💬 {visit.latest_feedback}
         </Text>
