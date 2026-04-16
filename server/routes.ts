@@ -2879,6 +2879,24 @@ app.get("/api/field-visits/:id/photo", async (req: Request, res: Response) => {
 });
 
 // ── GET /api/admin/field-visits — admin sees all visits with filters ─────────
+// ── GET /api/admin/debug-photos — check photo_url status for recent visits ──
+app.get("/api/admin/debug-photos", requireAdmin, async (req: Request, res: Response) => {
+  try {
+    const result = await storage.query(`
+      SELECT id, agent_id, visited_at,
+        CASE WHEN photo_url IS NULL THEN 'NULL'
+             WHEN photo_url = '' THEN 'EMPTY'
+             ELSE 'HAS_PHOTO (' || LENGTH(photo_url)::text || ' chars)'
+        END AS photo_status
+      FROM field_visits
+      ORDER BY visited_at DESC
+      LIMIT 20
+    `);
+    res.json({ visits: result.rows });
+  } catch (e: any) {
+    res.status(500).json({ message: e.message });
+  }
+});
 app.get("/api/admin/field-visits", requireAdmin, async (req: Request, res: Response) => {
   try {
     const { agent_id, case_id, date } = req.query;
@@ -2938,6 +2956,11 @@ app.get("/api/admin/field-visits", requireAdmin, async (req: Request, res: Respo
     sql += " ORDER BY fv.visited_at DESC LIMIT 200";
 
     const result = await storage.query(sql, params);
+
+    // Debug: log has_photo status for each visit
+    const photoSummary = result.rows.map((r: any) => ({ id: r.id, has_photo: r.has_photo, visited_at: r.visited_at }));
+    console.log("[field-visits] has_photo summary:", JSON.stringify(photoSummary));
+
     res.json({ visits: result.rows });
   } catch (e: any) {
     console.error("[GET /api/admin/field-visits]", e);
