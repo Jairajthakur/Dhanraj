@@ -267,11 +267,20 @@ recordFieldVisit: async (
     form.append("lng",  String(data.lng));
     if (data.accuracy != null) form.append("accuracy", String(data.accuracy));
     if (data.case_type)        form.append("case_type", data.case_type);
-    form.append("photo", {
-      uri:  data.photo.uri,
-      name: data.photo.name  || "visit.jpg",
-      type: data.photo.mimeType || "image/jpeg",
-    } as any);
+
+    if (Platform.OS === "web") {
+      // On web, fetch the data URI and convert to a Blob for proper multipart upload
+      const fetchRes = await fetch(data.photo.uri);
+      const blob = await fetchRes.blob();
+      form.append("photo", blob, data.photo.name || "visit.jpg");
+    } else {
+      // React Native — pass the file object directly
+      form.append("photo", {
+        uri:  data.photo.uri,
+        name: data.photo.name  || "visit.jpg",
+        type: data.photo.mimeType || "image/jpeg",
+      } as any);
+    }
 
     const r = await fetch(url, {
       method: "POST",
