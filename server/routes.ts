@@ -2967,10 +2967,6 @@ app.get("/api/admin/field-visits", requireAdmin, async (req: Request, res: Respo
 
     const result = await storage.query(sql, params);
 
-    // Debug: log has_photo status for each visit
-    const photoSummary = result.rows.map((r: any) => ({ id: r.id, has_photo: r.has_photo, visited_at: r.visited_at }));
-    console.log("[field-visits] has_photo summary:", JSON.stringify(photoSummary));
-
     res.json({ visits: result.rows });
   } catch (e: any) {
     console.error("[GET /api/admin/field-visits]", e);
