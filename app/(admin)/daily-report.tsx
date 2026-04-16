@@ -27,7 +27,12 @@ import {
   ActivityIndicator,
   RefreshControl,
   Platform,
+  Alert,
+  Linking,
 } from "react-native";
+import * as Print from "expo-print";
+import * as Sharing from "expo-sharing";
+import * as FileSystem from "expo-file-system";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQuery } from "@tanstack/react-query";
 import { Ionicons } from "@expo/vector-icons";
@@ -96,6 +101,113 @@ function formatDuration(minutes: number | null): string {
 function formatAmount(n: number): string {
   if (n === 0) return "₹0";
   return "₹" + n.toLocaleString("en-IN", { maximumFractionDigits: 0 });
+}
+
+// ─── PDF / WhatsApp Helpers ───────────────────────────────────────────────────
+
+function generateReportHTML(report: AgentDayReport[], date: string): string {
+  const dateLabel = formatDate(date);
+  const present   = report.filter((r) => r.attendanceStatus !== "Absent").length;
+  const totalVisits = report.reduce((s, r) => s + r.fieldVisits, 0);
+  const totalPaid   = report.reduce((s, r) => s + Number(r.paidAmount), 0);
+  const totalDep    = report.reduce((s, r) => s + Number(r.depositionAmount), 0);
+
+  const rows = report
+    .map(
+      (r) => `
+      <tr>
+        <td>${r.agentName}</td>
+        <td class="badge ${r.attendanceStatus === "Present" ? "present" : r.attendanceStatus === "Checked-In" ? "checkin" : "absent"}">${r.attendanceStatus}</td>
+        <td>${formatTime(r.checkIn)}</td>
+        <td>${formatTime(r.checkOut)}</td>
+        <td>${formatDuration(r.durationMinutes)}</td>
+        <td>${r.fieldVisits}</td>
+        <td>${r.ptpCount}</td>
+        <td>${r.paidCount}<br/><small>${r.paidAmount > 0 ? formatAmount(Number(r.paidAmount)) : ""}</small></td>
+        <td>${r.depositionCount}<br/><small>${r.depositionAmount > 0 ? formatAmount(Number(r.depositionAmount)) : ""}</small></td>
+      </tr>`
+    )
+    .join("");
+
+  return `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8"/>
+<style>
+  body { font-family: Arial, sans-serif; margin: 24px; color: #1a1a2e; font-size: 12px; }
+  h1 { font-size: 20px; margin: 0; color: #1a1a2e; }
+  h2 { font-size: 13px; color: #6b7280; font-weight: normal; margin: 4px 0 20px; }
+  .summary { display: flex; gap: 12px; margin-bottom: 20px; }
+  .pill { flex: 1; border-radius: 10px; padding: 10px 14px; text-align: center; }
+  .pill-label { font-size: 10px; color: #6b7280; }
+  .pill-value { font-size: 16px; font-weight: 700; }
+  .pill-green { background: #f0fdf4; color: #16a34a; border: 1px solid #bbf7d0; }
+  .pill-blue  { background: #eff6ff; color: #2563eb; border: 1px solid #bfdbfe; }
+  .pill-teal  { background: #f0fdfa; color: #0d9488; border: 1px solid #99f6e4; }
+  .pill-amber { background: #fffbeb; color: #d97706; border: 1px solid #fde68a; }
+  table { width: 100%; border-collapse: collapse; }
+  th { background: #1a1a2e; color: #fff; padding: 8px 6px; text-align: left; font-size: 11px; }
+  td { padding: 7px 6px; border-bottom: 1px solid #e5e7eb; font-size: 11px; }
+  tr:nth-child(even) td { background: #f9fafb; }
+  small { color: #6b7280; }
+  .badge { font-weight: 700; font-size: 10px; border-radius: 6px; padding: 2px 6px; }
+  .present { color: #16a34a; background: #f0fdf4; }
+  .checkin { color: #2563eb; background: #eff6ff; }
+  .absent  { color: #dc2626; background: #fef2f2; }
+  .footer  { margin-top: 16px; font-size: 10px; color: #9ca3af; text-align: right; }
+</style>
+</head>
+<body>
+  <h1>Daily Agent Report</h1>
+  <h2>${dateLabel}</h2>
+
+  <div class="summary">
+    <div class="pill pill-green"><div class="pill-value">${present}/${report.length}</div><div class="pill-label">Present</div></div>
+    <div class="pill pill-blue"><div class="pill-value">${totalVisits}</div><div class="pill-label">Field Visits</div></div>
+    <div class="pill pill-teal"><div class="pill-value">${formatAmount(totalPaid)}</div><div class="pill-label">Collected</div></div>
+    <div class="pill pill-amber"><div class="pill-value">${formatAmount(totalDep)}</div><div class="pill-label">Deposited</div></div>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Agent</th><th>Status</th><th>Check-In</th><th>Check-Out</th><th>Duration</th>
+        <th>Visits</th><th>PTP</th><th>Paid</th><th>Depositions</th>
+      </tr>
+    </thead>
+    <tbody>${rows}</tbody>
+  </table>
+
+  <div class="footer">Generated on ${new Date().toLocaleString("en-IN")}</div>
+</body>
+</html>`;
+}
+
+async function downloadReportPDF(report: AgentDayReport[], date: string): Promise<string | null> {
+  try {
+    const html = generateReportHTML(report, date);
+    const { uri } = await Print.printToFileAsync({ html, base64: false });
+    // Move to a named file in the cache directory
+    const dest = `${FileSystem.cacheDirectory}DailyReport_${date}.pdf`;
+    await FileSystem.moveAsync({ from: uri, to: dest });
+    return dest;
+  } catch (e: any) {
+    Alert.alert("Error", e?.message ?? "Failed to generate PDF");
+    return null;
+  }
+}
+
+async function shareViaWhatsApp(pdfUri: string, date: string) {
+  const available = await Sharing.isAvailableAsync();
+  if (!available) {
+    Alert.alert("Sharing not available", "Your device does not support file sharing.");
+    return;
+  }
+  await Sharing.shareAsync(pdfUri, {
+    mimeType: "application/pdf",
+    dialogTitle: `Daily Report — ${formatDate(date)}`,
+    UTI: "com.adobe.pdf",
+  });
 }
 
 // ─── Summary Totals Bar ───────────────────────────────────────────────────────
@@ -317,6 +429,7 @@ function AgentCard({ item }: { item: AgentDayReport }) {
 export default function AdminDailyReportScreen() {
   const insets = useSafeAreaInsets();
   const [date, setDate] = useState(todayISO());
+  const [isExporting, setIsExporting] = useState(false);
 
   const { data, isLoading, isError, error, refetch, isFetching } = useQuery({
     queryKey: ["/api/admin/daily-report", date],
@@ -331,6 +444,29 @@ export default function AdminDailyReportScreen() {
   );
 
   const onRefresh = useCallback(() => { refetch(); }, [refetch]);
+
+  const handleExport = useCallback(async (sendToWhatsApp: boolean) => {
+    if (report.length === 0) {
+      Alert.alert("No Data", "Nothing to export for this date.");
+      return;
+    }
+    setIsExporting(true);
+    try {
+      const pdfUri = await downloadReportPDF(report, date);
+      if (!pdfUri) return;
+      if (sendToWhatsApp) {
+        await shareViaWhatsApp(pdfUri, date);
+      } else {
+        await Sharing.shareAsync(pdfUri, {
+          mimeType: "application/pdf",
+          dialogTitle: `Daily Report — ${formatDate(date)}`,
+          UTI: "com.adobe.pdf",
+        });
+      }
+    } finally {
+      setIsExporting(false);
+    }
+  }, [report, date]);
 
   const isToday = date === todayISO();
 
@@ -374,6 +510,31 @@ export default function AdminDailyReportScreen() {
 
       {/* Summary totals */}
       {report.length > 0 && <TotalsBar report={report} />}
+
+      {/* Export / Share buttons */}
+      {report.length > 0 && (
+        <View style={styles.exportBar}>
+          <Pressable
+            style={({ pressed }) => [styles.exportBtn, pressed && styles.exportBtnPressed]}
+            onPress={() => handleExport(false)}
+            disabled={isExporting}
+          >
+            {isExporting
+              ? <ActivityIndicator size="small" color="#fff" />
+              : <Ionicons name="download-outline" size={16} color="#fff" />}
+            <Text style={styles.exportBtnText}>Download PDF</Text>
+          </Pressable>
+
+          <Pressable
+            style={({ pressed }) => [styles.exportBtn, styles.waBtn, pressed && styles.exportBtnPressed]}
+            onPress={() => handleExport(true)}
+            disabled={isExporting}
+          >
+            <Ionicons name="logo-whatsapp" size={16} color="#fff" />
+            <Text style={styles.exportBtnText}>Send on WhatsApp</Text>
+          </Pressable>
+        </View>
+      )}
 
       {/* Loading */}
       {isLoading && (
@@ -720,5 +881,37 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontWeight: "600",
     fontSize: 14,
+  },
+
+  // Export / Share
+  exportBar: {
+    flexDirection: "row",
+    gap: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    backgroundColor: Colors.surface,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+  },
+  exportBtn: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    backgroundColor: Colors.primary,
+    borderRadius: 10,
+    paddingVertical: 10,
+  },
+  waBtn: {
+    backgroundColor: "#25D366",
+  },
+  exportBtnPressed: {
+    opacity: 0.75,
+  },
+  exportBtnText: {
+    color: "#fff",
+    fontWeight: "700",
+    fontSize: 13,
   },
 });
