@@ -490,12 +490,18 @@ function AgentCard({
   const isAbsent = item.attendanceStatus === "Absent";
   const initials = item.agentName.split(" ").map((w) => w[0]).slice(0, 2).join("").toUpperCase();
   const resolution = perf && perf.total > 0 ? Math.round((perf.paid / perf.total) * 100) : null;
+  const barColor =
+    resolution === null ? Colors.textMuted
+    : resolution >= 70 ? Colors.success
+    : resolution >= 40 ? Colors.warning
+    : Colors.danger;
 
   return (
     <Pressable
       onPress={() => setExpanded((e) => !e)}
       style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}
     >
+      {/* ── Card Header: avatar + name + attendance + today quick stats ── */}
       <View style={styles.cardHeader}>
         <View style={[styles.avatar, isAbsent && styles.avatarAbsent]}>
           <Text style={[styles.avatarText, isAbsent && styles.avatarTextAbsent]}>{initials}</Text>
@@ -506,6 +512,7 @@ function AgentCard({
           <AttBadge status={item.attendanceStatus} />
         </View>
 
+        {/* Today's activity quick chips */}
         <View style={styles.quickStats}>
           <View style={styles.quickStat}>
             <Ionicons name="location" size={11} color={Colors.info} />
@@ -519,13 +526,6 @@ function AgentCard({
             <Ionicons name="time-outline" size={11} color={Colors.statusPTP} />
             <Text style={[styles.quickStatVal, { color: Colors.statusPTP }]}>{item.ptpCount}</Text>
           </View>
-          {resolution !== null && (
-            <View style={[styles.quickStat, styles.quickStatPerf]}>
-              <Text style={[styles.quickStatVal, { color: Colors.primary, fontSize: 10 }]}>
-                {resolution}%
-              </Text>
-            </View>
-          )}
         </View>
 
         <Ionicons
@@ -536,9 +536,44 @@ function AgentCard({
         />
       </View>
 
+      {/* ── Always-visible Performance Summary Strip ── */}
+      {perf && perf.total > 0 && (
+        <View style={styles.perfStrip}>
+          {/* Stat pills row */}
+          <View style={styles.perfStripRow}>
+            {[
+              { label: "Total",  value: String(perf.total),      color: Colors.text },
+              { label: "Paid",   value: String(perf.paid),       color: Colors.statusPaid },
+              { label: "Unpaid", value: String(perf.notProcess), color: Colors.danger },
+              { label: "PTP",    value: String(perf.ptp),        color: Colors.statusPTP },
+            ].map((s) => (
+              <View key={s.label} style={styles.perfStripPill}>
+                <Text style={[styles.perfStripVal, { color: s.color }]}>{s.value}</Text>
+                <Text style={styles.perfStripLabel}>{s.label}</Text>
+              </View>
+            ))}
+
+            {/* Resolution badge */}
+            <View style={[styles.perfStripPill, styles.perfStripResBadge, { borderColor: barColor + "44", backgroundColor: barColor + "12" }]}>
+              <Text style={[styles.perfStripVal, { color: barColor, fontSize: 13 }]}>{resolution}%</Text>
+              <Text style={[styles.perfStripLabel, { color: barColor }]}>Res%</Text>
+            </View>
+          </View>
+
+          {/* Resolution progress bar */}
+          <View style={styles.perfStripBarWrap}>
+            <View style={styles.perfStripBarBg}>
+              <View style={[styles.perfStripBarFill, { width: `${Math.min(resolution ?? 0, 100)}%` as any, backgroundColor: barColor }]} />
+            </View>
+            <Text style={[styles.perfStripBarLabel, { color: barColor }]}>{resolution}% resolved</Text>
+          </View>
+        </View>
+      )}
+
+      {/* ── Expanded Detail ── */}
       {expanded && (
         <View style={styles.detail}>
-          {/* Attendance */}
+          {/* Attendance timing */}
           <View style={styles.detailSection}>
             <Text style={styles.detailSectionTitle}>Attendance</Text>
             <View style={styles.timingRow}>
@@ -558,8 +593,8 @@ function AgentCard({
           {/* Field Activity */}
           <View style={styles.detailSection}>
             <Text style={styles.detailSectionTitle}>Field Activity</Text>
-            <MetricRow icon="location"     label="Field Visits"       value={String(item.fieldVisits)} color={Colors.info} />
-            <MetricRow icon="time-outline" label="PTP Cases Today"    value={String(item.ptpCount)}    color={Colors.statusPTP} />
+            <MetricRow icon="location"     label="Field Visits"    value={String(item.fieldVisits)} color={Colors.info} />
+            <MetricRow icon="time-outline" label="PTP Cases Today" value={String(item.ptpCount)}    color={Colors.statusPTP} />
             <MetricRow
               icon="walk-outline"
               label="Break Sessions"
@@ -588,7 +623,7 @@ function AgentCard({
             />
           </View>
 
-          {/* Overall Performance */}
+          {/* Overall Performance (full panel, already shown above as strip) */}
           <PerfPanel perf={perf} />
         </View>
       )}
@@ -948,6 +983,35 @@ const styles = StyleSheet.create({
   },
   resBarFill: { height: 6, borderRadius: 3 },
   resBarLabel: { fontSize: 10, fontWeight: "600", minWidth: 80, textAlign: "right" },
+
+  // ── Always-visible performance strip ──
+  perfStrip: {
+    borderTopWidth: 1, borderTopColor: Colors.border,
+    paddingHorizontal: 14, paddingTop: 10, paddingBottom: 12,
+    gap: 8,
+    backgroundColor: Colors.background + "80",
+  },
+  perfStripRow: { flexDirection: "row", gap: 6, alignItems: "center" },
+  perfStripPill: {
+    flex: 1, alignItems: "center",
+    backgroundColor: Colors.surface, borderRadius: 10,
+    paddingVertical: 7, borderWidth: 1, borderColor: Colors.border,
+  },
+  perfStripResBadge: {
+    flex: 1.2,
+  },
+  perfStripVal: { fontSize: 14, fontWeight: "800" },
+  perfStripLabel: {
+    fontSize: 9, color: Colors.textMuted,
+    fontWeight: "600", letterSpacing: 0.3, marginTop: 1,
+  },
+  perfStripBarWrap: { flexDirection: "row", alignItems: "center", gap: 8 },
+  perfStripBarBg: {
+    flex: 1, height: 5,
+    backgroundColor: Colors.surfaceElevated, borderRadius: 3, overflow: "hidden",
+  },
+  perfStripBarFill: { height: 5, borderRadius: 3 },
+  perfStripBarLabel: { fontSize: 10, fontWeight: "600", minWidth: 80, textAlign: "right" },
 
   center: {
     flex: 1, alignItems: "center", justifyContent: "center", gap: 12, padding: 32,
