@@ -40,6 +40,7 @@ const CALL_LOG_OPTIONS = [
   "NOT AT HOME",
   "WILL PAY",
   "PTP DATE SET",
+  "PTP",
   "PARTIAL PAYMENT DONE",
   "PAID",
   "PART PAYMENT",
@@ -54,11 +55,11 @@ const OUTCOME_TO_STATUS: Record<string, string> = {
   "PART PAYMENT":       "Paid",
   "SETTLED":            "Paid",
   "PTP DATE SET":       "PTP",
+  "PTP":                "PTP",
   "WILL PAY TOMORROW":  "PTP",
   "WILL ARRANGE FUNDS": "PTP",
   "CALL LATER":         "PTP",
 };
-
 const MONTHLY_FEEDBACK_OPTIONS = [
   "SWITCH OFF", "NOT AVAILABLE", "DISCONNECTED", "REFUSED TO PAY",
   "DISPUTED", "NOT AT HOME", "CUSTOMER MET - WILL PAY", "CUSTOMER MET - REFUSED",
