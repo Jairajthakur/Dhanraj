@@ -3161,7 +3161,29 @@ app.get("/api/admin/daily-report", requireAdmin, async (req: Request, res: Respo
       });
     }
 
-    // 7. Assemble one row per agent
+    // 7. Overall performance stats per agent (all-time)
+    const perfResult = await storage.query(
+      `SELECT fa.id,
+         COUNT(lc.id)::int                                      AS total,
+         COUNT(lc.id) FILTER (WHERE lc.status='Paid')::int     AS paid,
+         COUNT(lc.id) FILTER (WHERE lc.status='Unpaid')::int   AS "notProcess",
+         COUNT(lc.id) FILTER (WHERE lc.status='PTP')::int      AS ptp
+       FROM fos_agents fa
+       LEFT JOIN loan_cases lc ON lc.agent_id = fa.id
+       WHERE fa.role = 'fos'
+       GROUP BY fa.id`
+    );
+    const agentPerfMap = new Map<number, { total: number; paid: number; notProcess: number; ptp: number }>();
+    for (const row of perfResult.rows) {
+      agentPerfMap.set(Number(row.id), {
+        total:      Number(row.total),
+        paid:       Number(row.paid),
+        notProcess: Number(row.notProcess),
+        ptp:        Number(row.ptp),
+      });
+    }
+
+    // 8. Assemble one row per agent
     const report = agents.map((agent) => {
       const att = attMap.get(agent.id);
       const checkIn = att?.checkIn ?? null;
@@ -3182,6 +3204,7 @@ app.get("/api/admin/daily-report", requireAdmin, async (req: Request, res: Respo
 
       const paid = paidMap.get(agent.id) ?? { count: 0, amount: 0 };
       const dep  = depMap.get(agent.id)  ?? { count: 0, amount: 0 };
+      const perf = agentPerfMap.get(agent.id) ?? { total: 0, paid: 0, notProcess: 0, ptp: 0 };
 
       return {
         agentId:           agent.id,
@@ -3199,6 +3222,11 @@ app.get("/api/admin/daily-report", requireAdmin, async (req: Request, res: Respo
         // break tracking placeholder — add break_sessions table later
         breakCount:        0,
         breakMinutes:      0,
+        // overall all-time performance
+        perfTotal:         perf.total,
+        perfPaid:          perf.paid,
+        perfUnpaid:        perf.notProcess,
+        perfPtp:           perf.ptp,
       };
     });
 
