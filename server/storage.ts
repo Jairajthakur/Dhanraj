@@ -531,7 +531,7 @@ export async function upsertLoanCase(data: {
   firstEmiDueDate?: string | null; loanMaturityDate?: string | null; tenor?: number | null;
   pro?: string | null; status?: string | null; latestFeedback?: string | null;
   feedbackComments?: string | null; ptpDate?: string | null; telecallerPtpDate?: string | null;
-  rollbackYn?: boolean | null;
+  rollbackYn?: boolean | null; companyName?: string | null;
 }): Promise<"inserted" | "updated"> {
   const result = await query(
     `INSERT INTO loan_cases (
@@ -539,10 +539,12 @@ export async function upsertLoanCase(data: {
       reference_address, pos, asset_make, registration_no, engine_no, chassis_no,
       emi_amount, emi_due, cbc, lpp, cbc_lpp, rollback, clearance,
       first_emi_due_date, loan_maturity_date, tenor, pro, status,
-      latest_feedback, feedback_comments, ptp_date, telecaller_ptp_date, rollback_yn
+      latest_feedback, feedback_comments, ptp_date, telecaller_ptp_date, rollback_yn,
+      company_name
     ) VALUES (
       $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,
-      $15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31
+      $15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,
+      $32
     )
     ON CONFLICT (loan_no) DO UPDATE SET
       agent_id = EXCLUDED.agent_id, fos_name = EXCLUDED.fos_name,
@@ -571,7 +573,8 @@ export async function upsertLoanCase(data: {
       status = EXCLUDED.status,
       ptp_date = COALESCE(EXCLUDED.ptp_date, loan_cases.ptp_date),
       telecaller_ptp_date = EXCLUDED.telecaller_ptp_date,
-      rollback_yn = COALESCE(EXCLUDED.rollback_yn, loan_cases.rollback_yn)
+      rollback_yn = COALESCE(EXCLUDED.rollback_yn, loan_cases.rollback_yn),
+      company_name = EXCLUDED.company_name
     RETURNING (xmax = 0) AS is_insert`,
     [
       data.agentId, data.fosName, data.loanNo, data.customerName,
@@ -584,6 +587,7 @@ export async function upsertLoanCase(data: {
       data.latestFeedback, data.feedbackComments,
       data.ptpDate || null, data.telecallerPtpDate || null,
       data.rollbackYn ?? null,
+      data.companyName || null,
     ]
   );
   return result.rows[0]?.is_insert ? "inserted" : "updated";
