@@ -221,7 +221,11 @@ export const api = {
     apiRequest("POST", "/api/profile-photo", { photoUrl }),
 
   // ── Cases ─────────────────────────────────────────────────────────────────
-  getCases: () => apiRequest("GET", "/api/cases"),
+  getCases: (params?: { company?: string }) => {
+    const qs = params?.company ? `?company=${encodeURIComponent(params.company)}` : "";
+    return apiRequest("GET", `/api/cases${qs}`);
+  },
+  getCompanies: () => apiRequest("GET", "/api/companies"),
   getCaseById: (id: number) => apiRequest("GET", `/api/cases/${id}`),
 
   getBktCases: (category?: string) =>
