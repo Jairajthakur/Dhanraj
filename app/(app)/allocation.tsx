@@ -1234,7 +1234,7 @@ export default function AllocationScreen() {
             backgroundColor: Colors.surface,
             borderBottomWidth: StyleSheet.hairlineWidth,
             borderBottomColor: Colors.border,
-            marginTop: Platform.OS === "web" ? 67 : 0,
+            
           }}
           contentContainerStyle={{ flexDirection: "row", paddingHorizontal: 12, paddingVertical: 10 }}
         >
@@ -1259,7 +1259,7 @@ export default function AllocationScreen() {
       )}
 
       {/* Status tabs */}
-      <View style={[styles.tabsContainer, { paddingTop: (!companiesLoading && companies.length > 1) && Platform.OS === "web" ? 12 : Platform.OS === "web" ? 67 : 12 }]}>
+      <View style={[styles.tabsContainer, { paddingTop: 12 }]}>
         {STATUS_TABS.map((tab) => (
           <Pressable
             key={tab}
