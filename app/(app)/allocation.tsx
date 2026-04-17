@@ -158,6 +158,7 @@ interface CaseItem {
   non_starter?: boolean | null;
   kyc_purchase?: boolean | null;
   workable?: boolean | null;
+  company_name?: string;
 }
 
 interface GpsCoords {
@@ -1111,6 +1112,14 @@ function CaseCard({ item, onOpenModal }: CaseCardProps) {
         <Ionicons name="briefcase" size={14} color={Colors.textSecondary} />
         <Text style={styles.metaText} numberOfLines={1}>{item.loan_no}</Text>
       </View>
+
+      {/* Company name */}
+      {item.company_name ? (
+        <View style={styles.metaRow}>
+          <Ionicons name="business" size={14} color={Colors.textSecondary} />
+          <Text style={styles.metaText} numberOfLines={1}>{item.company_name}</Text>
+        </View>
+      ) : null}
 
       {/* Primary phone */}
       {primaryPhone ? (
