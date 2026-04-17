@@ -635,7 +635,18 @@ app.use("/api/fos-depositions", (req, res, next) => {
  });
 
   app.get("/api/cases", requireAuth, async (req, res) => {
-    try { res.json({ cases: await storage.getLoanCasesByAgent(req.session.agentId!) }); }
+    try {
+      const company = (req.query.company as string) || null;
+      res.json({ cases: await storage.getLoanCasesByAgent(req.session.agentId!, company) });
+    }
+    catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  app.get("/api/companies", requireAuth, async (req, res) => {
+    try {
+      const companies = await storage.getDistinctCompaniesByAgent(req.session.agentId!);
+      res.json({ companies });
+    }
     catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
