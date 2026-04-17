@@ -574,7 +574,7 @@ export async function upsertLoanCase(data: {
       ptp_date = COALESCE(EXCLUDED.ptp_date, loan_cases.ptp_date),
       telecaller_ptp_date = EXCLUDED.telecaller_ptp_date,
       rollback_yn = COALESCE(EXCLUDED.rollback_yn, loan_cases.rollback_yn),
-      company_name = EXCLUDED.company_name
+      company_name = COALESCE(EXCLUDED.company_name, loan_cases.company_name)
     RETURNING (xmax = 0) AS is_insert`,
     [
       data.agentId, data.fosName, data.loanNo, data.customerName,
