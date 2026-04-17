@@ -284,12 +284,27 @@ export async function createFosAgent(data: { name: string; username: string; pas
 export async function deleteAllLoanCases() { await query("DELETE FROM loan_cases"); }
 export async function deleteAllBktCases() { await query("DELETE FROM bkt_cases"); }
 
-export async function getLoanCasesByAgent(agentId: number) {
+export async function getLoanCasesByAgent(agentId: number, companyName?: string | null) {
+  if (companyName && companyName !== "All") {
+    const result = await query(
+      "SELECT * FROM loan_cases WHERE agent_id = $1 AND company_name = $2 ORDER BY bkt DESC NULLS LAST, customer_name",
+      [agentId, companyName]
+    );
+    return result.rows;
+  }
   const result = await query(
     "SELECT * FROM loan_cases WHERE agent_id = $1 ORDER BY bkt DESC NULLS LAST, customer_name",
     [agentId]
   );
   return result.rows;
+}
+
+export async function getDistinctCompaniesByAgent(agentId: number): Promise<string[]> {
+  const result = await query(
+    "SELECT DISTINCT company_name FROM loan_cases WHERE agent_id = $1 AND company_name IS NOT NULL AND company_name != '' ORDER BY company_name",
+    [agentId]
+  );
+  return result.rows.map((r: any) => r.company_name);
 }
 
 export async function getAllLoanCases() {
