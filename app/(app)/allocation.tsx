@@ -1187,11 +1187,11 @@ export default function AllocationScreen() {
   const [modalItem,    setModalItem]    = useState<CaseItem | null>(null);
   const [modalInitTab, setModalInitTab] = useState<FeedbackTab>("Call Log");
 
-  const { data: companiesData } = useQuery({
+  const { data: companiesData, isLoading: companiesLoading } = useQuery({
     queryKey: ["/api/companies"],
     queryFn:  () => api.getCompanies(),
   });
-  const companies: string[] = ["All", ...(companiesData?.companies ?? [])];
+  const companies: string[] = ["All", ...(companiesData?.companies ?? []).filter((c: string) => !!c)];
 
   const { data, isLoading } = useQuery({
     queryKey: ["/api/cases", activeCompany],
@@ -1227,8 +1227,8 @@ export default function AllocationScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: "#EFEFEF" }}>
-      {/* Company tabs */}
-      {companies.length > 1 && (
+      {/* Company tabs — only shown after loaded and when there are multiple companies */}
+      {!companiesLoading && companies.length > 1 && (
         <ScrollView horizontal showsHorizontalScrollIndicator={false}
           style={{
             backgroundColor: Colors.surface,
@@ -1259,7 +1259,7 @@ export default function AllocationScreen() {
       )}
 
       {/* Status tabs */}
-      <View style={[styles.tabsContainer, { paddingTop: companies.length > 1 && Platform.OS === "web" ? 12 : Platform.OS === "web" ? 67 : 12 }]}>
+      <View style={[styles.tabsContainer, { paddingTop: (!companiesLoading && companies.length > 1) && Platform.OS === "web" ? 12 : Platform.OS === "web" ? 67 : 12 }]}>
         {STATUS_TABS.map((tab) => (
           <Pressable
             key={tab}
