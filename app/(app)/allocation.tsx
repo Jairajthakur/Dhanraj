@@ -1173,13 +1173,20 @@ export default function AllocationScreen() {
   const qc     = useQueryClient();
 
   const [activeTab,    setActiveTab]    = useState<StatusTab>("All");
+  const [activeCompany, setActiveCompany] = useState<string>("All");
   const [search,       setSearch]       = useState("");
   const [modalItem,    setModalItem]    = useState<CaseItem | null>(null);
   const [modalInitTab, setModalInitTab] = useState<FeedbackTab>("Call Log");
 
+  const { data: companiesData } = useQuery({
+    queryKey: ["/api/companies"],
+    queryFn:  () => api.getCompanies(),
+  });
+  const companies: string[] = ["All", ...(companiesData?.companies ?? [])];
+
   const { data, isLoading } = useQuery({
-    queryKey: ["/api/cases"],
-    queryFn:  () => api.getCases(),
+    queryKey: ["/api/cases", activeCompany],
+    queryFn:  () => api.getCases({ company: activeCompany === "All" ? undefined : activeCompany }),
   });
 
   const allCases: CaseItem[] = data?.cases ?? [];
@@ -1211,6 +1218,31 @@ export default function AllocationScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: "#EFEFEF" }}>
+      {/* Company tabs */}
+      {companies.length > 1 && (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false}
+          style={{ backgroundColor: Colors.surface, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: Colors.border }}
+          contentContainerStyle={{ flexDirection: "row", gap: 8, paddingHorizontal: 12, paddingVertical: 10 }}
+        >
+          {companies.map((c) => (
+            <Pressable
+              key={c}
+              style={{
+                paddingHorizontal: 18, paddingVertical: 8, borderRadius: 20,
+                backgroundColor: activeCompany === c ? Colors.primary : Colors.surfaceAlt,
+                borderWidth: 1,
+                borderColor: activeCompany === c ? Colors.primary : Colors.border,
+              }}
+              onPress={() => { setActiveCompany(c); setActiveTab("All"); }}
+            >
+              <Text style={{ fontSize: 13, fontWeight: "700", color: activeCompany === c ? "#fff" : Colors.textSecondary }}>
+                {c}
+              </Text>
+            </Pressable>
+          ))}
+        </ScrollView>
+      )}
+
       {/* Status tabs */}
       <View style={[styles.tabsContainer, { paddingTop: Platform.OS === "web" ? 67 : 12 }]}>
         {STATUS_TABS.map((tab) => (
