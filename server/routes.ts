@@ -1548,11 +1548,10 @@ res.json({ imported, updated: 0, skipped, agentsCreated, agentsRemoved, total: r
       const result = await storage.query(`
         SELECT TO_CHAR(COALESCE(lc.created_at,NOW()),'DD-Mon') AS allu_date, lc.loan_no, lc.app_id, lc.customer_name, lc.bkt::text AS bkt, lc.pro, 'NANDED'::text AS branch, lc.customer_available, lc.vehicle_available, lc.third_party, lc.third_party_name, lc.third_party_number, lc.feedback_code, lc.latest_feedback, lc.monthly_feedback, lc.ptp_date, lc.projection, lc.non_starter, lc.kyc_purchase, lc.workable, lc.status, lc.feedback_comments, fa.name AS fos_name
         FROM loan_cases lc LEFT JOIN fos_agents fa ON lc.agent_id=fa.id
-        WHERE lc.latest_feedback IS NOT NULL OR lc.feedback_code IS NOT NULL OR lc.status IN ('Paid','PTP')
-        UNION ALL
+        WHERE lc.latest_feedback IS NOT NULL OR lc.feedback_code IS NOT NULL OR lc.status IN ('Paid','PTP','Unpaid')        UNION ALL
         SELECT TO_CHAR(COALESCE(bc.created_at,NOW()),'DD-Mon') AS allu_date, bc.loan_no, bc.app_id, bc.customer_name, bc.case_category AS bkt, bc.pro, 'NANDED'::text AS branch, bc.customer_available, bc.vehicle_available, bc.third_party, bc.third_party_name, bc.third_party_number, bc.feedback_code, bc.latest_feedback, bc.monthly_feedback, bc.ptp_date, bc.projection, bc.non_starter, bc.kyc_purchase, bc.workable, bc.status, bc.feedback_comments, fa.name AS fos_name
         FROM bkt_cases bc LEFT JOIN fos_agents fa ON bc.agent_id=fa.id
-        WHERE bc.latest_feedback IS NOT NULL OR bc.feedback_code IS NOT NULL OR bc.status IN ('Paid','PTP')
+        WHERE bc.latest_feedback IS NOT NULL OR bc.feedback_code IS NOT NULL OR bc.status IN ('Paid','PTP','Unpaid')
         ORDER BY fos_name NULLS LAST, loan_no
       `);
       const yn = (v: any) => v === true || v === "true" || v === "t" || v === 1 ? "Y" : v === false || v === "false" || v === "f" || v === 0 ? "N" : "";
