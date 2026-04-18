@@ -254,6 +254,8 @@ const COLUMN_MAP: Record<string, string> = {
   companyname: "company_name", company: "company_name", compname: "company_name",
   financecompany: "company_name", financeco: "company_name", lender: "company_name",
   nbfc: "company_name", bankname: "company_name", bank: "company_name",
+  penal: "penal_yn",
+penalstatus: "penal_yn",
 };
 
 const MONTH_NAMES = ["January","February","March","April","May","June","July","August","September","October","November","December"];
@@ -1445,6 +1447,42 @@ for (const [loanNo, ptpData] of ptpLoanMap) {
     [ptpData.ptpDate, ptpData.telecallerPtpDate, loanNo]
   );
 }
+
+      // ── Aggregate penal (CBC+LPP) per agent and upsert penal bkt_perf_summary ──
+const penalByAgent: Record<number, { fosName: string; paid: number; unpaid: number; cbcPaid: number }> = {};
+for (let i = 0; i < rawRows.slice(headerRowIdx + 1).length; i++) {
+  const row = rawRows.slice(headerRowIdx + 1)[i];
+  const mapped2: Record<string, any> = {};
+  for (const [colIdx, dbField] of Object.entries(colIdxMap)) {
+    const val = row[Number(colIdx)];
+    mapped2[dbField] = val !== undefined && val !== "" ? String(val).trim() : null;
+  }
+  if (!mapped2.loan_no || !mapped2.customer_name || isRepeatHeaderRow(mapped2)) continue;
+  if (!mapped2.fos_name) continue;
+  const fosLower = mapped2.fos_name.toLowerCase().trim();
+  const agId = agentByName[fosLower];
+  if (!agId) continue;
+  // penal_cbc is the mapped "Penal" column; fallback to cbc_lpp then cbc
+  const cbcVal = parseFloat(mapped2.penal_cbc || mapped2.cbc_lpp || mapped2.cbc || "0") || 0;
+  if (cbcVal <= 0) continue;
+  const isPenalPaid = normalizeStatus(mapped2.status) === "Paid";
+  if (!penalByAgent[agId]) penalByAgent[agId] = { fosName: mapped2.fos_name, paid: 0, unpaid: 0, cbcPaid: 0 };
+  if (isPenalPaid) { penalByAgent[agId].paid += cbcVal; penalByAgent[agId].cbcPaid += 1; }
+  else { penalByAgent[agId].unpaid += cbcVal; }
+}
+for (const [agIdStr, d] of Object.entries(penalByAgent)) {
+  const total = d.paid + d.unpaid;
+  const pct = total > 0 ? Math.round((d.paid / total) * 10000) / 100 : 0;
+  try {
+    await storage.upsertBktPerfSummary({
+      fosName: d.fosName, agentId: Number(agIdStr), bkt: "penal",
+      posPaid: d.paid, posUnpaid: d.unpaid, posGrandTotal: total, posPercentage: pct,
+      countPaid: d.cbcPaid, countUnpaid: 0, countTotal: 0,
+      rollbackPaid: 0, rollbackUnpaid: 0, rollbackGrandTotal: 0, rollbackPercentage: 0,
+    });
+  } catch (e: any) { console.warn("[import] penal upsert warn:", e.message); }
+}
+console.log(`[import] ✅ Penal perf upserted for ${Object.keys(penalByAgent).length} agents from allocation`);
 try { await recalcBktPerfFromAllocation(); } catch (e: any) { console.warn("[import] BKT recalc warning:", e.message); }
 res.json({ imported, updated: 0, skipped, agentsCreated, agentsRemoved, total: rawRows.slice(headerRowIdx + 1).length, errors: errors.slice(0, 20) });
     } catch (e: any) { res.status(500).json({ message: e.message }); }
@@ -1618,62 +1656,7 @@ res.json({ imported, updated: 0, skipped, agentsCreated, agentsRemoved, total: r
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
-  app.post("/api/admin/import-bkt-perf", requireAdmin, upload.single("file"), async (req, res) => {
-    try {
-      if (!req.file) return res.status(400).json({ message: "No file uploaded" });
-      const ejWorkbook3 = new ExcelJS.Workbook(); await ejWorkbook3.xlsx.load(req.file.buffer);
-      const worksheet3 = ejWorkbook3.worksheets[0]; const rawRows: any[][] = worksheetToRows(worksheet3, false);
-      if (rawRows.length === 0) return res.json({ imported: 0, skipped: 0, errors: [] });
-      const cn = (v: any): number => { if (v === "" || v === null || v === undefined) return 0; return parseFloat(String(v).replace(/[,%₹\s]/g, "")) || 0; };
-      const toPct = (v: any): number => { const raw = cn(v); return raw > 0 && raw <= 1 ? raw * 100 : raw; };
-      const bktValue = "penal";
-      let headerIdx = -1, cFos = -1, cVal = -1, cPaid = -1, cUnpaid = -1, cGt = -1, cPct = -1, cRbVal = -1, cRb = -1, cRbGt = -1, cRbPct = -1;
-      for (let r = 0; r < rawRows.length; r++) {
-        const row = rawRows[r]; const norm = (v: any) => String(v || "").toLowerCase().trim().replace(/[\s_]/g, ""); const cells = row.map(norm);
-        if (!cells.some((c) => c === "values" || c === "value") || !cells.some((c) => c === "paid")) continue;
-        headerIdx = r; let fosCount = 0, valCount = 0, gtCount = 0, pctCount = 0;
-        for (let j = 0; j < row.length; j++) {
-          const c = cells[j];
-          if (c === "fosname" || c === "fos_name" || c === "fosagent") { if (fosCount === 0) { cFos = j; fosCount++; } }
-          else if (c === "values" || c === "value") { if (valCount === 0) { cVal = j; valCount++; } else if (valCount === 1) { cRbVal = j; valCount++; } }
-          else if (c === "paid" && cPaid === -1) { cPaid = j; }
-          else if (c === "unpaid" && cUnpaid === -1) { cUnpaid = j; }
-          else if ((c === "grandtotal" || c.includes("grand")) && gtCount <= 1) { if (gtCount === 0) { cGt = j; gtCount++; } else { cRbGt = j; gtCount++; } }
-          else if ((c === "percentage" || c.includes("percent")) && pctCount <= 1) { if (pctCount === 0) { cPct = j; pctCount++; } else { cRbPct = j; pctCount++; } }
-          else if (c.includes("rollback") || c === "rb") { cRb = j; }
-        }
-        break;
-      }
-      if (headerIdx === -1) return res.status(400).json({ message: "Could not find header row." });
-      const fosData: Record<string, any> = {}; let currentFos = "";
-      for (let r = headerIdx + 1; r < rawRows.length; r++) {
-        const row = rawRows[r];
-        const fosCell = cFos >= 0 ? String(row[cFos] || "").trim() : "";
-        const valCell = cVal >= 0 ? String(row[cVal] || "").trim().toLowerCase() : "";
-        if (fosCell.toLowerCase().includes("grand total")) continue;
-        if (fosCell && fosCell.toLowerCase() !== "grand total") currentFos = fosCell;
-        if (!currentFos || !valCell) continue;
-        if (!fosData[currentFos]) fosData[currentFos] = { posPaid: 0, posUnpaid: 0, posGrandTotal: 0, posPercentage: 0, countPaid: 0, countUnpaid: 0, countTotal: 0, rollbackPaid: 0, rollbackGrandTotal: 0, rollbackPercentage: 0 };
-        const d = fosData[currentFos];
-        if (valCell.includes("sum of pos") || valCell.includes("sum of po")) { d.posPaid = cPaid >= 0 ? cn(row[cPaid]) : d.posPaid; d.posUnpaid = cUnpaid >= 0 ? cn(row[cUnpaid]) : d.posUnpaid; d.posGrandTotal = cGt >= 0 ? cn(row[cGt]) : d.posGrandTotal; d.posPercentage = cPct >= 0 ? toPct(row[cPct]) : d.posPercentage; d.rollbackPaid = cRb >= 0 ? cn(row[cRb]) : d.rollbackPaid; d.rollbackGrandTotal = cRbGt >= 0 ? cn(row[cRbGt]) : d.rollbackGrandTotal; d.rollbackPercentage = cRbPct >= 0 ? toPct(row[cRbPct]) : d.rollbackPercentage; }
-        else if (valCell.includes("cbc+lpp") || valCell.includes("cbclpp") || valCell.includes("cbc lpp") || valCell.includes("sum of cbc") || (valCell.includes("cbc") && valCell.includes("lpp"))) { d.posPaid = cPaid >= 0 ? cn(row[cPaid]) : d.posPaid; d.posUnpaid = cUnpaid >= 0 ? cn(row[cUnpaid]) : d.posUnpaid; d.posGrandTotal = cGt >= 0 ? cn(row[cGt]) : d.posGrandTotal; d.posPercentage = cPct >= 0 ? toPct(row[cPct]) : d.posPercentage; }
-        else if (valCell.includes("count") || valCell.includes("col cbc") || (valCell.includes("col") && valCell.includes("cbc"))) { d.countPaid = cPaid >= 0 ? Math.round(cn(row[cPaid])) : d.countPaid; d.countUnpaid = cUnpaid >= 0 ? Math.round(cn(row[cUnpaid])) : d.countUnpaid; d.countTotal = cGt >= 0 ? Math.round(cn(row[cGt])) : d.countTotal; }
-      }
-      const { rows: existingAgents } = await storage.query(`SELECT id, name FROM fos_agents WHERE name IS NOT NULL`);
-      const agentByName: Record<string, number> = {};
-      for (const a of existingAgents) { if (a.name) agentByName[a.name.toLowerCase().trim()] = a.id; }
-      let imported = 0, skipped = 0; const errors: string[] = [];
-      for (const fosName of Object.keys(fosData)) {
-        const d = fosData[fosName]; d.posGrandTotal = d.posPaid + d.posUnpaid;
-        const fosLower = fosName.toLowerCase();
-        let agentId: number | null = agentByName[fosLower] || null;
-        if (!agentId) { try { const username = fosLower.replace(/\s+/g, ".").replace(/[^a-z0-9.]/g, ""); const newAgent = await storage.createFosAgent({ name: fosName, username, password: randomBytes(16).toString("hex") }); agentByName[fosLower] = newAgent.id; agentId = newAgent.id; } catch { const found = await storage.getAgentByUsername(fosLower.replace(/\s+/g, ".").replace(/[^a-z0-9.]/g, "")); if (found) { agentByName[fosLower] = found.id; agentId = found.id; } } }
-        try { await storage.upsertBktPerfSummary({ fosName, agentId, bkt: bktValue, posPaid: d.posPaid, posUnpaid: d.posUnpaid, posGrandTotal: d.posGrandTotal, posPercentage: d.posPercentage, countPaid: d.countPaid, countUnpaid: d.countUnpaid, countTotal: d.countTotal, rollbackPaid: d.rollbackPaid, rollbackUnpaid: Math.max(0, d.rollbackGrandTotal - d.rollbackPaid), rollbackGrandTotal: d.rollbackGrandTotal, rollbackPercentage: d.rollbackPercentage }); imported++; }
-        catch (e: any) { errors.push(`${fosName}: ${e.message}`); skipped++; }
-      }
-      res.json({ imported, skipped, total: Object.keys(fosData).length, bkt: bktValue, errors: errors.slice(0, 20) });
-    } catch (e: any) { res.status(500).json({ message: e.message }); }
-  });
+ 
 
   app.post("/api/admin/reset-feedback/agent/:agentId", requireAdmin, async (req, res) => {
     try {
