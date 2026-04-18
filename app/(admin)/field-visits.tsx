@@ -1,13 +1,6 @@
 /**
  * Admin — Field Visit Tracker
  * Route: /(admin)/field-visits
- *
- * Shows every GPS check-in recorded by agents, with:
- *   • Date picker  (defaults to today)
- *   • Agent filter (All or a specific FOS)
- *   • Summary bar  (total visits, unique agents, unique cases)
- *   • Per-visit card with Google Maps deep-link
- *   • Pull-to-refresh + auto-refresh every 60 s
  */
 
 import React, { useState, useMemo, useCallback, useEffect } from "react";
@@ -31,6 +24,8 @@ import { router } from "expo-router";
 import Colors from "@/constants/colors";
 import { api, tokenStore } from "@/lib/api";
 import { getApiUrl } from "@/lib/query-client";
+// DIFF 1: Import useCompanyFilter
+import { useCompanyFilter } from "@/context/CompanyFilterContext";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -49,9 +44,11 @@ interface FieldVisit {
   pos: number | null;
   latest_feedback: string | null;
   case_status: string | null;
-  visit_outcome: string | null;  // outcome selected by agent: Paid, PTP, Refused to Pay, etc.
-  visit_remarks: string | null;  // free-text remarks entered by agent
-  has_photo: boolean; // photo served via /api/field-visits/:id/photo
+  visit_outcome: string | null;
+  visit_remarks: string | null;
+  has_photo: boolean;
+  // DIFF 5: company field on FieldVisit
+  company_name?: string | null;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -78,7 +75,6 @@ function fmtDate(iso: string): string {
   });
 }
 
-/** Shift YYYY-MM-DD by +/- N days */
 function shiftDate(iso: string, delta: number): string {
   const d = new Date(iso);
   d.setDate(d.getDate() + delta);
@@ -92,11 +88,7 @@ function openInMaps(lat: number, lng: number, label?: string | null) {
 
 // ─── Sub-components ──────────────────────────────────────────────────────────
 
-function SummaryBar({
-  visits,
-}: {
-  visits: FieldVisit[];
-}) {
+function SummaryBar({ visits }: { visits: FieldVisit[] }) {
   const uniqueAgents = new Set(visits.map((v) => v.agent_id)).size;
   const uniqueCases = new Set(visits.map((v) => v.case_id)).size;
 
@@ -129,9 +121,6 @@ function VisitCard({ visit, authToken }: { visit: FieldVisit; authToken: string 
   const typeTag   = visit.case_type === "bkt" ? "BKT" : "Loan";
   const typeColor = visit.case_type === "bkt" ? Colors.warning : Colors.info;
 
-  // Photo URL strategy:
-  //  • Web: same-origin request → session cookie is sent automatically by browser → no token needed
-  //  • Native: React Native <Image> can't send cookies → append JWT as ?token= query param
   const photoUrl = visit.has_photo
     ? Platform.OS === "web"
       ? `${getApiUrl()}/api/field-visits/${visit.id}/photo`
@@ -156,7 +145,15 @@ function VisitCard({ visit, authToken }: { visit: FieldVisit; authToken: string 
       {/* Case name */}
       <Text style={styles.caseName} numberOfLines={1}>{caseLabel}</Text>
 
-      {/* Photo thumbnail — tappable, opens full image in browser */}
+      {/* DIFF 5: Company chip in VisitCard */}
+      {visit.company_name && (
+        <View style={styles.companyChip}>
+          <Ionicons name="business-outline" size={10} color={Colors.primary} />
+          <Text style={styles.companyChipText} numberOfLines={1}>{visit.company_name}</Text>
+        </View>
+      )}
+
+      {/* Photo thumbnail */}
       {photoUrl && (
         <Pressable
           onPress={() => Linking.openURL(photoUrl)}
@@ -218,7 +215,6 @@ function VisitCard({ visit, authToken }: { visit: FieldVisit; authToken: string 
             </Text>
           </View>
         )}
-        {/* Fallback: show case_status if no visit_outcome (legacy visits) */}
         {visit.visit_outcome == null && visit.case_status != null && (
           <View style={[styles.detailChip, {
             backgroundColor:
@@ -238,13 +234,11 @@ function VisitCard({ visit, authToken }: { visit: FieldVisit; authToken: string 
         )}
       </View>
 
-      {/* Visit remarks entered by agent */}
       {visit.visit_remarks != null && (
         <Text style={styles.feedbackText} numberOfLines={2}>
           💬 {visit.visit_remarks}
         </Text>
       )}
-      {/* Fallback: latest_feedback for legacy visits without remarks */}
       {visit.visit_remarks == null && visit.latest_feedback != null && (
         <Text style={styles.feedbackText} numberOfLines={1}>
           💬 {visit.latest_feedback}
@@ -277,22 +271,26 @@ export default function AdminFieldVisitsScreen() {
   const insets = useSafeAreaInsets();
 
   const [selectedDate, setSelectedDate] = useState<string>(todayISO());
-  const [agentFilter, setAgentFilter] = useState<number | null>(null); // null = All
+  const [agentFilter, setAgentFilter] = useState<number | null>(null);
   const [authToken, setAuthToken] = useState<string | null>(null);
 
-  // Load JWT token once so VisitCard can embed it in photo URLs
+  // DIFF 2: Hook in AdminFieldVisitsScreen
+  const { selectedCompany } = useCompanyFilter();
+
   useEffect(() => {
     tokenStore.get().then(setAuthToken).catch(() => {});
   }, []);
 
   // ── Data ──────────────────────────────────────────────────────────────────
 
+  // DIFF 3: Pass company to API — updated queryKey and queryFn
   const visitsQuery = useQuery<{ visits: FieldVisit[] }>({
-    queryKey: ["/api/admin/field-visits", selectedDate, agentFilter],
+    queryKey: ["/api/admin/field-visits", selectedDate, agentFilter, selectedCompany],
     queryFn: () =>
       api.admin.getAdminFieldVisits({
         date: selectedDate,
-        ...(agentFilter ? { agent_id: agentFilter } : {}),
+        ...(agentFilter     ? { agent_id: agentFilter }    : {}),
+        ...(selectedCompany ? { company: selectedCompany } : {}),
       }),
     refetchInterval: 60_000,
     retry: 2,
@@ -425,6 +423,15 @@ export default function AdminFieldVisitsScreen() {
         ))}
       </ScrollView>
 
+      {/* DIFF 4: Company indicator banner — shown after agent filter row */}
+      {selectedCompany && (
+        <View style={styles.companyBanner}>
+          <Ionicons name="business" size={13} color={Colors.primary} />
+          <Text style={styles.companyBannerText}>{selectedCompany}</Text>
+          <Text style={styles.companyBannerSub}>Open drawer to change</Text>
+        </View>
+      )}
+
       {/* ── Summary ── */}
       {!isLoading && allVisits.length > 0 && (
         <SummaryBar visits={allVisits} />
@@ -444,15 +451,15 @@ export default function AdminFieldVisitsScreen() {
             <Text style={styles.retryText}>Retry</Text>
           </Pressable>
         </View>
-     ) : allVisits.length === 0 ? (
+      ) : allVisits.length === 0 ? (
         <View style={styles.centered}>
           <Ionicons name="location-outline" size={44} color={Colors.textMuted} />
           <Text style={styles.emptyTitle}>No visits recorded</Text>
           <Text style={styles.emptySubtitle}>
-            {JSON.stringify({ 
-              date: selectedDate, 
+            {JSON.stringify({
+              date: selectedDate,
               data: visitsQuery.data,
-              error: visitsQuery.error?.message 
+              error: visitsQuery.error?.message
             })}
           </Text>
         </View>
@@ -745,32 +752,49 @@ const styles = StyleSheet.create({
   },
 
   photoWrapper: {
-  borderRadius: 8,
-  overflow: "hidden",
-  marginTop: 4,
-  marginBottom: 2,
-  height: 140,
-  backgroundColor: Colors.surfaceAlt,
-},
-photoThumb: {
-  width: "100%",
-  height: "100%",
-},
-photoOverlay: {
-  position: "absolute",
-  bottom: 6,
-  right: 8,
-  flexDirection: "row",
-  alignItems: "center",
-  gap: 3,
-  backgroundColor: "rgba(0,0,0,0.45)",
-  paddingHorizontal: 7,
-  paddingVertical: 3,
-  borderRadius: 6,
-},
-photoOverlayText: {
-  fontSize: 11,
-  fontWeight: "600",
-  color: "#fff",
-},
+    borderRadius: 8,
+    overflow: "hidden",
+    marginTop: 4,
+    marginBottom: 2,
+    height: 140,
+    backgroundColor: Colors.surfaceAlt,
+  },
+  photoThumb: {
+    width: "100%",
+    height: "100%",
+  },
+  photoOverlay: {
+    position: "absolute",
+    bottom: 6,
+    right: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+    backgroundColor: "rgba(0,0,0,0.45)",
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  photoOverlayText: {
+    fontSize: 11,
+    fontWeight: "600",
+    color: "#fff",
+  },
+
+  // DIFF 6: Company banner and chip styles
+  companyBanner: {
+    flexDirection: "row", alignItems: "center", gap: 8,
+    backgroundColor: Colors.primary + "12", borderRadius: 8,
+    paddingHorizontal: 14, paddingVertical: 8,
+    marginHorizontal: 14, marginBottom: 4,
+    borderWidth: 1, borderColor: Colors.primary + "25",
+  },
+  companyBannerText: { fontSize: 12, fontWeight: "700", color: Colors.primary, flex: 1 },
+  companyBannerSub:  { fontSize: 10, color: Colors.textMuted },
+  companyChip: {
+    flexDirection: "row", alignItems: "center", gap: 4,
+    backgroundColor: Colors.primary + "12", borderRadius: 6,
+    paddingHorizontal: 7, paddingVertical: 2, alignSelf: "flex-start", marginTop: 2,
+  },
+  companyChipText: { fontSize: 10, fontWeight: "700", color: Colors.primary },
 });
