@@ -301,7 +301,11 @@ export async function getLoanCasesByAgent(agentId: number, companyName?: string 
 
 export async function getDistinctCompaniesByAgent(agentId: number): Promise<string[]> {
   const result = await query(
-    "SELECT DISTINCT company_name FROM loan_cases WHERE agent_id = $1 AND company_name IS NOT NULL AND company_name != '' ORDER BY company_name",
+    `SELECT DISTINCT company_name FROM (
+       SELECT company_name FROM loan_cases WHERE agent_id = $1 AND company_name IS NOT NULL AND company_name != ''
+       UNION
+       SELECT company_name FROM bkt_cases WHERE agent_id = $1 AND company_name IS NOT NULL AND company_name != ''
+     ) t ORDER BY company_name`,
     [agentId]
   );
   return result.rows.map((r: any) => r.company_name);
