@@ -499,10 +499,15 @@ function FeedbackModal({
           : caseItem.status;
 
         await api.recordFieldVisit(caseItem.id, {
-          lat:       gps!.lat,
-          lng:       gps!.lng,
-          accuracy:  gps!.accuracy,
-          case_type: "allocation",
+          lat:          gps!.lat,
+          lng:          gps!.lng,
+          accuracy:     gps!.accuracy,
+          case_type:    "allocation",
+          visit_outcome: visitOutcome || undefined,
+          visit_remarks: visitRemarks.trim() || undefined,
+          photo:        photos.length > 0
+            ? { uri: photos[0].uri, name: photos[0].fileName, mimeType: photos[0].mimeType }
+            : undefined,
         });
 
         payload = {
