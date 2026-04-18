@@ -704,30 +704,60 @@ app.use("/api/fos-depositions", (req, res, next) => {
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
-  app.get("/api/stats", requireAuth, async (req, res) => {
-    try { res.json(await storage.getAgentStats(req.session.agentId!)); }
-    catch (e: any) { res.status(500).json({ message: e.message }); }
-  });
+ app.get("/api/stats", requireAuth, async (req, res) => {
+  try {
+    const company  = (req.query.company as string) || null;
+    const agentId  = req.session.agentId!;
+ 
+    if (!company) {
+      res.json(await storage.getAgentStats(agentId));
+      return;
+    }
+ 
+    // Company-filtered stats (loan_cases only — bkt_cases usually have no company)
+    const result = await storage.query(
+      `SELECT
+         COUNT(*)::int                                           AS total,
+         COUNT(*) FILTER (WHERE status = 'Paid')::int           AS paid,
+         COUNT(*) FILTER (WHERE status = 'PTP')::int            AS ptp,
+         COUNT(*) FILTER (WHERE status NOT IN ('Paid','PTP'))::int AS "notProcess"
+       FROM loan_cases
+       WHERE agent_id = $1 AND company_name = $2`,
+      [agentId, company],
+    );
+    res.json(result.rows[0] ?? { total: 0, paid: 0, ptp: 0, notProcess: 0 });
+  } catch (e: any) { res.status(500).json({ message: e.message }); }
+});
 
 app.get("/api/today-ptp", requireAuth, async (req, res) => {
   try {
     const agentId = req.session.agentId!;
+    const company = (req.query.company as string) || null;
+ 
+    const companyClause = company ? `AND lc.company_name = '${company.replace(/'/g, "''")}'` : "";
+ 
     const result = await storage.query(`
-      SELECT 'loan' AS source, id, customer_name, loan_no, pos::numeric AS pos, ptp_date, telecaller_ptp_date
-      FROM loan_cases WHERE agent_id=$1
+      SELECT 'loan' AS source, id, customer_name, loan_no, pos::numeric AS pos,
+             ptp_date, telecaller_ptp_date
+      FROM loan_cases lc
+      WHERE agent_id = $1
         AND (
           (status = 'PTP' AND ptp_date = CURRENT_DATE)
           OR (status = 'PTP' AND telecaller_ptp_date = CURRENT_DATE)
         )
+        ${companyClause}
       UNION ALL
-      SELECT 'bkt' AS source, id, customer_name, loan_no, pos::numeric AS pos, ptp_date, telecaller_ptp_date
-      FROM bkt_cases WHERE agent_id=$1
+      SELECT 'bkt' AS source, id, customer_name, loan_no, pos::numeric AS pos,
+             ptp_date, telecaller_ptp_date
+      FROM bkt_cases
+      WHERE agent_id = $1
         AND (
           (status = 'PTP' AND ptp_date = CURRENT_DATE)
           OR (status = 'PTP' AND telecaller_ptp_date = CURRENT_DATE)
         )
       ORDER BY customer_name
     `, [agentId]);
+ 
     res.json({ count: result.rows.length, cases: result.rows });
   } catch (e: any) { res.status(500).json({ message: e.message }); }
 });
@@ -1337,10 +1367,17 @@ app.put("/api/fos-depositions/:id/pay-both", requireAuth, screenshotUpload.singl
     try { res.json({ cases: await storage.getAllBktCases(req.query.category as string | undefined) }); }
     catch (e: any) { res.status(500).json({ message: e.message }); }
   });
-  app.get("/api/bkt-cases", requireAuth, async (req, res) => {
-    try { res.json({ cases: await storage.getBktCasesByAgent(req.session.agentId!, req.query.category as string | undefined) }); }
-    catch (e: any) { res.status(500).json({ message: e.message }); }
-  });
+ app.get("/api/bkt-cases", requireAuth, async (req, res) => {
+  try {
+    const agentId  = req.session.agentId!;
+    const category = req.query.category as string | undefined;
+    const company  = (req.query.company as string) || null;
+ 
+    // bkt_cases doesn't have company_name, so company filter delegates to loan_cases
+    // For now fall through to normal query (bkt is separate allocation)
+    res.json({ cases: await storage.getBktCasesByAgent(agentId, category) });
+  } catch (e: any) { res.status(500).json({ message: e.message }); }
+});
 
   app.put("/api/bkt-cases/:id/feedback", requireAuth, async (req, res) => {
     try {
@@ -1732,59 +1769,142 @@ res.json({ imported, updated: 0, skipped, agentsCreated, agentsRemoved, total: r
 });
 
 
-  app.get("/api/bkt-tw-collection-summary", requireAuth, async (req, res) => {
-    try {
-      const agentId = req.session.agentId!;
-      const result = await storage.query(
-        `SELECT
-           bkt_key AS case_category,
-           COUNT(*) FILTER (WHERE status = 'Paid')::int AS count_paid,
-           COUNT(*)::int AS count_total,
-           COALESCE(SUM(pos::numeric), 0) AS amount_total,
-           COALESCE((
-             SELECT SUM(fd.amount)
-             FROM fos_depositions fd
-             WHERE fd.agent_id = $1
-               AND LOWER(REPLACE(fd.bkt, ' ', '')) = bkt_key
-               AND DATE_TRUNC('month', fd.deposition_date) = DATE_TRUNC('month', CURRENT_DATE)
-           ), 0) AS amount_collected
-         FROM (
-           SELECT 'bkt' || bkt::text AS bkt_key, pos, status
-           FROM loan_cases
-           WHERE agent_id = $1 AND bkt IN (1, 2, 3) AND pos IS NOT NULL
-           UNION ALL
-           SELECT case_category AS bkt_key, pos, status
-           FROM bkt_cases
-           WHERE agent_id = $1 AND case_category IN ('bkt1','bkt2','bkt3') AND pos IS NOT NULL
-         ) combined
-         GROUP BY bkt_key
-         ORDER BY bkt_key`,
-        [agentId]
-      );
-      res.json({ summary: result.rows });
-    } catch (e: any) {
-      res.status(500).json({ message: e.message });
-    }
-  });
+app.get("/api/bkt-tw-collection-summary", requireAuth, async (req, res) => {
+  try {
+    const agentId = req.session.agentId!;
+    const company = (req.query.company as string) || null;
+ 
+    const companyFilter = company ? `AND lc.company_name = '${company.replace(/'/g, "''")}'` : "";
+ 
+    const result = await storage.query(
+      `SELECT
+         bkt_key AS case_category,
+         COUNT(*) FILTER (WHERE status = 'Paid')::int AS count_paid,
+         COUNT(*)::int                                 AS count_total,
+         COALESCE(SUM(pos::numeric), 0)               AS amount_total,
+         COALESCE((
+           SELECT SUM(fd.amount)
+           FROM fos_depositions fd
+           WHERE fd.agent_id = $1
+             AND LOWER(REPLACE(fd.bkt, ' ', '')) = bkt_key
+             AND DATE_TRUNC('month', fd.deposition_date) = DATE_TRUNC('month', CURRENT_DATE)
+         ), 0) AS amount_collected
+       FROM (
+         SELECT 'bkt' || bkt::text AS bkt_key, pos, status
+         FROM loan_cases lc
+         WHERE agent_id = $1 AND bkt IN (1, 2, 3) AND pos IS NOT NULL ${companyFilter}
+         UNION ALL
+         SELECT case_category AS bkt_key, pos, status
+         FROM bkt_cases
+         WHERE agent_id = $1 AND case_category IN ('bkt1','bkt2','bkt3') AND pos IS NOT NULL
+       ) combined
+       GROUP BY bkt_key
+       ORDER BY bkt_key`,
+      [agentId],
+    );
+ 
+    res.json({ summary: result.rows });
+  } catch (e: any) { res.status(500).json({ message: e.message }); }
+});
 
-  app.get("/api/bkt-perf-summary", requireAuth, async (req, res) => {
-    try {
-      const agentId = req.session.agentId!;
+app.get("/api/bkt-perf-summary", requireAuth, async (req, res) => {
+  try {
+    const agentId = req.session.agentId!;
+    const company = (req.query.company as string) || null;
+ 
+    if (company) {
+      // Live calculation from loan_cases for the selected company
       const result = await storage.query(`
-        WITH imported_norm AS (SELECT *, CASE LOWER(REPLACE(bkt,' ','')) WHEN '1' THEN 'bkt1' WHEN '2' THEN 'bkt2' WHEN '3' THEN 'bkt3' WHEN 'bkt1' THEN 'bkt1' WHEN 'bkt2' THEN 'bkt2' WHEN 'bkt3' THEN 'bkt3' ELSE LOWER(REPLACE(bkt,' ','')) END AS bkt_norm FROM bkt_perf_summary WHERE agent_id=$1),
-        imported_latest AS (SELECT DISTINCT ON (bkt_norm) * FROM imported_norm ORDER BY bkt_norm, uploaded_at DESC),
-        covered_bkts AS (SELECT bkt_norm FROM imported_latest WHERE bkt_norm IN ('bkt1','bkt2','bkt3')),
-        live_cases AS (
-          SELECT LOWER(REPLACE(bc.case_category,' ','')) AS bkt, bc.pos::numeric AS pos, bc.status, bc.rollback_yn FROM bkt_cases bc WHERE bc.agent_id=$1 AND LOWER(REPLACE(bc.case_category,' ','')) IN ('bkt1','bkt2','bkt3') AND LOWER(REPLACE(bc.case_category,' ','')) NOT IN (SELECT bkt_norm FROM covered_bkts) AND UPPER(COALESCE(bc.pro,''))<>'UC'
-          UNION ALL SELECT 'bkt'||lc.bkt::text AS bkt, lc.pos::numeric AS pos, lc.status, lc.rollback_yn FROM loan_cases lc WHERE lc.agent_id=$1 AND lc.bkt IS NOT NULL AND 'bkt'||lc.bkt::text NOT IN (SELECT bkt_norm FROM covered_bkts) AND UPPER(COALESCE(lc.pro,''))<>'UC'
-        ),
-        live_agg AS (SELECT bkt, COALESCE(SUM(pos) FILTER (WHERE status='Paid'),0) AS pos_paid, COALESCE(SUM(pos) FILTER (WHERE status<>'Paid'),0) AS pos_unpaid, COALESCE(SUM(pos),0) AS pos_grand_total, CASE WHEN COALESCE(SUM(pos),0)>0 THEN ROUND((COALESCE(SUM(pos) FILTER (WHERE status='Paid'),0)/SUM(pos))*100,2) ELSE 0 END AS pos_percentage, COUNT(*) FILTER (WHERE status='Paid')::int AS count_paid, COUNT(*) FILTER (WHERE status<>'Paid')::int AS count_unpaid, COUNT(*)::int AS count_total, COALESCE(SUM(pos) FILTER (WHERE rollback_yn=true),0) AS rollback_paid, COALESCE(SUM(pos) FILTER (WHERE rollback_yn IS DISTINCT FROM true),0) AS rollback_unpaid, COALESCE(SUM(pos),0) AS rollback_grand_total, CASE WHEN COALESCE(SUM(pos),0)>0 THEN ROUND((COALESCE(SUM(pos) FILTER (WHERE rollback_yn=true),0)/SUM(pos))*100,2) ELSE 0 END AS rollback_percentage FROM live_cases GROUP BY bkt),
-        combined AS (SELECT bkt_norm AS bkt, COALESCE(pos_paid,0) AS pos_paid, COALESCE(pos_unpaid,0) AS pos_unpaid, COALESCE(pos_grand_total,0) AS pos_grand_total, COALESCE(pos_percentage,0) AS pos_percentage, COALESCE(count_paid,0) AS count_paid, COALESCE(count_unpaid,0) AS count_unpaid, COALESCE(count_total,0) AS count_total, COALESCE(rollback_paid,0) AS rollback_paid, COALESCE(rollback_unpaid,0) AS rollback_unpaid, COALESCE(rollback_grand_total,0) AS rollback_grand_total, COALESCE(rollback_percentage,0) AS rollback_percentage FROM imported_latest UNION ALL SELECT * FROM live_agg)
-        SELECT * FROM combined ORDER BY bkt
-      `, [agentId]);
+        SELECT
+          CASE lc.bkt WHEN 1 THEN 'bkt1' WHEN 2 THEN 'bkt2' WHEN 3 THEN 'bkt3' END AS bkt,
+          COALESCE(SUM(lc.pos::numeric) FILTER (WHERE lc.status='Paid'),  0) AS pos_paid,
+          COALESCE(SUM(lc.pos::numeric) FILTER (WHERE lc.status<>'Paid'), 0) AS pos_unpaid,
+          COALESCE(SUM(lc.pos::numeric), 0)                                  AS pos_grand_total,
+          CASE WHEN COALESCE(SUM(lc.pos::numeric),0) > 0
+               THEN ROUND((COALESCE(SUM(lc.pos::numeric) FILTER (WHERE lc.status='Paid'),0) / SUM(lc.pos::numeric)) * 100, 2)
+               ELSE 0 END                                                    AS pos_percentage,
+          COUNT(*) FILTER (WHERE lc.status='Paid')::int                      AS count_paid,
+          COUNT(*) FILTER (WHERE lc.status<>'Paid')::int                     AS count_unpaid,
+          COUNT(*)::int                                                       AS count_total,
+          COALESCE(SUM(lc.pos::numeric) FILTER (WHERE lc.rollback_yn=true), 0)                  AS rollback_paid,
+          COALESCE(SUM(lc.pos::numeric) FILTER (WHERE lc.rollback_yn IS DISTINCT FROM true), 0) AS rollback_unpaid,
+          COALESCE(SUM(lc.pos::numeric), 0)                                                      AS rollback_grand_total,
+          CASE WHEN COALESCE(SUM(lc.pos::numeric),0) > 0
+               THEN ROUND((COALESCE(SUM(lc.pos::numeric) FILTER (WHERE lc.rollback_yn=true),0) / SUM(lc.pos::numeric)) * 100, 2)
+               ELSE 0 END AS rollback_percentage
+        FROM loan_cases lc
+        WHERE lc.agent_id = $1
+          AND lc.bkt IS NOT NULL
+          AND lc.company_name = $2
+          AND UPPER(COALESCE(lc.pro,'')) NOT IN ('UC','RUC')
+        GROUP BY lc.bkt
+        HAVING CASE lc.bkt WHEN 1 THEN 'bkt1' WHEN 2 THEN 'bkt2' WHEN 3 THEN 'bkt3' END IS NOT NULL
+        ORDER BY lc.bkt
+      `, [agentId, company]);
+ 
       res.json({ rows: result.rows });
-    } catch (e: any) { res.status(500).json({ message: e.message }); }
-  });
+      return;
+    }
+ 
+    // ── Default: existing full CTE query (unchanged from original routes.ts) ──
+    const result = await storage.query(`
+      WITH imported_norm AS (
+        SELECT *, CASE LOWER(REPLACE(bkt,' ',''))
+          WHEN '1' THEN 'bkt1' WHEN '2' THEN 'bkt2' WHEN '3' THEN 'bkt3'
+          WHEN 'bkt1' THEN 'bkt1' WHEN 'bkt2' THEN 'bkt2' WHEN 'bkt3' THEN 'bkt3'
+          ELSE LOWER(REPLACE(bkt,' ',''))
+        END AS bkt_norm
+        FROM bkt_perf_summary WHERE agent_id=$1
+      ),
+      imported_latest AS (
+        SELECT DISTINCT ON (bkt_norm) * FROM imported_norm ORDER BY bkt_norm, uploaded_at DESC
+      ),
+      covered_bkts AS (SELECT bkt_norm FROM imported_latest WHERE bkt_norm IN ('bkt1','bkt2','bkt3')),
+      live_cases AS (
+        SELECT LOWER(REPLACE(bc.case_category,' ','')) AS bkt, bc.pos::numeric AS pos, bc.status, bc.rollback_yn
+        FROM bkt_cases bc
+        WHERE bc.agent_id=$1 AND LOWER(REPLACE(bc.case_category,' ','')) IN ('bkt1','bkt2','bkt3')
+          AND LOWER(REPLACE(bc.case_category,' ','')) NOT IN (SELECT bkt_norm FROM covered_bkts)
+          AND UPPER(COALESCE(bc.pro,''))<>'UC'
+        UNION ALL
+        SELECT 'bkt'||lc.bkt::text AS bkt, lc.pos::numeric AS pos, lc.status, lc.rollback_yn
+        FROM loan_cases lc
+        WHERE lc.agent_id=$1 AND lc.bkt IS NOT NULL
+          AND 'bkt'||lc.bkt::text NOT IN (SELECT bkt_norm FROM covered_bkts)
+          AND UPPER(COALESCE(lc.pro,''))<>'UC'
+      ),
+      live_agg AS (
+        SELECT bkt,
+          COALESCE(SUM(pos) FILTER (WHERE status='Paid'),0)  AS pos_paid,
+          COALESCE(SUM(pos) FILTER (WHERE status<>'Paid'),0) AS pos_unpaid,
+          COALESCE(SUM(pos),0)                               AS pos_grand_total,
+          CASE WHEN COALESCE(SUM(pos),0)>0 THEN ROUND((COALESCE(SUM(pos) FILTER (WHERE status='Paid'),0)/SUM(pos))*100,2) ELSE 0 END AS pos_percentage,
+          COUNT(*) FILTER (WHERE status='Paid')::int  AS count_paid,
+          COUNT(*) FILTER (WHERE status<>'Paid')::int AS count_unpaid,
+          COUNT(*)::int                               AS count_total,
+          COALESCE(SUM(pos) FILTER (WHERE rollback_yn=true),0)                  AS rollback_paid,
+          COALESCE(SUM(pos) FILTER (WHERE rollback_yn IS DISTINCT FROM true),0) AS rollback_unpaid,
+          COALESCE(SUM(pos),0)                                                   AS rollback_grand_total,
+          CASE WHEN COALESCE(SUM(pos),0)>0 THEN ROUND((COALESCE(SUM(pos) FILTER (WHERE rollback_yn=true),0)/SUM(pos))*100,2) ELSE 0 END AS rollback_percentage
+        FROM live_cases GROUP BY bkt
+      ),
+      combined AS (
+        SELECT bkt_norm AS bkt,
+          COALESCE(pos_paid,0) AS pos_paid, COALESCE(pos_unpaid,0) AS pos_unpaid,
+          COALESCE(pos_grand_total,0) AS pos_grand_total, COALESCE(pos_percentage,0) AS pos_percentage,
+          COALESCE(count_paid,0) AS count_paid, COALESCE(count_unpaid,0) AS count_unpaid,
+          COALESCE(count_total,0) AS count_total, COALESCE(rollback_paid,0) AS rollback_paid,
+          COALESCE(rollback_unpaid,0) AS rollback_unpaid, COALESCE(rollback_grand_total,0) AS rollback_grand_total,
+          COALESCE(rollback_percentage,0) AS rollback_percentage
+        FROM imported_latest
+        UNION ALL SELECT * FROM live_agg
+      )
+      SELECT * FROM combined ORDER BY bkt
+    `, [agentId]);
+ 
+    res.json({ rows: result.rows });
+  } catch (e: any) { res.status(500).json({ message: e.message }); }
+});
 
  
 
