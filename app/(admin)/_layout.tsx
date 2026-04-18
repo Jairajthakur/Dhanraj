@@ -25,9 +25,19 @@ const ADMIN_MENU = [
 
 // ─── Company Selector strip (shown inside drawer) ─────────────────────────────
 function CompanySelectorStrip({ onClose }: { onClose: () => void }) {
-  const { companies, selectedCompany, setSelectedCompany } = useCompanyFilter();
-  if (companies.length === 0) return null;
+  const { companies, selectedCompany, setSelectedCompany, isLoading } = useCompanyFilter();
 
+  if (isLoading) return (
+    <View style={cs.wrap}>
+      <Text style={cs.label}>Loading companies...</Text>
+    </View>
+  );
+
+  if (companies.length === 0) return (
+    <View style={cs.wrap}>
+      <Text style={cs.label}>No companies found</Text>
+    </View>
+  );
   const pick = (c: string | null) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setSelectedCompany(c);
