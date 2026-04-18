@@ -856,12 +856,13 @@ app.get("/api/today-ptp", requireAuth, async (req, res) => {
 
   app.get("/api/admin/companies", requireAdmin, async (req, res) => {
   try {
-    const result = await storage.query(`
-      SELECT DISTINCT company_name
-      FROM loan_cases
-      WHERE company_name IS NOT NULL AND company_name <> ''
-      ORDER BY company_name
-    `);
+   const result = await storage.query(`
+  SELECT DISTINCT company_name FROM (
+    SELECT company_name FROM loan_cases WHERE company_name IS NOT NULL AND company_name <> ''
+    UNION
+    SELECT company_name FROM bkt_cases WHERE company_name IS NOT NULL AND company_name <> ''
+  ) t ORDER BY company_name
+`);
     res.json({ companies: result.rows.map((r: any) => r.company_name) });
   } catch (e: any) {
     res.status(500).json({ message: e.message });
