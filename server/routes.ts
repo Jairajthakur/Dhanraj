@@ -644,14 +644,22 @@ app.use("/api/fos-depositions", (req, res, next) => {
     catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
- app.get("/api/companies", requireAuth, async (req, res) => {
+app.get("/api/companies", requireAuth, async (req, res) => {
   try {
     const isAdmin = req.session.role === "admin";
     const agentId = req.session.agentId!;
     const result = await storage.query(
       isAdmin
-        ? `SELECT DISTINCT company_name FROM loan_cases WHERE company_name IS NOT NULL AND company_name <> '' ORDER BY company_name`
-        : `SELECT DISTINCT company_name FROM loan_cases WHERE agent_id=$1 AND company_name IS NOT NULL AND company_name <> '' ORDER BY company_name`,
+        ? `SELECT DISTINCT company_name FROM (
+             SELECT company_name FROM loan_cases WHERE company_name IS NOT NULL AND company_name <> ''
+             UNION
+             SELECT company_name FROM bkt_cases WHERE company_name IS NOT NULL AND company_name <> ''
+           ) t ORDER BY company_name`
+        : `SELECT DISTINCT company_name FROM (
+             SELECT company_name FROM loan_cases WHERE agent_id=$1 AND company_name IS NOT NULL AND company_name <> ''
+             UNION
+             SELECT company_name FROM bkt_cases WHERE agent_id=$1 AND company_name IS NOT NULL AND company_name <> ''
+           ) t ORDER BY company_name`,
       isAdmin ? [] : [agentId]
     );
     res.json({ companies: result.rows.map((r: any) => r.company_name) });
