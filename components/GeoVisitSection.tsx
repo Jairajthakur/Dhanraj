@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useEffect } from "react";
 import {
   View, Text, StyleSheet, Pressable,
   ActivityIndicator, Alert, Image,
@@ -9,7 +9,7 @@ import * as Haptics from "expo-haptics";
 import * as ImagePicker from "expo-image-picker";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import Colors from "@/constants/colors";
-import { api } from "@/lib/api";
+import { api, tokenStore } from "@/lib/api";
 import { getApiUrl } from "@/lib/query-client";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -26,6 +26,12 @@ interface FieldVisit {
 interface Props {
   caseId: number;
   caseType: "loan" | "bkt";
+}
+
+interface PendingPhoto {
+  uri: string;
+  name: string;
+  mimeType: string;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -49,9 +55,12 @@ export function GeoVisitSection({ caseId, caseType }: Props) {
   const qc = useQueryClient();
   const [checking, setChecking] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
-  const [pendingPhoto, setPendingPhoto] = useState<{
-    uri: string; name: string; mimeType: string;
-  } | null>(null);
+  const [authToken, setAuthToken] = useState<string | null>(null);
+  const [pendingPhoto, setPendingPhoto] = useState<PendingPhoto | null>(null);
+
+  useEffect(() => {
+    tokenStore.get().then(setAuthToken).catch(() => {});
+  }, []);
 
   // ── Fetch visit history ──
   const queryKey = [`/api/cases/${caseId}/visits`];
@@ -67,12 +76,14 @@ export function GeoVisitSection({ caseId, caseType }: Props) {
     (v) => new Date(v.visited_at).toDateString() === todayStr
   );
 
+  // ── Build photo URL with token ──
+  const photoUrl = (visitId: number) =>
+    `${getApiUrl()}/api/field-visits/${visitId}/photo${authToken ? `?token=${encodeURIComponent(authToken)}` : ""}`;
+
   // ── Photo picker ──
   const handlePickPhoto = useCallback(async () => {
-    // Try camera first, fall back to library
     const { status: camStatus } = await ImagePicker.requestCameraPermissionsAsync();
     if (camStatus !== "granted") {
-      // Fall back to gallery
       const { status: libStatus } = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (libStatus !== "granted") {
         Alert.alert("Permission Required", "Please allow camera or photo library access.");
@@ -143,7 +154,6 @@ export function GeoVisitSection({ caseId, caseType }: Props) {
   const handleCheckIn = useCallback(async () => {
     setChecking(true);
     try {
-      // 1. Request location permission
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== "granted") {
         Alert.alert(
@@ -154,12 +164,10 @@ export function GeoVisitSection({ caseId, caseType }: Props) {
         return;
       }
 
-      // 2. Get position
       const pos = await Location.getCurrentPositionAsync({
         accuracy: Location.Accuracy.High,
       });
 
-      // 3. Post to server (with or without photo)
       await api.recordFieldVisit(caseId, {
         case_type: caseType,
         lat:       pos.coords.latitude,
@@ -169,7 +177,7 @@ export function GeoVisitSection({ caseId, caseType }: Props) {
       });
 
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      setPendingPhoto(null); // clear staged photo after successful submit
+      setPendingPhoto(null);
       await qc.invalidateQueries({ queryKey });
     } catch (e: any) {
       Alert.alert("Check-in Failed", e.message || "Could not record location.");
@@ -239,10 +247,9 @@ export function GeoVisitSection({ caseId, caseType }: Props) {
               {visits[0].accuracy != null && (
                 <Text style={styles.accuracy}>Accuracy ±{Math.round(visits[0].accuracy)}m</Text>
               )}
-              {/* Show photo from last visit if exists */}
               {visits[0].has_photo ? (
                 <Image
-                  source={{ uri: `${getApiUrl()}/api/field-visits/${visits[0].id}/photo` }}
+                  source={{ uri: photoUrl(visits[0].id) }}
                   style={styles.visitPhoto}
                   resizeMode="cover"
                 />
@@ -337,7 +344,7 @@ export function GeoVisitSection({ caseId, caseType }: Props) {
                   <Text style={styles.historyCoords}>{fmtCoords(v.lat, v.lng)}</Text>
                   {v.has_photo ? (
                     <Image
-                      source={{ uri: `${getApiUrl()}/api/field-visits/${v.id}/photo` }}
+                      source={{ uri: photoUrl(v.id) }}
                       style={styles.historyPhoto}
                       resizeMode="cover"
                     />
@@ -445,8 +452,6 @@ const styles = StyleSheet.create({
     color: Colors.textMuted,
     fontStyle: "italic",
   },
-
-  // Pending photo
   pendingPhotoWrapper: {
     borderRadius: 10,
     overflow: "hidden",
@@ -479,8 +484,6 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     color: "#fff",
   },
-
-  // Photo button
   photoBtn: {
     flexDirection: "row",
     alignItems: "center",
@@ -497,7 +500,6 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     color: Colors.primary,
   },
-
   btnRow: {
     flexDirection: "row",
     gap: 8,
