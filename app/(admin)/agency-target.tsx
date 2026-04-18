@@ -17,15 +17,12 @@ import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import Colors from "@/constants/colors";
 import { api } from "@/lib/api";
+import { useCompanyFilter } from "@/context/CompanyFilterContext";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-interface BktTargets {
-  resTarget: number;
-  rbTarget: number;
-}
+interface BktTargets { resTarget: number; rbTarget: number; }
 type AllTargets = Record<string, BktTargets>;
 
-// ─── Defaults ─────────────────────────────────────────────────────────────────
 const DEFAULT_TARGETS: AllTargets = {
   "1": { resTarget: 92, rbTarget: 22 },
   "2": { resTarget: 80, rbTarget: 18 },
@@ -40,28 +37,15 @@ const BKT_META: Record<string, { label: string; color: string }> = {
 
 const STORAGE_KEY = "agency_bkt_targets_v1";
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
 function fmtAmt(n: number): string {
   if (n >= 10_000_000) return `₹${(n / 10_000_000).toFixed(2)}Cr`;
   if (n >= 100_000)    return `₹${(n / 100_000).toFixed(2)}L`;
   return `₹${n.toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
 }
-function pct(a: number, b: number): number {
-  return b > 0 ? (a / b) * 100 : 0;
-}
+function pct(a: number, b: number): number { return b > 0 ? (a / b) * 100 : 0; }
 
 // ─── Edit Modal ───────────────────────────────────────────────────────────────
-function EditTargetsModal({
-  visible,
-  targets,
-  onSave,
-  onClose,
-}: {
-  visible: boolean;
-  targets: AllTargets;
-  onSave: (t: AllTargets) => void;
-  onClose: () => void;
-}) {
+function EditTargetsModal({ visible, targets, onSave, onClose }: { visible: boolean; targets: AllTargets; onSave: (t: AllTargets) => void; onClose: () => void; }) {
   const insets = useSafeAreaInsets();
   const [draft, setDraft] = useState<Record<string, { resTarget: string; rbTarget: string }>>({});
 
@@ -83,22 +67,15 @@ function EditTargetsModal({
     for (const k of ["1", "2", "3"]) {
       const res = parseFloat(draft[k]?.resTarget ?? "");
       const rb  = parseFloat(draft[k]?.rbTarget  ?? "");
-      if (isNaN(res) || res < 0 || res > 100) {
-        Alert.alert("Invalid", `BKT ${k} Resolution must be 0–100.`);
-        return;
-      }
-      if (isNaN(rb) || rb < 0 || rb > 100) {
-        Alert.alert("Invalid", `BKT ${k} Rollback must be 0–100.`);
-        return;
-      }
+      if (isNaN(res) || res < 0 || res > 100) { Alert.alert("Invalid", `BKT ${k} Resolution must be 0–100.`); return; }
+      if (isNaN(rb)  || rb  < 0 || rb  > 100) { Alert.alert("Invalid", `BKT ${k} Rollback must be 0–100.`); return; }
       result[k] = { resTarget: res, rbTarget: rb };
     }
     onSave(result);
   };
 
-  const setField = (bkt: string, field: "resTarget" | "rbTarget", val: string) => {
+  const setField = (bkt: string, field: "resTarget" | "rbTarget", val: string) =>
     setDraft((prev) => ({ ...prev, [bkt]: { ...prev[bkt], [field]: val } }));
-  };
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
@@ -111,9 +88,7 @@ function EditTargetsModal({
               <Ionicons name="close" size={20} color={Colors.text} />
             </Pressable>
           </View>
-          <Text style={em.subtitle}>
-            Customise resolution and rollback % targets for each BKT. Progress bars update immediately.
-          </Text>
+          <Text style={em.subtitle}>Customise resolution and rollback % targets for each BKT.</Text>
           <ScrollView showsVerticalScrollIndicator={false}>
             {["1", "2", "3"].map((k) => {
               const meta = BKT_META[k];
@@ -126,30 +101,14 @@ function EditTargetsModal({
                     <View style={em.inputGroup}>
                       <Text style={em.inputLabel}>Resolution Target (%)</Text>
                       <View style={em.inputWrap}>
-                        <TextInput
-                          style={em.input}
-                          keyboardType="numeric"
-                          value={draft[k]?.resTarget ?? ""}
-                          onChangeText={(v) => setField(k, "resTarget", v)}
-                          placeholder="e.g. 92"
-                          placeholderTextColor={Colors.textMuted}
-                          maxLength={5}
-                        />
+                        <TextInput style={em.input} keyboardType="numeric" value={draft[k]?.resTarget ?? ""} onChangeText={(v) => setField(k, "resTarget", v)} placeholder="e.g. 92" placeholderTextColor={Colors.textMuted} maxLength={5} />
                         <Text style={em.suffix}>%</Text>
                       </View>
                     </View>
                     <View style={em.inputGroup}>
                       <Text style={em.inputLabel}>Rollback Target (%)</Text>
                       <View style={em.inputWrap}>
-                        <TextInput
-                          style={em.input}
-                          keyboardType="numeric"
-                          value={draft[k]?.rbTarget ?? ""}
-                          onChangeText={(v) => setField(k, "rbTarget", v)}
-                          placeholder="e.g. 22"
-                          placeholderTextColor={Colors.textMuted}
-                          maxLength={5}
-                        />
+                        <TextInput style={em.input} keyboardType="numeric" value={draft[k]?.rbTarget ?? ""} onChangeText={(v) => setField(k, "rbTarget", v)} placeholder="e.g. 22" placeholderTextColor={Colors.textMuted} maxLength={5} />
                         <Text style={em.suffix}>%</Text>
                       </View>
                     </View>
@@ -215,7 +174,6 @@ const pb = StyleSheet.create({
   targetText: { fontSize: 11, color: Colors.textMuted, fontWeight: "600" },
 });
 
-// ─── Stat Cell ────────────────────────────────────────────────────────────────
 function StatCell({ label, value, color }: { label: string; value: string; color?: string }) {
   return (
     <View style={sc.cell}>
@@ -234,7 +192,6 @@ const sc = StyleSheet.create({
 function BktTargetCard({ bktKey, data, targets }: { bktKey: string; data: any; targets: BktTargets }) {
   const meta = BKT_META[bktKey];
   if (!meta) return null;
-
   const totalPOS    = data.totalPOS    || 0;
   const paidPOS     = data.paidPOS     || 0;
   const unpaidPOS   = data.unpaidPOS   || 0;
@@ -242,7 +199,6 @@ function BktTargetCard({ bktKey, data, targets }: { bktKey: string; data: any; t
   const rollbackPOS = data.rollbackPOS || 0;
   const caseCount   = data.caseCount   || 0;
   const paidCount   = data.paidCount   || 0;
-
   const resPct = pct(paidPOS, totalPOS);
   const rbPct  = pct(rollbackPOS, totalPOS);
   const resMet = resPct >= targets.resTarget;
@@ -264,17 +220,13 @@ function BktTargetCard({ bktKey, data, targets }: { bktKey: string; data: any; t
           <Text style={[card.bigAmt, { color: meta.color }]}>{fmtAmt(totalPOS)}</Text>
         </View>
       </View>
-
       <View style={card.divider} />
-
       <View style={card.row3}>
         <StatCell label="Paid POS"   value={fmtAmt(paidPOS)}   color={Colors.success} />
         <StatCell label="Unpaid POS" value={fmtAmt(unpaidPOS)} color={Colors.danger}  />
         <StatCell label="PTP POS"    value={fmtAmt(ptpPOS)}    color={Colors.info}    />
       </View>
-
       <View style={card.divider} />
-
       <View style={card.sectionHeader}>
         <Text style={card.sectionTitle}>Resolution</Text>
         <View style={[card.statusChip, { backgroundColor: resMet ? Colors.success + "20" : Colors.danger + "20" }]}>
@@ -286,13 +238,11 @@ function BktTargetCard({ bktKey, data, targets }: { bktKey: string; data: any; t
       </View>
       <ProgressBar value={resPct} target={targets.resTarget} color={meta.color} />
       <View style={card.row3}>
-        <StatCell label="Paid Cases" value={String(paidCount)}                      color={Colors.success} />
-        <StatCell label="Res %"      value={resPct.toFixed(1) + "%"}                color={meta.color}    />
+        <StatCell label="Paid Cases" value={String(paidCount)} color={Colors.success} />
+        <StatCell label="Res %"      value={resPct.toFixed(1) + "%"} color={meta.color} />
         <StatCell label="Required"   value={resMet ? "✓ Met" : fmtAmt(resRequired)} color={resMet ? Colors.success : Colors.danger} />
       </View>
-
       <View style={card.divider} />
-
       <View style={card.sectionHeader}>
         <Text style={card.sectionTitle}>Rollback</Text>
         <View style={[card.statusChip, { backgroundColor: rbMet ? Colors.success + "20" : Colors.info + "20" }]}>
@@ -304,8 +254,8 @@ function BktTargetCard({ bktKey, data, targets }: { bktKey: string; data: any; t
       </View>
       <ProgressBar value={rbPct} target={targets.rbTarget} color={Colors.info} />
       <View style={card.row3}>
-        <StatCell label="RB POS"   value={fmtAmt(rollbackPOS)}                 color={Colors.info} />
-        <StatCell label="RB %"     value={rbPct.toFixed(1) + "%"}               color={Colors.info} />
+        <StatCell label="RB POS"   value={fmtAmt(rollbackPOS)} color={Colors.info} />
+        <StatCell label="RB %"     value={rbPct.toFixed(1) + "%"} color={Colors.info} />
         <StatCell label="Required" value={rbMet ? "✓ Met" : fmtAmt(rbRequired)} color={rbMet ? Colors.success : Colors.info} />
       </View>
     </View>
@@ -330,7 +280,7 @@ const card = StyleSheet.create({
 });
 
 // ─── Summary Strip ────────────────────────────────────────────────────────────
-function SummaryStrip({ bktData }: { bktData: Record<string, any> }) {
+function SummaryStrip({ bktData, selectedCompany }: { bktData: Record<string, any>; selectedCompany: string | null }) {
   const overallTotal = Object.values(bktData).reduce((s: number, d: any) => s + (d.totalPOS  || 0), 0);
   const overallPaid  = Object.values(bktData).reduce((s: number, d: any) => s + (d.paidPOS   || 0), 0);
   const overallCases = Object.values(bktData).reduce((s: number, d: any) => s + (d.caseCount || 0), 0);
@@ -338,7 +288,9 @@ function SummaryStrip({ bktData }: { bktData: Record<string, any> }) {
   return (
     <View style={ss.wrap}>
       <View style={ss.left}>
-        <Text style={ss.subLabel}>TW Portfolio</Text>
+        <Text style={ss.subLabel}>
+          {selectedCompany ? selectedCompany.toUpperCase() : "TW"} Portfolio
+        </Text>
         <Text style={ss.bigNum}>{fmtAmt(overallTotal)}</Text>
       </View>
       <View style={ss.divider} />
@@ -373,11 +325,11 @@ const ss = StyleSheet.create({
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 export default function AgencyTargetScreen() {
   const insets = useSafeAreaInsets();
+  const { selectedCompany } = useCompanyFilter();
   const [targets, setTargets]             = useState<AllTargets>(DEFAULT_TARGETS);
   const [targetsLoaded, setTargetsLoaded] = useState(false);
   const [editVisible, setEditVisible]     = useState(false);
 
-  // Load persisted targets on mount
   useEffect(() => {
     AsyncStorage.getItem(STORAGE_KEY)
       .then((raw) => { if (raw) setTargets(JSON.parse(raw)); })
@@ -397,8 +349,8 @@ export default function AgencyTargetScreen() {
   }, []);
 
   const { data, isLoading, refetch } = useQuery({
-    queryKey: ["/api/admin/cases"],
-    queryFn: () => api.admin.getCases(),
+    queryKey: ["/api/admin/cases", selectedCompany],
+    queryFn: () => api.admin.getCases(selectedCompany ? { company: selectedCompany } : undefined),
     refetchInterval: 15000,
   });
 
@@ -408,16 +360,15 @@ export default function AgencyTargetScreen() {
     for (const c of cases) {
       const bktRaw = String(c.bkt ?? "").trim();
       if (!bktRaw || !BKT_META[bktRaw]) continue;
-      // ── TW filter: skip UC and RUC ──
       if (String(c.pro ?? "").trim().toUpperCase() !== "TW") continue;
       if (!map[bktRaw]) map[bktRaw] = { totalPOS: 0, paidPOS: 0, unpaidPOS: 0, ptpPOS: 0, rollbackPOS: 0, caseCount: 0, paidCount: 0 };
-      const pos = parseFloat(c.pos      || 0);
+      const pos = parseFloat(c.pos || 0);
       const rb  = parseFloat(c.rollback || 0);
       map[bktRaw].totalPOS  += pos;
       map[bktRaw].caseCount += 1;
-      if (c.status === "Paid")      { map[bktRaw].paidPOS += pos; map[bktRaw].paidCount += 1; }
-      else if (c.status === "PTP")  { map[bktRaw].ptpPOS  += pos; }
-      else                          { map[bktRaw].unpaidPOS += pos; }
+      if (c.status === "Paid")     { map[bktRaw].paidPOS += pos; map[bktRaw].paidCount += 1; }
+      else if (c.status === "PTP") { map[bktRaw].ptpPOS  += pos; }
+      else                         { map[bktRaw].unpaidPOS += pos; }
       if (c.rollback_yn === true || c.rollback_yn === "true" || c.rollback_yn === "t") {
         map[bktRaw].rollbackPOS += rb > 0 ? rb : pos;
       }
@@ -457,7 +408,17 @@ export default function AgencyTargetScreen() {
           </Pressable>
         </View>
 
-        {/* Current target summary chips */}
+        {/* Active company indicator */}
+        {selectedCompany && (
+          <View style={styles.companyBanner}>
+            <Ionicons name="business" size={14} color={Colors.primary} />
+            <Text style={styles.companyBannerText}>
+              Showing data for <Text style={{ fontWeight: "800" }}>{selectedCompany}</Text>
+            </Text>
+          </View>
+        )}
+
+        {/* Target chips */}
         <View style={styles.targetChipsRow}>
           {["1", "2", "3"].map((k) => {
             const meta = BKT_META[k];
@@ -475,21 +436,17 @@ export default function AgencyTargetScreen() {
         <View style={styles.infoBanner}>
           <Ionicons name="information-circle-outline" size={15} color={Colors.info} />
           <Text style={styles.infoText}>
-            Showing <Text style={{ fontWeight: "700" }}>TW cases only</Text>. UC and RUC are excluded. Tap <Text style={{ fontWeight: "700" }}>Set Targets</Text> to customise goals per BKT.
+            Showing <Text style={{ fontWeight: "700" }}>TW cases only</Text>
+            {selectedCompany ? ` for ${selectedCompany}` : ""}. UC and RUC are excluded. Tap <Text style={{ fontWeight: "700" }}>Set Targets</Text> to customise goals.
           </Text>
         </View>
 
         {hasBktData ? (
           <>
-            <SummaryStrip bktData={bktData} />
+            <SummaryStrip bktData={bktData} selectedCompany={selectedCompany} />
             {["1", "2", "3"].map((key) =>
               bktData[key] ? (
-                <BktTargetCard
-                  key={key}
-                  bktKey={key}
-                  data={bktData[key]}
-                  targets={targets[key] ?? DEFAULT_TARGETS[key]}
-                />
+                <BktTargetCard key={key} bktKey={key} data={bktData[key]} targets={targets[key] ?? DEFAULT_TARGETS[key]} />
               ) : null
             )}
           </>
@@ -498,7 +455,9 @@ export default function AgencyTargetScreen() {
             <Ionicons name="bar-chart-outline" size={56} color={Colors.textMuted} />
             <Text style={styles.emptyTitle}>No TW Data Yet</Text>
             <Text style={styles.emptyText}>
-              Import an Allocation Excel from the Dashboard to populate TW agency targets.
+              {selectedCompany
+                ? `No TW cases found for ${selectedCompany}. Try selecting a different company.`
+                : "Import an Allocation Excel from the Dashboard to populate TW agency targets."}
             </Text>
             <Pressable style={styles.retryBtn} onPress={() => refetch()}>
               <Ionicons name="refresh" size={14} color="#fff" />
@@ -508,32 +467,29 @@ export default function AgencyTargetScreen() {
         )}
       </ScrollView>
 
-      <EditTargetsModal
-        visible={editVisible}
-        targets={targets}
-        onSave={saveTargets}
-        onClose={() => setEditVisible(false)}
-      />
+      <EditTargetsModal visible={editVisible} targets={targets} onSave={saveTargets} onClose={() => setEditVisible(false)} />
     </>
   );
 }
 
 const styles = StyleSheet.create({
-  container:       { padding: 16, gap: 14 },
-  topBar:          { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  topBarLeft:      { flexDirection: "row", alignItems: "center", gap: 7 },
-  topBarTitle:     { fontSize: 16, fontWeight: "800", color: Colors.text },
-  editBtn:         { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: Colors.primary + "18", borderRadius: 10, paddingHorizontal: 14, paddingVertical: 8, borderWidth: 1, borderColor: Colors.primary + "30" },
-  editBtnText:     { fontSize: 13, fontWeight: "700", color: Colors.primary },
-  targetChipsRow:  { flexDirection: "row", gap: 8 },
-  targetChip:      { flex: 1, borderRadius: 10, borderWidth: 1, padding: 10, gap: 3, alignItems: "center" },
-  targetChipBkt:   { fontSize: 11, fontWeight: "800", textTransform: "uppercase" },
-  targetChipVal:   { fontSize: 10, fontWeight: "600", color: Colors.textSecondary },
-  infoBanner:      { flexDirection: "row", alignItems: "flex-start", gap: 8, backgroundColor: Colors.info + "15", borderRadius: 10, padding: 12, borderLeftWidth: 3, borderLeftColor: Colors.info },
-  infoText:        { flex: 1, fontSize: 12, color: Colors.textSecondary, lineHeight: 18 },
-  empty:           { flex: 1, alignItems: "center", justifyContent: "center", paddingVertical: 80, gap: 12 },
-  emptyTitle:      { fontSize: 18, fontWeight: "800", color: Colors.text },
-  emptyText:       { fontSize: 13, color: Colors.textMuted, textAlign: "center", maxWidth: 280, lineHeight: 20 },
-  retryBtn:        { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: Colors.primary, borderRadius: 10, paddingHorizontal: 20, paddingVertical: 10, marginTop: 8 },
-  retryBtnText:    { color: "#fff", fontSize: 13, fontWeight: "700" },
+  container:          { padding: 16, gap: 14 },
+  topBar:             { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  topBarLeft:         { flexDirection: "row", alignItems: "center", gap: 7 },
+  topBarTitle:        { fontSize: 16, fontWeight: "800", color: Colors.text },
+  editBtn:            { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: Colors.primary + "18", borderRadius: 10, paddingHorizontal: 14, paddingVertical: 8, borderWidth: 1, borderColor: Colors.primary + "30" },
+  editBtnText:        { fontSize: 13, fontWeight: "700", color: Colors.primary },
+  companyBanner:      { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: Colors.primary + "12", borderRadius: 10, padding: 10, borderWidth: 1, borderColor: Colors.primary + "25" },
+  companyBannerText:  { flex: 1, fontSize: 13, color: Colors.text },
+  targetChipsRow:     { flexDirection: "row", gap: 8 },
+  targetChip:         { flex: 1, borderRadius: 10, borderWidth: 1, padding: 10, gap: 3, alignItems: "center" },
+  targetChipBkt:      { fontSize: 11, fontWeight: "800", textTransform: "uppercase" },
+  targetChipVal:      { fontSize: 10, fontWeight: "600", color: Colors.textSecondary },
+  infoBanner:         { flexDirection: "row", alignItems: "flex-start", gap: 8, backgroundColor: Colors.info + "15", borderRadius: 10, padding: 12, borderLeftWidth: 3, borderLeftColor: Colors.info },
+  infoText:           { flex: 1, fontSize: 12, color: Colors.textSecondary, lineHeight: 18 },
+  empty:              { flex: 1, alignItems: "center", justifyContent: "center", paddingVertical: 80, gap: 12 },
+  emptyTitle:         { fontSize: 18, fontWeight: "800", color: Colors.text },
+  emptyText:          { fontSize: 13, color: Colors.textMuted, textAlign: "center", maxWidth: 280, lineHeight: 20 },
+  retryBtn:           { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: Colors.primary, borderRadius: 10, paddingHorizontal: 20, paddingVertical: 10, marginTop: 8 },
+  retryBtnText:       { color: "#fff", fontSize: 13, fontWeight: "700" },
 });
