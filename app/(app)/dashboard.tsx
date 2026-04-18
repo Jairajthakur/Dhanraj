@@ -188,9 +188,9 @@ function DRRWidget({ rows }: { rows: any[] }) {
 // ─── Main Dashboard ───────────────────────────────────────────────────────────
 export default function Dashboard() {
   const insets              = useSafeAreaInsets();
-  const { selectedCompany } = useCompany();
-  const company             = selectedCompany;
-
+ const { selectedCompany, setSelectedCompany } = useCompany();
+const company = selectedCompany === "All" ? null : selectedCompany;
+  
   const { data: stats, isLoading, refetch: refetchStats } = useQuery({
     queryKey:  ["/api/stats", company],
     queryFn:   () => api.getStats({ company }),
@@ -210,6 +210,11 @@ export default function Dashboard() {
     queryKey: ["/api/bkt-tw-collection-summary", company],
     queryFn:  () => api.getBktTwCollectionSummary({ company }),
   });
+
+  const { data: companiesData } = useQuery({
+  queryKey: ["/api/companies"],
+  queryFn:  () => api.getCompanies(),
+});
 
   const refetch = useCallback(() => {
     refetchStats(); refetchPtp(); refetchDrr(); refetchTw();
@@ -237,8 +242,14 @@ export default function Dashboard() {
   return (
     <View style={{ flex: 1, backgroundColor: Colors.background }}>
       {/* Company Filter Bar */}
-      <CompanyFilterBar onSelect={() => { refetch(); }} />
-
+      <CompanyFilterBar
+  companies={companiesData?.companies ?? []}
+  selected={selectedCompany}
+  onSelect={(company) => {
+    setSelectedCompany(company);
+    refetch();
+  }}
+/>
       <ScrollView
         contentContainerStyle={[styles.container, {
           paddingBottom: insets.bottom + 24,
