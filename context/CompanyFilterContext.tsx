@@ -26,17 +26,20 @@ export function CompanyFilterProvider({ children }: { children: React.ReactNode 
   const [selectedCompany, setSelectedCompany] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
-  const refreshCompanies = useCallback(async () => {
-    setIsLoading(true);
-    try {
-      const res = await api.admin.getCompanies();
-      setCompanies(res?.companies ?? []);
-    } catch {
-      setCompanies([]);
-    } finally {
-      setIsLoading(false);
-    }
-  }, []);
+ const refreshCompanies = useCallback(async () => {
+  setIsLoading(true);
+  console.log('[CompanyFilter] fetching companies...');  // add this
+  try {
+    const res = await api.admin.getCompanies();
+    console.log('[CompanyFilter] result:', res);  // add this
+    setCompanies(res?.companies ?? []);
+  } catch (e) {
+    console.log('[CompanyFilter] error:', e);  // add this
+    setCompanies([]);
+  } finally {
+    setIsLoading(false);
+  }
+}, []);
 
   useEffect(() => {
     refreshCompanies();
