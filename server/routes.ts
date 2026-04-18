@@ -644,13 +644,21 @@ app.use("/api/fos-depositions", (req, res, next) => {
     catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
-  app.get("/api/companies", requireAuth, async (req, res) => {
-    try {
-      const companies = await storage.getDistinctCompaniesByAgent(req.session.agentId!);
-      res.json({ companies });
-    }
-    catch (e: any) { res.status(500).json({ message: e.message }); }
-  });
+ app.get("/api/companies", requireAuth, async (req, res) => {
+  try {
+    const isAdmin = req.session.role === "admin";
+    const agentId = req.session.agentId!;
+    const result = await storage.query(
+      isAdmin
+        ? `SELECT DISTINCT company_name FROM loan_cases WHERE company_name IS NOT NULL AND company_name <> '' ORDER BY company_name`
+        : `SELECT DISTINCT company_name FROM loan_cases WHERE agent_id=$1 AND company_name IS NOT NULL AND company_name <> '' ORDER BY company_name`,
+      isAdmin ? [] : [agentId]
+    );
+    res.json({ companies: result.rows.map((r: any) => r.company_name) });
+  } catch (e: any) {
+    res.status(500).json({ message: e.message });
+  }
+});
 
   app.get("/api/cases/:id", requireAuth, async (req, res) => {
     try {
@@ -765,13 +773,62 @@ app.get("/api/today-ptp", requireAuth, async (req, res) => {
     catch (e: any) { res.status(500).json({ message: e.message }); }
   });
   app.get("/api/admin/stats", requireAdmin, async (req, res) => {
-    try { res.json({ stats: await storage.getAllAgentStats() }); }
-    catch (e: any) { res.status(500).json({ message: e.message }); }
-  });
-  app.get("/api/admin/cases", requireAdmin, async (req, res) => {
-    try { res.json({ cases: await storage.getAllLoanCases() }); }
-    catch (e: any) { res.status(500).json({ message: e.message }); }
-  });
+  try {
+    const company = (req.query.company as string) || null;
+    if (company) {
+      // Return per-agent stats filtered by company
+      const result = await storage.query(`
+        SELECT
+          fa.id,
+          fa.name,
+          COUNT(lc.id)::int                                     AS total,
+          COUNT(lc.id) FILTER (WHERE lc.status='Paid')::int     AS paid,
+          COUNT(lc.id) FILTER (WHERE lc.status='PTP')::int      AS ptp,
+          COUNT(lc.id) FILTER (WHERE lc.status NOT IN ('Paid','PTP'))::int AS "notProcess"
+        FROM fos_agents fa
+        LEFT JOIN loan_cases lc ON lc.agent_id = fa.id AND lc.company_name = $1
+        WHERE fa.role = 'fos'
+        GROUP BY fa.id, fa.name
+        ORDER BY fa.name
+      `, [company]);
+      res.json({ stats: result.rows });
+    } else {
+      res.json({ stats: await storage.getAllAgentStats() });
+    }
+  } catch (e: any) {
+    res.status(500).json({ message: e.message });
+  }
+});
+ app.get("/api/admin/cases", requireAdmin, async (req, res) => {
+  try {
+    const company = (req.query.company as string) || null;
+    if (company) {
+      const result = await storage.query(
+        `SELECT * FROM loan_cases WHERE company_name = $1 ORDER BY customer_name`,
+        [company]
+      );
+      res.json({ cases: result.rows });
+    } else {
+      res.json({ cases: await storage.getAllLoanCases() });
+    }
+  } catch (e: any) {
+    res.status(500).json({ message: e.message });
+  }
+});
+
+  app.get("/api/admin/companies", requireAdmin, async (req, res) => {
+  try {
+    const result = await storage.query(`
+      SELECT DISTINCT company_name
+      FROM loan_cases
+      WHERE company_name IS NOT NULL AND company_name <> ''
+      ORDER BY company_name
+    `);
+    res.json({ companies: result.rows.map((r: any) => r.company_name) });
+  } catch (e: any) {
+    res.status(500).json({ message: e.message });
+  }
+});
 
   app.get("/api/admin/cases/agent/:agentId", requireAdmin, async (req, res) => {
   try {
@@ -1595,11 +1652,85 @@ res.json({ imported, updated: 0, skipped, agentsCreated, agentsRemoved, total: r
   });
 
   app.get("/api/admin/bkt-perf-summary", requireAdmin, async (req, res) => {
-    try {
-      const result = await storage.query(`WITH norm AS (SELECT *, CASE LOWER(REPLACE(bkt,' ','')) WHEN '1' THEN 'bkt1' WHEN '2' THEN 'bkt2' WHEN '3' THEN 'bkt3' WHEN 'bkt1' THEN 'bkt1' WHEN 'bkt2' THEN 'bkt2' WHEN 'bkt3' THEN 'bkt3' ELSE LOWER(REPLACE(bkt,' ','')) END AS bkt_norm FROM bkt_perf_summary), latest AS (SELECT DISTINCT ON (fos_name, bkt_norm) * FROM norm ORDER BY fos_name, bkt_norm, uploaded_at DESC) SELECT fos_name, bkt_norm AS bkt, COALESCE(pos_paid,0) AS pos_paid, COALESCE(pos_unpaid,0) AS pos_unpaid, COALESCE(pos_grand_total,0) AS pos_grand_total, COALESCE(pos_percentage,0) AS pos_percentage, COALESCE(count_paid,0) AS count_paid, COALESCE(count_unpaid,0) AS count_unpaid, COALESCE(count_total,0) AS count_total, COALESCE(rollback_paid,0) AS rollback_paid, COALESCE(rollback_unpaid,0) AS rollback_unpaid, COALESCE(rollback_grand_total,0) AS rollback_grand_total, COALESCE(rollback_percentage,0) AS rollback_percentage FROM latest ORDER BY fos_name, bkt_norm`);
+  try {
+    const company = (req.query.company as string) || null;
+ 
+    if (company) {
+      // Calculate live from loan_cases for the selected company
+      const result = await storage.query(`
+        SELECT
+          fa.name AS fos_name,
+          fa.id   AS agent_id,
+          CASE lc.bkt
+            WHEN 1 THEN 'bkt1'
+            WHEN 2 THEN 'bkt2'
+            WHEN 3 THEN 'bkt3'
+          END AS bkt,
+          COALESCE(SUM(lc.pos::numeric) FILTER (WHERE lc.status='Paid'), 0)  AS pos_paid,
+          COALESCE(SUM(lc.pos::numeric) FILTER (WHERE lc.status!='Paid'), 0) AS pos_unpaid,
+          COALESCE(SUM(lc.pos::numeric), 0)                                   AS pos_grand_total,
+          CASE WHEN COALESCE(SUM(lc.pos::numeric),0) > 0
+               THEN ROUND((COALESCE(SUM(lc.pos::numeric) FILTER (WHERE lc.status='Paid'),0) / SUM(lc.pos::numeric)) * 100, 2)
+               ELSE 0 END                                                      AS pos_percentage,
+          COUNT(*) FILTER (WHERE lc.status='Paid')::int  AS count_paid,
+          COUNT(*) FILTER (WHERE lc.status!='Paid')::int AS count_unpaid,
+          COUNT(*)::int                                   AS count_total,
+          COALESCE(SUM(lc.pos::numeric) FILTER (WHERE lc.rollback_yn=true), 0)                   AS rollback_paid,
+          COALESCE(SUM(lc.pos::numeric) FILTER (WHERE lc.rollback_yn IS DISTINCT FROM true), 0)  AS rollback_unpaid,
+          COALESCE(SUM(lc.pos::numeric), 0)                                                       AS rollback_grand_total,
+          CASE WHEN COALESCE(SUM(lc.pos::numeric),0) > 0
+               THEN ROUND((COALESCE(SUM(lc.pos::numeric) FILTER (WHERE lc.rollback_yn=true),0) / SUM(lc.pos::numeric)) * 100, 2)
+               ELSE 0 END AS rollback_percentage
+        FROM loan_cases lc
+        JOIN fos_agents fa ON fa.id = lc.agent_id
+        WHERE lc.bkt IS NOT NULL
+          AND lc.company_name = $1
+          AND UPPER(COALESCE(lc.pro, '')) NOT IN ('UC', 'RUC')
+        GROUP BY fa.id, fa.name, lc.bkt
+        HAVING CASE lc.bkt WHEN 1 THEN 'bkt1' WHEN 2 THEN 'bkt2' WHEN 3 THEN 'bkt3' END IS NOT NULL
+        ORDER BY fa.name, lc.bkt
+      `, [company]);
       res.json({ rows: result.rows });
-    } catch (e: any) { res.status(500).json({ message: e.message }); }
-  });
+    } else {
+      // Existing aggregated query (unchanged)
+      const result = await storage.query(`
+        WITH norm AS (
+          SELECT *,
+            CASE LOWER(REPLACE(bkt,' ',''))
+              WHEN '1' THEN 'bkt1' WHEN '2' THEN 'bkt2' WHEN '3' THEN 'bkt3'
+              WHEN 'bkt1' THEN 'bkt1' WHEN 'bkt2' THEN 'bkt2' WHEN 'bkt3' THEN 'bkt3'
+              ELSE LOWER(REPLACE(bkt,' ',''))
+            END AS bkt_norm
+          FROM bkt_perf_summary
+        ),
+        latest AS (
+          SELECT DISTINCT ON (fos_name, bkt_norm) *
+          FROM norm
+          ORDER BY fos_name, bkt_norm, uploaded_at DESC
+        )
+        SELECT
+          fos_name, bkt_norm AS bkt,
+          COALESCE(pos_paid,0)               AS pos_paid,
+          COALESCE(pos_unpaid,0)             AS pos_unpaid,
+          COALESCE(pos_grand_total,0)        AS pos_grand_total,
+          COALESCE(pos_percentage,0)         AS pos_percentage,
+          COALESCE(count_paid,0)             AS count_paid,
+          COALESCE(count_unpaid,0)           AS count_unpaid,
+          COALESCE(count_total,0)            AS count_total,
+          COALESCE(rollback_paid,0)          AS rollback_paid,
+          COALESCE(rollback_unpaid,0)        AS rollback_unpaid,
+          COALESCE(rollback_grand_total,0)   AS rollback_grand_total,
+          COALESCE(rollback_percentage,0)    AS rollback_percentage
+        FROM latest
+        ORDER BY fos_name, bkt_norm
+      `);
+      res.json({ rows: result.rows });
+    }
+  } catch (e: any) {
+    res.status(500).json({ message: e.message });
+  }
+});
+
 
   app.get("/api/bkt-tw-collection-summary", requireAuth, async (req, res) => {
     try {
@@ -2955,6 +3086,16 @@ app.get("/api/admin/field-visits", requireAdmin, async (req: Request, res: Respo
       params.push(String(date));
       sql += ` AND DATE(fv.visited_at AT TIME ZONE 'Asia/Kolkata') = $${params.length}::date`;
     }
+    if (req.query.company) {
+  params.push(String(req.query.company));
+  sql += `
+    AND (
+      (LOWER(TRIM(fv.case_type)) = 'bkt' AND bc.company_name = $${params.length})
+      OR
+      (LOWER(TRIM(fv.case_type)) != 'bkt' AND lc.company_name = $${params.length})
+    )
+  `;
+}
 
     sql += " ORDER BY fv.visited_at DESC LIMIT 200";
 
