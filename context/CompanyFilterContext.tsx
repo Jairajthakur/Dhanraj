@@ -1,52 +1,95 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from "react";
-import { api } from "@/lib/api";
+import React from "react";
+import {
+  View,
+  Text,
+  ScrollView,
+  TouchableOpacity,
+  StyleSheet,
+} from "react-native";
 
-interface CompanyFilterContextType {
+interface CompanyFilterBarProps {
   companies: string[];
-  selectedCompany: string | null;
-  setSelectedCompany: (c: string | null) => void;
-  isLoading: boolean;
-  refreshCompanies: () => void;
+  selected: string | null;
+  onSelect: (company: string | null) => void;
 }
 
-export const CompanyFilterContext = createContext<CompanyFilterContextType>({
-  companies: [],
-  selectedCompany: null,
-  setSelectedCompany: () => {},
-  isLoading: false,
-  refreshCompanies: () => {},
-});
-
-export function useCompanyFilter() {
-  return useContext(CompanyFilterContext);
-}
-
-export function CompanyFilterProvider({ children }: { children: React.ReactNode }) {
-  const [companies, setCompanies] = useState<string[]>([]);
-  const [selectedCompany, setSelectedCompany] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
-
-  const refreshCompanies = useCallback(async () => {
-    setIsLoading(true);
-    try {
-      const res = await api.admin.getCompanies();
-      setCompanies(res?.companies ?? []);
-    } catch {
-      setCompanies([]);
-    } finally {
-      setIsLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    refreshCompanies();
-  }, [refreshCompanies]);
+export function CompanyFilterBar({
+  companies,
+  selected,
+  onSelect,
+}: CompanyFilterBarProps) {
+  if (!companies || companies.length === 0) return null;
 
   return (
-    <CompanyFilterContext.Provider
-      value={{ companies, selectedCompany, setSelectedCompany, isLoading, refreshCompanies }}
-    >
-      {children}
-    </CompanyFilterContext.Provider>
+    <View style={styles.wrapper}>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.scroll}
+      >
+        <TouchableOpacity
+          style={[styles.chip, selected === null && styles.chipActive]}
+          onPress={() => onSelect(null)}
+        >
+          <Text style={[styles.chipText, selected === null && styles.chipTextActive]}>
+            All
+          </Text>
+        </TouchableOpacity>
+
+        {companies.map((company) => (
+          <TouchableOpacity
+            key={company}
+            style={[styles.chip, selected === company && styles.chipActive]}
+            onPress={() => onSelect(company)}
+          >
+            <Text
+              style={[
+                styles.chipText,
+                selected === company && styles.chipTextActive,
+              ]}
+              numberOfLines={1}
+            >
+              {company}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </ScrollView>
+    </View>
   );
 }
+
+const styles = StyleSheet.create({
+  wrapper: {
+    backgroundColor: "#0f172a",
+    borderBottomWidth: 1,
+    borderBottomColor: "#1e293b",
+  },
+  scroll: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    gap: 8,
+    flexDirection: "row",
+  },
+  chip: {
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 20,
+    backgroundColor: "#1e293b",
+    borderWidth: 1,
+    borderColor: "#334155",
+    marginRight: 8,
+  },
+  chipActive: {
+    backgroundColor: "#ff6b00",
+    borderColor: "#ff6b00",
+  },
+  chipText: {
+    color: "#94a3b8",
+    fontSize: 13,
+    fontWeight: "500",
+  },
+  chipTextActive: {
+    color: "#ffffff",
+    fontWeight: "700",
+  },
+});
