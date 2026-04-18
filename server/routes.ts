@@ -564,7 +564,7 @@ app.use("/api/fos-depositions", (req, res, next) => {
     store: new PgStore({ conString: process.env.DATABASE_URL, tableName: "user_sessions", createTableIfMissing: true }),
     secret: process.env.SESSION_SECRET || "fos-secret-key-2024",
     resave: false, saveUninitialized: false,
-    cookie: { secure: false, httpOnly: true, sameSite: "lax", maxAge: 30 * 24 * 60 * 60 * 1000 },
+cookie: { secure: process.env.NODE_ENV === "production", httpOnly: true, sameSite: "lax", maxAge: 30 * 24 * 60 * 60 * 1000 },
   }));
 
   function requireAuth(req: Request, res: Response, next: any) {
@@ -854,7 +854,7 @@ app.get("/api/today-ptp", requireAuth, async (req, res) => {
   }
 });
 
-  app.get("/api/admin/companies", requireAdmin, async (req, res) => {
+app.get("/api/admin/companies", requireAuth, async (req, res) => {
   try {
    const result = await storage.query(`
   SELECT DISTINCT company_name FROM (
