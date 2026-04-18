@@ -500,7 +500,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     await storage.query(`ALTER TABLE loan_cases ADD COLUMN IF NOT EXISTS company_name TEXT`);
     console.log("[DB] loan_cases.company_name column ready ✅");
   } catch (e: any) { console.error("[DB] loan_cases.company_name migration:", e.message); }
-
+try {
+    await storage.query(`ALTER TABLE bkt_cases ADD COLUMN IF NOT EXISTS company_name TEXT`);
+    console.log("[DB] bkt_cases.company_name column ready ✅");
+  } catch (e: any) { console.error("[DB] bkt_cases.company_name migration:", e.message); }
   try {
     await storage.query(`CREATE TABLE IF NOT EXISTS fos_depositions (
       id SERIAL PRIMARY KEY, agent_id INTEGER REFERENCES fos_agents(id),
@@ -857,11 +860,9 @@ app.get("/api/today-ptp", requireAuth, async (req, res) => {
 app.get("/api/admin/companies", requireAuth, async (req, res) => {
   try {
    const result = await storage.query(`
-  SELECT DISTINCT company_name FROM (
-    SELECT company_name FROM loan_cases WHERE company_name IS NOT NULL AND company_name <> ''
-    UNION
-    SELECT company_name FROM bkt_cases WHERE company_name IS NOT NULL AND company_name <> ''
-  ) t ORDER BY company_name
+  SELECT DISTINCT company_name FROM loan_cases 
+  WHERE company_name IS NOT NULL AND company_name <> ''
+  ORDER BY company_name
 `);
     res.json({ companies: result.rows.map((r: any) => r.company_name) });
   } catch (e: any) {
