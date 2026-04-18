@@ -14,6 +14,8 @@ import Colors from "@/constants/colors";
 import { api } from "@/lib/api";
 import { getApiUrl } from "@/lib/query-client";
 import { tokenStore } from "@/lib/api";
+// DIFF 1: Import useCompanyFilter
+import { useCompanyFilter } from "@/context/CompanyFilterContext";
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 const fmt = (n: any) => parseFloat(n || 0).toLocaleString("en-IN");
@@ -236,7 +238,7 @@ function AddDepositionModal({ visible, onClose, onSaved, agents }: any) {
   );
 }
 
-// ─── FOS Detail Modal (FIXED) ─────────────────────────────────────────────────
+// ─── FOS Detail Modal ─────────────────────────────────────────────────────────
 function FosDetailModal({ visible, agentId, agentName, onClose, onUpdated, onViewScreenshot }: any) {
   const [payItem, setPayItem] = useState<any>(null);
 
@@ -345,6 +347,13 @@ function FosDetailModal({ visible, agentId, agentName, onClose, onUpdated, onVie
                         <Text style={fd.cardName}>{item.customer_name || "—"}</Text>
                         {item.loan_no && <Text style={fd.cardMeta}>{item.loan_no} · BKT {item.bkt || "—"}</Text>}
                         <Text style={fd.cardDate}>{fmtDateTime(item.created_at)}</Text>
+                        {/* DIFF 2: Company badge on each deposition card */}
+                        {item.company_name && (
+                          <View style={companyBadge.wrap}>
+                            <Ionicons name="business-outline" size={10} color={Colors.primary} />
+                            <Text style={companyBadge.text} numberOfLines={1}>{item.company_name}</Text>
+                          </View>
+                        )}
                       </View>
                       <View style={{ alignItems: "flex-end", gap: 6 }}>
                         <Text style={[fd.cardAmt, { color }]}>₹{fmt(assignedAmt)}</Text>
@@ -520,6 +529,9 @@ export default function AdminDepositionsScreen() {
   const [downloading, setDownloading] = useState(false);
   const [screenshotUrl, setScreenshotUrl] = useState<string | null>(null);
 
+  // DIFF 3: Read selectedCompany from context
+  const { selectedCompany } = useCompanyFilter();
+
   const { data, isLoading, refetch } = useQuery({
     queryKey: ["/api/admin/fos-depositions"],
     queryFn: () => apiReq("GET", "/api/admin/fos-depositions"),
@@ -588,6 +600,16 @@ return (
             <Text style={[scr.actionBtnText, { color: "#fff" }]}>Add</Text>
           </Pressable>
         </View>
+
+        {/* DIFF 3: Company filter indicator banner */}
+        {selectedCompany && (
+          <View style={scr.companyBanner}>
+            <Ionicons name="business" size={13} color={Colors.primary} />
+            <Text style={scr.companyBannerText}>
+              Filtered: {selectedCompany}
+            </Text>
+          </View>
+        )}
 
         <View style={scr.summaryRow}>
           <View style={[scr.sumCard, { borderTopColor: Colors.primary }]}>
@@ -663,7 +685,7 @@ return (
         onViewScreenshot={(url: string) => setScreenshotUrl(url)}
       />
 
-      {/* Screenshot viewer — as Modal so it works on both web and mobile */}
+      {/* Screenshot viewer */}
       <Modal
         visible={!!screenshotUrl}
         transparent
@@ -738,6 +760,15 @@ const scr = StyleSheet.create({
   empty: { flex: 1, justifyContent: "center", alignItems: "center", gap: 8, paddingVertical: 60 },
   emptyTitle: { fontSize: 16, fontWeight: "700", color: Colors.textMuted },
   emptyText: { fontSize: 13, color: Colors.textMuted, textAlign: "center" },
+  // DIFF 4: Company banner styles
+  companyBanner: {
+    flexDirection: "row", alignItems: "center", gap: 8,
+    backgroundColor: Colors.primary + "12", borderRadius: 8,
+    paddingHorizontal: 14, paddingVertical: 8,
+    marginHorizontal: 16, marginBottom: 4,
+    borderWidth: 1, borderColor: Colors.primary + "25",
+  },
+  companyBannerText: { fontSize: 12, fontWeight: "700", color: Colors.primary },
 });
 
 const ms = StyleSheet.create({
@@ -787,10 +818,8 @@ const fd = StyleSheet.create({
   payBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20 },
   payBadgeText: { fontSize: 11, fontWeight: "700" },
   subAmt: { fontSize: 12, fontWeight: "600", color: Colors.success },
-  // ✅ NEW: remaining banner
   remainingBanner: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 8, backgroundColor: Colors.warning + "15", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6, borderWidth: 1, borderColor: Colors.warning + "30" },
   remainingText: { fontSize: 12, fontWeight: "700", color: Colors.warning, flex: 1 },
-  // ✅ FIXED: proper screenshot card
   screenshotCard: { flexDirection: "row", alignItems: "center", gap: 12, marginTop: 10, backgroundColor: "#2563eb08", borderRadius: 10, padding: 10, borderWidth: 1, borderColor: "#2563eb30" },
   screenshotThumb: { width: 72, height: 72, borderRadius: 8, backgroundColor: Colors.border },
   screenshotInfo: { flex: 1, gap: 4 },
@@ -812,4 +841,15 @@ const imp = StyleSheet.create({
   result: { backgroundColor: Colors.success + "12", borderRadius: 10, padding: 12, gap: 4, borderWidth: 1, borderColor: Colors.success + "30" },
   resultTitle: { fontSize: 14, fontWeight: "700", color: Colors.success },
   resultText: { fontSize: 13, color: Colors.text },
+});
+
+// DIFF 5: Company badge StyleSheet
+const companyBadge = StyleSheet.create({
+  wrap: {
+    flexDirection: "row", alignItems: "center", gap: 4,
+    marginTop: 4, backgroundColor: Colors.primary + "12",
+    borderRadius: 6, paddingHorizontal: 7, paddingVertical: 2,
+    alignSelf: "flex-start",
+  },
+  text: { fontSize: 10, fontWeight: "700", color: Colors.primary },
 });
