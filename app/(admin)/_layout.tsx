@@ -7,6 +7,7 @@ import Colors from "@/constants/colors";
 import { useAuth } from "@/context/AuthContext";
 import * as Haptics from "expo-haptics";
 import { CompanyFilterProvider, useCompanyFilter } from "@/context/CompanyFilterContext";
+import { useEffect } from "react";
 
 const ADMIN_MENU = [
   { key: "dashboard",    label: "Dashboard",        icon: "home"             as const, screen: "/(admin)"                  },
@@ -158,8 +159,14 @@ function AdminDrawer({ visible, onClose }: { visible: boolean; onClose: () => vo
 // ─── Layout ───────────────────────────────────────────────────────────────────
 function AdminLayoutInner() {
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const { selectedCompany } = useCompanyFilter();
+  const { selectedCompany, refreshCompanies } = useCompanyFilter();
+  const { agent } = useAuth(); // ← get agent from auth context
 
+  // Fetch companies once the admin session is confirmed
+useEffect(() => {
+    if (agent) refreshCompanies();
+  }, [agent, refreshCompanies]);
+  
   return (
     <>
       <Stack
