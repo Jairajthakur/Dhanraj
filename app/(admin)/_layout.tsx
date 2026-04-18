@@ -94,6 +94,10 @@ function AdminDrawer({ visible, onClose, onVisible }: { visible: boolean; onClos
     if (visible) onVisible?.();
   }, [visible]);
 
+  useEffect(() => {
+    if (visible) onVisible?.();
+  }, [visible]);
+
   const handleNav = (screen: string) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     onClose();
@@ -224,8 +228,7 @@ useEffect(() => {
         <Stack.Screen name="field-visits" options={{ title: "Field Visit Tracker" }} />
         <Stack.Screen name="daily-report" options={{ title: "Daily Report" }} />
       </Stack>
-        <AdminDrawer visible={drawerOpen} onClose={() => setDrawerOpen(false)} onVisible={refreshCompanies} />
-    </>
+<AdminDrawer visible={drawerOpen} onClose={() => setDrawerOpen(false)} onVisible={refreshCompanies} />    </>
   );
 }
 
