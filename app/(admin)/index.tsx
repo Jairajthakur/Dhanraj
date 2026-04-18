@@ -11,7 +11,7 @@ import Colors from "@/constants/colors";
 import { api } from "@/lib/api";
 import { getApiUrl } from "@/lib/query-client";
 import { fetch as expoFetch } from "expo/fetch";
-import { ImportModal, BktPerfImportModal } from "@/components/ImportModals";
+import { ImportModal } from "@/components/ImportModals";
 
 function AgentCard({ agent }: { agent: any }) {
   const rate = agent.total > 0 ? ((agent.paid / agent.total) * 100).toFixed(0) : "0";
@@ -53,8 +53,6 @@ export default function AdminDashboard() {
   const insets = useSafeAreaInsets();
   const qc = useQueryClient();
   const [importVisible, setImportVisible] = useState(false);
-  const [bktPerfImportVisible, setBktPerfImportVisible] = useState(false);
-  const [ptpDownloading, setPtpDownloading] = useState(false);
   const [feedbackDownloading, setFeedbackDownloading] = useState(false);
   const [ptpClearing, setPtpClearing] = useState(false);
   const [pushTesting, setPushTesting] = useState(false);
@@ -162,8 +160,7 @@ export default function AdminDashboard() {
     } finally { setLoading(false); }
   };
 
-  const handleDownloadPTP = () =>
-    downloadExcel("/api/admin/ptp-export", `PTP_Report_${new Date().toISOString().slice(0, 10)}.xlsx`, setPtpDownloading);
+
 
   const handleDownloadFeedback = () =>
     downloadExcel("/api/admin/feedback-export", `Feedback_Report_${new Date().toISOString().slice(0, 10)}.xlsx`, setFeedbackDownloading);
@@ -250,35 +247,8 @@ export default function AdminDashboard() {
           <Ionicons name="chevron-forward" size={22} color="rgba(255,255,255,0.7)" />
         </Pressable>
 
-        {/* Import Penal Performance */}
-        <Pressable style={[styles.importBanner, { backgroundColor: "#7C3AED" }]} onPress={() => setBktPerfImportVisible(true)}>
-          <View style={styles.importBannerLeft}>
-            <Ionicons name="bar-chart-outline" size={28} color="#fff" />
-            <View style={styles.importBannerText}>
-              <Text style={styles.importBannerTitle}>Import Penal Performance</Text>
-              <Text style={styles.importBannerSub}>Upload penal summary Excel: Fos_Name, Values, PAID, UNPAID, Grand Total, Percentage, Rollback</Text>
-            </View>
-          </View>
-          <Ionicons name="chevron-forward" size={22} color="rgba(255,255,255,0.7)" />
-        </Pressable>
 
-        {/* Download PTP */}
-        <Pressable
-          style={[styles.importBanner, { backgroundColor: Colors.success }, ptpDownloading && { opacity: 0.7 }]}
-          onPress={handleDownloadPTP}
-          disabled={ptpDownloading}
-        >
-          <View style={styles.importBannerLeft}>
-            {ptpDownloading
-              ? <ActivityIndicator color="#fff" size="small" style={{ marginRight: 4 }} />
-              : <Ionicons name="download-outline" size={28} color="#fff" />}
-            <View style={styles.importBannerText}>
-              <Text style={styles.importBannerTitle}>Download PTP Report</Text>
-              <Text style={styles.importBannerSub}>{ptpDownloading ? "Preparing file…" : "Export all PTP cases with customer details as Excel"}</Text>
-            </View>
-          </View>
-          {!ptpDownloading && <Ionicons name="chevron-forward" size={22} color="rgba(255,255,255,0.7)" />}
-        </Pressable>
+
 
         {/* Download Feedback */}
         <Pressable
@@ -424,14 +394,6 @@ export default function AdminDashboard() {
           qc.invalidateQueries({ queryKey: ["/api/admin/bkt-perf-summary"] });
           qc.invalidateQueries({ queryKey: ["/api/bkt-perf-summary"] });
           refetch();
-        }}
-      />
-      <BktPerfImportModal
-        visible={bktPerfImportVisible}
-        onClose={() => setBktPerfImportVisible(false)}
-        onDone={() => {
-          qc.invalidateQueries({ queryKey: ["/api/admin/bkt-perf-summary"] });
-          qc.invalidateQueries({ queryKey: ["/api/bkt-perf-summary"] });
         }}
       />
     </View>
