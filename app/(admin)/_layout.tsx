@@ -75,10 +75,14 @@ const cs = StyleSheet.create({
 });
 
 // ─── Drawer ───────────────────────────────────────────────────────────────────
-function AdminDrawer({ visible, onClose }: { visible: boolean; onClose: () => void }) {
+function AdminDrawer({ visible, onClose, onVisible }: { visible: boolean; onClose: () => void; onVisible?: () => void }) {
   const insets = useSafeAreaInsets();
   const { logout } = useAuth();
   const { selectedCompany } = useCompanyFilter();
+
+  useEffect(() => {
+    if (visible) onVisible?.();
+  }, [visible]);
 
   const handleNav = (screen: string) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -210,7 +214,7 @@ useEffect(() => {
         <Stack.Screen name="field-visits" options={{ title: "Field Visit Tracker" }} />
         <Stack.Screen name="daily-report" options={{ title: "Daily Report" }} />
       </Stack>
-      <AdminDrawer visible={drawerOpen} onClose={() => setDrawerOpen(false)} />
+        <AdminDrawer visible={drawerOpen} onClose={() => setDrawerOpen(false)} onVisible={refreshCompanies} />
     </>
   );
 }
