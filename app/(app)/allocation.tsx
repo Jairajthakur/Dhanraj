@@ -1228,35 +1228,47 @@ export default function AllocationScreen() {
   return (
     <View style={{ flex: 1, backgroundColor: "#EFEFEF" }}>
       {/* Company tabs — only shown after loaded and when there are multiple companies */}
-      {!companiesLoading && companies.length > 1 && (
-        <ScrollView horizontal showsHorizontalScrollIndicator={false}
-          style={{
-            backgroundColor: Colors.surface,
-            borderBottomWidth: StyleSheet.hairlineWidth,
-            borderBottomColor: Colors.border,
-            
-          }}
-          contentContainerStyle={{ flexDirection: "row", paddingHorizontal: 12, paddingVertical: 10 }}
-        >
-          {companies.map((c, idx) => (
-            <Pressable
-              key={c}
-              style={{
-                paddingHorizontal: 20, paddingVertical: 9, borderRadius: 20,
-                marginRight: idx < companies.length - 1 ? 8 : 0,
-                backgroundColor: activeCompany === c ? Colors.primary : "#FFFFFF",
-                borderWidth: 1.5,
-                borderColor: activeCompany === c ? Colors.primary : "#AAAAAA",
-              }}
-              onPress={() => { setActiveCompany(c); setActiveTab("All"); }}
-            >
-              <Text style={{ fontSize: 14, fontWeight: "700", color: activeCompany === c ? "#FFFFFF" : "#111111" }}>
-                {c}
-              </Text>
-            </Pressable>
-          ))}
-        </ScrollView>
-      )}
+     {!companiesLoading && companies.length > 1 && (
+  <ScrollView
+    horizontal
+    showsHorizontalScrollIndicator={false}
+    style={{
+      flexGrow: 0,
+      flexShrink: 0,
+      backgroundColor: Colors.surface,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: Colors.border,
+    }}
+    contentContainerStyle={{
+      flexDirection: "row",
+      alignItems: "center",
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+    }}
+  >
+    {companies.map((c, idx) => (
+      <Pressable
+        key={c}
+        style={{
+          paddingHorizontal: 20,
+          paddingVertical: 9,
+          borderRadius: 20,
+          marginRight: idx < companies.length - 1 ? 8 : 0,
+          backgroundColor: activeCompany === c ? Colors.primary : "#FFFFFF",
+          borderWidth: 1.5,
+          borderColor: activeCompany === c ? Colors.primary : "#AAAAAA",
+          alignSelf: "center",
+        }}
+        onPress={() => { setActiveCompany(c); setActiveTab("All"); }}
+      >
+        <Text style={{ fontSize: 14, fontWeight: "700", color: activeCompany === c ? "#FFFFFF" : "#111111" }}>
+          {c}
+        </Text>
+      </Pressable>
+    ))}
+  </ScrollView>
+)}
+         
 
       {/* Status tabs */}
       <View style={[styles.tabsContainer, { paddingTop: 12 }]}>
