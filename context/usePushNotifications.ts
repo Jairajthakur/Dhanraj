@@ -106,6 +106,7 @@ async function forceResubscribe(OneSignal: any): Promise<void> {
 
 let initPromise: Promise<void> | null = null;
 let initCompleted = false;
+let isRegistering = false;
 
 export function resetPushInit() {
   initPromise = null;
@@ -113,6 +114,7 @@ export function resetPushInit() {
   console.log("[OneSignal] Init state reset (logout)");
 }
 
+export function isPushRegistering() { return isRegistering; } 
 function ensureInit(): Promise<void> {
   if (Platform.OS === "web") return Promise.resolve();
   if (initCompleted) return Promise.resolve();
@@ -176,78 +178,82 @@ async function waitForAuthToken(timeoutMs = 15000): Promise<string | null> {
 
 export async function registerPushToken(isPostUpdate = false): Promise<void> {
   if (Platform.OS === "web") return;
+  isRegistering = true;   // ← ADD THIS LINE
+  try {
+    console.log("[OneSignal] registerPushToken() — isPostUpdate:", isPostUpdate);
 
-  console.log("[OneSignal] registerPushToken() — isPostUpdate:", isPostUpdate);
+    console.log("[OneSignal] Waiting for auth token...");
+    const authToken = await waitForAuthToken(15000);
+    if (!authToken) {
+      console.error("[OneSignal] ❌ Auth token never appeared — aborting push registration");
+      return;
+    }
+    console.log("[OneSignal] ✅ Auth token ready");
 
-  console.log("[OneSignal] Waiting for auth token...");
-  const authToken = await waitForAuthToken(15000);
-  if (!authToken) {
-    console.error("[OneSignal] ❌ Auth token never appeared — aborting push registration");
-    return;
-  }
-  console.log("[OneSignal] ✅ Auth token ready");
+    await ensureInit();
 
-  await ensureInit();
-
-  const OneSignal = getOneSignal();
-  if (!OneSignal) {
-    console.warn("[OneSignal] Module not available");
-    return;
-  }
-
-  if (isPostUpdate) {
-    await forceResubscribe(OneSignal);
-  } else {
-    try {
-      const isOptedIn = OneSignal.User?.pushSubscription?.optedIn;
-      if (!isOptedIn) {
-        await OneSignal.User.pushSubscription.optIn();
-        await new Promise((r) => setTimeout(r, 3000));
-      }
-    } catch (_) {}
-  }
-
-  const maxAttempts = 40;
-  let nullIdStreak = 0;
-
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    console.log(`[OneSignal] Poll ${attempt}/${maxAttempts}`);
-
-    const playerId = await getOnesignalPlayerId(OneSignal);
-
-    if (playerId) {
-      nullIdStreak = 0;
-      try {
-        await savePushTokenToServer(playerId);
-        console.log(`[OneSignal] ✅ Token registered on attempt ${attempt}`);
-        return;
-      } catch (e: any) {
-        if (e.message === "NO_AUTH_TOKEN") {
-          console.error("[OneSignal] ❌ Auth token lost mid-registration — aborting");
-          return;
-        }
-        console.warn("[OneSignal] Server save failed:", e.message);
-      }
-    } else {
-      nullIdStreak++;
-      if (nullIdStreak % 6 === 0) {
-        console.log("[OneSignal] Extended null streak — re-triggering optOut/optIn");
-        try {
-          await OneSignal.User.pushSubscription.optOut();
-          await new Promise((r) => setTimeout(r, 1500));
-          await OneSignal.User.pushSubscription.optIn();
-          await new Promise((r) => setTimeout(r, 5000));
-          continue;
-        } catch (_) {}
-      } else if (attempt % 2 === 0) {
-        try { await OneSignal.User.pushSubscription.optIn(); } catch (_) {}
-      }
+    const OneSignal = getOneSignal();
+    if (!OneSignal) {
+      console.warn("[OneSignal] Module not available");
+      return;
     }
 
-    if (attempt < maxAttempts) await new Promise((r) => setTimeout(r, 3000));
-  }
+    if (isPostUpdate) {
+      await forceResubscribe(OneSignal);
+    } else {
+      try {
+        const isOptedIn = OneSignal.User?.pushSubscription?.optedIn;
+        if (!isOptedIn) {
+          await OneSignal.User.pushSubscription.optIn();
+          await new Promise((r) => setTimeout(r, 3000));
+        }
+      } catch (_) {}
+    }
 
-  console.warn("[OneSignal] ❌ Could not register token after", maxAttempts, "attempts");
+    const maxAttempts = 40;
+    let nullIdStreak = 0;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      console.log(`[OneSignal] Poll ${attempt}/${maxAttempts}`);
+
+      const playerId = await getOnesignalPlayerId(OneSignal);
+
+      if (playerId) {
+        nullIdStreak = 0;
+        try {
+          await savePushTokenToServer(playerId);
+          console.log(`[OneSignal] ✅ Token registered on attempt ${attempt}`);
+          return;
+        } catch (e: any) {
+          if (e.message === "NO_AUTH_TOKEN") {
+            console.error("[OneSignal] ❌ Auth token lost mid-registration — aborting");
+            return;
+          }
+          console.warn("[OneSignal] Server save failed:", e.message);
+        }
+      } else {
+        nullIdStreak++;
+        if (nullIdStreak % 6 === 0) {
+          console.log("[OneSignal] Extended null streak — re-triggering optOut/optIn");
+          try {
+            await OneSignal.User.pushSubscription.optOut();
+            await new Promise((r) => setTimeout(r, 1500));
+            await OneSignal.User.pushSubscription.optIn();
+            await new Promise((r) => setTimeout(r, 5000));
+            continue;
+          } catch (_) {}
+        } else if (attempt % 2 === 0) {
+          try { await OneSignal.User.pushSubscription.optIn(); } catch (_) {}
+        }
+      }
+
+      if (attempt < maxAttempts) await new Promise((r) => setTimeout(r, 3000));
+    }
+
+    console.warn("[OneSignal] ❌ Could not register token after", maxAttempts, "attempts");
+  } finally {
+    isRegistering = false;  // ← ADD THIS LINE
+  }
 }
 
 export function usePushNotifications() {
