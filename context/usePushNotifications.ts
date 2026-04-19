@@ -111,10 +111,14 @@ let isRegistering = false;
 export function resetPushInit() {
   initPromise = null;
   initCompleted = false;
+  isRegistering = false;
   console.log("[OneSignal] Init state reset (logout)");
 }
 
-export function isPushRegistering() { return isRegistering; } 
+export function isPushRegistering(): boolean {
+  return isRegistering;
+}
+
 function ensureInit(): Promise<void> {
   if (Platform.OS === "web") return Promise.resolve();
   if (initCompleted) return Promise.resolve();
@@ -178,7 +182,8 @@ async function waitForAuthToken(timeoutMs = 15000): Promise<string | null> {
 
 export async function registerPushToken(isPostUpdate = false): Promise<void> {
   if (Platform.OS === "web") return;
-  isRegistering = true;   // ← ADD THIS LINE
+  isRegistering = true;
+
   try {
     console.log("[OneSignal] registerPushToken() — isPostUpdate:", isPostUpdate);
 
@@ -252,7 +257,7 @@ export async function registerPushToken(isPostUpdate = false): Promise<void> {
 
     console.warn("[OneSignal] ❌ Could not register token after", maxAttempts, "attempts");
   } finally {
-    isRegistering = false;  // ← ADD THIS LINE
+    isRegistering = false;
   }
 }
 
