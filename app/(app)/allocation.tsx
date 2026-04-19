@@ -13,6 +13,8 @@ import * as Location from "expo-location";
 import Colors from "@/constants/colors";
 import { api } from "@/lib/api";
 import { caseStore } from "@/lib/caseStore";
+import BlockingActionModal from "@/components/BlockingActionModal";
+import { useBlockingItems } from "@/hooks/useBlockingItems";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const STATUS_TABS = ["All", "Unpaid", "PTP", "Paid"] as const;
@@ -315,6 +317,8 @@ function FeedbackModal({
 
   // Reset active tab whenever the modal opens with a (possibly different) initialTab
   const [activeTab, setActiveTab] = useState<FeedbackTab>(initialTab);
+  const { items: blockingItems, isBlocking, snooze, refetch: refetchBlocking } =
+  useBlockingItems();
   useEffect(() => {
     if (visible) setActiveTab(initialTab);
   }, [visible, initialTab]);
@@ -1352,6 +1356,12 @@ export default function AllocationScreen() {
           onClose={() => setModalItem(null)}
         />
       )}
+      <BlockingActionModal
+        visible={isBlocking}
+        items={blockingItems}
+        onDismiss={snooze}
+        onActionTaken={refetchBlocking}
+      />
     </View>
   );
 }
