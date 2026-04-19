@@ -9,7 +9,6 @@ import React, {
 } from "react";
 import { AppState, AppStateStatus, Platform } from "react-native";
 import { api, agentCache, tokenStore } from "../lib/api";
-import { resetPushInit } from "@/context/usePushNotifications";
 import { resetPushInit, isPushRegistering } from "@/context/usePushNotifications";
 
 
