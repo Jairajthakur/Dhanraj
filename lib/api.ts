@@ -208,6 +208,12 @@ export const api = {
   getTodayPtp: (params?: { company?: string | null }) =>
     apiRequest("GET", `/api/today-ptp${qs({ company: params?.company })}`),
 
+  getBrokenPtps: (): Promise<import("@/components/BlockingActionModal").BlockingItem[]> =>
+  apiRequest("GET", "/api/broken-ptps"),
+
+snoozeBlocking: () =>
+  apiRequest("POST", "/api/broken-ptps/snooze"),
+
   addExtraNumber: (id: number, number: string, table: string) =>
     apiRequest("POST", `/api/cases/${id}/extra-numbers`, { number, table }),
 
