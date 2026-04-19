@@ -372,7 +372,6 @@ function FeedbackModal({
 }: FeedbackModalProps) {
 
   const [activeTab, setActiveTab] = useState<FeedbackTab>(initialTab);
-  const { items: blockingItems, isBlocking, snooze, refetch: refetchBlocking } = useBlockingItems();
 
   useEffect(() => { if (visible) setActiveTab(initialTab); }, [visible, initialTab]);
 
@@ -1210,6 +1209,8 @@ export default function AllocationScreen() {
   const [search,        setSearch]        = useState("");
   const [modalItem,     setModalItem]     = useState<CaseItem | null>(null);
   const [modalInitTab,  setModalInitTab]  = useState<FeedbackTab>("Call Log");
+
+  const { items: blockingItems, isBlocking, snooze, refetch: refetchBlocking } = useBlockingItems();
 
   const { data: companiesData, isLoading: companiesLoading } = useQuery({
     queryKey: ["/api/companies"],
