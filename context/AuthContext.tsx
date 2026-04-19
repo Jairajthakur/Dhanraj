@@ -11,7 +11,6 @@ import { AppState, AppStateStatus, Platform } from "react-native";
 import { api, agentCache, tokenStore } from "../lib/api";
 import { resetPushInit, isPushRegistering } from "@/context/usePushNotifications";
 
-
 interface Agent {
   id: number;
   name: string;
@@ -40,28 +39,21 @@ const AuthContext = createContext<AuthContextType>({
   logout: async () => {},
 });
 
-// Only log out after this many consecutive 401s — prevents fluke logouts
 const MAX_CONSECUTIVE_401 = 10;
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [agent, setAgent] = useState<Agent | null>(null);
-
-  // KEY: stays TRUE until we've read the cache and set the correct agent.
-  // This means NO screen renders until we know if user is logged in or not.
-  // Eliminates the login-screen flash entirely.
   const [isLoading, setIsLoading] = useState(true);
 
   const consecutive401Ref = useRef(0);
   const lastValidatedRef = useRef<number>(0);
   const revalidatingRef = useRef(false);
-  // Mirror of agent state for use in closures/callbacks
   const agentRef = useRef<Agent | null>(null);
 
   useEffect(() => {
     agentRef.current = agent;
   }, [agent]);
 
-  // ─── Background revalidation — never blocks UI, rarely triggers logout ──
   const revalidateSession = async (cached: Agent | null): Promise<void> => {
     if (revalidatingRef.current) return;
     if (isPushRegistering()) return;
@@ -91,7 +83,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         console.warn(
           `[AuthContext] 401 received (${consecutive401Ref.current}/${MAX_CONSECUTIVE_401})`
         );
-        // Only log out after multiple consecutive 401s
         if (consecutive401Ref.current >= MAX_CONSECUTIVE_401) {
           console.warn("[AuthContext] Session definitively expired — logging out");
           await agentCache.clear();
@@ -100,9 +91,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           agentRef.current = null;
           setAgent(null);
         }
-        // else: keep the user logged in — single 401 could be a fluke
       } else {
-        // Network error — never log out for this
         consecutive401Ref.current = 0;
         console.warn("[AuthContext] Network error, keeping session:", e?.message);
       }
@@ -111,7 +100,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  // ─── Bootstrap ──────────────────────────────────────────────────────────
   useEffect(() => {
     let cancelled = false;
 
@@ -143,7 +131,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 setAgent(null);
                 agentRef.current = null;
               } else {
-                // Network error — use cache
                 const cached = await agentCache.get();
                 setAgent(cached ?? null);
                 agentRef.current = cached ?? null;
@@ -153,12 +140,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           return;
         }
 
-        // ── Mobile: read cache FIRST, set agent, THEN set isLoading=false ─
-        // The order here is critical:
-        //   1. Read cache
-        //   2. setAgent(cached)   ← correct screen is ready to show
-        //   3. setIsLoading(false) ← NOW render (in finally block)
-        // This guarantees zero flash — user sees home or login, never both.
         const cached = await agentCache.get();
 
         if (!cancelled) {
@@ -166,7 +147,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           agentRef.current = cached ?? null;
         }
 
-        // Kick off background revalidation — won't block or flash anything
         if (cached) {
           revalidateSession(cached).catch(() => {});
         }
@@ -177,16 +157,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           agentRef.current = cached ?? null;
         }
       } finally {
-        // This is the ONLY place isLoading becomes false on mobile.
-        // It runs after setAgent, so the navigator always gets the right
-        // initial route on the very first render.
         if (!cancelled) {
           setIsLoading(false);
         }
       }
     };
 
-    // Absolute fallback — if AsyncStorage hangs, unblock after 4s
     const timeout = setTimeout(() => {
       if (!cancelled) {
         agentCache.get().then((cached) => {
@@ -203,7 +179,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     bootstrap().finally(() => {
       clearTimeout(timeout);
-      // Ensure isLoading is always cleared even on unexpected errors
       if (!cancelled) setIsLoading(false);
     });
 
@@ -213,14 +188,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  // ─── Foreground revalidation — throttled to once per 5 minutes ─────────
   useEffect(() => {
     if (Platform.OS === "web") return;
 
     const handleAppStateChange = async (nextState: AppStateStatus) => {
       if (nextState !== "active") return;
       const elapsed = Date.now() - lastValidatedRef.current;
-      if (elapsed < 5 * 60 * 1000) return; // skip if validated recently
+      if (elapsed < 5 * 60 * 1000) return;
       const cached = agentRef.current ?? (await agentCache.get().catch(() => null));
       if (!cached) return;
       revalidateSession(cached).catch(() => {});
@@ -230,11 +204,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => sub.remove();
   }, []);
 
-  // ─── Login ──────────────────────────────────────────────────────────────
   const login = async (username: string, password: string) => {
     setIsLoading(true);
     try {
-      // Always clear stale data before a fresh login
       await tokenStore.clear();
       await agentCache.clear();
       consecutive401Ref.current = 0;
@@ -254,7 +226,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  // ─── Logout ─────────────────────────────────────────────────────────────
   const logout = async () => {
     consecutive401Ref.current = 0;
     lastValidatedRef.current = 0;
