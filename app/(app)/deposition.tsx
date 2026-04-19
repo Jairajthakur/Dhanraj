@@ -12,7 +12,8 @@ import Colors from "@/constants/colors";
 import { getApiUrl } from "@/lib/query-client";
 import { tokenStore } from "@/lib/api";
 import { usePushNotifications } from "@/context/usePushNotifications";
-
+import BlockingActionModal from "@/components/BlockingActionModal";
+import { useBlockingItems } from "@/hooks/useBlockingItems";
 // ─── helpers ──────────────────────────────────────────────────────────────────
 const fmt = (n: any) => parseFloat(n || 0).toLocaleString("en-IN");
 const fmtDate = (d: any) =>
@@ -521,7 +522,8 @@ export default function FosDepositionScreen() {
   const qc     = useQueryClient();
   usePushNotifications();
 
-  const [selectedIds,    setSelectedIds]    = useState<Set<number>>(new Set());
+  const { items: blockingItems, isBlocking, snooze, refetch: refetchBlocking } =
+  useBlockingItems();
   const [bulkPayVisible, setBulkPayVisible] = useState(false);
   const [amountEntryItem, setAmountEntryItem] = useState<any>(null);
   const [enteredAmount,   setEnteredAmount]   = useState("");
@@ -733,11 +735,14 @@ export default function FosDepositionScreen() {
         </View>
       )}
 
-      <BulkPaymentSheet
-        visible={bulkPayVisible}
-        selectedItems={selectedItems}
-        onClose={() => setBulkPayVisible(false)}
-        onPaid={onPaid}
+     <BlockingActionModal
+        visible={isBlocking}
+        items={blockingItems}
+        onDismiss={snooze}
+        onActionTaken={() => {
+          refetchBlocking();
+          qc.invalidateQueries({ queryKey: ["/api/fos-depositions"] });
+        }}
       />
 
       {/* Amount Entry Modal (for partial-pay flow) */}
