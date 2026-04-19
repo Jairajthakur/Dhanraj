@@ -500,6 +500,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
     await storage.query(`ALTER TABLE loan_cases ADD COLUMN IF NOT EXISTS company_name TEXT`);
     console.log("[DB] loan_cases.company_name column ready ✅");
   } catch (e: any) { console.error("[DB] loan_cases.company_name migration:", e.message); }
+
+  try {
+  await storage.query(`ALTER TABLE loan_cases ADD COLUMN IF NOT EXISTS occupation TEXT`);
+  await storage.query(`ALTER TABLE loan_cases ADD COLUMN IF NOT EXISTS sft_city TEXT`);
+  await storage.query(`ALTER TABLE bkt_cases  ADD COLUMN IF NOT EXISTS occupation TEXT`);
+  await storage.query(`ALTER TABLE bkt_cases  ADD COLUMN IF NOT EXISTS sft_city TEXT`);
+  console.log("[DB] occupation/sft_city columns ready ✅");
+} catch (e: any) { console.error("[DB] occupation/sft_city migration:", e.message); }
+  
   try {
   await storage.query(`
     ALTER TABLE loan_cases
@@ -1718,46 +1727,104 @@ res.json({ imported, updated: 0, skipped, agentsCreated, agentsRemoved, total: r
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
-  app.get("/api/admin/feedback-export", requireAdmin, async (req, res) => {
-    try {
-      const result = await storage.query(`
-        SELECT TO_CHAR(COALESCE(lc.created_at,NOW()),'DD-Mon') AS allu_date, lc.loan_no, lc.app_id, lc.customer_name, lc.bkt::text AS bkt, lc.pro, 'NANDED'::text AS branch, lc.customer_available, lc.vehicle_available, lc.third_party, lc.third_party_name, lc.third_party_number, lc.feedback_code, lc.latest_feedback, lc.monthly_feedback, lc.ptp_date, lc.projection, lc.non_starter, lc.kyc_purchase, lc.workable, lc.status, lc.feedback_comments, fa.name AS fos_name
-        FROM loan_cases lc LEFT JOIN fos_agents fa ON lc.agent_id=fa.id
-        WHERE lc.latest_feedback IS NOT NULL OR lc.feedback_code IS NOT NULL OR lc.status IN ('Paid','PTP','Unpaid')        UNION ALL
-        SELECT TO_CHAR(COALESCE(bc.created_at,NOW()),'DD-Mon') AS allu_date, bc.loan_no, bc.app_id, bc.customer_name, bc.case_category AS bkt, bc.pro, 'NANDED'::text AS branch, bc.customer_available, bc.vehicle_available, bc.third_party, bc.third_party_name, bc.third_party_number, bc.feedback_code, bc.latest_feedback, bc.monthly_feedback, bc.ptp_date, bc.projection, bc.non_starter, bc.kyc_purchase, bc.workable, bc.status, bc.feedback_comments, fa.name AS fos_name
-        FROM bkt_cases bc LEFT JOIN fos_agents fa ON bc.agent_id=fa.id
-        WHERE bc.latest_feedback IS NOT NULL OR bc.feedback_code IS NOT NULL OR bc.status IN ('Paid','PTP','Unpaid')
-        ORDER BY fos_name NULLS LAST, loan_no
-      `);
-      const yn = (v: any) => v === true || v === "true" || v === "t" || v === 1 ? "Y" : v === false || v === "false" || v === "f" || v === 0 ? "N" : "";
-      const rows = result.rows.map((r: any) => ({
-        "Allu Date": r.allu_date || "", "LOAN NO": r.loan_no || "", "APP ID": r.app_id || "", "CUSTOMERNAME": r.customer_name || "",
-        "Bkt": r.bkt || "", "Pro": r.pro || "", "Branch": r.branch || "",
-        "Customer Y/N": yn(r.customer_available), "Vehicle Y/N": yn(r.vehicle_available), "Third_party Y/N": yn(r.third_party),
-        "Third Party Name": r.third_party === true || r.third_party === "true" || r.third_party === "t" ? r.third_party_name || "" : "",
-        "Third Party Number": r.third_party === true || r.third_party === "true" || r.third_party === "t" ? r.third_party_number || "" : "",
-        "FEEDBACK CODE": r.feedback_code != null ? String(r.feedback_code) : "",
-        "Details FEEDBACK": r.latest_feedback != null ? String(r.latest_feedback) : "",
-        "Monthly Feedback": r.monthly_feedback != null ? String(r.monthly_feedback) : "",
-        "PTP DATE": r.ptp_date ? (r.ptp_date instanceof Date ? r.ptp_date.toISOString().slice(0, 10) : String(r.ptp_date).slice(0, 10)) : "",
-        "Projection": r.projection != null ? String(r.projection) : "",
-        "NON_STARTER (Y/N)": yn(r.non_starter), "KYC PURCHASE (Y/N)": yn(r.kyc_purchase),
-        "Workable/Non": r.workable === true || r.workable === "true" || r.workable === "t" ? "WORKABLE" : r.workable === false || r.workable === "false" || r.workable === "f" ? "NONWORKABLE" : "",
-        "Comments": r.feedback_comments || "", "Status": r.status || "", "FOS Name": r.fos_name || "",
-      }));
-      const wb = new ExcelJS.Workbook(); const ws = wb.addWorksheet("Feedback Report");
-      const exportRows = rows.length ? rows : [{}];
-      ws.columns = Object.keys(exportRows[0]).map((key) => ({ header: key, key, width: ["CUSTOMERNAME", "Details FEEDBACK", "Monthly Feedback", "Comments"].includes(key) ? 30 : 16 }));
-      exportRows.forEach((row) => ws.addRow(row));
-      ws.getRow(1).eachCell((cell) => { cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFFF00" } }; cell.font = { bold: true }; cell.alignment = { vertical: "middle", horizontal: "center", wrapText: true }; });
-      ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: Object.keys(exportRows[0]).length } };
-      ws.views = [{ state: "frozen", ySplit: 1 }];
-      const buf = await wb.xlsx.writeBuffer();
-      res.setHeader("Content-Disposition", `attachment; filename="Feedback_Report_${new Date().toISOString().slice(0, 10)}.xlsx"`);
-      res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-      res.send(Buffer.from(buf));
-    } catch (e: any) { res.status(500).json({ message: e.message }); }
-  });
+app.get("/api/admin/feedback-export", requireAdmin, async (req, res) => {
+  try {
+    const result = await storage.query(`
+      SELECT
+        TO_CHAR(COALESCE(lc.created_at, NOW()), 'DD-Mon') AS allu_date,
+        lc.loan_no, lc.app_id, lc.customer_name,
+        lc.bkt::text AS bkt, lc.pro, 'NANDED'::text AS branch,
+        lc.customer_available, lc.vehicle_available, lc.third_party,
+        lc.third_party_name, lc.third_party_number,
+        lc.feedback_code, lc.latest_feedback, lc.monthly_feedback,
+        lc.ptp_date, lc.projection, lc.non_starter, lc.kyc_purchase,
+        lc.workable, lc.status, lc.feedback_comments,
+        lc.occupation, lc.sft_city,
+        fa.name AS fos_name
+      FROM loan_cases lc
+      LEFT JOIN fos_agents fa ON lc.agent_id = fa.id
+
+      UNION ALL
+
+      SELECT
+        TO_CHAR(COALESCE(bc.created_at, NOW()), 'DD-Mon') AS allu_date,
+        bc.loan_no, bc.app_id, bc.customer_name,
+        bc.case_category AS bkt, bc.pro, 'NANDED'::text AS branch,
+        bc.customer_available, bc.vehicle_available, bc.third_party,
+        bc.third_party_name, bc.third_party_number,
+        bc.feedback_code, bc.latest_feedback, bc.monthly_feedback,
+        bc.ptp_date, bc.projection, bc.non_starter, bc.kyc_purchase,
+        bc.workable, bc.status, bc.feedback_comments,
+        bc.occupation, bc.sft_city,
+        fa.name AS fos_name
+      FROM bkt_cases bc
+      LEFT JOIN fos_agents fa ON bc.agent_id = fa.id
+
+      ORDER BY fos_name NULLS LAST, loan_no
+    `);
+
+    const yn = (v: any) =>
+      v === true  || v === "true"  || v === "t" || v === 1 ? "Y" :
+      v === false || v === "false" || v === "f" || v === 0 ? "N" : "";
+
+    const rows = result.rows.map((r: any) => ({
+      "Allu Date":          r.allu_date        || "",
+      "LOAN NO":            r.loan_no           || "",
+      "APP ID":             r.app_id            || "",
+      "CUSTOMERNAME":       r.customer_name     || "",
+      "Bkt":                r.bkt               || "",
+      "Pro":                r.pro               || "",
+      "Branch":             r.branch            || "",
+      "Customer Y/N":       yn(r.customer_available),
+      "Vehicle Y/N":        yn(r.vehicle_available),
+      "Third_party Y/N":    yn(r.third_party),
+      "Third Party Name":   (r.third_party === true || r.third_party === "true" || r.third_party === "t")
+                              ? r.third_party_name   || "" : "",
+      "Third Party Number": (r.third_party === true || r.third_party === "true" || r.third_party === "t")
+                              ? r.third_party_number || "" : "",
+      "Occupation":         r.occupation        || "",
+      "FEEDBACK CODE":      r.feedback_code    != null ? String(r.feedback_code)    : "",
+      "Details FEEDBACK":   r.latest_feedback  != null ? String(r.latest_feedback)  : "",
+      "Monthly Feedback":   r.monthly_feedback != null ? String(r.monthly_feedback) : "",
+      "PTP DATE":           r.ptp_date
+                              ? (r.ptp_date instanceof Date
+                                  ? r.ptp_date.toISOString().slice(0, 10)
+                                  : String(r.ptp_date).slice(0, 10))
+                              : "",
+      "Shifted To City":    r.sft_city          || "",
+      "Projection":         r.projection       != null ? String(r.projection)        : "",
+      "NON_STARTER (Y/N)":  yn(r.non_starter),
+      "KYC PURCHASE (Y/N)": yn(r.kyc_purchase),
+      "Workable/Non":       r.workable === true  || r.workable === "true"  || r.workable === "t"  ? "WORKABLE" :
+                            r.workable === false || r.workable === "false" || r.workable === "f"  ? "NONWORKABLE" : "",
+      "Comments":           r.feedback_comments || "",
+      "Status":             r.status            || "",
+      "FOS Name":           r.fos_name          || "",
+    }));
+
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet("Feedback Report");
+    const exportRows = rows.length ? rows : [{}];
+    ws.columns = Object.keys(exportRows[0]).map((key) => ({
+      header: key, key,
+      width: ["CUSTOMERNAME", "Details FEEDBACK", "Monthly Feedback", "Comments", "Third Party Name"].includes(key) ? 32
+           : ["Third Party Number", "Occupation", "Shifted To City"].includes(key) ? 20
+           : 16,
+    }));
+    exportRows.forEach((row) => ws.addRow(row));
+    ws.getRow(1).eachCell((cell) => {
+      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFFF00" } };
+      cell.font = { bold: true };
+      cell.alignment = { vertical: "middle", horizontal: "center", wrapText: true };
+    });
+    ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: Object.keys(exportRows[0]).length } };
+    ws.views = [{ state: "frozen", ySplit: 1 }];
+    const buf = await wb.xlsx.writeBuffer();
+    res.setHeader("Content-Disposition", `attachment; filename="Feedback_Report_${new Date().toISOString().slice(0, 10)}.xlsx"`);
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.send(Buffer.from(buf));
+  } catch (e: any) { res.status(500).json({ message: e.message }); }
+});
 
   app.post("/api/admin/clear-ptp", requireAdmin, async (req, res) => {
     try {
