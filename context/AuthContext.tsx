@@ -10,6 +10,7 @@ import React, {
 import { AppState, AppStateStatus, Platform } from "react-native";
 import { api, agentCache, tokenStore } from "../lib/api";
 import { resetPushInit } from "@/context/usePushNotifications";
+import { resetPushInit, isPushRegistering } from "@/context/usePushNotifications";
 
 
 interface Agent {
@@ -41,7 +42,7 @@ const AuthContext = createContext<AuthContextType>({
 });
 
 // Only log out after this many consecutive 401s — prevents fluke logouts
-const MAX_CONSECUTIVE_401 = 3;
+const MAX_CONSECUTIVE_401 = 10;
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [agent, setAgent] = useState<Agent | null>(null);
@@ -64,6 +65,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // ─── Background revalidation — never blocks UI, rarely triggers logout ──
   const revalidateSession = async (cached: Agent | null): Promise<void> => {
     if (revalidatingRef.current) return;
+    if (isPushRegistering()) return;
     revalidatingRef.current = true;
     try {
       const res = await api.me();
