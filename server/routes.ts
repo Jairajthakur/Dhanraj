@@ -500,6 +500,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
     await storage.query(`ALTER TABLE loan_cases ADD COLUMN IF NOT EXISTS company_name TEXT`);
     console.log("[DB] loan_cases.company_name column ready ✅");
   } catch (e: any) { console.error("[DB] loan_cases.company_name migration:", e.message); }
+  try {
+  await storage.query(`
+    ALTER TABLE loan_cases
+      ADD COLUMN IF NOT EXISTS broken_ptp      BOOLEAN DEFAULT FALSE,
+      ADD COLUMN IF NOT EXISTS broken_ptp_date DATE
+  `);
+  await storage.query(`
+    ALTER TABLE bkt_cases
+      ADD COLUMN IF NOT EXISTS broken_ptp      BOOLEAN DEFAULT FALSE,
+      ADD COLUMN IF NOT EXISTS broken_ptp_date DATE
+  `);
+  console.log("[DB] broken_ptp columns ready ✅");
+} catch (e: any) { console.error("[DB] broken_ptp migration:", e.message); }
+
+try {
+  await storage.query(`
+    ALTER TABLE fos_depositions
+      ADD COLUMN IF NOT EXISTS snooze_until TIMESTAMPTZ
+  `);
+  console.log("[DB] fos_depositions.snooze_until column ready ✅");
+} catch (e: any) { console.error("[DB] snooze_until migration:", e.message); }
 try {
     await storage.query(`ALTER TABLE bkt_cases ADD COLUMN IF NOT EXISTS company_name TEXT`);
     console.log("[DB] bkt_cases.company_name column ready ✅");
@@ -701,6 +722,10 @@ app.get("/api/companies", requireAuth, async (req, res) => {
         monthlyFeedback: monthly_feedback || null,
       };
       await storage.updateLoanCaseFeedback(caseId, status, feedback, comments, ptp_date, ynVal, extraFields);
+      await storage.query(
+        `UPDATE loan_cases SET broken_ptp = false, broken_ptp_date = NULL WHERE id = $1`,
+        [caseId]
+      );
       if (old && old.bkt && old.agent_id && !["UC","RUC"].includes((old.pro || "").toUpperCase())) {
         const pos = parseFloat(old.pos) || 0;
         const bktKey = `bkt${old.bkt}`;
@@ -739,7 +764,49 @@ app.get("/api/companies", requireAuth, async (req, res) => {
     res.json(result.rows[0] ?? { total: 0, paid: 0, ptp: 0, notProcess: 0 });
   } catch (e: any) { res.status(500).json({ message: e.message }); }
 });
+app.get("/api/broken-ptps", requireAuth, async (req, res) => {
+  try {
+    const agentId = req.session.agentId!;
+    const now = new Date().toISOString();
 
+    const result = await storage.query(`
+      SELECT 'loan' AS source, id, customer_name, loan_no,
+             pos::numeric AS pos, broken_ptp_date AS ptp_date
+      FROM loan_cases
+      WHERE agent_id = $1
+        AND broken_ptp = true
+        AND (snooze_until IS NULL OR snooze_until < NOW())
+      UNION ALL
+      SELECT 'bkt' AS source, id, customer_name, loan_no,
+             pos::numeric AS pos, broken_ptp_date AS ptp_date
+      FROM bkt_cases
+      WHERE agent_id = $1
+        AND broken_ptp = true
+        AND (snooze_until IS NULL OR snooze_until < NOW())
+      ORDER BY ptp_date
+    `, [agentId]);
+
+    res.json(result.rows);
+  } catch (e: any) { res.status(500).json({ message: e.message }); }
+});
+
+  app.post("/api/broken-ptps/snooze", requireAuth, async (req, res) => {
+  try {
+    const agentId = req.session.agentId!;
+    const snoozeUntil = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+
+    await storage.query(
+      `UPDATE loan_cases SET snooze_until = $1 WHERE agent_id = $2 AND broken_ptp = true`,
+      [snoozeUntil, agentId]
+    );
+    await storage.query(
+      `UPDATE bkt_cases SET snooze_until = $1 WHERE agent_id = $2 AND broken_ptp = true`,
+      [snoozeUntil, agentId]
+    );
+
+    res.json({ success: true });
+  } catch (e: any) { res.status(500).json({ message: e.message }); }
+});
 app.get("/api/today-ptp", requireAuth, async (req, res) => {
   try {
     const agentId = req.session.agentId!;
@@ -1411,6 +1478,10 @@ app.put("/api/fos-depositions/:id/pay-both", requireAuth, screenshotUpload.singl
         monthlyFeedback: monthly_feedback || null,
       };
       await storage.updateBktCaseFeedback(caseId, status, feedback, comments, ptp_date, ynVal, bktExtraFields);
+      await storage.query(
+        `UPDATE bkt_cases SET broken_ptp = false, broken_ptp_date = NULL WHERE id = $1`,
+        [caseId]
+      );
       if (old && old.case_category && old.agent_id && !["UC","RUC"].includes((old.pro || "").toUpperCase())) {
         const pos = parseFloat(old.pos) || 0;
         const bktKey = (old.case_category as string).toLowerCase().replace(/\s+/g, "");
@@ -2046,6 +2117,65 @@ app.post("/api/admin/reset-monthly-feedback/case/:caseId", requireAdmin, async (
     } catch (e: any) { console.error("[batch-reminder]", e.message); }
   }
   runBatchReminderJob(); setInterval(runBatchReminderJob, 10 * 60 * 1000);
+
+  async function runPtpBreakJob() {
+    try {
+      const yesterday = new Date();
+      yesterday.setDate(yesterday.getDate() - 1);
+      const yStr = yesterday.toISOString().slice(0, 10);
+
+      await storage.query(`
+        UPDATE loan_cases
+        SET broken_ptp = true, broken_ptp_date = ptp_date
+        WHERE status = 'PTP'
+          AND ptp_date IS NOT NULL
+          AND ptp_date <= $1
+          AND broken_ptp IS DISTINCT FROM true
+      `, [yStr]);
+
+      await storage.query(`
+        UPDATE bkt_cases
+        SET broken_ptp = true, broken_ptp_date = ptp_date
+        WHERE status = 'PTP'
+          AND ptp_date IS NOT NULL
+          AND ptp_date <= $1
+          AND broken_ptp IS DISTINCT FROM true
+      `, [yStr]);
+
+      console.log("[ptp-break-job] ✅ Broken PTP check complete");
+    } catch (e: any) { console.error("[ptp-break-job]", e.message); }
+  }
+  runPtpBreakJob(); setInterval(runPtpBreakJob, 60 * 60 * 1000);
+
+  async function runOverdueDepositionPushJob() {
+    try {
+      const result = await storage.query(`
+        SELECT fd.agent_id, fa.push_token, fa.name,
+               COUNT(fd.id)::int AS overdue_count,
+               SUM(fd.amount)::numeric AS overdue_total
+        FROM fos_depositions fd
+        JOIN fos_agents fa ON fa.id = fd.agent_id
+        WHERE fd.payment_method = 'pending'
+          AND fd.deposition_date < CURRENT_DATE
+          AND fa.push_token IS NOT NULL AND fa.push_token <> ''
+          AND (fd.snooze_until IS NULL OR fd.snooze_until < NOW())
+        GROUP BY fd.agent_id, fa.push_token, fa.name
+        HAVING COUNT(fd.id) > 0
+      `);
+
+      for (const row of result.rows) {
+        const total = parseFloat(row.overdue_total || 0).toLocaleString("en-IN");
+        await sendPush(
+          row.push_token,
+          "⚠️ Overdue Deposits",
+          `You have ${row.overdue_count} overdue deposit${row.overdue_count > 1 ? "s" : ""} totalling ₹${total}. Please settle immediately.`,
+          { screen: "fos-depositions", type: "overdue_dep" }
+        );
+      }
+      console.log("[overdue-dep-job] ✅ Done");
+    } catch (e: any) { console.error("[overdue-dep-job]", e.message); }
+  }
+  runOverdueDepositionPushJob(); setInterval(runOverdueDepositionPushJob, 60 * 60 * 1000);
 
   const monthlyCleanupDone = new Set<string>();
   async function runMonthlyCleanupJob() {
