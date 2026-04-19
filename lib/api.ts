@@ -180,7 +180,6 @@ export const api = {
   saveProfilePhoto: (photoUrl: string) => apiRequest("POST", "/api/profile-photo", { photoUrl }),
 
   // ── Companies ─────────────────────────────────────────────────────────────
-  /** Returns distinct company names for the current FOS agent's cases */
   getCompanies: (): Promise<{ companies: string[] }> =>
     apiRequest("GET", "/api/companies"),
 
@@ -208,11 +207,31 @@ export const api = {
   getTodayPtp: (params?: { company?: string | null }) =>
     apiRequest("GET", `/api/today-ptp${qs({ company: params?.company })}`),
 
-  getBrokenPtps: (): Promise<import("@/components/BlockingActionModal").BlockingItem[]> =>
-  apiRequest("GET", "/api/broken-ptps"),
+  // ── Broken PTPs / Blocking ────────────────────────────────────────────────
+  // Safe wrapper — never throws, always returns an array.
+  // This prevents the allocation screen from going black if the
+  // endpoint doesn't exist yet or returns a non-2xx response.
+  getBrokenPtps: async (): Promise<import("@/components/BlockingActionModal").BlockingItem[]> => {
+    try {
+      const result = await apiRequest("GET", "/api/broken-ptps");
+      // Server might return { items: [...] } or a bare array
+      if (Array.isArray(result)) return result;
+      if (result && Array.isArray(result.items)) return result.items;
+      return [];
+    } catch (err) {
+      // Log but don't crash — missing endpoint should not block the UI
+      console.warn("[api.getBrokenPtps] failed silently:", err);
+      return [];
+    }
+  },
 
-snoozeBlocking: () =>
-  apiRequest("POST", "/api/broken-ptps/snooze"),
+  snoozeBlocking: async (): Promise<void> => {
+    try {
+      await apiRequest("POST", "/api/broken-ptps/snooze");
+    } catch (err) {
+      console.warn("[api.snoozeBlocking] failed silently:", err);
+    }
+  },
 
   addExtraNumber: (id: number, number: string, table: string) =>
     apiRequest("POST", `/api/cases/${id}/extra-numbers`, { number, table }),
@@ -316,7 +335,6 @@ snoozeBlocking: () =>
   },
 
   // ── BKT Performance ───────────────────────────────────────────────────────
-  /** company=null → all companies combined */
   getBktPerfSummary: (params?: { company?: string | null }) =>
     apiRequest("GET", `/api/bkt-perf-summary${qs({ company: params?.company })}`),
 
