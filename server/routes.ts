@@ -600,7 +600,11 @@ app.use("/api/fos-depositions", (req, res, next) => {
 cookie: { secure: process.env.NODE_ENV === "production", httpOnly: true, sameSite: "lax", maxAge: 30 * 24 * 60 * 60 * 1000 },
   }));
 
-  function requireAuth(req: Request, res: Response, next: any) {
+ function requireAuth(req: Request, res: Response, next: any) {
+    // ADD THESE 2 LINES:
+    console.log("[auth] session agentId:", req.session.agentId);
+    console.log("[auth] auth header:", req.headers.authorization?.slice(0, 30));
+    
     if (req.session.agentId) return next();
     const authHeader = req.headers.authorization;
     if (authHeader?.startsWith("Bearer ")) {
