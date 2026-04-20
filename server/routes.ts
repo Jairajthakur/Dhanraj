@@ -780,18 +780,20 @@ app.get("/api/companies", requireAuth, async (req, res) => {
 app.get("/api/broken-ptps", requireAuth, async (req, res) => {
   try {
     const agentId = req.session.agentId!;
-    const now = new Date().toISOString();
 
-    const result = await storage.query(`
-      SELECT 'loan' AS source, id, customer_name, loan_no,
-             pos::numeric AS pos, broken_ptp_date AS ptp_date
+    // ── Broken PTPs (loan + bkt) ──────────────────────────────────────────
+    const ptpResult = await storage.query(`
+      SELECT 'broken_ptp' AS type, id, customer_name, loan_no,
+             pos::numeric AS amount, broken_ptp_date AS ptp_date,
+             NULL::text AS assigned_at, NULL::numeric AS hours_overdue
       FROM loan_cases
       WHERE agent_id = $1
         AND broken_ptp = true
         AND (snooze_until IS NULL OR snooze_until < NOW())
       UNION ALL
-      SELECT 'bkt' AS source, id, customer_name, loan_no,
-             pos::numeric AS pos, broken_ptp_date AS ptp_date
+      SELECT 'broken_ptp' AS type, id, customer_name, loan_no,
+             pos::numeric AS amount, broken_ptp_date AS ptp_date,
+             NULL::text AS assigned_at, NULL::numeric AS hours_overdue
       FROM bkt_cases
       WHERE agent_id = $1
         AND broken_ptp = true
@@ -799,14 +801,28 @@ app.get("/api/broken-ptps", requireAuth, async (req, res) => {
       ORDER BY ptp_date
     `, [agentId]);
 
-    res.json(result.rows);
+    // ── Overdue depositions (pending > 7 hours) ───────────────────────────
+    const depoResult = await storage.query(`
+      SELECT 'overdue_deposition' AS type, id, customer_name, loan_no,
+             amount, NULL::date AS ptp_date,
+             created_at::text AS assigned_at,
+             ROUND(EXTRACT(EPOCH FROM (NOW() - created_at)) / 3600, 1) AS hours_overdue
+      FROM fos_depositions
+      WHERE agent_id = $1
+        AND payment_method = 'pending'
+        AND created_at < NOW() - INTERVAL '7 hours'
+        AND (snooze_until IS NULL OR snooze_until < NOW())
+      ORDER BY created_at
+    `, [agentId]);
+
+    res.json([...ptpResult.rows, ...depoResult.rows]);
   } catch (e: any) { res.status(500).json({ message: e.message }); }
 });
 
   app.post("/api/broken-ptps/snooze", requireAuth, async (req, res) => {
   try {
     const agentId = req.session.agentId!;
-    const snoozeUntil = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+    const snoozeUntil = new Date(Date.now() + 60 * 60 * 1000).toISOString(); // 1 hour
 
     await storage.query(
       `UPDATE loan_cases SET snooze_until = $1 WHERE agent_id = $2 AND broken_ptp = true`,
@@ -814,6 +830,10 @@ app.get("/api/broken-ptps", requireAuth, async (req, res) => {
     );
     await storage.query(
       `UPDATE bkt_cases SET snooze_until = $1 WHERE agent_id = $2 AND broken_ptp = true`,
+      [snoozeUntil, agentId]
+    );
+    await storage.query(
+      `UPDATE fos_depositions SET snooze_until = $1 WHERE agent_id = $2 AND payment_method = 'pending'`,
       [snoozeUntil, agentId]
     );
 
