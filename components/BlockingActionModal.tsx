@@ -124,11 +124,13 @@ export default function BlockingActionModal({
 
   const handleGoAction = () => {
     onActionTaken();
-    // Navigate to the right screen based on what's blocking
-    if (overdueDepos.length > 0) {
-      router.push("/(app)/fos-depositions" as any);
+    // Navigate to the right screen based on what's blocking.
+    // If ONLY overdue depositions → go to deposition submit screen.
+    // If broken PTPs (alone or mixed) → go to allocation.
+    if (overdueDepos.length > 0 && brokenPtps.length === 0) {
+      router.push("/(app)/deposition" as any);
     } else {
-      router.push("/(app)/(tabs)/allocation" as any);
+      router.push("/(app)/allocation" as any);
     }
   };
 
