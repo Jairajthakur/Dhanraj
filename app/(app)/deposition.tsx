@@ -12,8 +12,6 @@ import Colors from "@/constants/colors";
 import { getApiUrl } from "@/lib/query-client";
 import { tokenStore } from "@/lib/api";
 import { usePushNotifications } from "@/context/usePushNotifications";
-import BlockingActionModal from "@/components/BlockingActionModal";
-import { useBlockingItems } from "@/hooks/useBlockingItems";
 // ─── helpers ──────────────────────────────────────────────────────────────────
 const fmt = (n: any) => parseFloat(n || 0).toLocaleString("en-IN");
 const fmtDate = (d: any) =>
@@ -734,16 +732,6 @@ export default function FosDepositionScreen() {
           </Pressable>
         </View>
       )}
-
-     <BlockingActionModal
-        visible={isBlocking}
-        items={blockingItems}
-        onDismiss={snooze}
-        onActionTaken={() => {
-          refetchBlocking();
-          qc.invalidateQueries({ queryKey: ["/api/fos-depositions"] });
-        }}
-      />
 
       {/* Amount Entry Modal (for partial-pay flow) */}
       <Modal
