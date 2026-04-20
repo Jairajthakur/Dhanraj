@@ -13,8 +13,6 @@ import * as Location from "expo-location";
 import Colors from "@/constants/colors";
 import { api } from "@/lib/api";
 import { caseStore } from "@/lib/caseStore";
-import BlockingActionModal from "@/components/BlockingActionModal";
-import { useBlockingItems } from "@/hooks/useBlockingItems";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const STATUS_TABS = ["All", "Unpaid", "PTP", "Paid"] as const;
@@ -1210,7 +1208,6 @@ export default function AllocationScreen() {
   const [modalItem,     setModalItem]     = useState<CaseItem | null>(null);
   const [modalInitTab,  setModalInitTab]  = useState<FeedbackTab>("Call Log");
 
-  const { items: blockingItems, isBlocking, snooze, refetch: refetchBlocking } = useBlockingItems();
 
   const { data: companiesData, isLoading: companiesLoading } = useQuery({
     queryKey: ["/api/companies"],
@@ -1321,7 +1318,6 @@ export default function AllocationScreen() {
           onClose={() => setModalItem(null)}
         />
       )}
-      <BlockingActionModal visible={isBlocking} items={blockingItems} onDismiss={snooze} onActionTaken={refetchBlocking} />
     </View>
   );
 }
