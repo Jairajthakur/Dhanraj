@@ -1,11 +1,11 @@
 /**
  * useBlockingItems
  *
- * Returns any items that should block the agent from using the app:
- *   - Broken PTPs (status was PTP, ptp_date has passed)
- *   - Overdue depositions (assigned > 7 hours ago, still pending)
+ * Blocks the agent from using the app until all broken PTPs and
+ * overdue depositions are resolved. The modal stays visible until
+ * the server confirms no blocking items remain.
  *
- * Snooze is applied both locally (instant UI) and on the server
+ * Snooze is applied locally (instant UI) AND on the server
  * (persists across app restarts via the snooze_until DB column).
  */
 
@@ -24,7 +24,8 @@ export function useBlockingItems() {
   const { data, refetch } = useQuery<BlockingItem[]>({
     queryKey: ["/api/broken-ptps"],
     queryFn:  () => api.getBrokenPtps(),
-    staleTime: 5 * 60 * 1000,
+    staleTime: 0,                 // always re-fetch — we need fresh data to unblock
+    refetchInterval: 30 * 1000,   // poll every 30s so modal clears as soon as PTP resolved
     refetchOnWindowFocus: true,
   });
 
@@ -49,5 +50,13 @@ export function useBlockingItems() {
     api.snoozeBlocking().catch(() => {});
   };
 
-  return { items, isBlocking, snooze, refetch };
+  /**
+   * Call this after the agent takes action (e.g. submits a PTP update).
+   * Uses refetch() directly — safe, does NOT touch auth/session queries.
+   */
+  const checkResolved = () => {
+    refetch();
+  };
+
+  return { items, isBlocking, snooze, refetch: checkResolved };
 }
