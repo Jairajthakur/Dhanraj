@@ -5,28 +5,26 @@
  *   - Broken PTPs (status was PTP, ptp_date has passed)
  *   - Overdue depositions (assigned > 7 hours ago, still pending)
  *
- * The hook manages snooze state both locally (for instant UI feedback)
- * and on the server (so the block stays dismissed across app restarts).
+ * Snooze is applied both locally (instant UI) and on the server
+ * (persists across app restarts via the snooze_until DB column).
  */
 
 import { useEffect, useRef, useState } from "react";
 import { AppState, AppStateStatus } from "react-native";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { BlockingItem } from "@/components/BlockingActionModal";
 import { api } from "@/lib/api";
 
 const SNOOZE_DURATION_MS = 60 * 60 * 1000; // 1 hour
-const QUERY_KEY = ["/api/broken-ptps"];
 
 export function useBlockingItems() {
-  const qc = useQueryClient();
   const [snoozedUntil, setSnoozedUntil] = useState<number>(0);
   const appStateRef = useRef(AppState.currentState);
 
   const { data, refetch } = useQuery<BlockingItem[]>({
-    queryKey: QUERY_KEY,
+    queryKey: ["/api/broken-ptps"],
     queryFn:  () => api.getBrokenPtps(),
-    staleTime: 5 * 60 * 1000,   // re-fetch every 5 min in background
+    staleTime: 5 * 60 * 1000,
     refetchOnWindowFocus: true,
   });
 
@@ -45,16 +43,11 @@ export function useBlockingItems() {
   const isSnoozed = Date.now() < snoozedUntil;
   const isBlocking = items.length > 0 && !isSnoozed;
 
-  /** Snooze locally for instant UI response, and persist to server. */
+  /** Snooze locally for instant UI, and persist to server. */
   const snooze = () => {
     setSnoozedUntil(Date.now() + SNOOZE_DURATION_MS);
-    api.snoozeBlocking().catch(() => {/* silent — local snooze already applied */});
+    api.snoozeBlocking().catch(() => {});
   };
 
-  /** Call after the agent resolves an item so the modal clears straight away. */
-  const clearAndRefetch = () => {
-    qc.invalidateQueries({ queryKey: QUERY_KEY });
-  };
-
-  return { items, isBlocking, snooze, refetch: clearAndRefetch };
+  return { items, isBlocking, snooze, refetch };
 }
