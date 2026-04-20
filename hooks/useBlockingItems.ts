@@ -5,24 +5,26 @@
  *   - Broken PTPs (status was PTP, ptp_date has passed)
  *   - Overdue depositions (assigned > 7 hours ago, still pending)
  *
- * The hook manages the snooze state locally so the modal won't
- * re-appear within 1 hour after the agent taps "Remind me later".
+ * The hook manages snooze state both locally (for instant UI feedback)
+ * and on the server (so the block stays dismissed across app restarts).
  */
 
 import { useEffect, useRef, useState } from "react";
 import { AppState, AppStateStatus } from "react-native";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { BlockingItem } from "@/components/BlockingActionModal";
 import { api } from "@/lib/api";
 
 const SNOOZE_DURATION_MS = 60 * 60 * 1000; // 1 hour
+const QUERY_KEY = ["/api/broken-ptps"];
 
 export function useBlockingItems() {
+  const qc = useQueryClient();
   const [snoozedUntil, setSnoozedUntil] = useState<number>(0);
   const appStateRef = useRef(AppState.currentState);
 
   const { data, refetch } = useQuery<BlockingItem[]>({
-    queryKey: ["/api/broken-ptps"],
+    queryKey: QUERY_KEY,
     queryFn:  () => api.getBrokenPtps(),
     staleTime: 5 * 60 * 1000,   // re-fetch every 5 min in background
     refetchOnWindowFocus: true,
@@ -40,14 +42,19 @@ export function useBlockingItems() {
   }, [refetch]);
 
   const items: BlockingItem[] = data ?? [];
-
   const isSnoozed = Date.now() < snoozedUntil;
-
   const isBlocking = items.length > 0 && !isSnoozed;
 
+  /** Snooze locally for instant UI response, and persist to server. */
   const snooze = () => {
     setSnoozedUntil(Date.now() + SNOOZE_DURATION_MS);
+    api.snoozeBlocking().catch(() => {/* silent — local snooze already applied */});
   };
 
-  return { items, isBlocking, snooze, refetch };
+  /** Call after the agent resolves an item so the modal clears straight away. */
+  const clearAndRefetch = () => {
+    qc.invalidateQueries({ queryKey: QUERY_KEY });
+  };
+
+  return { items, isBlocking, snooze, refetch: clearAndRefetch };
 }
