@@ -9,6 +9,8 @@ import { Ionicons } from "@expo/vector-icons";
 import Colors from "@/constants/colors";
 import { useAuth } from "@/context/AuthContext";
 import { CompanyProvider, useCompany } from "@/context/CompanyContext";
+import BlockingActionModal from "@/components/BlockingActionModal";
+import { useBlockingItems } from "@/hooks/useBlockingItems";
 import { api } from "@/lib/api";
 
 // ─── Menu Items ───────────────────────────────────────────────────────────────
@@ -240,6 +242,8 @@ function AppLayoutInner() {
   const [drawerOpen,        setDrawerOpen]        = useState(false);
   const [companyPickerOpen, setCompanyPickerOpen] = useState(false);
   const { agent }                                  = useAuth();
+  // Only query blocking items when agent is authenticated — prevents crashes on login screen
+  const { items: blockingItems, isBlocking, snooze, refetch: checkResolved } = useBlockingItems(!!agent);
 
   return (
     <>
@@ -294,6 +298,16 @@ function AppLayoutInner() {
         visible={companyPickerOpen}
         onClose={() => setCompanyPickerOpen(false)}
       />
+
+      {/* ── Global blocking modal — only shown when agent is logged in ── */}
+      {!!agent && (
+        <BlockingActionModal
+          visible={isBlocking}
+          items={blockingItems}
+          onDismiss={snooze}
+          onActionTaken={checkResolved}
+        />
+      )}
     </>
   );
 }
