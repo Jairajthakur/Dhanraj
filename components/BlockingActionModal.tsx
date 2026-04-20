@@ -123,15 +123,16 @@ export default function BlockingActionModal({
   };
 
   const handleGoAction = () => {
-    onActionTaken();
-    // Navigate to the right screen based on what's blocking.
-    // If ONLY overdue depositions → go to deposition submit screen.
-    // If broken PTPs (alone or mixed) → go to allocation.
+    // Dismiss the modal first, then navigate if needed.
+    // Do NOT invalidate queries here — doing so during navigation
+    // can momentarily clear auth state and redirect to login.
+    // The blocking query refetches automatically when the resolved screen mounts.
+    onDismiss();
     if (overdueDepos.length > 0 && brokenPtps.length === 0) {
       router.push("/(app)/deposition" as any);
-    } else {
-      router.push("/(app)/allocation" as any);
     }
+    // For broken PTPs: the agent is already on allocation — closing the
+    // modal is sufficient; no navigation push needed.
   };
 
   if (!visible || items.length === 0) return null;
