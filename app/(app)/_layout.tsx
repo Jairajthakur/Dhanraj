@@ -250,11 +250,18 @@ function AppLayoutInner() {
   const handleBlockingItemPress = async (item: import("@/components/BlockingActionModal").BlockingItem) => {
     if (item.type === "broken_ptp") {
       try {
-        // Fetch the full case so caseStore has all fields for the detail screen
-        const result = await api.getCaseById(item.id);
-        if (result?.case) caseStore.set(result.case);
-      } catch (_) {
-        // If fetch fails, navigate anyway — detail screen handles missing data
+        // Use correct endpoint based on whether it is a loan or bkt case
+        let caseData: any = null;
+        if (item.source === "bkt") {
+          const result = await api.getBktCaseById(item.id);
+          caseData = result?.case ?? result;
+        } else {
+          const result = await api.getCaseById(item.id);
+          caseData = result?.case ?? result;
+        }
+        if (caseData) caseStore.set(caseData);
+      } catch (e) {
+        console.warn("[blocking] fetch case failed", e);
       }
       router.push({
         pathname: "/(app)/customer/[id]" as any,
