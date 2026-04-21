@@ -10,6 +10,7 @@ import Colors from "@/constants/colors";
 // ─── Types ────────────────────────────────────────────────────────────────────
 export interface BlockingItem {
   type: "broken_ptp" | "overdue_deposition";
+  source: "loan" | "bkt";   // which table the case comes from
   id: number;
   customer_name: string;
   loan_no?: string;
