@@ -783,7 +783,7 @@ app.get("/api/broken-ptps", requireAuth, async (req, res) => {
 
     // ── Broken PTPs (loan + bkt) ──────────────────────────────────────────
     const ptpResult = await storage.query(`
-      SELECT 'broken_ptp' AS type, id, customer_name, loan_no,
+      SELECT 'broken_ptp' AS type, 'loan' AS source, id, customer_name, loan_no,
              pos::numeric AS amount, broken_ptp_date AS ptp_date,
              NULL::text AS assigned_at, NULL::numeric AS hours_overdue
       FROM loan_cases
@@ -791,7 +791,7 @@ app.get("/api/broken-ptps", requireAuth, async (req, res) => {
         AND broken_ptp = true
         AND (snooze_until IS NULL OR snooze_until < NOW())
       UNION ALL
-      SELECT 'broken_ptp' AS type, id, customer_name, loan_no,
+      SELECT 'broken_ptp' AS type, 'bkt' AS source, id, customer_name, loan_no,
              pos::numeric AS amount, broken_ptp_date AS ptp_date,
              NULL::text AS assigned_at, NULL::numeric AS hours_overdue
       FROM bkt_cases
@@ -803,7 +803,7 @@ app.get("/api/broken-ptps", requireAuth, async (req, res) => {
 
     // ── Overdue depositions (pending > 7 hours) ───────────────────────────
     const depoResult = await storage.query(`
-      SELECT 'overdue_deposition' AS type, id, customer_name, loan_no,
+      SELECT 'overdue_deposition' AS type, 'loan' AS source, id, customer_name, loan_no,
              amount, NULL::date AS ptp_date,
              created_at::text AS assigned_at,
              ROUND(EXTRACT(EPOCH FROM (NOW() - created_at)) / 3600, 1) AS hours_overdue
@@ -1488,6 +1488,18 @@ app.put("/api/fos-depositions/:id/pay-both", requireAuth, screenshotUpload.singl
     res.json({ cases: await storage.getBktCasesByAgent(agentId, category) });
   } catch (e: any) { res.status(500).json({ message: e.message }); }
 });
+
+  app.get("/api/bkt-cases/:id", requireAuth, async (req, res) => {
+    try {
+      const result = await storage.query(
+        `SELECT *, 'bkt' AS case_type FROM bkt_cases WHERE id = $1`,
+        [Number(req.params.id)]
+      );
+      const c = result.rows[0];
+      if (!c) return res.status(404).json({ message: "Not found" });
+      res.json({ case: c });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
 
   app.put("/api/bkt-cases/:id/feedback", requireAuth, async (req, res) => {
     try {
