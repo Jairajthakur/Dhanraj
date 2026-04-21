@@ -123,16 +123,16 @@ export default function BlockingActionModal({
   };
 
   const handleGoAction = () => {
-    // Dismiss the modal first, then navigate if needed.
-    // Do NOT invalidate queries here — doing so during navigation
-    // can momentarily clear auth state and redirect to login.
-    // The blocking query refetches automatically when the resolved screen mounts.
-    onDismiss();
+    // Do NOT dismiss here — modal stays blocking until the agent actually
+    // resolves the PTP/deposition in the DB.
+    // Just navigate underneath so the right screen is ready.
     if (overdueDepos.length > 0 && brokenPtps.length === 0) {
       router.push("/(app)/deposition" as any);
+    } else {
+      router.push("/(app)/allocation" as any);
     }
-    // For broken PTPs: the agent is already on allocation — closing the
-    // modal is sufficient; no navigation push needed.
+    // Trigger a refetch — modal will auto-dismiss once server confirms resolved.
+    onActionTaken();
   };
 
   if (!visible || items.length === 0) return null;
