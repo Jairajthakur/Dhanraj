@@ -520,8 +520,6 @@ export default function FosDepositionScreen() {
   const qc     = useQueryClient();
   usePushNotifications();
 
-  const { items: blockingItems, isBlocking, snooze, refetch: refetchBlocking } =
-  useBlockingItems();
   const [bulkPayVisible, setBulkPayVisible] = useState(false);
   const [amountEntryItem, setAmountEntryItem] = useState<any>(null);
   const [enteredAmount,   setEnteredAmount]   = useState("");
