@@ -9,7 +9,7 @@ import { Ionicons } from "@expo/vector-icons";
 import Colors from "@/constants/colors";
 import { useAuth } from "@/context/AuthContext";
 import { CompanyProvider, useCompany } from "@/context/CompanyContext";
-import BlockingActionModal from "@/components/BlockingActionModal";
+import BlockingActionModal, { BlockingItem } from "@/components/BlockingActionModal";
 import { useBlockingItems } from "@/hooks/useBlockingItems";
 import { api } from "@/lib/api";
 import { caseStore } from "@/lib/caseStore";
@@ -247,7 +247,7 @@ function AppLayoutInner() {
   const { items: blockingItems, isBlocking, snooze, refetch: checkResolved } = useBlockingItems(!!agent);
 
   // State for inline case-update flow triggered from blocking modal
-  const handleBlockingItemPress = async (item: import("@/components/BlockingActionModal").BlockingItem) => {
+  const handleBlockingItemPress = async (item: BlockingItem) => {
     if (item.type === "broken_ptp") {
       try {
         // Use correct endpoint based on whether it is a loan or bkt case
