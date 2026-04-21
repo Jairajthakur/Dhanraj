@@ -12,6 +12,7 @@ import { CompanyProvider, useCompany } from "@/context/CompanyContext";
 import BlockingActionModal from "@/components/BlockingActionModal";
 import { useBlockingItems } from "@/hooks/useBlockingItems";
 import { api } from "@/lib/api";
+import { caseStore } from "@/lib/caseStore";
 
 // ─── Menu Items ───────────────────────────────────────────────────────────────
 const MENU_ITEMS = [
@@ -245,6 +246,25 @@ function AppLayoutInner() {
   // Only query blocking items when agent is authenticated — prevents crashes on login screen
   const { items: blockingItems, isBlocking, snooze, refetch: checkResolved } = useBlockingItems(!!agent);
 
+  // State for inline case-update flow triggered from blocking modal
+  const handleBlockingItemPress = async (item: import("@/components/BlockingActionModal").BlockingItem) => {
+    if (item.type === "broken_ptp") {
+      try {
+        // Fetch the full case so caseStore has all fields for the detail screen
+        const result = await api.getCaseById(item.id);
+        if (result?.case) caseStore.set(result.case);
+      } catch (_) {
+        // If fetch fails, navigate anyway — detail screen handles missing data
+      }
+      router.push({
+        pathname: "/(app)/customer/[id]" as any,
+        params: { id: String(item.id), fromBlocking: "1" },
+      });
+    } else if (item.type === "overdue_deposition") {
+      router.push("/(app)/deposition" as any);
+    }
+  };
+
   return (
     <>
       <Stack
@@ -306,6 +326,7 @@ function AppLayoutInner() {
           items={blockingItems}
           onDismiss={snooze}
           onActionTaken={checkResolved}
+          onPressItem={handleBlockingItemPress}
         />
       )}
     </>
