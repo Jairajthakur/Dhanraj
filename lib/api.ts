@@ -187,7 +187,8 @@ export const api = {
   getCases: (params?: { company?: string | null }) =>
     apiRequest("GET", `/api/cases${qs({ company: params?.company })}`),
 
-  getCaseById: (id: number) => apiRequest("GET", `/api/cases/${id}`),
+  getCaseById:    (id: number) => apiRequest("GET", `/api/cases/${id}`),
+  getBktCaseById: (id: number) => apiRequest("GET", `/api/bkt-cases/${id}`),
 
   getBktCases: (params?: { category?: string; company?: string | null }) =>
     apiRequest(
