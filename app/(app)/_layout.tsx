@@ -9,9 +9,6 @@ import { Ionicons } from "@expo/vector-icons";
 import Colors from "@/constants/colors";
 import { useAuth } from "@/context/AuthContext";
 import { CompanyProvider, useCompany } from "@/context/CompanyContext";
-import BlockingActionModal, { BlockingItem } from "@/components/BlockingActionModal";
-import { useBlockingItems } from "@/hooks/useBlockingItems";
-import { api } from "@/lib/api";
 
 // ─── Menu Items ───────────────────────────────────────────────────────────────
 const MENU_ITEMS = [
@@ -242,25 +239,6 @@ function AppLayoutInner() {
   const [drawerOpen,        setDrawerOpen]        = useState(false);
   const [companyPickerOpen, setCompanyPickerOpen] = useState(false);
   const { agent }                                  = useAuth();
-  // Only query blocking items when agent is authenticated — prevents crashes on login screen
-  const { items: blockingItems, isBlocking, snooze, hideToResolve } = useBlockingItems(!!agent);
-
-  // State for inline case-update flow triggered from blocking modal
-  const handleBlockingItemPress = (item: BlockingItem) => {
-    // Hide modal temporarily so agent can access the screen to resolve the case.
-    // Modal reappears in 2 minutes if still unresolved.
-    hideToResolve();
-    if (item.type === "overdue_deposition") {
-      router.push("/(app)/deposition" as any);
-    } else {
-      const ids = item.id ? String(item.id) : "";
-      router.push({
-        pathname: "/(app)/allocation" as any,
-        params: { brokenPtpIds: ids },
-      });
-    }
-  };
-
   return (
     <>
       <Stack
@@ -315,16 +293,6 @@ function AppLayoutInner() {
         onClose={() => setCompanyPickerOpen(false)}
       />
 
-      {/* ── Global blocking modal — only shown when agent is logged in ── */}
-      {!!agent && (
-        <BlockingActionModal
-          visible={isBlocking}
-          items={blockingItems}
-          onDismiss={snooze}
-          onActionTaken={hideToResolve}
-          onPressItem={handleBlockingItemPress}
-        />
-      )}
     </>
   );
 }
