@@ -77,7 +77,7 @@ function BlockItem({ item, index, onPress }: { item: BlockingItem; index: number
       {onPress && (
         <View style={s.tapHint}>
           <Ionicons name="chevron-forward" size={11} color="#E24B4A" />
-          <Text style={s.tapHintText}>Tap to update</Text>
+          <Text style={s.tapHintText}>Tap to go to this case</Text>
         </View>
       )}
     </TouchableOpacity>
@@ -219,7 +219,7 @@ export default function BlockingActionModal({
           ) : (
             <View style={s.infoBtn}>
               <Ionicons name="finger-print-outline" size={20} color="#E24B4A" />
-              <Text style={s.infoBtnText}>Tap a case above to update it</Text>
+              <Text style={s.infoBtnText}>Tap a case above to resolve it</Text>
             </View>
           )}
 
