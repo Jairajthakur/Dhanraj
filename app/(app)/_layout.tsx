@@ -243,12 +243,13 @@ function AppLayoutInner() {
   const [companyPickerOpen, setCompanyPickerOpen] = useState(false);
   const { agent }                                  = useAuth();
   // Only query blocking items when agent is authenticated — prevents crashes on login screen
-  const { items: blockingItems, isBlocking, snooze, refetch: checkResolved } = useBlockingItems(!!agent);
+  const { items: blockingItems, isBlocking, snooze, hideToResolve, refetch: checkResolved } = useBlockingItems(!!agent);
 
   // State for inline case-update flow triggered from blocking modal
   const handleBlockingItemPress = (item: BlockingItem) => {
-    // Navigate to allocation with the broken case ID highlighted.
-    // Allocation screen pre-filters and highlights broken PTP cases.
+    // Hide modal temporarily so agent can access the screen to resolve the case.
+    // Modal reappears in 2 minutes if still unresolved.
+    hideToResolve();
     if (item.type === "overdue_deposition") {
       router.push("/(app)/deposition" as any);
     } else {
@@ -320,7 +321,7 @@ function AppLayoutInner() {
           visible={isBlocking}
           items={blockingItems}
           onDismiss={snooze}
-          onActionTaken={checkResolved}
+          onActionTaken={hideToResolve}
           onPressItem={handleBlockingItemPress}
         />
       )}
