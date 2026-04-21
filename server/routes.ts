@@ -2211,32 +2211,49 @@ app.post("/api/admin/reset-monthly-feedback/case/:caseId", requireAdmin, async (
 
   async function runPtpBreakJob() {
     try {
-      const yesterday = new Date();
-      yesterday.setDate(yesterday.getDate() - 1);
-      const yStr = yesterday.toISOString().slice(0, 10);
-
+      // Mark as broken: PTP date has passed (strictly before today)
+      // We use CURRENT_DATE so it's always in the DB server's timezone.
       await storage.query(`
         UPDATE loan_cases
         SET broken_ptp = true, broken_ptp_date = ptp_date
         WHERE status = 'PTP'
           AND ptp_date IS NOT NULL
-          AND ptp_date <= $1
+          AND ptp_date < CURRENT_DATE
           AND broken_ptp IS DISTINCT FROM true
-      `, [yStr]);
+      `);
 
       await storage.query(`
         UPDATE bkt_cases
         SET broken_ptp = true, broken_ptp_date = ptp_date
         WHERE status = 'PTP'
           AND ptp_date IS NOT NULL
-          AND ptp_date <= $1
+          AND ptp_date < CURRENT_DATE
           AND broken_ptp IS DISTINCT FROM true
-      `, [yStr]);
+      `);
+
+      // Auto-clear broken flag if agent has already given a new future PTP date
+      // (i.e. they rescheduled — broken_ptp should not persist for future dates)
+      await storage.query(`
+        UPDATE loan_cases
+        SET broken_ptp = false, broken_ptp_date = NULL
+        WHERE broken_ptp = true
+          AND ptp_date IS NOT NULL
+          AND ptp_date >= CURRENT_DATE
+      `);
+
+      await storage.query(`
+        UPDATE bkt_cases
+        SET broken_ptp = false, broken_ptp_date = NULL
+        WHERE broken_ptp = true
+          AND ptp_date IS NOT NULL
+          AND ptp_date >= CURRENT_DATE
+      `);
 
       console.log("[ptp-break-job] ✅ Broken PTP check complete");
     } catch (e: any) { console.error("[ptp-break-job]", e.message); }
   }
-  runPtpBreakJob(); setInterval(runPtpBreakJob, 60 * 60 * 1000);
+  // Run every 10 minutes so the block clears quickly after agent resolves
+  runPtpBreakJob(); setInterval(runPtpBreakJob, 10 * 60 * 1000);
 
   async function runOverdueDepositionPushJob() {
     try {
