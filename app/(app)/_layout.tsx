@@ -243,7 +243,7 @@ function AppLayoutInner() {
   const [companyPickerOpen, setCompanyPickerOpen] = useState(false);
   const { agent }                                  = useAuth();
   // Only query blocking items when agent is authenticated — prevents crashes on login screen
-  const { items: blockingItems, isBlocking, snooze, hideToResolve, refetch: checkResolved } = useBlockingItems(!!agent);
+  const { items: blockingItems, isBlocking, snooze, hideToResolve } = useBlockingItems(!!agent);
 
   // State for inline case-update flow triggered from blocking modal
   const handleBlockingItemPress = (item: BlockingItem) => {
