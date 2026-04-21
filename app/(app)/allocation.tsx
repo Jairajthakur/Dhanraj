@@ -6,7 +6,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Ionicons } from "@expo/vector-icons";
-import { router } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import * as Haptics from "expo-haptics";
 import * as ImagePicker from "expo-image-picker";
 import * as Location from "expo-location";
@@ -1123,9 +1123,9 @@ function FeedbackModal({
 }
 
 // ─── CaseCard ─────────────────────────────────────────────────────────────────
-interface CaseCardProps { item: CaseItem; onOpenModal: (item: CaseItem, tab: FeedbackTab) => void; }
+interface CaseCardProps { item: CaseItem; onOpenModal: (item: CaseItem, tab: FeedbackTab) => void; isBrokenPtp?: boolean; }
 
-function CaseCard({ item, onOpenModal }: CaseCardProps) {
+function CaseCard({ item, onOpenModal, isBrokenPtp = false }: CaseCardProps) {
   const [callPickerVisible, setCallPickerVisible] = useState(false);
   const phones: string[] = (item.mobile_no ?? "").split(",").map((p) => p.trim()).filter(Boolean);
 
@@ -1139,7 +1139,7 @@ function CaseCard({ item, onOpenModal }: CaseCardProps) {
   const primaryPhone    = phones[0] ?? "";
 
   return (
-    <Pressable style={styles.card} onPress={() => navigateToDetail(item)}>
+    <Pressable style={[styles.card, isBrokenPtp && styles.cardBrokenPtp]} onPress={() => navigateToDetail(item)}>
       <View style={styles.cardHeader}>
         <View style={styles.cardNameRow}>
           <Ionicons name="person" size={16} color={Colors.textSecondary} />
@@ -1202,6 +1202,14 @@ export default function AllocationScreen() {
   const insets = useSafeAreaInsets();
   const qc     = useQueryClient();
 
+  // When navigated from blocking modal, brokenPtpIds contains the case ids to focus
+  const { brokenPtpIds } = useLocalSearchParams<{ brokenPtpIds?: string }>();
+  const brokenPtpIdSet = useMemo(() => {
+    if (!brokenPtpIds) return new Set<number>();
+    return new Set(brokenPtpIds.split(",").map(Number).filter(Boolean));
+  }, [brokenPtpIds]);
+  const isBrokenPtpMode = brokenPtpIdSet.size > 0;
+
   const [activeTab,     setActiveTab]     = useState<StatusTab>("All");
   const [activeCompany, setActiveCompany] = useState<string>("All");
   const [search,        setSearch]        = useState("");
@@ -1224,6 +1232,12 @@ export default function AllocationScreen() {
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase();
+    // When navigated from blocking modal — show ONLY broken PTP cases first, then rest
+    if (isBrokenPtpMode && !q && activeTab === "All") {
+      const broken = allCases.filter((c) => brokenPtpIdSet.has(c.id));
+      const rest   = allCases.filter((c) => !brokenPtpIdSet.has(c.id));
+      return [...broken, ...rest];
+    }
     return allCases
       .filter((c) => activeTab === "All" || c.status === activeTab)
       .filter((c) =>
@@ -1233,7 +1247,7 @@ export default function AllocationScreen() {
         c.app_id?.toLowerCase().includes(q)         ||
         c.registration_no?.toLowerCase().includes(q)
       );
-  }, [allCases, activeTab, search]);
+  }, [allCases, activeTab, search, isBrokenPtpMode, brokenPtpIdSet]);
 
   const counts = useMemo(() => ({
     All:    allCases.length,
@@ -1290,6 +1304,15 @@ export default function AllocationScreen() {
         {search ? <Pressable onPress={() => setSearch("")}><Ionicons name="close-circle" size={18} color={Colors.textMuted} /></Pressable> : null}
       </View>
 
+      {isBrokenPtpMode && (
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "#FEE2E2", paddingHorizontal: 16, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: "#FECACA" }}>
+          <Ionicons name="warning" size={16} color="#E24B4A" />
+          <Text style={{ flex: 1, fontSize: 12, color: "#991B1B", fontWeight: "700" }}>
+            {brokenPtpIdSet.size} broken PTP{brokenPtpIdSet.size > 1 ? "s" : ""} highlighted below — update them to unlock the app
+          </Text>
+        </View>
+      )}
+
       {isLoading ? (
         <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
           <ActivityIndicator color={Colors.primary} size="large" />
@@ -1298,7 +1321,7 @@ export default function AllocationScreen() {
         <FlatList
           data={filtered}
           keyExtractor={(item) => String(item.id)}
-          renderItem={({ item }) => <CaseCard item={item} onOpenModal={handleOpenModal} />}
+          renderItem={({ item }) => <CaseCard item={item} onOpenModal={handleOpenModal} isBrokenPtp={brokenPtpIdSet.has(item.id)} />}
           contentContainerStyle={[styles.list, { paddingBottom: insets.bottom + 24 }, filtered.length === 0 && { flex: 1 }]}
           ListEmptyComponent={
             <View style={styles.empty}>
@@ -1334,6 +1357,7 @@ const styles = StyleSheet.create({
   searchContainer:     { flexDirection: "row", alignItems: "center", margin: 12, backgroundColor: Colors.surface, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, borderWidth: 1, borderColor: Colors.border },
   searchInput:         { flex: 1, fontSize: 14, color: Colors.text },
   list:                { padding: 12, gap: 10 },
+  cardBrokenPtp:       { borderWidth: 2, borderColor: "#E24B4A", shadowColor: "#E24B4A", shadowOpacity: 0.2, shadowRadius: 6, elevation: 4 },
   card:                { backgroundColor: "#fff", borderRadius: 14, padding: 14, gap: 6, shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.08, shadowRadius: 6, elevation: 3 },
   cardHeader:          { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 2 },
   cardNameRow:         { flex: 1, flexDirection: "row", alignItems: "center", gap: 7 },
