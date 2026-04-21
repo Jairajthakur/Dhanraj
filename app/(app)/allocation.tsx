@@ -7,6 +7,8 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Ionicons } from "@expo/vector-icons";
 import { router, useLocalSearchParams } from "expo-router";
+import BlockingActionModal from "@/components/BlockingActionModal";
+import { useBlockingItems } from "@/hooks/useBlockingItems";
 import * as Haptics from "expo-haptics";
 import * as ImagePicker from "expo-image-picker";
 import * as Location from "expo-location";
@@ -1203,6 +1205,7 @@ export default function AllocationScreen() {
   const qc     = useQueryClient();
 
   // When navigated from blocking modal, brokenPtpIds contains the case ids to focus
+  const { items: blockingItems, isBlocking, snooze, hideToResolve } = useBlockingItems();
   const { brokenPtpIds } = useLocalSearchParams<{ brokenPtpIds?: string }>();
   const brokenPtpIdSet = useMemo(() => {
     if (!brokenPtpIds) return new Set<number>();
@@ -1341,6 +1344,20 @@ export default function AllocationScreen() {
           onClose={() => setModalItem(null)}
         />
       )}
+
+      <BlockingActionModal
+        visible={isBlocking}
+        items={blockingItems}
+        onDismiss={snooze}
+        onActionTaken={hideToResolve}
+        onPressItem={(item) => {
+          hideToResolve();
+          if (item.type === "overdue_deposition") {
+            router.push("/(app)/deposition" as any);
+          }
+          // For broken PTPs: modal hides and agent can see the highlighted cards below
+        }}
+      />
     </View>
   );
 }
