@@ -763,9 +763,25 @@ function ReceiptRequestModal({ visible, item, onClose }: { visible: boolean; ite
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 export default function CustomerDetailScreen() {
   const insets = useSafeAreaInsets();
-  const { id }  = useLocalSearchParams();
+  const { id, fromBlocking } = useLocalSearchParams<{ id: string; fromBlocking?: string }>();
   const qc      = useQueryClient();
   const item    = caseStore.get();
+  const isFromBlocking = fromBlocking === "1";
+
+  // When opened from blocking modal, auto-open the feedback modal immediately
+  useEffect(() => {
+    if (isFromBlocking) {
+      setShowFeedbackModal(true);
+    }
+  }, [isFromBlocking]);
+
+  const handleBack = () => {
+    if (isFromBlocking) {
+      // Refetch blocking items so modal auto-clears if PTP was resolved
+      qc.invalidateQueries({ queryKey: ["/api/broken-ptps"] });
+    }
+    router.back();
+  };
 
   const [extraNumbers,     setExtraNumbers]     = useState<string[]>((item as any)?.extra_numbers ?? []);
   const [newNumberInput,   setNewNumberInput]   = useState("");
@@ -791,6 +807,19 @@ export default function CustomerDetailScreen() {
   }
 
   const statusColor = STATUS_COLORS[item.status] ?? Colors.textMuted;
+
+  // Banner shown when navigated from blocking modal
+  const blockingBanner = isFromBlocking ? (
+    <View style={{ flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "#FEE2E2", paddingHorizontal: 16, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: "#FECACA" }}>
+      <Ionicons name="warning" size={14} color="#E24B4A" />
+      <Text style={{ flex: 1, fontSize: 12, color: "#991B1B", fontWeight: "700" }}>
+        This PTP is overdue — update the status to unlock the app
+      </Text>
+      <Pressable onPress={handleBack} style={{ padding: 4 }}>
+        <Ionicons name="close" size={16} color="#991B1B" />
+      </Pressable>
+    </View>
+  ) : null;
   const caseType    = (item as any).case_type === "bkt" ? "bkt" : "loan";
   const call        = (number: string) => { const num = number.trim(); if (!num) return; Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); Linking.openURL(`tel:${num}`); };
   const phones: string[] = (item.mobile_no ?? "").split(",").map((p: string) => p.trim()).filter(Boolean);
@@ -828,6 +857,7 @@ export default function CustomerDetailScreen() {
 
   return (
     <>
+      {blockingBanner}
       <ScrollView style={{ flex: 1, backgroundColor: Colors.background }} contentContainerStyle={[styles.container, { paddingBottom: insets.bottom + 32, paddingTop: Platform.OS === "web" ? 72 : 12 }]}>
 
         {/* ── Hero Card ── */}
