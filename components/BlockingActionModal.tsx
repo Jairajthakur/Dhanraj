@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import {
   Modal, View, Text, Pressable, StyleSheet,
-  ScrollView, Animated, Platform,
+  ScrollView, Animated, Platform, TouchableOpacity,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
@@ -24,17 +24,22 @@ interface BlockingActionModalProps {
   items: BlockingItem[];
   onDismiss: () => void;   // only called after snooze (1-hour grace)
   onActionTaken: () => void;
+  onPressItem?: (item: BlockingItem) => void;
 }
 
 // ─── Single row ───────────────────────────────────────────────────────────────
-function BlockItem({ item, index }: { item: BlockingItem; index: number }) {
+function BlockItem({ item, index, onPress }: { item: BlockingItem; index: number; onPress?: (item: BlockingItem) => void }) {
   const isBrokenPtp = item.type === "broken_ptp";
 
   return (
-    <View style={[
-      s.itemCard,
-      { borderLeftColor: isBrokenPtp ? "#E24B4A" : "#EF9F27" },
-    ]}>
+    <TouchableOpacity
+      activeOpacity={0.75}
+      onPress={() => onPress?.(item)}
+      style={[
+        s.itemCard,
+        { borderLeftColor: isBrokenPtp ? "#E24B4A" : "#EF9F27" },
+      ]}
+    >
       <View style={s.itemRow}>
         <View style={[
           s.itemIconBox,
@@ -68,7 +73,13 @@ function BlockItem({ item, index }: { item: BlockingItem; index: number }) {
           </Text>
         </View>
       </View>
-    </View>
+      {onPress && (
+        <View style={s.tapHint}>
+          <Ionicons name="chevron-forward" size={11} color="#E24B4A" />
+          <Text style={s.tapHintText}>Tap to update</Text>
+        </View>
+      )}
+    </TouchableOpacity>
   );
 }
 
@@ -78,6 +89,7 @@ export default function BlockingActionModal({
   items,
   onDismiss,
   onActionTaken,
+  onPressItem,
 }: BlockingActionModalProps) {
   const shake = useRef(new Animated.Value(0)).current;
   const [snoozeCountdown, setSnoozeCountdown] = useState(0);
@@ -176,7 +188,7 @@ export default function BlockingActionModal({
                   </Text>
                 </View>
                 {brokenPtps.map((item, i) => (
-                  <BlockItem key={item.id} item={item} index={i} />
+                  <BlockItem key={item.id} item={item} index={i} onPress={onPressItem} />
                 ))}
               </>
             )}
@@ -191,23 +203,24 @@ export default function BlockingActionModal({
                   </Text>
                 </View>
                 {overdueDepos.map((item, i) => (
-                  <BlockItem key={item.id} item={item} index={i} />
+                  <BlockItem key={item.id} item={item} index={i} onPress={onPressItem} />
                 ))}
               </>
             )}
           </ScrollView>
 
           {/* Action buttons */}
-          <Pressable style={s.primaryBtn} onPress={handleGoAction}>
-            <Ionicons name="arrow-forward-circle" size={20} color="#fff" />
-            <Text style={s.primaryBtnText}>
-              {overdueDepos.length > 0 && brokenPtps.length === 0
-                ? "Go to Depositions"
-                : brokenPtps.length > 0 && overdueDepos.length === 0
-                  ? "Go to Allocation"
-                  : "Resolve now"}
-            </Text>
-          </Pressable>
+          {overdueDepos.length > 0 && brokenPtps.length === 0 ? (
+            <Pressable style={s.primaryBtn} onPress={handleGoAction}>
+              <Ionicons name="arrow-forward-circle" size={20} color="#fff" />
+              <Text style={s.primaryBtnText}>Go to Depositions</Text>
+            </Pressable>
+          ) : (
+            <View style={s.infoBtn}>
+              <Ionicons name="finger-print-outline" size={20} color="#E24B4A" />
+              <Text style={s.infoBtnText}>Tap a case above to update it</Text>
+            </View>
+          )}
 
           {/* Snooze — 1 hour grace, with visible countdown */}
           {snoozeCountdown > 0 ? (
@@ -358,6 +371,34 @@ const s = StyleSheet.create({
     fontSize: 15,
     fontWeight: "700",
     color: "#fff",
+  },
+  tapHint: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+    marginTop: 4,
+    alignSelf: "flex-end",
+  },
+  tapHintText: {
+    fontSize: 10,
+    color: "#E24B4A",
+    fontWeight: "600",
+  },
+  infoBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    backgroundColor: "#FEE2E2",
+    borderRadius: 14,
+    paddingVertical: 15,
+    marginHorizontal: 16,
+    marginTop: 16,
+  },
+  infoBtnText: {
+    fontSize: 15,
+    fontWeight: "700",
+    color: "#E24B4A",
   },
   snoozeBtn: {
     flexDirection: "row",
