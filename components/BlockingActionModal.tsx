@@ -123,16 +123,16 @@ export default function BlockingActionModal({
   };
 
   const handleGoAction = () => {
-    // Do NOT dismiss here — modal stays blocking until the agent actually
-    // resolves the PTP/deposition in the DB.
-    // Just navigate underneath so the right screen is ready.
+    // Do NOT dismiss — modal stays blocking until agent resolves in DB.
+    // Navigate underneath with broken IDs so allocation pre-filters to those cases.
+    onActionTaken();
     if (overdueDepos.length > 0 && brokenPtps.length === 0) {
       router.push("/(app)/deposition" as any);
     } else {
-      router.push("/(app)/allocation" as any);
+      // Pass the broken PTP case ids so allocation can highlight/filter them
+      const ids = brokenPtps.map((i) => String(i.id)).join(",");
+      router.push({ pathname: "/(app)/allocation" as any, params: { brokenPtpIds: ids } });
     }
-    // Trigger a refetch — modal will auto-dismiss once server confirms resolved.
-    onActionTaken();
   };
 
   if (!visible || items.length === 0) return null;
