@@ -12,7 +12,6 @@ import { CompanyProvider, useCompany } from "@/context/CompanyContext";
 import BlockingActionModal, { BlockingItem } from "@/components/BlockingActionModal";
 import { useBlockingItems } from "@/hooks/useBlockingItems";
 import { api } from "@/lib/api";
-import { caseStore } from "@/lib/caseStore";
 
 // ─── Menu Items ───────────────────────────────────────────────────────────────
 const MENU_ITEMS = [
@@ -247,28 +246,17 @@ function AppLayoutInner() {
   const { items: blockingItems, isBlocking, snooze, refetch: checkResolved } = useBlockingItems(!!agent);
 
   // State for inline case-update flow triggered from blocking modal
-  const handleBlockingItemPress = async (item: BlockingItem) => {
-    if (item.type === "broken_ptp") {
-      try {
-        // Use correct endpoint based on whether it is a loan or bkt case
-        let caseData: any = null;
-        if (item.source === "bkt") {
-          const result = await api.getBktCaseById(item.id);
-          caseData = result?.case ?? result;
-        } else {
-          const result = await api.getCaseById(item.id);
-          caseData = result?.case ?? result;
-        }
-        if (caseData) caseStore.set(caseData);
-      } catch (e) {
-        console.warn("[blocking] fetch case failed", e);
-      }
-      router.push({
-        pathname: "/(app)/customer/[id]" as any,
-        params: { id: String(item.id), fromBlocking: "1" },
-      });
-    } else if (item.type === "overdue_deposition") {
+  const handleBlockingItemPress = (item: BlockingItem) => {
+    // Navigate to allocation with the broken case ID highlighted.
+    // Allocation screen pre-filters and highlights broken PTP cases.
+    if (item.type === "overdue_deposition") {
       router.push("/(app)/deposition" as any);
+    } else {
+      const ids = item.id ? String(item.id) : "";
+      router.push({
+        pathname: "/(app)/allocation" as any,
+        params: { brokenPtpIds: ids },
+      });
     }
   };
 
