@@ -312,9 +312,10 @@ export function usePushNotifications() {
       console.log("[OneSignal] Tapped:", event?.notification?.additionalData);
     const handleForeground = (event: any) => {
       console.log("[OneSignal] Foreground:", event?.notification?.title);
-      // Always show the notification banner even when app is open
-      // This is what makes it appear like a payment app alert
-      try { event?.preventDefault?.(); } catch (_) {}
+      // Always show the notification banner even when app is open.
+      // IMPORTANT: Do NOT call event.preventDefault() here — that suppresses
+      // the notification before display() can show it, causing the banner to
+      // never appear (this was the root cause of the silent foreground bug).
       try { event?.notification?.display?.(); } catch (_) {}
     };
 
