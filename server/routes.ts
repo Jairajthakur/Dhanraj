@@ -150,10 +150,11 @@ async function sendUrgentPush(
         data:            { screen: "allocation", type: "broken_ptp" },
 
         // Maximum urgency — shows as heads-up banner and plays sound like PhonePe/BharatPe.
-        // BUG FIX: Removed android_channel_id ("broken_ptp_alerts") — that channel was never
-        // registered in the app so OneSignal fell back silently to low-priority with no sound.
-        // BUG FIX: Removed android_sound ("notification") — not a valid sound file reference;
-        // omitting it lets OneSignal's default high-importance channel play its sound automatically.
+        // "ptp_alerts" is registered at app startup (lib/notificationChannels.ts) with
+        // AndroidImportance.MAX, vibration [0,500,200,500], and lockscreen PUBLIC.
+        // Without specifying the channel OneSignal falls back to its default
+        // IMPORTANCE_DEFAULT channel which plays no sound on Android 8+.
+        android_channel_id:        "ptp_alerts",
         priority:                  10,
         android_visibility:        1,        // shows on lock screen
         android_led_color:         "FFFF0000",     // red LED
