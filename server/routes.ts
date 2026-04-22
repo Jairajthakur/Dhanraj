@@ -149,11 +149,13 @@ async function sendUrgentPush(
         contents:        { en: body },
         data:            { screen: "allocation", type: "broken_ptp" },
 
-        // Maximum urgency — shows as heads-up banner and plays sound
+        // Maximum urgency — shows as heads-up banner and plays sound like PhonePe/BharatPe
+        // NOTE: Do NOT set android_channel_id to a custom value unless that channel is
+        //       explicitly registered in the app. Omitting it makes OneSignal use its
+        //       default high-importance channel which already has sound + vibration.
+        // NOTE: Do NOT set android_sound — omitting it lets the channel's default sound play.
         priority:                  10,
         android_visibility:        1,        // shows on lock screen
-        android_channel_id:        "broken_ptp_alerts",
-        android_sound:             "notification", // uses device default alarm
         android_led_color:         "FFFF0000",     // red LED
         android_accent_color:      "FFE24B4A",
         android_group:             "broken_ptp",
@@ -851,6 +853,28 @@ app.get("/api/companies", requireAuth, async (req, res) => {
 app.get("/api/broken-ptps", requireAuth, async (req, res) => {
   try {
     const agentId = req.session.agentId!;
+
+    // ── Auto-mark past-due PTPs as broken (runs on every agent poll) ─────
+    // Ensures blocking works even if the background job hasn't fired yet.
+    await storage.query(`
+      UPDATE loan_cases
+      SET broken_ptp = true, broken_ptp_date = ptp_date
+      WHERE agent_id = $1
+        AND status = 'PTP'
+        AND ptp_date IS NOT NULL
+        AND ptp_date < CURRENT_DATE
+        AND broken_ptp IS DISTINCT FROM true
+    `, [agentId]);
+
+    await storage.query(`
+      UPDATE bkt_cases
+      SET broken_ptp = true, broken_ptp_date = ptp_date
+      WHERE agent_id = $1
+        AND status = 'PTP'
+        AND ptp_date IS NOT NULL
+        AND ptp_date < CURRENT_DATE
+        AND broken_ptp IS DISTINCT FROM true
+    `, [agentId]);
 
     // ── Broken PTPs (loan + bkt) ──────────────────────────────────────────
     const ptpResult = await storage.query(`
@@ -1949,6 +1973,24 @@ app.get("/api/admin/feedback-export", requireAdmin, async (req, res) => {
   // that currently has broken PTPs, then records the notification timestamp.
   app.post("/api/admin/trigger-ptp-alert", requireAdmin, async (req, res) => {
     try {
+      // ── First: mark any newly overdue PTPs as broken so the alert is accurate ──
+      await storage.query(`
+        UPDATE loan_cases
+        SET broken_ptp = true, broken_ptp_date = ptp_date
+        WHERE status = 'PTP'
+          AND ptp_date IS NOT NULL
+          AND ptp_date < CURRENT_DATE
+          AND broken_ptp IS DISTINCT FROM true
+      `);
+      await storage.query(`
+        UPDATE bkt_cases
+        SET broken_ptp = true, broken_ptp_date = ptp_date
+        WHERE status = 'PTP'
+          AND ptp_date IS NOT NULL
+          AND ptp_date < CURRENT_DATE
+          AND broken_ptp IS DISTINCT FROM true
+      `);
+
       const affectedAgents = await storage.query(`
         SELECT fa.id, fa.name, fa.push_token,
                COUNT(*)::int AS broken_count
