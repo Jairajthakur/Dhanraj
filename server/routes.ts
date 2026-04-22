@@ -117,6 +117,66 @@ async function sendPush(playerId: string, title: string, body: string, data: Rec
   }
 }
 
+// ─── Urgent Push (PTP Break Alert) ───────────────────────────────────────────
+// Sends a loud, heads-up notification that shows on the lock screen and
+// plays the default alarm sound — identical to PhonePe/BharatPe payment alerts.
+async function sendUrgentPush(
+  playerId: string,
+  agentName: string,
+  brokenCount: number
+): Promise<void> {
+  const appId  = process.env.ONESIGNAL_APP_ID;
+  const apiKey = process.env.ONESIGNAL_API_KEY;
+  if (!appId || !apiKey || !playerId?.trim()) return;
+
+  const title = "🚨 Broken PTP Alert";
+  const body  = brokenCount === 1
+    ? `${agentName}, you have 1 broken PTP. Update it immediately to unlock the app.`
+    : `${agentName}, you have ${brokenCount} broken PTPs. Update them immediately to unlock the app.`;
+
+  try {
+    await fetch("https://onesignal.com/api/v1/notifications", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Basic ${apiKey}`,
+      },
+      body: JSON.stringify({
+        app_id:          appId,
+        target_channel:  "push",
+        include_aliases: { onesignal_id: [playerId.trim()] },
+        headings:        { en: title },
+        contents:        { en: body },
+        data:            { screen: "allocation", type: "broken_ptp" },
+
+        // Maximum urgency — shows as heads-up banner and plays sound
+        priority:                  10,
+        android_visibility:        1,        // shows on lock screen
+        android_channel_id:        "broken_ptp_alerts",
+        android_sound:             "notification", // uses device default alarm
+        android_led_color:         "FFFF0000",     // red LED
+        android_accent_color:      "FFE24B4A",
+        android_group:             "broken_ptp",
+        android_group_alert:       "all",
+
+        // Vibration pattern: 500ms on, 200ms off, 500ms on (like payment alert)
+        android_vibration_pattern: [0, 500, 200, 500],
+
+        // Show big text style so full message is readable on lock screen
+        android_big_picture:       null,
+        large_icon:                "ic_launcher",
+        small_icon:                "ic_stat_onesignal_default",
+
+        // Keep for 6 hours — if agent's phone is off it delivers when they turn it on
+        ttl: 6 * 60 * 60,
+      }),
+    });
+    console.log(`[urgent-push] ✅ PTP alert sent to ${agentName}`);
+  } catch (e: any) {
+    console.error(`[urgent-push] ❌ Failed for ${agentName}:`, e.message);
+  }
+}
+
 async function sendPushToMany(playerIds: string[], title: string, body: string, data: Record<string, any> = {}): Promise<{ sent: number; total: number }> {
   const appId = process.env.ONESIGNAL_APP_ID;
   const apiKey = process.env.ONESIGNAL_API_KEY;
@@ -522,6 +582,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
   `);
   console.log("[DB] broken_ptp columns ready ✅");
 } catch (e: any) { console.error("[DB] broken_ptp migration:", e.message); }
+
+try {
+  await storage.query(`
+    CREATE TABLE IF NOT EXISTS ptp_break_notifications (
+      agent_id    INTEGER PRIMARY KEY REFERENCES fos_agents(id) ON DELETE CASCADE,
+      broken_count INTEGER NOT NULL DEFAULT 0,
+      notified_at  TIMESTAMP NOT NULL DEFAULT NOW()
+    )
+  `);
+  console.log("[DB] ptp_break_notifications table ready ✅");
+} catch (e: any) { console.error("[DB] ptp_break_notifications migration:", e.message); }
 
 try {
   await storage.query(`
@@ -2260,6 +2331,44 @@ app.post("/api/admin/reset-monthly-feedback/case/:caseId", requireAdmin, async (
           AND ptp_date IS NOT NULL
           AND ptp_date >= CURRENT_DATE
       `);
+
+      // ── Notify agents who NOW have broken PTPs ────────────────────────
+      // Find agents with unnotified broken PTPs (notified_at is NULL or old)
+      const affectedAgents = await storage.query(`
+        SELECT fa.id, fa.name, fa.push_token, fa.phone,
+               COUNT(*)::int AS broken_count
+        FROM (
+          SELECT agent_id FROM loan_cases
+          WHERE broken_ptp = true AND ptp_date < CURRENT_DATE
+          UNION ALL
+          SELECT agent_id FROM bkt_cases
+          WHERE broken_ptp = true AND ptp_date < CURRENT_DATE
+        ) t
+        JOIN fos_agents fa ON fa.id = t.agent_id
+        WHERE fa.id NOT IN (
+          SELECT agent_id FROM ptp_break_notifications
+          WHERE notified_at > NOW() - INTERVAL '1 hour'
+        )
+        GROUP BY fa.id, fa.name, fa.push_token, fa.phone
+      `);
+
+      for (const agent of affectedAgents.rows) {
+        const { id, name, push_token, phone, broken_count } = agent;
+
+        // Send urgent loud push notification (like PhonePe/BharatPe alert)
+        if (push_token?.trim()) {
+          await sendUrgentPush(push_token.trim(), name, broken_count);
+        }
+
+        // Record notification so we don't spam every 10 minutes
+        await storage.query(
+          `INSERT INTO ptp_break_notifications (agent_id, broken_count, notified_at)
+           VALUES ($1, $2, NOW())
+           ON CONFLICT (agent_id) DO UPDATE
+           SET broken_count = $2, notified_at = NOW()`,
+          [id, broken_count]
+        );
+      }
 
       console.log("[ptp-break-job] ✅ Broken PTP check complete");
     } catch (e: any) { console.error("[ptp-break-job]", e.message); }
