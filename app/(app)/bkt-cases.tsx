@@ -7,6 +7,9 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Ionicons } from "@expo/vector-icons";
+import * as Haptics from "expo-haptics";
+import * as FileSystem from "expo-file-system";
+import * as Sharing from "expo-sharing";
 import Colors from "@/constants/colors";
 import { getApiUrl } from "@/lib/query-client";
 
@@ -307,6 +310,39 @@ function FeedbackModal({
   );
 }
 
+// ─── CSV Download ─────────────────────────────────────────────────────────────
+function escCsv(v: unknown): string {
+  const s = v === null || v === undefined ? "" : String(v);
+  if (s.includes(",") || s.includes('"') || s.includes("\n")) {
+    return `"${s.replace(/"/g, '""')}"`;
+  }
+  return s;
+}
+
+async function downloadBktCsv(cases: any[], filename: string): Promise<void> {
+  const headers = [
+    "Customer Name", "Loan No", "App ID", "Mobile No",
+    "Status", "Bucket", "EMI Amount", "EMI Due", "POS",
+    "CBC", "LPP", "Registration No", "Address",
+    "Feedback Code", "Latest Feedback", "PTP Date", "Company",
+  ];
+  const rows = cases.map((c) => [
+    c.customer_name, c.loan_no, c.app_id ?? "", c.mobile_no ?? "",
+    c.status, c.bkt ?? "", c.emi_amount ?? "", c.emi_due ?? "", c.pos ?? "",
+    c.cbc ?? "", c.lpp ?? "", c.registration_no ?? "", c.address ?? "",
+    c.feedback_code ?? "", c.latest_feedback ?? "",
+    c.ptp_date ? String(c.ptp_date).slice(0, 10) : "",
+    c.company_name ?? "",
+  ].map(escCsv).join(","));
+
+  const csv = [headers.map(escCsv).join(","), ...rows].join("\n");
+  const path = `${FileSystem.cacheDirectory}${filename}`;
+  await FileSystem.writeAsStringAsync(path, csv, { encoding: FileSystem.EncodingType.UTF8 });
+  const canShare = await Sharing.isAvailableAsync();
+  if (!canShare) { Alert.alert("Sharing not available", "Cannot share files on this device."); return; }
+  await Sharing.shareAsync(path, { mimeType: "text/csv", dialogTitle: "Download BKT Cases" });
+}
+
 export default function FosBktCases() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
@@ -314,6 +350,7 @@ export default function FosBktCases() {
   const [activeTab, setActiveTab] = useState("bkt1");
   const [search, setSearch] = useState("");
   const [feedbackItem, setFeedbackItem] = useState<any>(null);
+  const [downloading, setDownloading] = useState(false);
 
   const { data, isLoading } = useQuery({
     queryKey: ["/api/bkt-cases", activeTab],
@@ -338,6 +375,23 @@ export default function FosBktCases() {
   }, [cases, search]);
 
   const tabColor = TABS.find((t) => t.key === activeTab)?.color || Colors.primary;
+  const tabLabel = TABS.find((t) => t.key === activeTab)?.label ?? activeTab;
+
+  const handleDownload = async () => {
+    if (!cases.length) { Alert.alert("No Cases", "There are no cases to download."); return; }
+    setDownloading(true);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    try {
+      const date = new Date().toISOString().slice(0, 10);
+      const toExport = filtered.length > 0 ? filtered : cases;
+      const filename = `bkt_${tabLabel}_${date}.csv`;
+      await downloadBktCsv(toExport, filename);
+    } catch (e: unknown) {
+      Alert.alert("Download Failed", e instanceof Error ? e.message : "Something went wrong.");
+    } finally {
+      setDownloading(false);
+    }
+  };
 
   return (
     <View style={{ flex: 1, backgroundColor: Colors.background }}>
@@ -363,20 +417,32 @@ export default function FosBktCases() {
           ))}
         </ScrollView>
 
-        <View style={styles.searchWrap}>
-          <Ionicons name="search" size={16} color={Colors.textMuted} />
-          <TextInput
-            style={styles.searchInput}
-            placeholder="Search by name, loan no, reg no..."
-            placeholderTextColor={Colors.textMuted}
-            value={search}
-            onChangeText={setSearch}
-          />
-          {search.length > 0 && (
-            <Pressable onPress={() => setSearch("")}>
-              <Ionicons name="close-circle" size={18} color={Colors.textMuted} />
-            </Pressable>
-          )}
+        <View style={styles.searchRow}>
+          <View style={styles.searchWrap}>
+            <Ionicons name="search" size={16} color={Colors.textMuted} />
+            <TextInput
+              style={styles.searchInput}
+              placeholder="Search by name, loan no, reg no..."
+              placeholderTextColor={Colors.textMuted}
+              value={search}
+              onChangeText={setSearch}
+            />
+            {search.length > 0 && (
+              <Pressable onPress={() => setSearch("")}>
+                <Ionicons name="close-circle" size={18} color={Colors.textMuted} />
+              </Pressable>
+            )}
+          </View>
+          <Pressable
+            style={[styles.downloadBtn, { borderColor: tabColor, backgroundColor: tabColor }, (downloading || isLoading) && { opacity: 0.5 }]}
+            onPress={handleDownload}
+            disabled={downloading || isLoading}
+          >
+            {downloading
+              ? <ActivityIndicator size="small" color="#fff" />
+              : <Ionicons name="download-outline" size={19} color="#fff" />
+            }
+          </Pressable>
         </View>
       </View>
 
@@ -500,8 +566,10 @@ const styles = StyleSheet.create({
   tabScroll: { gap: 8, paddingVertical: 8 },
   tab: { paddingHorizontal: 18, paddingVertical: 8, borderRadius: 20, borderWidth: 1.5, borderColor: Colors.border, backgroundColor: Colors.background },
   tabText: { fontSize: 13, fontWeight: "700", color: Colors.textSecondary },
-  searchWrap: { flexDirection: "row", alignItems: "center", backgroundColor: Colors.surfaceAlt, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 8, gap: 8 },
+  searchRow:  { flexDirection: "row", alignItems: "center", gap: 10 },
+  searchWrap: { flex: 1, flexDirection: "row", alignItems: "center", backgroundColor: Colors.surfaceAlt, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 8, gap: 8 },
   searchInput: { flex: 1, fontSize: 14, color: Colors.text, paddingVertical: 0 },
+  downloadBtn: { width: 42, height: 42, borderRadius: 12, alignItems: "center", justifyContent: "center", borderWidth: 1.5 },
   list: { padding: 12, gap: 10 },
   count: { fontSize: 13, color: Colors.textMuted, fontWeight: "600", paddingHorizontal: 4, paddingBottom: 4 },
   card: { backgroundColor: Colors.surface, borderRadius: 14, padding: 14, gap: 8, borderLeftWidth: 4, shadowColor: "#000", shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 1 },
