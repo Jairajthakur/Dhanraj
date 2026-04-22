@@ -9,6 +9,8 @@ import { Ionicons } from "@expo/vector-icons";
 import Colors from "@/constants/colors";
 import { useAuth } from "@/context/AuthContext";
 import { CompanyProvider, useCompany } from "@/context/CompanyContext";
+import BlockingActionModal, { BlockingItem } from "@/components/BlockingActionModal";
+import { useBlocking } from "@/context/BlockingContext";
 
 // ─── Menu Items ───────────────────────────────────────────────────────────────
 const MENU_ITEMS = [
@@ -239,6 +241,17 @@ function AppLayoutInner() {
   const [drawerOpen,        setDrawerOpen]        = useState(false);
   const [companyPickerOpen, setCompanyPickerOpen] = useState(false);
   const { agent }                                  = useAuth();
+  const { items: blockingItems, isBlocking, snooze } = useBlocking();
+
+  const handleBlockingItemPress = (item: BlockingItem) => {
+    router.push({
+      pathname: "/(app)/allocation" as any,
+      params:   { brokenPtpIds: String(item.id) },
+    });
+    if (item.type === "overdue_deposition") {
+      router.push("/(app)/deposition" as any);
+    }
+  };
   return (
     <>
       <Stack
@@ -293,6 +306,14 @@ function AppLayoutInner() {
         onClose={() => setCompanyPickerOpen(false)}
       />
 
+      {!!agent && agent.role === "fos" && (
+        <BlockingActionModal
+          visible={isBlocking}
+          items={blockingItems}
+          onDismiss={snooze}
+          onGoToCase={handleBlockingItemPress}
+        />
+      )}
     </>
   );
 }
