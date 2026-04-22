@@ -308,14 +308,36 @@ export function usePushNotifications() {
       console.warn("[OneSignal] registerPushToken error:", e?.message)
     );
 
-    const handleClick = (event: any) =>
+    const handleClick = (event: any) => {
       console.log("[OneSignal] Tapped:", event?.notification?.additionalData);
+      // BUG FIX: Previously this only logged — the agent's tap did nothing.
+      // Now we navigate to the allocation screen and bust the broken-ptps cache
+      // so the blocking modal appears immediately with the correct PTP list.
+      try {
+        const data = event?.notification?.additionalData as Record<string, any> | undefined;
+        if (data?.type === "broken_ptp" || data?.screen === "allocation") {
+          // Dynamically import router to avoid circular deps at module load time
+          const { router } = require("expo-router");
+          router.push("/(app)/allocation");
+        }
+        // Invalidate the broken-ptps cache so BlockingContext refreshes immediately.
+        // api.ts exposes _queryClient via setQueryClientRef (called in _layout.tsx).
+        try {
+          const apiMod = require("@/lib/api");
+          // Access the internal ref the same way invalidateAfterImport does
+          if (apiMod._queryClient) {
+            apiMod._queryClient.invalidateQueries({ queryKey: ["/api/broken-ptps"] });
+          }
+        } catch (_) {}
+      } catch (navErr) {
+        console.warn("[OneSignal] Click navigation error:", navErr);
+      }
+    };
     const handleForeground = (event: any) => {
       console.log("[OneSignal] Foreground:", event?.notification?.title);
-      // Always show the notification banner even when app is open.
-      // IMPORTANT: Do NOT call event.preventDefault() here — that suppresses
-      // the notification before display() can show it, causing the banner to
-      // never appear (this was the root cause of the silent foreground bug).
+      // BUG FIX: Removed event.preventDefault() — calling it suppressed the notification
+      // BEFORE display() could show it, so the banner and sound never appeared when the
+      // app was open in the foreground. display() alone is the correct way to show it.
       try { event?.notification?.display?.(); } catch (_) {}
     };
 
