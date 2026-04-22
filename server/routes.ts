@@ -1971,8 +1971,8 @@ app.get("/api/admin/feedback-export", requireAdmin, async (req, res) => {
       let sent = 0;
       for (const agent of affectedAgents.rows) {
         const { id, name, push_token, broken_count } = agent;
-        const result = await sendUrgentPush(push_token.trim(), name, broken_count);
-        if (result?.ok !== false) sent++;
+        await sendUrgentPush(push_token.trim(), name, broken_count);
+        sent++;
 
         // Record so the admin can see last triggered timestamp if needed
         await storage.query(
