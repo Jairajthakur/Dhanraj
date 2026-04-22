@@ -131,6 +131,7 @@ async function uploadScreenshot(route: string, file: any, extraFields?: Record<s
 // ─── Query cache invalidation helper ─────────────────────────────────────────
 let _queryClient: any = null;
 export function setQueryClientRef(qc: any) { _queryClient = qc; }
+export function getQueryClientRef(): any   { return _queryClient; }
 function invalidateAfterImport() {
   if (!_queryClient) return;
   _queryClient.invalidateQueries({ queryKey: ["/api/admin/cases"] });
