@@ -196,9 +196,12 @@ function toIsoDate(val: string): string {
   return val;
 }
 
-function navigateToDetail(item: CaseItem) {
+function navigateToDetail(item: CaseItem, fromBlocking = false) {
   caseStore.set(item);
-  router.push({ pathname: "/(app)/customer/[id]", params: { id: String(item.id) } });
+  router.push({
+    pathname: "/(app)/customer/[id]",
+    params: { id: String(item.id), ...(fromBlocking ? { fromBlocking: "1" } : {}) },
+  });
 }
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -1140,7 +1143,7 @@ function CaseCard({ item, onOpenModal, isBrokenPtp = false }: CaseCardProps) {
   const primaryPhone    = phones[0] ?? "";
 
   return (
-    <Pressable style={[styles.card, isBrokenPtp && styles.cardBrokenPtp]} onPress={() => navigateToDetail(item)}>
+    <Pressable style={[styles.card, isBrokenPtp && styles.cardBrokenPtp]} onPress={() => navigateToDetail(item, isBrokenPtp)}>
       <View style={styles.cardHeader}>
         <View style={styles.cardNameRow}>
           <Ionicons name="person" size={16} color={Colors.textSecondary} />
