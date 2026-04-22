@@ -1943,6 +1943,55 @@ app.get("/api/admin/feedback-export", requireAdmin, async (req, res) => {
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
+  // ─── Admin: Manually trigger PTP break sound alert ──────────────────────────
+  // Replaces the old auto-notification that fired every 10 min.
+  // Admin presses a button → this sends the urgent loud push to every agent
+  // that currently has broken PTPs, then records the notification timestamp.
+  app.post("/api/admin/trigger-ptp-alert", requireAdmin, async (req, res) => {
+    try {
+      const affectedAgents = await storage.query(`
+        SELECT fa.id, fa.name, fa.push_token,
+               COUNT(*)::int AS broken_count
+        FROM (
+          SELECT agent_id FROM loan_cases
+          WHERE broken_ptp = true AND ptp_date < CURRENT_DATE
+          UNION ALL
+          SELECT agent_id FROM bkt_cases
+          WHERE broken_ptp = true AND ptp_date < CURRENT_DATE
+        ) t
+        JOIN fos_agents fa ON fa.id = t.agent_id
+        WHERE fa.push_token IS NOT NULL AND fa.push_token <> ''
+        GROUP BY fa.id, fa.name, fa.push_token
+      `);
+
+      if (affectedAgents.rows.length === 0) {
+        return res.json({ ok: true, sent: 0, total: 0, message: "No agents with broken PTPs found." });
+      }
+
+      let sent = 0;
+      for (const agent of affectedAgents.rows) {
+        const { id, name, push_token, broken_count } = agent;
+        const result = await sendUrgentPush(push_token.trim(), name, broken_count);
+        if (result?.ok !== false) sent++;
+
+        // Record so the admin can see last triggered timestamp if needed
+        await storage.query(
+          `INSERT INTO ptp_break_notifications (agent_id, broken_count, notified_at)
+           VALUES ($1, $2, NOW())
+           ON CONFLICT (agent_id) DO UPDATE
+           SET broken_count = $2, notified_at = NOW()`,
+          [id, broken_count]
+        );
+      }
+
+      console.log(`[admin-ptp-alert] ✅ Admin triggered PTP alert — sent: ${sent}/${affectedAgents.rows.length}`);
+      res.json({ ok: true, sent, total: affectedAgents.rows.length });
+    } catch (e: any) {
+      console.error("[admin-ptp-alert] ❌", e.message);
+      res.status(500).json({ ok: false, error: e.message });
+    }
+  });
+
   app.get("/api/admin/bkt-perf-summary", requireAdmin, async (req, res) => {
   try {
     const company = (req.query.company as string) || null;
@@ -2332,45 +2381,9 @@ app.post("/api/admin/reset-monthly-feedback/case/:caseId", requireAdmin, async (
           AND ptp_date >= CURRENT_DATE
       `);
 
-      // ── Notify agents who NOW have broken PTPs ────────────────────────
-      // Find agents with unnotified broken PTPs (notified_at is NULL or old)
-      const affectedAgents = await storage.query(`
-        SELECT fa.id, fa.name, fa.push_token, fa.phone,
-               COUNT(*)::int AS broken_count
-        FROM (
-          SELECT agent_id FROM loan_cases
-          WHERE broken_ptp = true AND ptp_date < CURRENT_DATE
-          UNION ALL
-          SELECT agent_id FROM bkt_cases
-          WHERE broken_ptp = true AND ptp_date < CURRENT_DATE
-        ) t
-        JOIN fos_agents fa ON fa.id = t.agent_id
-        WHERE fa.id NOT IN (
-          SELECT agent_id FROM ptp_break_notifications
-          WHERE notified_at > NOW() - INTERVAL '1 hour'
-        )
-        GROUP BY fa.id, fa.name, fa.push_token, fa.phone
-      `);
-
-      for (const agent of affectedAgents.rows) {
-        const { id, name, push_token, phone, broken_count } = agent;
-
-        // Send urgent loud push notification (like PhonePe/BharatPe alert)
-        if (push_token?.trim()) {
-          await sendUrgentPush(push_token.trim(), name, broken_count);
-        }
-
-        // Record notification so we don't spam every 10 minutes
-        await storage.query(
-          `INSERT INTO ptp_break_notifications (agent_id, broken_count, notified_at)
-           VALUES ($1, $2, NOW())
-           ON CONFLICT (agent_id) DO UPDATE
-           SET broken_count = $2, notified_at = NOW()`,
-          [id, broken_count]
-        );
-      }
-
-      console.log("[ptp-break-job] ✅ Broken PTP check complete");
+      // ── Auto-notification removed ─────────────────────────────────────
+      // Sound alerts are now admin-triggered only via POST /api/admin/trigger-ptp-alert
+      console.log("[ptp-break-job] ✅ Broken PTP check complete (notifications disabled — use admin trigger)");
     } catch (e: any) { console.error("[ptp-break-job]", e.message); }
   }
   // Run every 10 minutes so the block clears quickly after agent resolves
