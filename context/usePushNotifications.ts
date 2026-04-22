@@ -321,13 +321,11 @@ export function usePushNotifications() {
           router.push("/(app)/allocation");
         }
         // Invalidate the broken-ptps cache so BlockingContext refreshes immediately.
-        // api.ts exposes _queryClient via setQueryClientRef (called in _layout.tsx).
+        // getQueryClientRef() is the exported accessor — _queryClient itself is not
+        // a public export, so accessing apiMod._queryClient would always be undefined.
         try {
-          const apiMod = require("@/lib/api");
-          // Access the internal ref the same way invalidateAfterImport does
-          if (apiMod._queryClient) {
-            apiMod._queryClient.invalidateQueries({ queryKey: ["/api/broken-ptps"] });
-          }
+          const { getQueryClientRef } = require("@/lib/api");
+          getQueryClientRef()?.invalidateQueries({ queryKey: ["/api/broken-ptps"] });
         } catch (_) {}
       } catch (navErr) {
         console.warn("[OneSignal] Click navigation error:", navErr);
