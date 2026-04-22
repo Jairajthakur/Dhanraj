@@ -174,6 +174,7 @@ export default function AdminDashboard() {
   const [importVisible, setImportVisible] = useState(false);
   const [feedbackDownloading, setFeedbackDownloading] = useState(false);
   const [ptpClearing, setPtpClearing] = useState(false);
+  const [ptpAlertSending, setPtpAlertSending] = useState(false);
   const [pushTesting, setPushTesting] = useState(false);
   const [pushExpanded, setPushExpanded] = useState(false);
   const { selectedCompany } = useCompanyFilter();
@@ -263,6 +264,33 @@ export default function AdminDashboard() {
 
   const handleDownloadFeedback = () =>
     downloadExcel("/api/admin/feedback-export", `Feedback_Report_${new Date().toISOString().slice(0, 10)}.xlsx`, setFeedbackDownloading);
+
+  const handleTriggerPtpAlert = () => {
+    Alert.alert(
+      "Send PTP Break Alert",
+      "This will send a loud sound notification to all agents who currently have broken PTPs. Continue?",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Send Alert", onPress: async () => {
+            setPtpAlertSending(true);
+            try {
+              const url = new URL("/api/admin/trigger-ptp-alert", getApiUrl()).toString();
+              const res = await expoFetch(url, { method: "POST", credentials: "include" });
+              const json: any = await res.json();
+              if (!res.ok) throw new Error(json.error || "Failed to send alert");
+              if (json.sent === 0) {
+                Alert.alert("No Broken PTPs", "There are currently no agents with broken PTP cases.");
+              } else {
+                Alert.alert("Alert Sent!", `Sound notification sent to ${json.sent} agent${json.sent !== 1 ? "s" : ""} with broken PTPs.`);
+              }
+            } catch (e: any) { Alert.alert("Error", e.message || "Could not send PTP alert"); }
+            finally { setPtpAlertSending(false); }
+          },
+        },
+      ]
+    );
+  };
 
   const handleClearPTP = () => {
     Alert.alert("Clear All PTP Dates", "This will remove all PTP dates and reset all PTP cases to Pending. Continue?", [
@@ -371,6 +399,18 @@ export default function AdminDashboard() {
             </View>
           </View>
           {!ptpClearing && <Ionicons name="chevron-forward" size={22} color="rgba(255,255,255,0.7)" />}
+        </Pressable>
+
+        {/* Trigger PTP Break Alert */}
+        <Pressable style={[styles.importBanner, { backgroundColor: "#7C3AED" }, ptpAlertSending && { opacity: 0.7 }]} onPress={handleTriggerPtpAlert} disabled={ptpAlertSending}>
+          <View style={styles.importBannerLeft}>
+            {ptpAlertSending ? <ActivityIndicator color="#fff" size="small" style={{ marginRight: 4 }} /> : <Ionicons name="notifications" size={28} color="#fff" />}
+            <View style={styles.importBannerText}>
+              <Text style={styles.importBannerTitle}>Send PTP Break Alert</Text>
+              <Text style={styles.importBannerSub}>{ptpAlertSending ? "Sending alerts…" : "Manually trigger sound notification for all broken PTPs"}</Text>
+            </View>
+          </View>
+          {!ptpAlertSending && <Ionicons name="chevron-forward" size={22} color="rgba(255,255,255,0.7)" />}
         </Pressable>
 
         {/* Push Panel */}
