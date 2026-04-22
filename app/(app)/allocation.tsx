@@ -11,7 +11,6 @@ import * as Haptics from "expo-haptics";
 import * as ImagePicker from "expo-image-picker";
 import * as Location from "expo-location";
 import * as FileSystem from "expo-file-system";
-import * as Sharing from "expo-sharing";
 import Colors from "@/constants/colors";
 import { api } from "@/lib/api";
 import { caseStore } from "@/lib/caseStore";
@@ -207,6 +206,15 @@ function escCsv(v: unknown): string {
   return s;
 }
 
+// ─── CSV Download ─────────────────────────────────────────────────────────────
+function escCsv(v: unknown): string {
+  const s = v === null || v === undefined ? "" : String(v);
+  if (s.includes(",") || s.includes("\"") || s.includes("\n")) {
+    return `"${s.replace(/"/g, '""')}"`;
+  }
+  return s;
+}
+
 async function downloadAllocationCsv(cases: CaseItem[], filename: string): Promise<void> {
   const headers = [
     "Customer Name", "Loan No", "App ID", "Mobile No",
@@ -227,11 +235,29 @@ async function downloadAllocationCsv(cases: CaseItem[], filename: string): Promi
   ].map(escCsv).join(","));
 
   const csv = [headers.map(escCsv).join(","), ...rows].join("\n");
-  const path = `${FileSystem.cacheDirectory}${filename}`;
-  await FileSystem.writeAsStringAsync(path, csv, { encoding: FileSystem.EncodingType.UTF8 });
-  const canShare = await Sharing.isAvailableAsync();
-  if (!canShare) { Alert.alert("Sharing not available", "Cannot share files on this device."); return; }
-  await Sharing.shareAsync(path, { mimeType: "text/csv", dialogTitle: "Download Allocation" });
+
+  if (Platform.OS === "android") {
+    // Android: save directly to Downloads via StorageAccessFramework
+    const permissions = await FileSystem.StorageAccessFramework.requestDirectoryPermissionsAsync(
+      "content://com.android.externalstorage.documents/tree/primary%3ADownload"
+    );
+    if (!permissions.granted) {
+      Alert.alert("Permission Denied", "Please allow access to the Downloads folder.");
+      return;
+    }
+    const fileUri = await FileSystem.StorageAccessFramework.createFileAsync(
+      permissions.directoryUri,
+      filename,
+      "text/csv"
+    );
+    await FileSystem.writeAsStringAsync(fileUri, csv, { encoding: FileSystem.EncodingType.UTF8 });
+    Alert.alert("✅ Downloaded", `Saved to Downloads:\n${filename}`);
+  } else {
+    // iOS: save to app's Documents folder (accessible via Files app)
+    const path = `${FileSystem.documentDirectory}${filename}`;
+    await FileSystem.writeAsStringAsync(path, csv, { encoding: FileSystem.EncodingType.UTF8 });
+    Alert.alert("✅ Downloaded", `Saved to Files app:\n${filename}`);
+  }
 }
 
 function navigateToDetail(item: CaseItem, fromBlocking = false) {
