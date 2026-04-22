@@ -486,6 +486,7 @@ export default function FosBktCases() {
           onSaved={() => {
             qc.invalidateQueries({ queryKey: ["/api/bkt-cases", activeTab] });
             qc.invalidateQueries({ queryKey: ["/api/bkt-perf-summary"] });
+            qc.invalidateQueries({ queryKey: ["/api/broken-ptps"] }); // clear blocking modal if BKT PTP was resolved
             setFeedbackItem(null);
           }}
         />
