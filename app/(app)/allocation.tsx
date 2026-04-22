@@ -10,6 +10,8 @@ import { router, useLocalSearchParams } from "expo-router";
 import * as Haptics from "expo-haptics";
 import * as ImagePicker from "expo-image-picker";
 import * as Location from "expo-location";
+import * as FileSystem from "expo-file-system";
+import * as Sharing from "expo-sharing";
 import Colors from "@/constants/colors";
 import { api } from "@/lib/api";
 import { caseStore } from "@/lib/caseStore";
@@ -194,6 +196,42 @@ function toIsoDate(val: string): string {
   if (parts.length === 3 && parts[2].length === 4)
     return `${parts[2]}-${parts[1].padStart(2, "0")}-${parts[0].padStart(2, "0")}`;
   return val;
+}
+
+// ─── CSV Download ─────────────────────────────────────────────────────────────
+function escCsv(v: unknown): string {
+  const s = v === null || v === undefined ? "" : String(v);
+  if (s.includes(",") || s.includes("\"") || s.includes("\n")) {
+    return `"${s.replace(/"/g, '""')}"`;
+  }
+  return s;
+}
+
+async function downloadAllocationCsv(cases: CaseItem[], filename: string): Promise<void> {
+  const headers = [
+    "Customer Name", "Loan No", "App ID", "Mobile No",
+    "Status", "Bucket", "EMI Amount", "EMI Due", "POS",
+    "CBC", "LPP", "CBC+LPP", "PTP Date",
+    "Feedback Code", "Latest Feedback", "Monthly Feedback",
+    "Address", "Registration No", "Company",
+  ];
+
+  const rows = cases.map((c) => [
+    c.customer_name, c.loan_no, c.app_id ?? "", c.mobile_no ?? "",
+    c.status, c.bkt ?? "", c.emi_amount ?? "", c.emi_due ?? "", c.pos ?? "",
+    c.cbc ?? "", c.lpp ?? "", c.cbc_lpp ?? "",
+    c.ptp_date ? String(c.ptp_date).slice(0, 10) : "",
+    c.feedback_code ?? "", c.latest_feedback ?? "",
+    c.monthly_feedback ?? "", c.address ?? "", c.registration_no ?? "",
+    c.company_name ?? "",
+  ].map(escCsv).join(","));
+
+  const csv = [headers.map(escCsv).join(","), ...rows].join("\n");
+  const path = `${FileSystem.cacheDirectory}${filename}`;
+  await FileSystem.writeAsStringAsync(path, csv, { encoding: FileSystem.EncodingType.UTF8 });
+  const canShare = await Sharing.isAvailableAsync();
+  if (!canShare) { Alert.alert("Sharing not available", "Cannot share files on this device."); return; }
+  await Sharing.shareAsync(path, { mimeType: "text/csv", dialogTitle: "Download Allocation" });
 }
 
 function navigateToDetail(item: CaseItem, fromBlocking = false) {
@@ -1219,7 +1257,7 @@ export default function AllocationScreen() {
   const [search,        setSearch]        = useState("");
   const [modalItem,     setModalItem]     = useState<CaseItem | null>(null);
   const [modalInitTab,  setModalInitTab]  = useState<FeedbackTab>("Call Log");
-
+  const [downloading,   setDownloading]   = useState(false);
 
   const { data: companiesData, isLoading: companiesLoading } = useQuery({
     queryKey: ["/api/companies"],
@@ -1267,6 +1305,25 @@ export default function AllocationScreen() {
     Paid:   allCases.filter((c) => c.status === "Paid").length,
   }), [allCases]);
 
+  const handleDownload = useCallback(async () => {
+    if (!allCases.length) { Alert.alert("No Cases", "There are no cases to download."); return; }
+    setDownloading(true);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    try {
+      const date = new Date().toISOString().slice(0, 10);
+      const company = activeCompany !== "All" ? `_${activeCompany.replace(/\s+/g, "_")}` : "";
+      const tab = activeTab !== "All" ? `_${activeTab}` : "";
+      const filename = `allocation${company}${tab}_${date}.csv`;
+      // Download currently visible (filtered) cases, or all if no filter
+      const toExport = filtered.length > 0 ? filtered : allCases;
+      await downloadAllocationCsv(toExport, filename);
+    } catch (e: unknown) {
+      Alert.alert("Download Failed", e instanceof Error ? e.message : "Something went wrong.");
+    } finally {
+      setDownloading(false);
+    }
+  }, [allCases, filtered, activeCompany, activeTab]);
+
   const handleOpenModal = useCallback((item: CaseItem, tab: FeedbackTab) => {
     setModalItem(item); setModalInitTab(tab);
   }, []);
@@ -1307,13 +1364,25 @@ export default function AllocationScreen() {
         ))}
       </View>
 
-      <View style={styles.searchContainer}>
-        <Ionicons name="search" size={18} color={Colors.textMuted} style={{ marginRight: 8 }} />
-        <TextInput
-          style={styles.searchInput} placeholder="Search name, loan no, app id, reg no..."
-          placeholderTextColor={Colors.textMuted} value={search} onChangeText={setSearch}
-        />
-        {search ? <Pressable onPress={() => setSearch("")}><Ionicons name="close-circle" size={18} color={Colors.textMuted} /></Pressable> : null}
+      <View style={styles.searchRow}>
+        <View style={styles.searchContainer}>
+          <Ionicons name="search" size={18} color={Colors.textMuted} style={{ marginRight: 8 }} />
+          <TextInput
+            style={styles.searchInput} placeholder="Search name, loan no, app id, reg no..."
+            placeholderTextColor={Colors.textMuted} value={search} onChangeText={setSearch}
+          />
+          {search ? <Pressable onPress={() => setSearch("")}><Ionicons name="close-circle" size={18} color={Colors.textMuted} /></Pressable> : null}
+        </View>
+        <Pressable
+          style={[styles.downloadBtn, (downloading || isLoading) && { opacity: 0.5 }]}
+          onPress={handleDownload}
+          disabled={downloading || isLoading}
+        >
+          {downloading
+            ? <ActivityIndicator size="small" color="#fff" />
+            : <Ionicons name="download-outline" size={20} color="#fff" />
+          }
+        </Pressable>
       </View>
 
       {isBrokenPtpMode && (
@@ -1368,8 +1437,10 @@ const styles = StyleSheet.create({
   tabTextActive:       { color: "#fff" },
   tabCount:            { backgroundColor: Colors.border, borderRadius: 10, paddingHorizontal: 5, paddingVertical: 1, minWidth: 18, alignItems: "center" },
   tabCountText:        { fontSize: 10, fontWeight: "700", color: Colors.textSecondary },
-  searchContainer:     { flexDirection: "row", alignItems: "center", margin: 12, backgroundColor: Colors.surface, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, borderWidth: 1, borderColor: Colors.border },
+  searchRow:           { flexDirection: "row", alignItems: "center", gap: 10, marginHorizontal: 12, marginVertical: 12 },
+  searchContainer:     { flex: 1, flexDirection: "row", alignItems: "center", backgroundColor: Colors.surface, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, borderWidth: 1, borderColor: Colors.border },
   searchInput:         { flex: 1, fontSize: 14, color: Colors.text },
+  downloadBtn:         { width: 44, height: 44, borderRadius: 12, backgroundColor: Colors.primary, alignItems: "center", justifyContent: "center", shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.15, shadowRadius: 4, elevation: 3 },
   list:                { padding: 12, gap: 10 },
   cardBrokenPtp:       { borderWidth: 2, borderColor: "#E24B4A", shadowColor: "#E24B4A", shadowOpacity: 0.2, shadowRadius: 6, elevation: 4 },
   card:                { backgroundColor: "#fff", borderRadius: 14, padding: 14, gap: 6, shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.08, shadowRadius: 6, elevation: 3 },
