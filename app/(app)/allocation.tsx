@@ -206,15 +206,6 @@ function escCsv(v: unknown): string {
   return s;
 }
 
-// ─── CSV Download ─────────────────────────────────────────────────────────────
-function escCsv(v: unknown): string {
-  const s = v === null || v === undefined ? "" : String(v);
-  if (s.includes(",") || s.includes("\"") || s.includes("\n")) {
-    return `"${s.replace(/"/g, '""')}"`;
-  }
-  return s;
-}
-
 async function downloadAllocationCsv(cases: CaseItem[], filename: string): Promise<void> {
   const headers = [
     "Customer Name", "Loan No", "App ID", "Mobile No",
