@@ -89,8 +89,6 @@ export default function BlockingActionModal({
   onGoToCase,
 }: BlockingActionModalProps) {
   const shake = useRef(new Animated.Value(0)).current;
-  const [snoozeCountdown, setSnoozeCountdown] = useState(0);
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const brokenPtps   = items.filter((i) => i.type === "broken_ptp");
   const overdueDepos = items.filter((i) => i.type === "overdue_deposition");
@@ -106,25 +104,12 @@ export default function BlockingActionModal({
     ]).start();
   }, [visible]);
 
-  useEffect(() => {
-    if (!visible) {
-      if (timerRef.current) clearInterval(timerRef.current);
-      setSnoozeCountdown(0);
-    }
-  }, [visible]);
-
+  // BUG FIX: Previously the snooze button started a 60-second countdown and only
+  // called onDismiss() after it finished — forcing agents to watch a timer before the
+  // app unlocked. Now onDismiss() is called immediately so the app unlocks at once.
+  // The 1-hour re-appear logic lives in BlockingContext.snooze(), not here.
   const handleSnooze = () => {
-    setSnoozeCountdown(60);
-    timerRef.current = setInterval(() => {
-      setSnoozeCountdown((prev) => {
-        if (prev <= 1) {
-          if (timerRef.current) clearInterval(timerRef.current);
-          onDismiss();
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
+    onDismiss();
   };
 
   if (!visible || items.length === 0) return null;
@@ -180,17 +165,10 @@ export default function BlockingActionModal({
             )}
           </ScrollView>
 
-          {snoozeCountdown > 0 ? (
-            <View style={s.snoozeCountdown}>
-              <Ionicons name="time-outline" size={14} color={Colors.textMuted} />
-              <Text style={s.snoozeCountdownText}>App unlocks in {snoozeCountdown}s…</Text>
-            </View>
-          ) : (
-            <Pressable style={s.snoozeBtn} onPress={handleSnooze}>
-              <Ionicons name="time-outline" size={14} color={Colors.textMuted} />
-              <Text style={s.snoozeBtnText}>Remind me in 1 hour</Text>
-            </Pressable>
-          )}
+          <Pressable style={s.snoozeBtn} onPress={handleSnooze}>
+            <Ionicons name="time-outline" size={14} color={Colors.textMuted} />
+            <Text style={s.snoozeBtnText}>Remind me in 1 hour</Text>
+          </Pressable>
         </Animated.View>
       </View>
     </Modal>
@@ -218,6 +196,5 @@ const s = StyleSheet.create({
   itemTag:            { fontSize: 10, fontWeight: "600", paddingHorizontal: 7, paddingVertical: 2, borderRadius: 6, marginTop: 3, overflow: "hidden" },
   snoozeBtn:          { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 16, marginHorizontal: 16, marginTop: 8 },
   snoozeBtnText:      { fontSize: 13, color: Colors.textMuted, fontWeight: "500" },
-  snoozeCountdown:    { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 16, marginHorizontal: 16, marginTop: 8 },
-  snoozeCountdownText:{ fontSize: 13, color: Colors.textMuted, fontWeight: "500" },
+
 });
