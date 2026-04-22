@@ -490,71 +490,167 @@ function FieldVisitModal({ visible, item, onClose }: { visible: boolean; item: a
 
   if (!item) return null;
 
+  const canSave = !!outcome && !!gps && !saving;
+  const phones: string[] = (item?.mobile_no ?? "").split(",").map((p: string) => p.trim()).filter(Boolean);
+
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={handleClose} statusBarTranslucent>
       <View style={fvStyles.overlay}>
         <View style={fvStyles.sheet}>
+          {/* Handle */}
           <View style={fvStyles.handle} />
+
+          {/* Header */}
           <View style={fvStyles.headerRow}>
-            <View style={fvStyles.headerIconWrap}><Ionicons name="location" size={18} color={Colors.primary} /></View>
+            <View style={fvStyles.headerIconWrap}>
+              <Ionicons name="navigate" size={18} color={Colors.primary} />
+            </View>
             <View style={{ flex: 1 }}>
-              <Text style={fvStyles.title}>Field Visit</Text>
-              <Text style={fvStyles.subtitle} numberOfLines={1}>{item.customer_name}  ·  {item.loan_no}</Text>
+              <Text style={fvStyles.title}>Update Feedback</Text>
+              <Text style={fvStyles.subtitle} numberOfLines={1}>
+                {item.customer_name}  ·  {item.loan_no}
+              </Text>
             </View>
             <Pressable style={fvStyles.closeBtn} onPress={handleClose} disabled={saving}>
               <Ionicons name="close" size={20} color={saving ? Colors.textMuted : Colors.textSecondary} />
             </Pressable>
           </View>
+
+          {/* Contact Numbers */}
+          {phones.length > 0 && (
+            <View style={fvStyles.contactSection}>
+              <Text style={fvStyles.contactLabel}>CONTACT NUMBERS</Text>
+              <View style={fvStyles.contactRow}>
+                {phones.map((ph, i) => (
+                  <Pressable
+                    key={i}
+                    style={fvStyles.contactChip}
+                    onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); Linking.openURL(`tel:${ph}`); }}
+                  >
+                    <Ionicons name="call" size={14} color="#fff" />
+                    <Text style={fvStyles.contactChipText}>{ph}</Text>
+                  </Pressable>
+                ))}
+              </View>
+            </View>
+          )}
+
+          {/* Amount Chips */}
           <View style={fvStyles.amountRow}>
-            <View style={fvStyles.amountChip}><Text style={fvStyles.amountLabel}>EMI DUE</Text><Text style={[fvStyles.amountValue, { color: Colors.danger }]}>{fmt(item.emi_due, "₹")}</Text></View>
-            <View style={fvStyles.amountChip}><Text style={fvStyles.amountLabel}>POS</Text><Text style={fvStyles.amountValue}>{fmt(item.pos, "₹")}</Text></View>
-            <View style={[fvStyles.amountChip, { flex: 1.4 }]}><Text style={fvStyles.amountLabel}>ADDRESS</Text><Text style={[fvStyles.amountValue, { fontSize: 11 }]} numberOfLines={2}>{item.address || "—"}</Text></View>
+            <View style={fvStyles.amountChip}>
+              <Text style={fvStyles.amountLabel}>EMI DUE</Text>
+              <Text style={[fvStyles.amountValue, { color: Colors.danger }]}>{fmt(item.emi_due, "₹")}</Text>
+            </View>
+            <View style={fvStyles.amountChip}>
+              <Text style={fvStyles.amountLabel}>POS</Text>
+              <Text style={fvStyles.amountValue}>{fmt(item.pos, "₹")}</Text>
+            </View>
+            <View style={[fvStyles.amountChip, { flex: 1.5 }]}>
+              <Text style={fvStyles.amountLabel}>ADDRESS</Text>
+              <Text style={[fvStyles.amountValue, { fontSize: 10, lineHeight: 14 }]} numberOfLines={2}>
+                {item.address || "—"}
+              </Text>
+            </View>
           </View>
+
           <ScrollView showsVerticalScrollIndicator={false} style={{ flexShrink: 1 }} keyboardShouldPersistTaps="handled">
-            {/* GPS */}
-            <View style={fvStyles.sectionRow}><Text style={fvStyles.sectionLabel}>GPS Location</Text><View style={fvStyles.requiredBadge}><Text style={fvStyles.requiredText}>Required</Text></View></View>
-            <Pressable style={[fvStyles.locationBtn, gps && fvStyles.locationBtnCaptured, locLoading && fvStyles.locationBtnLoading]} onPress={captureGps} disabled={locLoading || saving}>
-              {locLoading ? <ActivityIndicator size="small" color={Colors.primary} /> : <Ionicons name={gps ? "checkmark-circle" : "locate"} size={20} color={gps ? Colors.success : Colors.primary} />}
+
+            {/* GPS Section */}
+            <View style={fvStyles.sectionRow}>
+              <Text style={fvStyles.sectionLabel}>GPS LOCATION</Text>
+              <View style={fvStyles.requiredBadge}><Text style={fvStyles.requiredText}>REQUIRED</Text></View>
+            </View>
+            <Pressable
+              style={[fvStyles.locationBtn, gps && fvStyles.locationBtnCaptured, locLoading && fvStyles.locationBtnLoading]}
+              onPress={captureGps}
+              disabled={locLoading || saving}
+            >
+              <View style={fvStyles.locationIconWrap}>
+                {locLoading
+                  ? <ActivityIndicator size="small" color={Colors.primary} />
+                  : <Ionicons name={gps ? "checkmark-circle" : "locate-outline"} size={22} color={gps ? Colors.success : Colors.textSecondary} />
+                }
+              </View>
               <View style={{ flex: 1 }}>
                 <Text style={[fvStyles.locationBtnText, gps && { color: Colors.success, fontWeight: "700" }]}>
-                  {locLoading ? "Getting GPS…" : gps ? `${gps.lat.toFixed(5)}, ${gps.lng.toFixed(5)}` : "Tap to Capture GPS"}
+                  {locLoading ? "Getting location…" : gps ? `${gps.lat.toFixed(5)}, ${gps.lng.toFixed(5)}` : "Tap to capture current location"}
                 </Text>
-                {gps && <Text style={fvStyles.locationAccuracy}>Accuracy ±{gps.accuracy}m</Text>}
+                {gps && <Text style={fvStyles.locationAccuracy}>±{gps.accuracy}m accuracy</Text>}
               </View>
-              {gps && !locLoading && (
-                <Pressable style={fvStyles.reCaptureBtnSmall} onPress={captureGps} disabled={saving}>
-                  <Ionicons name="refresh" size={12} color={Colors.primary} />
-                  <Text style={fvStyles.reCaptureText}>Re-capture</Text>
-                </Pressable>
-              )}
+              {gps && !locLoading
+                ? <Pressable style={fvStyles.reCaptureBtnSmall} onPress={captureGps} disabled={saving}>
+                    <Ionicons name="refresh" size={12} color={Colors.primary} />
+                    <Text style={fvStyles.reCaptureText}>Retry</Text>
+                  </Pressable>
+                : <Ionicons name="chevron-forward" size={18} color={Colors.textMuted} />
+              }
             </Pressable>
-            {/* Outcome */}
-            <View style={fvStyles.sectionRow}><Text style={fvStyles.sectionLabel}>Visit Outcome</Text><View style={fvStyles.requiredBadge}><Text style={fvStyles.requiredText}>Required</Text></View></View>
+
+            {/* Visit Outcome Section */}
+            <View style={fvStyles.sectionRow}>
+              <Text style={fvStyles.sectionLabel}>VISIT OUTCOME</Text>
+              <View style={fvStyles.requiredBadge}><Text style={fvStyles.requiredText}>REQUIRED</Text></View>
+            </View>
             <View style={{ gap: 8, marginBottom: 16 }}>
               {VISIT_OUTCOMES.map((o) => {
                 const color = VISIT_OUTCOME_COLORS[o];
                 const isSelected = outcome === o;
                 return (
-                  <Pressable key={o} style={[fvStyles.outcomeBtn, isSelected && { borderColor: color, backgroundColor: color + "15" }]} onPress={() => setOutcome(o)}>
-                    <View style={[fvStyles.outcomeDot, { backgroundColor: isSelected ? color : Colors.border }]} />
+                  <Pressable
+                    key={o}
+                    style={[fvStyles.outcomeBtn, isSelected && { borderColor: color, backgroundColor: color + "12" }]}
+                    onPress={() => setOutcome(o)}
+                  >
+                    <View style={[fvStyles.outcomeDot, { borderColor: isSelected ? color : Colors.border, backgroundColor: isSelected ? color : "transparent" }]} />
                     <Text style={[fvStyles.outcomeText, isSelected && { color, fontWeight: "700" }]}>{o}</Text>
-                    {isSelected && <Ionicons name="checkmark-circle" size={20} color={color} />}
+                    {isSelected && <Ionicons name="checkmark-circle" size={20} color={color} style={{ marginLeft: "auto" }} />}
                   </Pressable>
                 );
               })}
             </View>
+
             {/* PTP Date */}
             {outcome === "PTP" && (
               <>
-                <View style={fvStyles.sectionRow}><Text style={fvStyles.sectionLabel}>PTP Date</Text><View style={fvStyles.requiredBadge}><Text style={fvStyles.requiredText}>Required</Text></View></View>
-                <TextInput style={[fvStyles.input, { marginBottom: 16 }]} placeholder="DD-MM-YYYY" placeholderTextColor={Colors.textMuted} value={ptpDate} onChangeText={setPtpDate} keyboardType="numeric" editable={!saving} />
+                <View style={fvStyles.sectionRow}>
+                  <Text style={fvStyles.sectionLabel}>PTP Date</Text>
+                  <View style={fvStyles.requiredBadge}><Text style={fvStyles.requiredText}>Required</Text></View>
+                </View>
+                <TextInput
+                  style={[fvStyles.input, { marginBottom: 16 }]}
+                  placeholder="DD-MM-YYYY"
+                  placeholderTextColor={Colors.textMuted}
+                  value={ptpDate}
+                  onChangeText={setPtpDate}
+                  keyboardType="numeric"
+                  editable={!saving}
+                />
               </>
             )}
+
             {/* Remarks */}
-            <View style={fvStyles.sectionRow}><Text style={fvStyles.sectionLabel}>Visit Remarks</Text><View style={fvStyles.requiredBadge}><Text style={fvStyles.requiredText}>Min 10 chars</Text></View></View>
-            <TextInput style={[fvStyles.input, { minHeight: 90, textAlignVertical: "top", marginBottom: 16 }]} placeholder="Describe what happened during the visit…" placeholderTextColor={Colors.textMuted} value={remarks} onChangeText={setRemarks} multiline numberOfLines={4} editable={!saving} />
+            <View style={fvStyles.sectionRow}>
+              <Text style={fvStyles.sectionLabel}>Visit Remarks</Text>
+              <View style={[fvStyles.requiredBadge, { backgroundColor: Colors.textMuted + "18" }]}>
+                <Text style={[fvStyles.requiredText, { color: Colors.textMuted }]}>Min 10 chars</Text>
+              </View>
+            </View>
+            <TextInput
+              style={[fvStyles.input, { minHeight: 90, textAlignVertical: "top", marginBottom: 16 }]}
+              placeholder="Describe what happened during the visit…"
+              placeholderTextColor={Colors.textMuted}
+              value={remarks}
+              onChangeText={setRemarks}
+              multiline
+              numberOfLines={4}
+              editable={!saving}
+            />
+
             {/* Photos */}
-            <View style={fvStyles.sectionRow}><Text style={fvStyles.sectionLabel}>Photo Proof</Text><Text style={fvStyles.sectionOptional}>(Optional, max {MAX_PHOTOS})</Text></View>
+            <View style={fvStyles.sectionRow}>
+              <Text style={fvStyles.sectionLabel}>Photo Proof</Text>
+              <Text style={fvStyles.sectionOptional}>Optional · max {MAX_PHOTOS}</Text>
+            </View>
             <View style={fvStyles.photoGrid}>
               {photos.map((p, i) => (
                 <View key={i} style={fvStyles.photoThumb}>
@@ -573,13 +669,25 @@ function FieldVisitModal({ visible, item, onClose }: { visible: boolean; item: a
             </View>
             <View style={{ height: 16 }} />
           </ScrollView>
+
+          {/* Footer Buttons */}
           <View style={fvStyles.btnRow}>
-            <Pressable style={fvStyles.cancelBtn} onPress={handleClose} disabled={saving}><Text style={fvStyles.cancelText}>Cancel</Text></Pressable>
-            <Pressable style={[fvStyles.saveBtn, { backgroundColor: Colors.primary, opacity: saving ? 0.6 : 1 }]} onPress={save} disabled={saving}>
-              {saving
-                ? <><ActivityIndicator size="small" color="#fff" /><Text style={fvStyles.saveText}>Saving…</Text></>
-                : <><Ionicons name="checkmark-circle" size={18} color="#fff" /><Text style={fvStyles.saveText}>Save Visit</Text></>
-              }
+            <Pressable style={fvStyles.cancelBtn} onPress={handleClose} disabled={saving}>
+              <Text style={fvStyles.cancelText}>Cancel</Text>
+            </Pressable>
+            <Pressable
+              style={[fvStyles.saveBtn, { backgroundColor: canSave ? Colors.primary : Colors.surfaceElevated ?? "#D8D6CF", opacity: saving ? 0.7 : 1 }]}
+              onPress={save}
+              disabled={!canSave}
+            >
+              {saving ? (
+                <><ActivityIndicator size="small" color="#fff" /><Text style={fvStyles.saveText}>Saving…</Text></>
+              ) : (
+                <>
+                  <Ionicons name="location" size={16} color={canSave ? "#fff" : Colors.textMuted} />
+                  <Text style={[fvStyles.saveText, { color: canSave ? "#fff" : Colors.textMuted }]}>Save Visit</Text>
+                </>
+              )}
             </Pressable>
           </View>
         </View>
@@ -1154,32 +1262,51 @@ const fbStyles = StyleSheet.create({
 
 const fvStyles = StyleSheet.create({
   overlay:             { flex: 1, backgroundColor: "rgba(0,0,0,0.55)", justifyContent: "flex-end" },
-  sheet:               { backgroundColor: Colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, maxHeight: "94%", flexShrink: 1 },
-  handle:              { width: 40, height: 4, backgroundColor: Colors.border, borderRadius: 2, alignSelf: "center", marginBottom: 16 },
-  headerRow:           { flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 12 },
-  headerIconWrap:      { width: 40, height: 40, borderRadius: 12, backgroundColor: Colors.primary + "14", alignItems: "center", justifyContent: "center" },
-  title:               { fontSize: 18, fontWeight: "800", color: Colors.text },
-  subtitle:            { fontSize: 11, color: Colors.textSecondary, marginTop: 2, textTransform: "uppercase", letterSpacing: 0.3 },
-  closeBtn:            { width: 34, height: 34, borderRadius: 17, backgroundColor: SA, alignItems: "center", justifyContent: "center" },
-  amountRow:           { flexDirection: "row", gap: 8, marginBottom: 16 },
-  amountChip:          { flex: 1, backgroundColor: SA, borderRadius: 10, padding: 10, borderWidth: 1, borderColor: Colors.border },
-  amountLabel:         { fontSize: 9, fontWeight: "700", color: Colors.textMuted, textTransform: "uppercase", marginBottom: 3 },
-  amountValue:         { fontSize: 13, fontWeight: "700", color: Colors.text },
-  sectionRow:          { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 8 },
-  sectionLabel:        { fontSize: 11, fontWeight: "700", color: Colors.textSecondary, textTransform: "uppercase", letterSpacing: 0.5 },
+  sheet:               { backgroundColor: Colors.surface, borderTopLeftRadius: 28, borderTopRightRadius: 28, paddingHorizontal: 20, paddingTop: 12, paddingBottom: 12, maxHeight: "94%", flexShrink: 1 },
+  handle:              { width: 36, height: 4, backgroundColor: Colors.border, borderRadius: 2, alignSelf: "center", marginBottom: 18 },
+
+  // Header
+  headerRow:           { flexDirection: "row", alignItems: "center", gap: 12, marginBottom: 14 },
+  headerIconWrap:      { width: 42, height: 42, borderRadius: 13, backgroundColor: Colors.primary + "10", alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: Colors.border },
+  title:               { fontSize: 18, fontWeight: "800", color: Colors.text, letterSpacing: -0.3 },
+  subtitle:            { fontSize: 11, color: Colors.textSecondary, marginTop: 1, letterSpacing: 0.2 },
+  closeBtn:            { width: 34, height: 34, borderRadius: 17, backgroundColor: Colors.surfaceAlt ?? SA, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: Colors.border },
+
+  // Contact numbers
+  contactSection:      { marginBottom: 14 },
+  contactLabel:        { fontSize: 10, fontWeight: "700", color: Colors.textMuted, letterSpacing: 0.8, marginBottom: 7 },
+  contactRow:          { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  contactChip:         { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: Colors.primary, borderRadius: 10, paddingVertical: 9, paddingHorizontal: 14 },
+  contactChipText:     { color: "#fff", fontWeight: "700", fontSize: 14, letterSpacing: 0.3 },
+
+  // Amount row
+  amountRow:           { flexDirection: "row", gap: 8, marginBottom: 18 },
+  amountChip:          { flex: 1, backgroundColor: SA, borderRadius: 12, padding: 10, borderWidth: 1, borderColor: Colors.border },
+  amountLabel:         { fontSize: 9, fontWeight: "700", color: Colors.textMuted, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 4 },
+  amountValue:         { fontSize: 13, fontWeight: "800", color: Colors.text },
+
+  // Section header
+  sectionRow:          { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 10 },
+  sectionLabel:        { fontSize: 12, fontWeight: "700", color: Colors.text, textTransform: "uppercase", letterSpacing: 0.5 },
   sectionOptional:     { fontSize: 10, fontWeight: "500", color: Colors.textMuted },
-  requiredBadge:       { backgroundColor: Colors.danger + "15", borderRadius: 6, paddingHorizontal: 7, paddingVertical: 2 },
-  requiredText:        { fontSize: 9, fontWeight: "700", color: Colors.danger, textTransform: "uppercase" },
-  locationBtn:         { flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: SA, borderRadius: 14, borderWidth: 1.5, borderColor: Colors.border, padding: 14, marginBottom: 16 },
-  locationBtnCaptured: { borderColor: Colors.success + "80", backgroundColor: Colors.success + "0C" },
-  locationBtnLoading:  { borderColor: Colors.primary + "60", backgroundColor: Colors.primary + "08" },
+  requiredBadge:       { backgroundColor: Colors.danger + "18", borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 },
+  requiredText:        { fontSize: 9, fontWeight: "700", color: Colors.danger, textTransform: "uppercase", letterSpacing: 0.5 },
+
+  // GPS button
+  locationBtn:         { flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: SA, borderRadius: 14, borderWidth: 1.5, borderColor: Colors.border, padding: 14, marginBottom: 20 },
+  locationBtnCaptured: { borderColor: Colors.success + "80", backgroundColor: Colors.success + "0A" },
+  locationBtnLoading:  { borderColor: Colors.primary + "50", backgroundColor: Colors.primary + "06" },
+  locationIconWrap:    { width: 36, height: 36, borderRadius: 10, backgroundColor: Colors.background, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: Colors.border },
   locationBtnText:     { fontSize: 13, color: Colors.textSecondary, fontWeight: "500" },
   locationAccuracy:    { fontSize: 11, color: Colors.textMuted, marginTop: 2 },
-  reCaptureBtnSmall:   { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, backgroundColor: Colors.primary + "14" },
+  reCaptureBtnSmall:   { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, backgroundColor: Colors.primary + "12", borderWidth: 1, borderColor: Colors.primary + "30" },
   reCaptureText:       { fontSize: 11, color: Colors.primary, fontWeight: "700" },
-  outcomeBtn:          { flexDirection: "row", alignItems: "center", paddingVertical: 14, paddingHorizontal: 16, borderRadius: 12, borderWidth: 1.5, borderColor: Colors.border, backgroundColor: SA, gap: 10 },
-  outcomeDot:          { width: 10, height: 10, borderRadius: 5 },
+
+  // Outcome buttons
+  outcomeBtn:          { flexDirection: "row", alignItems: "center", paddingVertical: 15, paddingHorizontal: 16, borderRadius: 14, borderWidth: 1.5, borderColor: Colors.border, backgroundColor: SA, gap: 12 },
+  outcomeDot:          { width: 18, height: 18, borderRadius: 9, borderWidth: 2, borderColor: Colors.border },
   outcomeText:         { fontSize: 14, fontWeight: "600", color: Colors.text, flex: 1 },
+
   input:               { borderWidth: 1.5, borderColor: Colors.border, borderRadius: 12, padding: 13, fontSize: 14, color: Colors.text, backgroundColor: SA },
   photoGrid:           { flexDirection: "row", flexWrap: "wrap", gap: 10, marginBottom: 16 },
   photoThumb:          { width: 80, height: 80, borderRadius: 12, overflow: "hidden", position: "relative", borderWidth: 1, borderColor: Colors.border },
@@ -1188,10 +1315,12 @@ const fvStyles = StyleSheet.create({
   photoRemoveBg:       { width: 20, height: 20, borderRadius: 10, backgroundColor: Colors.danger, alignItems: "center", justifyContent: "center" },
   photoAddBtn:         { width: 80, height: 80, borderRadius: 12, borderWidth: 1.5, borderColor: Colors.border, borderStyle: "dashed", backgroundColor: SA, alignItems: "center", justifyContent: "center", gap: 4 },
   photoAddText:        { fontSize: 10, color: Colors.textMuted, fontWeight: "600" },
-  btnRow:              { flexDirection: "row", gap: 12, marginTop: 12 },
-  cancelBtn:           { flex: 1, paddingVertical: 14, borderRadius: 12, borderWidth: 1.5, borderColor: Colors.border, alignItems: "center" },
+
+  // Buttons
+  btnRow:              { flexDirection: "row", gap: 12, marginTop: 14, paddingBottom: 4 },
+  cancelBtn:           { flex: 1, paddingVertical: 15, borderRadius: 14, borderWidth: 1.5, borderColor: Colors.border, alignItems: "center", backgroundColor: SA },
   cancelText:          { fontSize: 15, fontWeight: "600", color: Colors.textSecondary },
-  saveBtn:             { flex: 2, paddingVertical: 14, borderRadius: 12, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 },
+  saveBtn:             { flex: 2, paddingVertical: 15, borderRadius: 14, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 },
   saveText:            { fontSize: 15, fontWeight: "700", color: "#fff" },
 });
 
