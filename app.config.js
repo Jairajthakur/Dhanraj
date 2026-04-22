@@ -40,11 +40,12 @@ module.exports = ({ config }) => {
         "RECEIVE_BOOT_COMPLETED",
         "VIBRATE",
         "ACCESS_NETWORK_STATE",
+        "USE_FULL_SCREEN_INTENT",   // allows heads-up / full screen alert
       ],
       backgroundColor: "#000000",
       notification: {
         icon: "./assets/images/dhanraj-logo.png",
-        color: "#FF6B00",
+        color: "#E24B4A",
       },
       adaptiveIcon: {
         foregroundImage: "./assets/images/dhanraj-logo.png",
@@ -65,6 +66,9 @@ module.exports = ({ config }) => {
         "onesignal-expo-plugin",
         {
           mode: "production",
+          // Registers a high-importance Android notification channel
+          // This is what makes the notification loud like PhonePe/BharatPe
+          smallIcons: ["./assets/images/dhanraj-logo.png"],
         },
       ],
     ],
