@@ -228,6 +228,8 @@ function FeedbackModal({ visible, item, onClose, extraNumbers = [] }: { visible:
       qc.invalidateQueries({ queryKey: ["/api/cases"] });
       qc.invalidateQueries({ queryKey: ["/api/bkt-cases"] });
       qc.invalidateQueries({ queryKey: ["/api/stats"] });
+      // BUG FIX: invalidate broken-ptps so blocking modal clears immediately
+      qc.invalidateQueries({ queryKey: ["/api/broken-ptps"] });
       onClose();
     } catch (e: unknown) {
       Alert.alert("Error", e instanceof Error ? e.message : "Something went wrong");
@@ -476,6 +478,8 @@ function FieldVisitModal({ visible, item, onClose }: { visible: boolean; item: a
       qc.invalidateQueries({ queryKey: ["/api/cases"] });
       qc.invalidateQueries({ queryKey: ["/api/bkt-cases"] });
       qc.invalidateQueries({ queryKey: ["/api/stats"] });
+      // BUG FIX: invalidate broken-ptps so blocking modal clears immediately
+      qc.invalidateQueries({ queryKey: ["/api/broken-ptps"] });
       reset(); onClose();
       setTimeout(() => Alert.alert("Visit Recorded", "Field visit saved successfully."), 300);
     } catch (e: unknown) {
@@ -616,6 +620,8 @@ function PhoneCallModal({ visible, item, onClose, extraNumbers = [] }: { visible
       qc.invalidateQueries({ queryKey: ["/api/cases"] });
       qc.invalidateQueries({ queryKey: ["/api/bkt-cases"] });
       qc.invalidateQueries({ queryKey: ["/api/stats"] });
+      // BUG FIX: invalidate broken-ptps so blocking modal clears immediately
+      qc.invalidateQueries({ queryKey: ["/api/broken-ptps"] });
       reset(); onClose();
     } catch (e: unknown) {
       Alert.alert("Error", e instanceof Error ? e.message : "Something went wrong");
