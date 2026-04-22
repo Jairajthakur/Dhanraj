@@ -7,7 +7,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Ionicons } from "@expo/vector-icons";
 import { router, useLocalSearchParams } from "expo-router";
-import BlockingActionModal from "@/components/BlockingActionModal";
+import BlockingActionModal, { BlockingItem } from "@/components/BlockingActionModal";
 import { useBlockingItems } from "@/hooks/useBlockingItems";
 import * as Haptics from "expo-haptics";
 import * as ImagePicker from "expo-image-picker";
@@ -1205,7 +1205,7 @@ export default function AllocationScreen() {
   const qc     = useQueryClient();
 
   // When navigated from blocking modal, brokenPtpIds contains the case ids to focus
-  const { items: blockingItems, isBlocking, snooze, hideToResolve } = useBlockingItems();
+  const { items: blockingItems, isBlocking, snooze } = useBlockingItems();
   const { brokenPtpIds } = useLocalSearchParams<{ brokenPtpIds?: string }>();
   const brokenPtpIdSet = useMemo(() => {
     if (!brokenPtpIds) return new Set<number>();
@@ -1262,6 +1262,20 @@ export default function AllocationScreen() {
   const handleOpenModal = useCallback((item: CaseItem, tab: FeedbackTab) => {
     setModalItem(item); setModalInitTab(tab);
   }, []);
+
+  // Called when agent taps a blocking item — finds the case and opens feedback directly
+  const handleGoToCase = useCallback((blockingItem: BlockingItem) => {
+    if (blockingItem.type === "overdue_deposition") {
+      router.push("/(app)/deposition" as any);
+      return;
+    }
+    // Find the matching case in allCases by id
+    const match = allCases.find((c) => c.id === blockingItem.id);
+    if (match) {
+      setModalItem(match);
+      setModalInitTab("Call Log");
+    }
+  }, [allCases]);
 
   return (
     <View style={{ flex: 1, backgroundColor: "#EFEFEF" }}>
@@ -1349,14 +1363,7 @@ export default function AllocationScreen() {
         visible={isBlocking}
         items={blockingItems}
         onDismiss={snooze}
-        onActionTaken={hideToResolve}
-        onPressItem={(item) => {
-          hideToResolve();
-          if (item.type === "overdue_deposition") {
-            router.push("/(app)/deposition" as any);
-          }
-          // For broken PTPs: modal hides and agent can see the highlighted cards below
-        }}
+        onGoToCase={handleGoToCase}
       />
     </View>
   );
