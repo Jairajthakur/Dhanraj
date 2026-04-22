@@ -573,6 +573,7 @@ function FeedbackModal({
       qc.invalidateQueries({ queryKey: ["/api/cases"] });
       qc.invalidateQueries({ queryKey: ["/api/stats"] });
       qc.invalidateQueries({ queryKey: ["/api/bkt-perf-summary"] });
+      qc.invalidateQueries({ queryKey: ["/api/broken-ptps"] }); // re-check blocking after feedback
       onClose();
       if (activeTab === "Field Visit") {
         setTimeout(() => Alert.alert("Visit Recorded", "Field visit has been saved successfully."), 300);
@@ -1231,7 +1232,14 @@ export default function AllocationScreen() {
     queryFn:  () => api.getCases({ company: activeCompany === "All" ? undefined : activeCompany }),
   });
 
-  const allCases: CaseItem[] = data?.cases ?? [];
+  const { data: bktData } = useQuery({
+    queryKey: ["/api/bkt-cases", activeCompany],
+    queryFn:  () => api.getBktCases({ company: activeCompany === "All" ? undefined : activeCompany }),
+    staleTime: 60_000,
+  });
+
+  const allCases: CaseItem[]    = data?.cases     ?? [];
+  const allBktCases: CaseItem[] = bktData?.cases  ?? [];
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase();
@@ -1269,13 +1277,14 @@ export default function AllocationScreen() {
       router.push("/(app)/deposition" as any);
       return;
     }
-    // Find the matching case in allCases by id
-    const match = allCases.find((c) => c.id === blockingItem.id);
+    // Search loan cases first, then bkt cases
+    const match = allCases.find((c) => c.id === blockingItem.id)
+                ?? allBktCases.find((c) => c.id === blockingItem.id);
     if (match) {
       setModalItem(match);
       setModalInitTab("Call Log");
     }
-  }, [allCases]);
+  }, [allCases, allBktCases]);
 
   return (
     <View style={{ flex: 1, backgroundColor: "#EFEFEF" }}>
