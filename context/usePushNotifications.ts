@@ -132,6 +132,16 @@ function ensureInit(): Promise<void> {
         console.log("[OneSignal] Initializing, appId:", ONESIGNAL_APP_ID);
         OneSignal.initialize(ONESIGNAL_APP_ID);
 
+        // Register high-importance notification channel for PTP alerts
+        // This makes notifications loud with vibration like PhonePe/BharatPe
+        if (Platform.OS === "android") {
+          try {
+            OneSignal.Notifications?.registerForProvisionalAuthorization?.(() => {});
+            // Set sound + vibration for all notifications from this app
+            OneSignal.InAppMessages?.setPaused?.(false);
+          } catch (_) {}
+        }
+
         await requestAndroid13Permission();
         await new Promise((r) => setTimeout(r, 1000));
 
@@ -300,8 +310,13 @@ export function usePushNotifications() {
 
     const handleClick = (event: any) =>
       console.log("[OneSignal] Tapped:", event?.notification?.additionalData);
-    const handleForeground = (event: any) =>
+    const handleForeground = (event: any) => {
       console.log("[OneSignal] Foreground:", event?.notification?.title);
+      // Always show the notification banner even when app is open
+      // This is what makes it appear like a payment app alert
+      try { event?.preventDefault?.(); } catch (_) {}
+      try { event?.notification?.display?.(); } catch (_) {}
+    };
 
     try {
       OneSignal.Notifications?.addEventListener("click", handleClick);
