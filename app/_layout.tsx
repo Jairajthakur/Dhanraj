@@ -8,6 +8,7 @@ import { StatusBar } from "expo-status-bar";
 import { useFonts, Outfit_400Regular } from "@expo-google-fonts/outfit";
 import { queryClient } from "../lib/query-client";
 import { AuthProvider, useAuth } from "../context/AuthContext";
+import { BlockingProvider } from "../context/BlockingContext";
 import { setQueryClientRef } from "../lib/api";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { KeyboardProvider } from "react-native-keyboard-controller";
@@ -211,7 +212,9 @@ export default function RootLayout() {
         <View style={{ flex: 1, width: "100%", height: "100%" }}>
           <StatusBar style="dark" />
           <AuthProvider>
-            <RootLayoutNav />
+            <BlockingProvider>
+              <RootLayoutNav />
+            </BlockingProvider>
           </AuthProvider>
         </View>
       ) : (
@@ -219,7 +222,9 @@ export default function RootLayout() {
           <KeyboardProvider>
           <StatusBar style="dark" />
           <AuthProvider>
-            <RootLayoutNav />
+            <BlockingProvider>
+              <RootLayoutNav />
+            </BlockingProvider>
           </AuthProvider>
           </KeyboardProvider>
         </SafeAreaProvider>
