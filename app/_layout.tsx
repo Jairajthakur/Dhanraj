@@ -8,6 +8,7 @@ import { StatusBar } from "expo-status-bar";
 import { useFonts, Outfit_400Regular } from "@expo-google-fonts/outfit";
 import { queryClient } from "../lib/query-client";
 import { AuthProvider, useAuth } from "../context/AuthContext";
+import { registerNotificationChannels } from "../lib/notificationChannels";
 import { BlockingProvider } from "../context/BlockingContext";
 import { setQueryClientRef } from "../lib/api";
 import { SafeAreaProvider } from "react-native-safe-area-context";
@@ -15,6 +16,7 @@ import { KeyboardProvider } from "react-native-keyboard-controller";
 import { usePushNotifications } from "@/context/usePushNotifications";
 
 setQueryClientRef(queryClient);
+registerNotificationChannels(); // register high-importance Android channels
 
 // ─── OTA Update Check ─────────────────────────────────────────────────────────
 // Runs once on app load (non-dev only). Fetches and applies any pending EAS
