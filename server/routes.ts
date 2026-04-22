@@ -149,11 +149,11 @@ async function sendUrgentPush(
         contents:        { en: body },
         data:            { screen: "allocation", type: "broken_ptp" },
 
-        // Maximum urgency — shows as heads-up banner and plays sound like PhonePe/BharatPe
-        // NOTE: Do NOT set android_channel_id to a custom value unless that channel is
-        //       explicitly registered in the app. Omitting it makes OneSignal use its
-        //       default high-importance channel which already has sound + vibration.
-        // NOTE: Do NOT set android_sound — omitting it lets the channel's default sound play.
+        // Maximum urgency — shows as heads-up banner and plays sound like PhonePe/BharatPe.
+        // BUG FIX: Removed android_channel_id ("broken_ptp_alerts") — that channel was never
+        // registered in the app so OneSignal fell back silently to low-priority with no sound.
+        // BUG FIX: Removed android_sound ("notification") — not a valid sound file reference;
+        // omitting it lets OneSignal's default high-importance channel play its sound automatically.
         priority:                  10,
         android_visibility:        1,        // shows on lock screen
         android_led_color:         "FFFF0000",     // red LED
@@ -597,12 +597,17 @@ try {
 } catch (e: any) { console.error("[DB] ptp_break_notifications migration:", e.message); }
 
 try {
-  await storage.query(`
-    ALTER TABLE fos_depositions
-      ADD COLUMN IF NOT EXISTS snooze_until TIMESTAMPTZ
-  `);
+  await storage.query(`ALTER TABLE fos_depositions ADD COLUMN IF NOT EXISTS snooze_until TIMESTAMPTZ`);
   console.log("[DB] fos_depositions.snooze_until column ready ✅");
-} catch (e: any) { console.error("[DB] snooze_until migration:", e.message); }
+} catch (e: any) { console.error("[DB] fos_depositions snooze_until migration:", e.message); }
+
+// BUG FIX: snooze_until was missing from loan_cases and bkt_cases — the snooze
+// endpoint writes to these columns and the broken-ptps query filters on them.
+try {
+  await storage.query(`ALTER TABLE loan_cases ADD COLUMN IF NOT EXISTS snooze_until TIMESTAMPTZ`);
+  await storage.query(`ALTER TABLE bkt_cases  ADD COLUMN IF NOT EXISTS snooze_until TIMESTAMPTZ`);
+  console.log("[DB] loan_cases/bkt_cases.snooze_until columns ready ✅");
+} catch (e: any) { console.error("[DB] loan/bkt snooze_until migration:", e.message); }
 try {
     await storage.query(`ALTER TABLE bkt_cases ADD COLUMN IF NOT EXISTS company_name TEXT`);
     console.log("[DB] bkt_cases.company_name column ready ✅");
@@ -854,8 +859,10 @@ app.get("/api/broken-ptps", requireAuth, async (req, res) => {
   try {
     const agentId = req.session.agentId!;
 
-    // ── Auto-mark past-due PTPs as broken (runs on every agent poll) ─────
-    // Ensures blocking works even if the background job hasn't fired yet.
+    // ── BUG FIX: Auto-mark past-due PTPs as broken before querying ────────
+    // The background job (runPtpBreakJob) runs every 10 min, so a freshly
+    // overdue PTP might not be flagged yet. Doing it here on every poll
+    // (every 30 s) ensures the blocking modal appears immediately.
     await storage.query(`
       UPDATE loan_cases
       SET broken_ptp = true, broken_ptp_date = ptp_date
@@ -1973,7 +1980,8 @@ app.get("/api/admin/feedback-export", requireAdmin, async (req, res) => {
   // that currently has broken PTPs, then records the notification timestamp.
   app.post("/api/admin/trigger-ptp-alert", requireAdmin, async (req, res) => {
     try {
-      // ── First: mark any newly overdue PTPs as broken so the alert is accurate ──
+      // BUG FIX: Mark all overdue PTPs as broken first so the alert is accurate
+      // and agents who haven't been polled yet are also included.
       await storage.query(`
         UPDATE loan_cases
         SET broken_ptp = true, broken_ptp_date = ptp_date
