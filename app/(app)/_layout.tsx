@@ -244,12 +244,18 @@ function AppLayoutInner() {
   const { items: blockingItems, isBlocking, snooze } = useBlocking();
 
   const handleBlockingItemPress = (item: BlockingItem) => {
-    router.push({
-      pathname: "/(app)/allocation" as any,
-      params:   { brokenPtpIds: String(item.id) },
-    });
+    // Snooze the modal so the agent can actually see and interact with the case.
+    // The modal will reappear after 1 hour (or immediately on next refetch if
+    // the PTP is still unresolved). Once the agent submits updated feedback the
+    // broken_ptp flag is cleared on the server and the modal won't come back.
+    snooze();
     if (item.type === "overdue_deposition") {
       router.push("/(app)/deposition" as any);
+    } else {
+      router.push({
+        pathname: "/(app)/allocation" as any,
+        params:   { brokenPtpIds: String(item.id) },
+      });
     }
   };
   return (
