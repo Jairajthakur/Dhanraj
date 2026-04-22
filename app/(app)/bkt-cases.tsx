@@ -9,7 +9,6 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import * as FileSystem from "expo-file-system";
-import * as Sharing from "expo-sharing";
 import Colors from "@/constants/colors";
 import { getApiUrl } from "@/lib/query-client";
 
@@ -336,11 +335,27 @@ async function downloadBktCsv(cases: any[], filename: string): Promise<void> {
   ].map(escCsv).join(","));
 
   const csv = [headers.map(escCsv).join(","), ...rows].join("\n");
-  const path = `${FileSystem.cacheDirectory}${filename}`;
-  await FileSystem.writeAsStringAsync(path, csv, { encoding: FileSystem.EncodingType.UTF8 });
-  const canShare = await Sharing.isAvailableAsync();
-  if (!canShare) { Alert.alert("Sharing not available", "Cannot share files on this device."); return; }
-  await Sharing.shareAsync(path, { mimeType: "text/csv", dialogTitle: "Download BKT Cases" });
+
+  if (Platform.OS === "android") {
+    const permissions = await FileSystem.StorageAccessFramework.requestDirectoryPermissionsAsync(
+      "content://com.android.externalstorage.documents/tree/primary%3ADownload"
+    );
+    if (!permissions.granted) {
+      Alert.alert("Permission Denied", "Please allow access to the Downloads folder.");
+      return;
+    }
+    const fileUri = await FileSystem.StorageAccessFramework.createFileAsync(
+      permissions.directoryUri,
+      filename,
+      "text/csv"
+    );
+    await FileSystem.writeAsStringAsync(fileUri, csv, { encoding: FileSystem.EncodingType.UTF8 });
+    Alert.alert("✅ Downloaded", `Saved to Downloads:\n${filename}`);
+  } else {
+    const path = `${FileSystem.documentDirectory}${filename}`;
+    await FileSystem.writeAsStringAsync(path, csv, { encoding: FileSystem.EncodingType.UTF8 });
+    Alert.alert("✅ Downloaded", `Saved to Files app:\n${filename}`);
+  }
 }
 
 export default function FosBktCases() {
