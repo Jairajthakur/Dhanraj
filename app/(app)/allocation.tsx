@@ -209,19 +209,17 @@ function escCsv(v: unknown): string {
 async function downloadAllocationCsv(cases: CaseItem[], filename: string): Promise<void> {
   const headers = [
     "Customer Name", "Loan No", "App ID", "Mobile No",
-    "Status", "Bucket", "EMI Amount", "EMI Due", "POS",
+    "Status", "Bucket", "EMI Amount", "POS",
     "CBC", "LPP", "CBC+LPP", "PTP Date",
-    "Feedback Code", "Latest Feedback", "Monthly Feedback",
     "Address", "Registration No", "Company",
   ];
 
   const rows = cases.map((c) => [
     c.customer_name, c.loan_no, c.app_id ?? "", c.mobile_no ?? "",
-    c.status, c.bkt ?? "", c.emi_amount ?? "", c.emi_due ?? "", c.pos ?? "",
+    c.status, c.bkt ?? "", c.emi_amount ?? "", c.pos ?? "",
     c.cbc ?? "", c.lpp ?? "", c.cbc_lpp ?? "",
     c.ptp_date ? String(c.ptp_date).slice(0, 10) : "",
-    c.feedback_code ?? "", c.latest_feedback ?? "",
-    c.monthly_feedback ?? "", c.address ?? "", c.registration_no ?? "",
+    c.address ?? "", c.registration_no ?? "",
     c.company_name ?? "",
   ].map(escCsv).join(","));
 
