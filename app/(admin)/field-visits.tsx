@@ -35,6 +35,7 @@ import { Ionicons, MaterialCommunityIcons, MaterialIcons } from "@expo/vector-ic
 import * as FileSystem from "expo-file-system";
 import * as Sharing from "expo-sharing";
 import Constants from "expo-constants";
+import { tokenStore } from "@/lib/api";
 
 // ─── Theme ────────────────────────────────────────────────────────────────────
 const C = {
@@ -503,8 +504,13 @@ export default function FieldVisitsScreen() {
     setError(null);
 
     try {
-      const res  = await fetch(`${API}/admin/field-visits?date=${date}`, {
-        headers: { "Content-Type": "application/json" },
+      const token = await tokenStore.get();
+      const res  = await fetch(`${API}/api/admin/field-visits?date=${date}`, {
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
       });
       if (!res.ok) throw new Error(`Server error: ${res.status}`);
       const json = await res.json();
