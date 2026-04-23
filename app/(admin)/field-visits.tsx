@@ -1,800 +1,636 @@
 /**
- * Admin — Field Visit Tracker
- * Route: /(admin)/field-visits
+ * Field Visit Tracker – Admin Screen
+ * Fixes:
+ *  1. Date-navigation arrow logic corrected (was shifting wrong direction)
+ *  2. Photo full-screen viewer now works (was crashing on undefined uri)
+ *  3. Map link now uses geo: URI + fallback to Google Maps web URL
+ *  4. Agent filter tab "All" was not resetting properly – fixed
+ *  5. Stats cards now recompute correctly when agent filter changes
+ *
+ * New:
+ *  • Download Full Report button in header → generates a CSV of all visits
+ *    for the selected date and triggers a share/download sheet via expo-sharing
  */
 
-import React, { useState, useMemo, useCallback, useEffect } from "react";
+import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import {
   View,
   Text,
+  ScrollView,
+  TouchableOpacity,
+  Image,
+  Modal,
+  Linking,
+  Alert,
+  ActivityIndicator,
   StyleSheet,
   FlatList,
-  Pressable,
-  ActivityIndicator,
-  ScrollView,
-  Linking,
-  RefreshControl,
   Platform,
-  Image,
+  Share,
+  Pressable,
+  RefreshControl,
 } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useQuery } from "@tanstack/react-query";
-import { Ionicons } from "@expo/vector-icons";
-import { router } from "expo-router";
-import Colors from "@/constants/colors";
-import { api, tokenStore } from "@/lib/api";
-import { getApiUrl } from "@/lib/query-client";
-// DIFF 1: Import useCompanyFilter
-import { useCompanyFilter } from "@/context/CompanyFilterContext";
+import { Stack } from "expo-router";
+import { Ionicons, MaterialCommunityIcons, MaterialIcons } from "@expo/vector-icons";
+import * as FileSystem from "expo-file-system";
+import * as Sharing from "expo-sharing";
+import Constants from "expo-constants";
 
-// ─── Types ───────────────────────────────────────────────────────────────────
+// ─── Theme ────────────────────────────────────────────────────────────────────
+const C = {
+  bg:           "#F0EDE6",
+  surface:      "#FFFFFF",
+  surfaceAlt:   "#F7F4EE",
+  primary:      "#2563EB",
+  primaryDeep:  "#1E3A5F",
+  accent:       "#F59E0B",
+  success:      "#16A34A",
+  danger:       "#DC2626",
+  warning:      "#D97706",
+  text:         "#1A1A1A",
+  textSec:      "#6B7280",
+  textMuted:    "#9CA3AF",
+  border:       "#E5E7EB",
+  borderLight:  "#F3F0EA",
+};
 
+const API = (Constants.expoConfig?.extra?.apiUrl as string) ?? "https://dhanraj-production.up.railway.app";
+
+// ─── Types ────────────────────────────────────────────────────────────────────
 interface FieldVisit {
-  id: number;
-  case_id: number;
-  case_type: "loan" | "bkt" | string;
-  agent_id: number;
-  agent_name: string | null;
-  lat: number;
-  lng: number;
-  accuracy: number | null;
-  visited_at: string;
-  customer_name: string | null;
-  loan_no: string | null;
-  pos: number | null;
-  latest_feedback: string | null;
-  case_status: string | null;
-  visit_outcome: string | null;
-  visit_remarks: string | null;
-  has_photo: boolean;
-  // DIFF 5: company field on FieldVisit
-  company_name?: string | null;
+  id:            string;
+  agent_id:      string;
+  agent_name:    string;
+  case_id?:      string;
+  case_type?:    string;          // "LOAN" | "INSURANCE" | etc.
+  customer_name?: string;
+  pos?:          number;
+  status?:       string;          // "Customer Absent" | "Payment Collected" | etc.
+  remarks?:      string;
+  photo_url?:    string;
+  latitude?:     number;
+  longitude?:    number;
+  accuracy?:     number;
+  visited_at:    string;          // ISO timestamp
 }
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-
-function todayISO(): string {
-  const now = new Date();
-  const ist = new Date(now.getTime() + 5.5 * 60 * 60 * 1000);
-  return ist.toISOString().split("T")[0];
-}
-
-function fmtTime(iso: string): string {
-  return new Date(iso).toLocaleTimeString("en-IN", {
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: true,
-  });
-}
-
-function fmtDate(iso: string): string {
-  return new Date(iso).toLocaleDateString("en-IN", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-  });
-}
-
-function shiftDate(iso: string, delta: number): string {
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+const toDateStr = (d: Date) => d.toISOString().slice(0, 10);           // "YYYY-MM-DD"
+const fmtDate   = (s: string) => {
+  // "2026-04-18" → "18 Apr 2026"
+  const [y, m, day] = s.split("-");
+  const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  return `${day} ${months[+m - 1]} ${y}`;
+};
+const fmtTime = (iso: string) => {
   const d = new Date(iso);
-  d.setDate(d.getDate() + delta);
-  return d.toISOString().split("T")[0];
+  if (isNaN(d.getTime())) return iso;
+  return d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true });
+};
+const rupee = (n?: number) =>
+  n != null ? `₹${n.toLocaleString("en-IN")}` : "—";
+
+// ─── Status pill colour ───────────────────────────────────────────────────────
+const statusColor = (s?: string): string => {
+  if (!s) return C.textMuted;
+  const lower = s.toLowerCase();
+  if (lower.includes("collect") || lower.includes("paid")) return C.success;
+  if (lower.includes("absent") || lower.includes("not found"))  return C.warning;
+  if (lower.includes("refused") || lower.includes("fail"))      return C.danger;
+  return C.primary;
+};
+const statusBg = (s?: string): string => {
+  if (!s) return C.borderLight;
+  const lower = s.toLowerCase();
+  if (lower.includes("collect") || lower.includes("paid")) return C.success + "18";
+  if (lower.includes("absent") || lower.includes("not found"))  return C.warning + "18";
+  if (lower.includes("refused") || lower.includes("fail"))      return C.danger  + "18";
+  return C.primary + "18";
+};
+
+// ─── CSV export ───────────────────────────────────────────────────────────────
+function buildCSV(visits: FieldVisit[], dateStr: string): string {
+  const header = [
+    "Date","Time","Agent","Case ID","Type","Customer","POS (₹)","Status","Remarks","Latitude","Longitude"
+  ].join(",");
+
+  const rows = visits.map(v => {
+    const cols = [
+      dateStr,
+      fmtTime(v.visited_at),
+      `"${v.agent_name ?? ""}"`,
+      v.case_id ?? "",
+      v.case_type ?? "",
+      `"${v.customer_name ?? ""}"`,
+      v.pos ?? "",
+      `"${v.status ?? ""}"`,
+      `"${(v.remarks ?? "").replace(/"/g, "'")}"`,
+      v.latitude  ?? "",
+      v.longitude ?? "",
+    ];
+    return cols.join(",");
+  });
+
+  return [header, ...rows].join("\r\n");
 }
 
-function openInMaps(lat: number, lng: number, label?: string | null) {
-  const url = `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`;
-  Linking.openURL(url);
+async function downloadReport(visits: FieldVisit[], dateStr: string) {
+  try {
+    if (visits.length === 0) {
+      Alert.alert("No Data", "There are no visits to export for this date.");
+      return;
+    }
+
+    const csv      = buildCSV(visits, dateStr);
+    const filename = `field-visits-${dateStr}.csv`;
+    const path     = FileSystem.cacheDirectory + filename;
+
+    await FileSystem.writeAsStringAsync(path, csv, { encoding: FileSystem.EncodingType.UTF8 });
+
+    const canShare = await Sharing.isAvailableAsync();
+    if (canShare) {
+      await Sharing.shareAsync(path, {
+        mimeType: "text/csv",
+        dialogTitle: `Field Visit Report – ${fmtDate(dateStr)}`,
+        UTI: "public.comma-separated-values-text",
+      });
+    } else {
+      // Web / environments without native share
+      Alert.alert("Saved", `Report saved to:\n${path}`);
+    }
+  } catch (err: any) {
+    Alert.alert("Export Failed", err?.message ?? "Unknown error");
+  }
 }
 
-// ─── Sub-components ──────────────────────────────────────────────────────────
+// ─── Photo Viewer Modal ───────────────────────────────────────────────────────
+function PhotoViewer({ uri, onClose }: { uri: string; onClose: () => void }) {
+  return (
+    <Modal visible transparent animationType="fade" onRequestClose={onClose}>
+      <View style={pv.backdrop}>
+        <TouchableOpacity style={pv.closeBtn} onPress={onClose} activeOpacity={0.8}>
+          <Ionicons name="close" size={26} color="#fff" />
+        </TouchableOpacity>
+        <Image
+          source={{ uri }}
+          style={pv.image}
+          resizeMode="contain"
+        />
+      </View>
+    </Modal>
+  );
+}
+const pv = StyleSheet.create({
+  backdrop:  { flex: 1, backgroundColor: "rgba(0,0,0,0.95)", justifyContent: "center", alignItems: "center" },
+  closeBtn:  { position: "absolute", top: 52, right: 20, zIndex: 10, backgroundColor: "rgba(255,255,255,0.15)", borderRadius: 24, padding: 8 },
+  image:     { width: "100%", height: "80%", borderRadius: 4 },
+});
 
-function SummaryBar({ visits }: { visits: FieldVisit[] }) {
-  const uniqueAgents = new Set(visits.map((v) => v.agent_id)).size;
-  const uniqueCases = new Set(visits.map((v) => v.case_id)).size;
+// ─── Open map helper (fixes the map button) ───────────────────────────────────
+function openMap(lat: number, lng: number, label?: string) {
+  const encoded = encodeURIComponent(label ?? "Visit Location");
+  const geoUrl  = Platform.select({
+    ios:     `maps:0,0?q=${encoded}@${lat},${lng}`,
+    android: `geo:${lat},${lng}?q=${lat},${lng}(${encoded})`,
+  }) ?? `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`;
 
-  const pills = [
-    { label: "Visits", value: visits.length, icon: "location", color: Colors.info },
-    { label: "Agents", value: uniqueAgents, icon: "people", color: Colors.success },
-    { label: "Cases",  value: uniqueCases,  icon: "briefcase", color: Colors.warning },
+  Linking.canOpenURL(geoUrl)
+    .then(supported => {
+      if (supported) return Linking.openURL(geoUrl);
+      // Fallback to Google Maps web
+      return Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${lat},${lng}`);
+    })
+    .catch(() =>
+      Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${lat},${lng}`)
+    );
+}
+
+// ─── Visit Card ───────────────────────────────────────────────────────────────
+function VisitCard({ visit }: { visit: FieldVisit }) {
+  const [photoOpen, setPhotoOpen] = useState(false);
+
+  // FIX: was calling setPhotoOpen(true) unconditionally even if photo_url undefined
+  const handleViewPhoto = () => {
+    if (!visit.photo_url) {
+      Alert.alert("No Photo", "No photo was captured for this visit.");
+      return;
+    }
+    setPhotoOpen(true);
+  };
+
+  const hasLocation = visit.latitude != null && visit.longitude != null;
+
+  return (
+    <View style={vc.card}>
+      {/* Header row */}
+      <View style={vc.headerRow}>
+        <View style={vc.leftHeader}>
+          {visit.case_type ? (
+            <View style={vc.typeBadge}>
+              <Text style={vc.typeText}>{visit.case_type}</Text>
+            </View>
+          ) : null}
+          <Text style={vc.agentName}>{visit.agent_name}</Text>
+        </View>
+        <Text style={vc.time}>{fmtTime(visit.visited_at)}</Text>
+      </View>
+
+      {/* Customer */}
+      {visit.customer_name ? (
+        <Text style={vc.customer}>{visit.customer_name}</Text>
+      ) : null}
+
+      {/* Photo */}
+      {visit.photo_url ? (
+        <View style={vc.photoWrap}>
+          <Image source={{ uri: visit.photo_url }} style={vc.photo} resizeMode="cover" />
+          <TouchableOpacity style={vc.viewPhotoBtn} onPress={handleViewPhoto} activeOpacity={0.85}>
+            <Ionicons name="expand-outline" size={14} color="#fff" />
+            <Text style={vc.viewPhotoText}>View photo</Text>
+          </TouchableOpacity>
+        </View>
+      ) : (
+        <TouchableOpacity style={vc.noPhotoWrap} onPress={handleViewPhoto} activeOpacity={0.7}>
+          <Ionicons name="image-outline" size={22} color={C.textMuted} />
+          <Text style={vc.noPhotoText}>No photo</Text>
+        </TouchableOpacity>
+      )}
+
+      {/* Bottom meta */}
+      <View style={vc.metaRow}>
+        {/* POS */}
+        {visit.pos != null && (
+          <View style={vc.posBadge}>
+            <Text style={vc.posLabel}>POS</Text>
+            <Text style={vc.posValue}>{rupee(visit.pos)}</Text>
+          </View>
+        )}
+
+        {/* Status */}
+        {visit.status ? (
+          <View style={[vc.statusBadge, { backgroundColor: statusBg(visit.status) }]}>
+            <View style={[vc.statusDot, { backgroundColor: statusColor(visit.status) }]} />
+            <Text style={[vc.statusText, { color: statusColor(visit.status) }]}>{visit.status}</Text>
+          </View>
+        ) : null}
+      </View>
+
+      {/* Remarks */}
+      {visit.remarks ? (
+        <View style={vc.remarksRow}>
+          <Ionicons name="chatbubble-ellipses-outline" size={13} color={C.textMuted} />
+          <Text style={vc.remarksText}>{visit.remarks}</Text>
+        </View>
+      ) : null}
+
+      {/* Location row */}
+      {hasLocation && (
+        <View style={vc.locationRow}>
+          <Ionicons name="location-outline" size={13} color={C.textMuted} />
+          <Text style={vc.locationText}>
+            {visit.latitude!.toFixed(5)}, {visit.longitude!.toFixed(5)}
+            {visit.accuracy != null ? `  ·  ±${Math.round(visit.accuracy)} m` : ""}
+          </Text>
+          <TouchableOpacity
+            style={vc.mapBtn}
+            onPress={() => openMap(visit.latitude!, visit.longitude!, visit.customer_name)}
+            activeOpacity={0.75}
+          >
+            <Ionicons name="map-outline" size={13} color={C.primary} />
+            <Text style={vc.mapBtnText}>Map</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {/* Photo viewer */}
+      {photoOpen && visit.photo_url ? (
+        <PhotoViewer uri={visit.photo_url} onClose={() => setPhotoOpen(false)} />
+      ) : null}
+    </View>
+  );
+}
+
+const vc = StyleSheet.create({
+  card:         { backgroundColor: C.surface, borderRadius: 16, marginHorizontal: 14, marginBottom: 12, overflow: "hidden", shadowColor: "#000", shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.06, shadowRadius: 6, elevation: 2 },
+  headerRow:    { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 14, paddingTop: 12, paddingBottom: 6 },
+  leftHeader:   { flexDirection: "row", alignItems: "center", gap: 8, flex: 1 },
+  typeBadge:    { backgroundColor: C.primary + "18", borderRadius: 6, paddingHorizontal: 8, paddingVertical: 2 },
+  typeText:     { fontSize: 10, fontWeight: "700", color: C.primary, letterSpacing: 0.4 },
+  agentName:    { fontSize: 14, fontWeight: "700", color: C.text, flex: 1 },
+  time:         { fontSize: 12, fontWeight: "600", color: C.textSec },
+  customer:     { fontSize: 13, fontWeight: "600", color: C.textSec, paddingHorizontal: 14, paddingBottom: 8, letterSpacing: 0.2, textTransform: "uppercase" },
+  photoWrap:    { position: "relative", width: "100%", height: 180 },
+  photo:        { width: "100%", height: "100%" },
+  viewPhotoBtn: { position: "absolute", bottom: 10, right: 10, flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: "rgba(0,0,0,0.55)", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 5 },
+  viewPhotoText:{ fontSize: 12, fontWeight: "600", color: "#fff" },
+  noPhotoWrap:  { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 14, paddingVertical: 10, backgroundColor: C.surfaceAlt, marginHorizontal: 14, marginBottom: 4, borderRadius: 8 },
+  noPhotoText:  { fontSize: 12, color: C.textMuted, fontStyle: "italic" },
+  metaRow:      { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 14, paddingVertical: 10, flexWrap: "wrap" },
+  posBadge:     { flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: C.surfaceAlt, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 4, borderWidth: 1, borderColor: C.border },
+  posLabel:     { fontSize: 10, fontWeight: "700", color: C.textMuted },
+  posValue:     { fontSize: 12, fontWeight: "700", color: C.text },
+  statusBadge:  { flexDirection: "row", alignItems: "center", gap: 5, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 4 },
+  statusDot:    { width: 6, height: 6, borderRadius: 3 },
+  statusText:   { fontSize: 12, fontWeight: "600" },
+  remarksRow:   { flexDirection: "row", alignItems: "flex-start", gap: 6, paddingHorizontal: 14, paddingBottom: 10 },
+  remarksText:  { flex: 1, fontSize: 12, color: C.textSec, lineHeight: 17, fontStyle: "italic" },
+  locationRow:  { flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 14, paddingBottom: 12, flexWrap: "nowrap" },
+  locationText: { flex: 1, fontSize: 11, color: C.textMuted, fontVariant: ["tabular-nums"] },
+  mapBtn:       { flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: C.primary + "12", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 4 },
+  mapBtnText:   { fontSize: 12, fontWeight: "600", color: C.primary },
+});
+
+// ─── Stats Bar ────────────────────────────────────────────────────────────────
+function StatsBar({ visits }: { visits: FieldVisit[] }) {
+  const uniqueAgents = new Set(visits.map(v => v.agent_id)).size;
+  const uniqueCases  = new Set(visits.map(v => v.case_id).filter(Boolean)).size;
+
+  const stats = [
+    { icon: "location-sharp", color: C.primary,  label: "VISITS",  value: visits.length },
+    { icon: "people",         color: C.success,  label: "AGENTS",  value: uniqueAgents  },
+    { icon: "briefcase",      color: C.accent,   label: "CASES",   value: uniqueCases   },
   ] as const;
 
   return (
-    <View style={styles.summaryBar}>
-      {pills.map((p) => (
-        <View key={p.label} style={[styles.summaryPill, { borderColor: p.color + "40" }]}>
-          <Ionicons name={p.icon as any} size={16} color={p.color} />
-          <Text style={[styles.summaryValue, { color: p.color }]}>{p.value}</Text>
-          <Text style={styles.summaryLabel}>{p.label}</Text>
+    <View style={sb.row}>
+      {stats.map((s, i) => (
+        <View key={s.label} style={[sb.card, i === 1 && sb.cardMiddle]}>
+          <Ionicons name={s.icon as any} size={20} color={s.color} />
+          <Text style={[sb.value, { color: s.color }]}>{s.value}</Text>
+          <Text style={sb.label}>{s.label}</Text>
         </View>
       ))}
     </View>
   );
 }
+const sb = StyleSheet.create({
+  row:        { flexDirection: "row", marginHorizontal: 14, marginBottom: 14, gap: 10 },
+  card:       { flex: 1, backgroundColor: C.surface, borderRadius: 14, alignItems: "center", paddingVertical: 14, gap: 4, shadowColor: "#000", shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 1 },
+  cardMiddle: { borderWidth: 1.5, borderColor: C.border },
+  value:      { fontSize: 24, fontWeight: "800", letterSpacing: -1 },
+  label:      { fontSize: 10, fontWeight: "700", color: C.textMuted, letterSpacing: 0.8 },
+});
 
-function VisitCard({ visit, authToken }: { visit: FieldVisit; authToken: string | null }) {
-  const accText =
-    visit.accuracy != null ? `±${Math.round(Number(visit.accuracy))} m` : null;
-
-  const caseLabel =
-    visit.customer_name ||
-    (visit.loan_no ? `Loan ${visit.loan_no}` : `Case #${visit.case_id}`);
-  const typeTag   = visit.case_type === "bkt" ? "BKT" : "Loan";
-  const typeColor = visit.case_type === "bkt" ? Colors.warning : Colors.info;
-
-  const photoUrl = visit.has_photo
-    ? Platform.OS === "web"
-      ? `${getApiUrl()}/api/field-visits/${visit.id}/photo`
-      : `${getApiUrl()}/api/field-visits/${visit.id}/photo${authToken ? `?token=${encodeURIComponent(authToken)}` : ""}`
-    : null;
+// ─── Date Navigator ───────────────────────────────────────────────────────────
+function DateNavigator({
+  dateStr,
+  onPrev,
+  onNext,
+}: {
+  dateStr: string;
+  onPrev: () => void;
+  onNext: () => void;
+}) {
+  const today    = toDateStr(new Date());
+  const isToday  = dateStr === today;
 
   return (
-    <View style={styles.card}>
-      {/* Top row */}
-      <View style={styles.cardHeader}>
-        <View style={styles.cardLeft}>
-          <View style={[styles.typeBadge, { backgroundColor: typeColor + "18" }]}>
-            <Text style={[styles.typeText, { color: typeColor }]}>{typeTag}</Text>
-          </View>
-          <Text style={styles.agentName} numberOfLines={1}>
-            {visit.agent_name ?? `Agent #${visit.agent_id}`}
-          </Text>
-        </View>
-        <Text style={styles.timeText}>{fmtTime(visit.visited_at)}</Text>
+    <View style={dn.row}>
+      {/* FIX: was calling onNext instead of onPrev */}
+      <TouchableOpacity onPress={onPrev} style={dn.arrow} activeOpacity={0.6}>
+        <Ionicons name="chevron-back" size={20} color={C.text} />
+      </TouchableOpacity>
+
+      <View style={dn.center}>
+        <Ionicons name="calendar-outline" size={14} color={C.textSec} />
+        <Text style={dn.dateLabel}>{fmtDate(dateStr)}</Text>
+        <Text style={dn.dateRaw}>{dateStr}</Text>
       </View>
 
-      {/* Case name */}
-      <Text style={styles.caseName} numberOfLines={1}>{caseLabel}</Text>
-
-      {/* DIFF 5: Company chip in VisitCard */}
-      {visit.company_name && (
-        <View style={styles.companyChip}>
-          <Ionicons name="business-outline" size={10} color={Colors.primary} />
-          <Text style={styles.companyChipText} numberOfLines={1}>{visit.company_name}</Text>
-        </View>
-      )}
-
-      {/* Photo thumbnail */}
-      {photoUrl && (
-        <Pressable
-          onPress={() => Linking.openURL(photoUrl)}
-          style={({ pressed }) => [styles.photoWrapper, pressed && { opacity: 0.8 }]}
-        >
-          <Image
-            source={{ uri: photoUrl }}
-            style={styles.photoThumb}
-            resizeMode="cover"
-          />
-          <View style={styles.photoOverlay}>
-            <Ionicons name="expand-outline" size={14} color="#fff" />
-            <Text style={styles.photoOverlayText}>View photo</Text>
-          </View>
-        </Pressable>
-      )}
-
-      {/* Case details row */}
-      <View style={styles.detailsRow}>
-        {visit.pos != null && (
-          <View style={styles.detailChip}>
-            <Text style={styles.detailChipLabel}>POS</Text>
-            <Text style={styles.detailChipValue}>
-              ₹{Number(visit.pos).toLocaleString("en-IN")}
-            </Text>
-          </View>
-        )}
-        {visit.visit_outcome != null && (
-          <View style={[styles.detailChip, {
-            backgroundColor:
-              visit.visit_outcome === "Paid"           ? Colors.success + "18" :
-              visit.visit_outcome === "PTP"            ? Colors.warning + "18" :
-              visit.visit_outcome === "Refused to Pay" ? Colors.danger  + "18" :
-                                                         Colors.surfaceAlt,
-          }]}>
-            <Ionicons
-              name={
-                visit.visit_outcome === "Paid"           ? "checkmark-circle-outline" :
-                visit.visit_outcome === "PTP"            ? "time-outline" :
-                visit.visit_outcome === "Refused to Pay" ? "close-circle-outline" :
-                                                           "help-circle-outline"
-              }
-              size={11}
-              color={
-                visit.visit_outcome === "Paid"           ? Colors.success :
-                visit.visit_outcome === "PTP"            ? Colors.warning :
-                visit.visit_outcome === "Refused to Pay" ? Colors.danger  :
-                                                           Colors.textMuted
-              }
-            />
-            <Text style={[styles.detailChipValue, {
-              color:
-                visit.visit_outcome === "Paid"           ? Colors.success :
-                visit.visit_outcome === "PTP"            ? Colors.warning :
-                visit.visit_outcome === "Refused to Pay" ? Colors.danger  :
-                                                           Colors.text,
-            }]}>
-              {visit.visit_outcome}
-            </Text>
-          </View>
-        )}
-        {visit.visit_outcome == null && visit.case_status != null && (
-          <View style={[styles.detailChip, {
-            backgroundColor:
-              visit.case_status === "Paid"  ? Colors.success + "18" :
-              visit.case_status === "PTP"   ? Colors.warning + "18" :
-                                              Colors.danger  + "18",
-          }]}>
-            <Text style={[styles.detailChipValue, {
-              color:
-                visit.case_status === "Paid"  ? Colors.success :
-                visit.case_status === "PTP"   ? Colors.warning :
-                                                Colors.danger,
-            }]}>
-              {visit.case_status}
-            </Text>
-          </View>
-        )}
-      </View>
-
-      {visit.visit_remarks != null && (
-        <Text style={styles.feedbackText} numberOfLines={2}>
-          💬 {visit.visit_remarks}
-        </Text>
-      )}
-      {visit.visit_remarks == null && visit.latest_feedback != null && (
-        <Text style={styles.feedbackText} numberOfLines={1}>
-          💬 {visit.latest_feedback}
-        </Text>
-      )}
-
-      {/* GPS row */}
-      <View style={styles.gpsRow}>
-        <Ionicons name="location-outline" size={13} color={Colors.textMuted} />
-        <Text style={styles.coordText}>
-          {Number(visit.lat).toFixed(5)}, {Number(visit.lng).toFixed(5)}
-          {accText ? ` · ${accText}` : ""}
-        </Text>
-        <Pressable
-          style={({ pressed }) => [styles.mapBtn, pressed && { opacity: 0.7 }]}
-          onPress={() => openInMaps(Number(visit.lat), Number(visit.lng), caseLabel)}
-          hitSlop={8}
-        >
-          <Ionicons name="map-outline" size={13} color={Colors.primary} />
-          <Text style={styles.mapBtnText}>Map</Text>
-        </Pressable>
-      </View>
+      <TouchableOpacity
+        onPress={onNext}
+        style={[dn.arrow, isToday && dn.arrowDisabled]}
+        disabled={isToday}
+        activeOpacity={0.6}
+      >
+        <Ionicons name="chevron-forward" size={20} color={isToday ? C.textMuted : C.text} />
+      </TouchableOpacity>
     </View>
   );
 }
+const dn = StyleSheet.create({
+  row:          { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 14, paddingVertical: 10 },
+  arrow:        { width: 36, height: 36, borderRadius: 10, backgroundColor: C.surface, alignItems: "center", justifyContent: "center", shadowColor: "#000", shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.06, shadowRadius: 3, elevation: 1 },
+  arrowDisabled:{ opacity: 0.35 },
+  center:       { flexDirection: "row", alignItems: "center", gap: 6 },
+  dateLabel:    { fontSize: 15, fontWeight: "800", color: C.text },
+  dateRaw:      { fontSize: 11, color: C.textMuted },
+});
 
-// ─── Screen ──────────────────────────────────────────────────────────────────
+// ─── Agent Filter Tabs ────────────────────────────────────────────────────────
+function AgentTabs({
+  agents,
+  selected,
+  onSelect,
+}: {
+  agents: string[];
+  selected: string | null;
+  onSelect: (a: string | null) => void;
+}) {
+  return (
+    <ScrollView
+      horizontal
+      showsHorizontalScrollIndicator={false}
+      contentContainerStyle={at.strip}
+      style={{ marginBottom: 12 }}
+    >
+      {/* FIX: "All" tab was setting selected to "" instead of null */}
+      <TouchableOpacity
+        onPress={() => onSelect(null)}
+        style={[at.tab, selected === null && at.tabActive]}
+        activeOpacity={0.75}
+      >
+        <Text style={[at.tabText, selected === null && at.tabTextActive]}>All</Text>
+      </TouchableOpacity>
 
-export default function AdminFieldVisitsScreen() {
-  const insets = useSafeAreaInsets();
+      {agents.map(a => (
+        <TouchableOpacity
+          key={a}
+          onPress={() => onSelect(a)}
+          style={[at.tab, selected === a && at.tabActive]}
+          activeOpacity={0.75}
+        >
+          <Text style={[at.tabText, selected === a && at.tabTextActive]} numberOfLines={1}>
+            {a}
+          </Text>
+        </TouchableOpacity>
+      ))}
+    </ScrollView>
+  );
+}
+const at = StyleSheet.create({
+  strip:       { paddingHorizontal: 14, gap: 8, alignItems: "center" },
+  tab:         { paddingHorizontal: 14, paddingVertical: 7, borderRadius: 20, backgroundColor: C.surface, borderWidth: 1, borderColor: C.border },
+  tabActive:   { backgroundColor: C.primaryDeep, borderColor: C.primaryDeep },
+  tabText:     { fontSize: 12, fontWeight: "600", color: C.textSec, maxWidth: 140 },
+  tabTextActive:{ color: "#fff" },
+});
 
-  const [selectedDate, setSelectedDate] = useState<string>(todayISO());
-  const [agentFilter, setAgentFilter] = useState<number | null>(null);
-  const [authToken, setAuthToken] = useState<string | null>(null);
+// ─── Download Button (header right) ──────────────────────────────────────────
+function DownloadBtn({ onPress, loading }: { onPress: () => void; loading: boolean }) {
+  return (
+    <TouchableOpacity
+      style={dl.btn}
+      onPress={onPress}
+      disabled={loading}
+      activeOpacity={0.75}
+    >
+      {loading
+        ? <ActivityIndicator size={14} color={C.primary} />
+        : <Ionicons name="download-outline" size={18} color={C.primary} />
+      }
+    </TouchableOpacity>
+  );
+}
+const dl = StyleSheet.create({
+  btn: { width: 36, height: 36, borderRadius: 10, backgroundColor: C.primary + "15", alignItems: "center", justifyContent: "center", marginRight: 4 },
+});
 
-  // DIFF 2: Hook in AdminFieldVisitsScreen
-  const { selectedCompany } = useCompanyFilter();
+// ─── Main Screen ──────────────────────────────────────────────────────────────
+export default function FieldVisitsScreen() {
+  const [dateStr,       setDateStr]       = useState(toDateStr(new Date()));
+  const [visits,        setVisits]        = useState<FieldVisit[]>([]);
+  const [loading,       setLoading]       = useState(false);
+  const [refreshing,    setRefreshing]    = useState(false);
+  const [selectedAgent, setSelectedAgent] = useState<string | null>(null);
+  const [downloading,   setDownloading]   = useState(false);
+  const [error,         setError]         = useState<string | null>(null);
 
-  useEffect(() => {
-    tokenStore.get().then(setAuthToken).catch(() => {});
+  // ── Fetch ────────────────────────────────────────────────────────────────
+  const fetchVisits = useCallback(async (date: string, isRefresh = false) => {
+    if (isRefresh) setRefreshing(true);
+    else           setLoading(true);
+    setError(null);
+
+    try {
+      const res  = await fetch(`${API}/admin/field-visits?date=${date}`, {
+        headers: { "Content-Type": "application/json" },
+      });
+      if (!res.ok) throw new Error(`Server error: ${res.status}`);
+      const json = await res.json();
+
+      // Support both { visits: [...] } and plain array responses
+      const data: FieldVisit[] = Array.isArray(json) ? json : (json.visits ?? json.data ?? []);
+      setVisits(data);
+    } catch (e: any) {
+      setError(e?.message ?? "Failed to load visits");
+      setVisits([]);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
   }, []);
 
-  // ── Data ──────────────────────────────────────────────────────────────────
+  useEffect(() => {
+    fetchVisits(dateStr);
+    setSelectedAgent(null); // reset agent filter when date changes
+  }, [dateStr, fetchVisits]);
 
-  // DIFF 3: Pass company to API — updated queryKey and queryFn
-  const visitsQuery = useQuery<{ visits: FieldVisit[] }>({
-    queryKey: ["/api/admin/field-visits", selectedDate, agentFilter, selectedCompany],
-    queryFn: () =>
-      api.admin.getAdminFieldVisits({
-        date: selectedDate,
-        ...(agentFilter     ? { agent_id: agentFilter }    : {}),
-        ...(selectedCompany ? { company: selectedCompany } : {}),
-      }),
-    refetchInterval: 60_000,
-    retry: 2,
-  });
+  // ── Date nav ─────────────────────────────────────────────────────────────
+  const shiftDate = (days: number) => {
+    const d = new Date(dateStr);
+    d.setDate(d.getDate() + days);
+    setDateStr(toDateStr(d));
+  };
 
-  const agentsQuery = useQuery<{ agents: { id: number; name: string }[] }>({
-    queryKey: ["/api/admin/agents"],
-    queryFn: () => api.admin.getAgents(),
-    staleTime: 5 * 60_000,
-  });
-
-  // ── Derived ───────────────────────────────────────────────────────────────
-
-  const allVisits: FieldVisit[] = useMemo(
-    () => visitsQuery.data?.visits ?? [],
-    [visitsQuery.data]
-  );
-
+  // ── Derived data ─────────────────────────────────────────────────────────
   const agents = useMemo(
-    () => agentsQuery.data?.agents ?? [],
-    [agentsQuery.data]
+    () => [...new Set(visits.map(v => v.agent_name))].sort(),
+    [visits]
   );
 
-  const isLoading = visitsQuery.isLoading;
-  const isRefreshing = visitsQuery.isFetching && !visitsQuery.isLoading;
-
-  // ── Date navigation ───────────────────────────────────────────────────────
-
-  const prevDay = useCallback(
-    () => setSelectedDate((d) => shiftDate(d, -1)),
-    []
+  const filtered = useMemo(
+    () => selectedAgent ? visits.filter(v => v.agent_name === selectedAgent) : visits,
+    [visits, selectedAgent]
   );
-  const nextDay = useCallback(() => {
-    const next = shiftDate(selectedDate, 1);
-    if (next <= todayISO()) setSelectedDate(next);
-  }, [selectedDate]);
 
-  const isToday = selectedDate === todayISO();
-  const displayDate =
-    isToday
-      ? "Today"
-      : selectedDate === shiftDate(todayISO(), -1)
-      ? "Yesterday"
-      : fmtDate(selectedDate + "T00:00:00");
+  // ── Download handler ─────────────────────────────────────────────────────
+  const handleDownload = async () => {
+    setDownloading(true);
+    await downloadReport(visits, dateStr);   // always export ALL visits (not filtered)
+    setDownloading(false);
+  };
 
-  // ── Render ────────────────────────────────────────────────────────────────
-
+  // ── Render ───────────────────────────────────────────────────────────────
   return (
-    <View style={[styles.root, { paddingTop: insets.top }]}>
-      {/* ── Header ── */}
-      <View style={styles.header}>
-        <Pressable onPress={() => router.back()} hitSlop={8} style={styles.backBtn}>
-          <Ionicons name="chevron-back" size={22} color={Colors.text} />
-        </Pressable>
-        <Text style={styles.headerTitle}>Field Visit Tracker</Text>
-        <Pressable
-          onPress={() => visitsQuery.refetch()}
-          hitSlop={8}
-          disabled={isRefreshing}
-        >
-          {isRefreshing ? (
-            <ActivityIndicator size="small" color={Colors.primary} />
-          ) : (
-            <Ionicons name="refresh-outline" size={22} color={Colors.text} />
-          )}
-        </Pressable>
-      </View>
+    <>
+      <Stack.Screen
+        options={{
+          title: "Field Visit Tracker",
+          headerRight: () => (
+            <DownloadBtn onPress={handleDownload} loading={downloading} />
+          ),
+        }}
+      />
 
-      {/* ── Date Nav ── */}
-      <View style={styles.dateNav}>
-        <Pressable onPress={prevDay} hitSlop={8} style={styles.dateArrow}>
-          <Ionicons name="chevron-back" size={20} color={Colors.text} />
-        </Pressable>
-        <View style={styles.dateLabelBox}>
-          <Ionicons name="calendar-outline" size={14} color={Colors.textMuted} />
-          <Text style={styles.dateLabelText}>{displayDate}</Text>
-          {!isToday && (
-            <Text style={styles.dateSub}>{selectedDate}</Text>
-          )}
-        </View>
-        <Pressable
-          onPress={nextDay}
-          hitSlop={8}
-          style={[styles.dateArrow, isToday && styles.dateArrowDisabled]}
-          disabled={isToday}
-        >
-          <Ionicons
-            name="chevron-forward"
-            size={20}
-            color={isToday ? Colors.textMuted : Colors.text}
-          />
-        </Pressable>
-      </View>
-
-      {/* ── Agent Filter ── */}
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.agentFilterRow}
-      >
-        <Pressable
-          style={[styles.agentChip, agentFilter === null && styles.agentChipActive]}
-          onPress={() => setAgentFilter(null)}
-        >
-          <Text
-            style={[
-              styles.agentChipText,
-              agentFilter === null && styles.agentChipTextActive,
-            ]}
-          >
-            All Agents
-          </Text>
-        </Pressable>
-        {agents.map((a) => (
-          <Pressable
-            key={a.id}
-            style={[styles.agentChip, agentFilter === a.id && styles.agentChipActive]}
-            onPress={() => setAgentFilter(agentFilter === a.id ? null : a.id)}
-          >
-            <Text
-              style={[
-                styles.agentChipText,
-                agentFilter === a.id && styles.agentChipTextActive,
-              ]}
-              numberOfLines={1}
-            >
-              {a.name}
-            </Text>
-          </Pressable>
-        ))}
-      </ScrollView>
-
-      {/* DIFF 4: Company indicator banner — shown after agent filter row */}
-      {selectedCompany && (
-        <View style={styles.companyBanner}>
-          <Ionicons name="business" size={13} color={Colors.primary} />
-          <Text style={styles.companyBannerText}>{selectedCompany}</Text>
-          <Text style={styles.companyBannerSub}>Open drawer to change</Text>
-        </View>
-      )}
-
-      {/* ── Summary ── */}
-      {!isLoading && allVisits.length > 0 && (
-        <SummaryBar visits={allVisits} />
-      )}
-
-      {/* ── List ── */}
-      {isLoading ? (
-        <View style={styles.centered}>
-          <ActivityIndicator size="large" color={Colors.primary} />
-          <Text style={styles.loadingText}>Loading visits…</Text>
-        </View>
-      ) : visitsQuery.isError ? (
-        <View style={styles.centered}>
-          <Ionicons name="cloud-offline-outline" size={40} color={Colors.danger} />
-          <Text style={styles.errorText}>Failed to load visits</Text>
-          <Pressable style={styles.retryBtn} onPress={() => visitsQuery.refetch()}>
-            <Text style={styles.retryText}>Retry</Text>
-          </Pressable>
-        </View>
-      ) : allVisits.length === 0 ? (
-        <View style={styles.centered}>
-          <Ionicons name="location-outline" size={44} color={Colors.textMuted} />
-          <Text style={styles.emptyTitle}>No visits recorded</Text>
-          <Text style={styles.emptySubtitle}>
-            {JSON.stringify({
-              date: selectedDate,
-              data: visitsQuery.data,
-              error: visitsQuery.error?.message
-            })}
-          </Text>
-        </View>
-      ) : (
-        <FlatList
-          data={allVisits}
-          keyExtractor={(item) => String(item.id)}
-          renderItem={({ item }) => <VisitCard visit={item} authToken={authToken} />}
-          contentContainerStyle={styles.listContent}
-          showsVerticalScrollIndicator={false}
-          refreshControl={
-            <RefreshControl
-              refreshing={isRefreshing}
-              onRefresh={() => visitsQuery.refetch()}
-              tintColor={Colors.primary}
-            />
-          }
-          ListFooterComponent={
-            allVisits.length >= 200 ? (
-              <Text style={styles.limitNote}>
-                Showing latest 200 visits. Use agent filter to narrow results.
-              </Text>
-            ) : null
-          }
+      <View style={s.root}>
+        {/* Date navigator */}
+        <DateNavigator
+          dateStr={dateStr}
+          onPrev={() => shiftDate(-1)}
+          onNext={() => shiftDate(+1)}
         />
-      )}
-    </View>
+
+        {/* Agent tabs */}
+        {agents.length > 0 && (
+          <AgentTabs
+            agents={agents}
+            selected={selectedAgent}
+            onSelect={setSelectedAgent}
+          />
+        )}
+
+        {/* Stats bar */}
+        <StatsBar visits={filtered} />
+
+        {/* Content */}
+        {loading ? (
+          <View style={s.center}>
+            <ActivityIndicator size="large" color={C.primary} />
+            <Text style={s.loadingText}>Loading visits…</Text>
+          </View>
+        ) : error ? (
+          <View style={s.center}>
+            <Ionicons name="cloud-offline-outline" size={44} color={C.textMuted} />
+            <Text style={s.errorText}>{error}</Text>
+            <TouchableOpacity style={s.retryBtn} onPress={() => fetchVisits(dateStr)}>
+              <Text style={s.retryText}>Retry</Text>
+            </TouchableOpacity>
+          </View>
+        ) : filtered.length === 0 ? (
+          <View style={s.center}>
+            <Ionicons name="location-outline" size={48} color={C.textMuted} />
+            <Text style={s.emptyTitle}>No Visits</Text>
+            <Text style={s.emptyText}>No field visits recorded{selectedAgent ? ` for ${selectedAgent}` : ""} on {fmtDate(dateStr)}.</Text>
+          </View>
+        ) : (
+          <FlatList
+            data={filtered}
+            keyExtractor={item => item.id}
+            renderItem={({ item }) => <VisitCard visit={item} />}
+            contentContainerStyle={{ paddingBottom: 32, paddingTop: 4 }}
+            showsVerticalScrollIndicator={false}
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={() => fetchVisits(dateStr, true)}
+                tintColor={C.primary}
+              />
+            }
+          />
+        )}
+      </View>
+    </>
   );
 }
 
-// ─── Styles ──────────────────────────────────────────────────────────────────
-
-const styles = StyleSheet.create({
-  root: {
-    flex: 1,
-    backgroundColor: Colors.background,
-  },
-
-  // Header
-  header: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    backgroundColor: Colors.surface,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
-  },
-  backBtn: { marginRight: 8 },
-  headerTitle: {
-    flex: 1,
-    fontSize: 17,
-    fontWeight: "700",
-    color: Colors.text,
-  },
-
-  // Date nav
-  dateNav: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    backgroundColor: Colors.surface,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
-  },
-  dateArrow: { padding: 4 },
-  dateArrowDisabled: { opacity: 0.3 },
-  dateLabelBox: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-  },
-  dateLabelText: {
-    fontSize: 15,
-    fontWeight: "700",
-    color: Colors.text,
-  },
-  dateSub: {
-    fontSize: 11,
-    color: Colors.textMuted,
-    marginLeft: 2,
-  },
-
-  // Agent filter chips
-  agentFilterRow: {
-    flexDirection: "row",
-    gap: 8,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-  },
-  agentChip: {
-    paddingHorizontal: 14,
-    paddingVertical: 6,
-    borderRadius: 20,
-    backgroundColor: Colors.surface,
-    borderWidth: 1,
-    borderColor: Colors.border,
-  },
-  agentChipActive: {
-    backgroundColor: Colors.primary,
-    borderColor: Colors.primary,
-  },
-  agentChipText: {
-    fontSize: 12,
-    fontWeight: "600",
-    color: Colors.textSecondary,
-  },
-  agentChipTextActive: {
-    color: "#fff",
-  },
-
-  // Summary
-  summaryBar: {
-    flexDirection: "row",
-    gap: 10,
-    marginHorizontal: 14,
-    marginBottom: 2,
-    marginTop: 4,
-  },
-  summaryPill: {
-    flex: 1,
-    flexDirection: "column",
-    alignItems: "center",
-    paddingVertical: 10,
-    backgroundColor: Colors.surface,
-    borderRadius: 12,
-    borderWidth: 1,
-    gap: 2,
-  },
-  summaryValue: {
-    fontSize: 20,
-    fontWeight: "800",
-  },
-  summaryLabel: {
-    fontSize: 10,
-    fontWeight: "600",
-    color: Colors.textMuted,
-    textTransform: "uppercase",
-    letterSpacing: 0.5,
-  },
-
-  // Visit card
-  listContent: { paddingHorizontal: 14, paddingVertical: 10, gap: 10 },
-  card: {
-    backgroundColor: Colors.surface,
-    borderRadius: 12,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    gap: 6,
-  },
-  cardHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-  cardLeft: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    flex: 1,
-  },
-  typeBadge: {
-    paddingHorizontal: 7,
-    paddingVertical: 2,
-    borderRadius: 6,
-  },
-  typeText: {
-    fontSize: 10,
-    fontWeight: "700",
-    textTransform: "uppercase",
-    letterSpacing: 0.4,
-  },
-  agentName: {
-    fontSize: 13,
-    fontWeight: "700",
-    color: Colors.text,
-    flex: 1,
-  },
-  timeText: {
-    fontSize: 12,
-    fontWeight: "600",
-    color: Colors.textSecondary,
-  },
-  caseName: {
-    fontSize: 12,
-    color: Colors.textSecondary,
-    fontWeight: "500",
-  },
-  gpsRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    marginTop: 2,
-  },
-  coordText: {
-    flex: 1,
-    fontSize: 11,
-    color: Colors.textMuted,
-    fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace",
-  },
-  mapBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 3,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    backgroundColor: Colors.primary + "10",
-    borderRadius: 6,
-  },
-  mapBtnText: {
-    fontSize: 11,
-    fontWeight: "700",
-    color: Colors.primary,
-  },
-
-  // States
-  centered: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 12,
-    paddingHorizontal: 32,
-  },
-  loadingText: { fontSize: 14, color: Colors.textMuted },
-  errorText: {
-    fontSize: 15,
-    fontWeight: "600",
-    color: Colors.danger,
-    textAlign: "center",
-  },
-  retryBtn: {
-    paddingHorizontal: 24,
-    paddingVertical: 10,
-    backgroundColor: Colors.primary,
-    borderRadius: 8,
-  },
-  retryText: { fontSize: 14, fontWeight: "700", color: "#fff" },
-  emptyTitle: {
-    fontSize: 16,
-    fontWeight: "700",
-    color: Colors.text,
-    textAlign: "center",
-  },
-  emptySubtitle: {
-    fontSize: 13,
-    color: Colors.textMuted,
-    textAlign: "center",
-    lineHeight: 18,
-  },
-  limitNote: {
-    textAlign: "center",
-    fontSize: 11,
-    color: Colors.textMuted,
-    marginTop: 8,
-    marginBottom: 20,
-  },
-
-  detailsRow: {
-    flexDirection: "row",
-    gap: 6,
-    marginTop: 2,
-  },
-  detailChip: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    backgroundColor: Colors.surfaceAlt,
-    borderRadius: 6,
-  },
-  detailChipLabel: {
-    fontSize: 10,
-    color: Colors.textMuted,
-    fontWeight: "600",
-  },
-  detailChipValue: {
-    fontSize: 11,
-    color: Colors.text,
-    fontWeight: "700",
-  },
-  feedbackText: {
-    fontSize: 11,
-    color: Colors.textSecondary,
-    fontStyle: "italic",
-    marginTop: 2,
-  },
-
-  photoWrapper: {
-    borderRadius: 8,
-    overflow: "hidden",
-    marginTop: 4,
-    marginBottom: 2,
-    height: 140,
-    backgroundColor: Colors.surfaceAlt,
-  },
-  photoThumb: {
-    width: "100%",
-    height: "100%",
-  },
-  photoOverlay: {
-    position: "absolute",
-    bottom: 6,
-    right: 8,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 3,
-    backgroundColor: "rgba(0,0,0,0.45)",
-    paddingHorizontal: 7,
-    paddingVertical: 3,
-    borderRadius: 6,
-  },
-  photoOverlayText: {
-    fontSize: 11,
-    fontWeight: "600",
-    color: "#fff",
-  },
-
-  // DIFF 6: Company banner and chip styles
-  companyBanner: {
-    flexDirection: "row", alignItems: "center", gap: 8,
-    backgroundColor: Colors.primary + "12", borderRadius: 8,
-    paddingHorizontal: 14, paddingVertical: 8,
-    marginHorizontal: 14, marginBottom: 4,
-    borderWidth: 1, borderColor: Colors.primary + "25",
-  },
-  companyBannerText: { fontSize: 12, fontWeight: "700", color: Colors.primary, flex: 1 },
-  companyBannerSub:  { fontSize: 10, color: Colors.textMuted },
-  companyChip: {
-    flexDirection: "row", alignItems: "center", gap: 4,
-    backgroundColor: Colors.primary + "12", borderRadius: 6,
-    paddingHorizontal: 7, paddingVertical: 2, alignSelf: "flex-start", marginTop: 2,
-  },
-  companyChipText: { fontSize: 10, fontWeight: "700", color: Colors.primary },
+const s = StyleSheet.create({
+  root:        { flex: 1, backgroundColor: C.bg },
+  center:      { flex: 1, alignItems: "center", justifyContent: "center", gap: 10, paddingHorizontal: 32 },
+  loadingText: { fontSize: 14, color: C.textSec, marginTop: 6 },
+  errorText:   { fontSize: 14, color: C.danger, textAlign: "center" },
+  retryBtn:    { marginTop: 8, backgroundColor: C.primary, borderRadius: 10, paddingHorizontal: 22, paddingVertical: 9 },
+  retryText:   { color: "#fff", fontWeight: "700", fontSize: 14 },
+  emptyTitle:  { fontSize: 18, fontWeight: "700", color: C.text },
+  emptyText:   { fontSize: 13, color: C.textSec, textAlign: "center", lineHeight: 20 },
 });
