@@ -1771,7 +1771,10 @@ for (const [loanNo, ptpData] of ptpLoanMap) {
   );
 }
 
-      // ── Aggregate penal (CBC+LPP) per agent and upsert penal bkt_perf_summary ──
+      // ── Aggregate penal per agent and upsert penal bkt_perf_summary ──
+      // pos_paid/pos_unpaid track POS totals (for 3.5% target calculation)
+      // cbcPaid tracks SUM of Penal column values for paid rows (shown as Paid Col CBC)
+      // Only rows with an explicit Penal column value are counted - no fallback
 const penalByAgent: Record<number, { fosName: string; paid: number; unpaid: number; cbcPaid: number }> = {};
 for (let i = 0; i < rawRows.slice(headerRowIdx + 1).length; i++) {
   const row = rawRows.slice(headerRowIdx + 1)[i];
@@ -1785,13 +1788,19 @@ for (let i = 0; i < rawRows.slice(headerRowIdx + 1).length; i++) {
   const fosLower = mapped2.fos_name.toLowerCase().trim();
   const agId = agentByName[fosLower];
   if (!agId) continue;
-  // penal_cbc is the mapped "Penal" column; fallback to cbc_lpp then cbc
-  const cbcVal = parseFloat(mapped2.penal_cbc || mapped2.cbc_lpp || mapped2.cbc || "0") || 0;
-  if (cbcVal <= 0) continue;
+  // Only process rows with an explicit Penal column value
+  const penalCbc = parseFloat(mapped2.penal_cbc || "0") || 0;
+  if (penalCbc <= 0) continue;
+  // Use POS for money totals (target calculation), Penal value for Paid Col CBC
+  const posVal = parseFloat(mapped2.pos || "0") || 0;
   const isPenalPaid = normalizeStatus(mapped2.status) === "Paid";
   if (!penalByAgent[agId]) penalByAgent[agId] = { fosName: mapped2.fos_name, paid: 0, unpaid: 0, cbcPaid: 0 };
-  if (isPenalPaid) { penalByAgent[agId].paid += cbcVal; penalByAgent[agId].cbcPaid += 1; }
-  else { penalByAgent[agId].unpaid += cbcVal; }
+  if (isPenalPaid) {
+    penalByAgent[agId].paid += posVal;       // POS of paid penal loans
+    penalByAgent[agId].cbcPaid += penalCbc;  // Sum of Penal CBC values paid
+  } else {
+    penalByAgent[agId].unpaid += posVal;     // POS of unpaid penal loans
+  }
 }
 for (const [agIdStr, d] of Object.entries(penalByAgent)) {
   const total = d.paid + d.unpaid;
