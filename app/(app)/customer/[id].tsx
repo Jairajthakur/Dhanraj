@@ -1154,45 +1154,57 @@ export default function CustomerDetailScreen() {
         )}
       </ScrollView>
 
-      {/* ── Modals ── */}
-<FeedbackModal visible={showFeedbackModal} item={item} onClose={() => setShowFeedbackModal(false)} extraNumbers={extraNumbers} onMonthlyFeedbackRequest={() => setShowMonthlyFeedbackModal(true)} />
+      {/* ── Modals — conditionally mounted so nothing bleeds on web ── */}
+      {showFeedbackModal && (
+        <FeedbackModal visible={showFeedbackModal} item={item} onClose={() => setShowFeedbackModal(false)} extraNumbers={extraNumbers} onMonthlyFeedbackRequest={() => setShowMonthlyFeedbackModal(true)} />
+      )}
 
-<MonthlyFeedbackStepper
-  visible={showMonthlyFeedbackModal}
-  onClose={() => setShowMonthlyFeedbackModal(false)}
-  onCallLog={() => { setShowMonthlyFeedbackModal(false); setTimeout(() => setShowCallModal(true), 50); }}
-  onFieldVisit={() => { setShowMonthlyFeedbackModal(false); setTimeout(() => setShowVisitModal(true), 50); }}
-  onSave={async (data) => {
-    const caseType = (item as any).case_type === "bkt" ? "bkt" : "loan";
-    const payload = {
-      feedback_code:      data.feedbackCode,
-      feedback:           data.detailFeedback,
-      comments:           data.comments,
-      projection:         data.projection,
-      non_starter:        data.nonStarter,
-      kyc_purchase:       data.kycPurchase,
-      workable:           data.workable,
-      monthly_feedback:   "SUBMITTED",
-      customer_available: data.customerAvailable,
-      vehicle_available:  data.vehicleAvailable,
-      third_party:        data.thirdParty,
-      occupation:         data.occupation || null,
-      ptp_date:           data.feedbackCode === "PTP" ? toIsoDate(data.smartInputValue) : null,
-      shifted_to:         data.feedbackCode === "SFT" ? data.smartInputValue || null : null,
-    };
-    if (caseType === "bkt") await api.updateBktFeedback(item.id, payload);
-    else await api.updateFeedback(item.id, payload);
-    qc.invalidateQueries({ queryKey: ["/api/cases"] });
-    qc.invalidateQueries({ queryKey: ["/api/bkt-cases"] });
-    qc.invalidateQueries({ queryKey: ["/api/stats"] });
-    qc.invalidateQueries({ queryKey: ["/api/broken-ptps"] });
-    setShowMonthlyFeedbackModal(false);
-  }}
-  currentCaseName={item.name}
-  currentCaseId={item.loan_account_no ?? ""}
-/>      <FieldVisitModal  visible={showVisitModal}    item={item} onClose={() => setShowVisitModal(false)} />
-      <PhoneCallModal   visible={showCallModal}     item={item} onClose={() => setShowCallModal(false)} extraNumbers={extraNumbers} />
-      <ReceiptRequestModal visible={showReceiptModal} item={item} onClose={() => setShowReceiptModal(false)} />
+      {showMonthlyFeedbackModal && (
+        <MonthlyFeedbackStepper
+          visible={showMonthlyFeedbackModal}
+          onClose={() => setShowMonthlyFeedbackModal(false)}
+          onCallLog={() => { setShowMonthlyFeedbackModal(false); setTimeout(() => setShowCallModal(true), 50); }}
+          onFieldVisit={() => { setShowMonthlyFeedbackModal(false); setTimeout(() => setShowVisitModal(true), 50); }}
+          onSave={async (data) => {
+            const caseType = (item as any).case_type === "bkt" ? "bkt" : "loan";
+            const payload = {
+              feedback_code:      data.feedbackCode,
+              feedback:           data.detailFeedback,
+              comments:           data.comments,
+              projection:         data.projection,
+              non_starter:        data.nonStarter,
+              kyc_purchase:       data.kycPurchase,
+              workable:           data.workable,
+              monthly_feedback:   "SUBMITTED",
+              customer_available: data.customerAvailable,
+              vehicle_available:  data.vehicleAvailable,
+              third_party:        data.thirdParty,
+              occupation:         data.occupation || null,
+              ptp_date:           data.feedbackCode === "PTP" ? toIsoDate(data.smartInputValue) : null,
+              shifted_to:         data.feedbackCode === "SFT" ? data.smartInputValue || null : null,
+            };
+            if (caseType === "bkt") await api.updateBktFeedback(item.id, payload);
+            else await api.updateFeedback(item.id, payload);
+            qc.invalidateQueries({ queryKey: ["/api/cases"] });
+            qc.invalidateQueries({ queryKey: ["/api/bkt-cases"] });
+            qc.invalidateQueries({ queryKey: ["/api/stats"] });
+            qc.invalidateQueries({ queryKey: ["/api/broken-ptps"] });
+            setShowMonthlyFeedbackModal(false);
+          }}
+          currentCaseName={item.name}
+          currentCaseId={item.loan_account_no ?? ""}
+        />
+      )}
+
+      {showVisitModal && (
+        <FieldVisitModal visible={showVisitModal} item={item} onClose={() => setShowVisitModal(false)} />
+      )}
+      {showCallModal && (
+        <PhoneCallModal visible={showCallModal} item={item} onClose={() => setShowCallModal(false)} extraNumbers={extraNumbers} />
+      )}
+      {showReceiptModal && (
+        <ReceiptRequestModal visible={showReceiptModal} item={item} onClose={() => setShowReceiptModal(false)} />
+      )}
     </>
   );
 }
