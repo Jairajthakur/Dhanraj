@@ -332,6 +332,9 @@ export default function MonthlyFeedbackStepper({
   // Use a full-screen absolute overlay instead so z-index works correctly.
   const isWeb = Platform.OS === "web";
 
+  // Guard early — must be before any JSX that references `inner`
+  if (!visible) return null;
+
   const inner = (
     <View style={s.container}>
       {/* Tab bar */}
@@ -415,8 +418,6 @@ export default function MonthlyFeedbackStepper({
       )}
     </View>
   );
-
-  if (!visible) return null;
 
   if (isWeb) {
     return <View style={s.webOverlay}>{inner}</View>;
