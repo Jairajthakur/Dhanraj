@@ -160,7 +160,7 @@ function LockedFeedbackView({ item, onClose }: { item: any; onClose: () => void 
 }
 
 // ─── FeedbackModal ────────────────────────────────────────────────────────────
-function FeedbackModal({ visible, item, onClose, extraNumbers = [] }: { visible: boolean; item: any; onClose: () => void; extraNumbers?: string[] }) {
+function FeedbackModal({ visible, item, onClose, extraNumbers = [], onMonthlyFeedbackRequest }: { visible: boolean; item: any; onClose: () => void; extraNumbers?: string[]; onMonthlyFeedbackRequest?: () => void }) {
   const [activeTab,          setActiveTab]          = useState<FeedbackTab>("Unpaid");
   const [detailFeedback,     setDetailFeedback]     = useState(item?.latest_feedback   || "");
   const [monthlyFeedback,    setMonthlyFeedback]    = useState(item?.monthly_feedback  || "");
@@ -281,7 +281,14 @@ function FeedbackModal({ visible, item, onClose, extraNumbers = [] }: { visible:
               const isLocked = t === "Monthly Feedback" && isMonthlyLocked;
               const color = tabColor(t);
               return (
-                <Pressable key={t} style={[fbStyles.tabChip, isActive && { backgroundColor: color, borderColor: color }, isLocked && !isActive && { borderColor: ((Colors as any).warning ?? "#F59E0B") + "60", backgroundColor: ((Colors as any).warning ?? "#F59E0B") + "10" }]} onPress={() => setActiveTab(t)}>
+                <Pressable key={t} style={[fbStyles.tabChip, isActive && { backgroundColor: color, borderColor: color }, isLocked && !isActive && { borderColor: ((Colors as any).warning ?? "#F59E0B") + "60", backgroundColor: ((Colors as any).warning ?? "#F59E0B") + "10" }]} onPress={() => {
+                    if (t === "Monthly Feedback" && !isLocked && onMonthlyFeedbackRequest) {
+                      onClose();
+                      onMonthlyFeedbackRequest();
+                    } else {
+                      setActiveTab(t);
+                    }
+                  }}>
                   <View style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
                     {isLocked && <Ionicons name="lock-closed" size={11} color={isActive ? "#fff" : ((Colors as any).warning ?? "#F59E0B")} />}
                     <Text style={[fbStyles.tabChipText, isActive && { color: "#fff" }, isLocked && !isActive && { color: (Colors as any).warning ?? "#F59E0B" }]}>{t}</Text>
@@ -1146,7 +1153,7 @@ export default function CustomerDetailScreen() {
       </ScrollView>
 
       {/* ── Modals ── */}
-<FeedbackModal visible={showFeedbackModal} item={item} onClose={() => setShowFeedbackModal(false)} extraNumbers={extraNumbers} />
+<FeedbackModal visible={showFeedbackModal} item={item} onClose={() => setShowFeedbackModal(false)} extraNumbers={extraNumbers} onMonthlyFeedbackRequest={() => setShowMonthlyFeedbackModal(true)} />
 
 <MonthlyFeedbackStepper
   visible={showMonthlyFeedbackModal}
