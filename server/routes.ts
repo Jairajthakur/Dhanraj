@@ -1771,11 +1771,9 @@ for (const [loanNo, ptpData] of ptpLoanMap) {
   );
 }
 
-      // ── Aggregate penal per agent and upsert penal bkt_perf_summary ──
-      // Target = 3.5% of total CBC+LPP across ALL rows (matches Excel pivot)
-      // Paid (Col CBC) = SUM of Penal column values for PAID rows only
-      // pos_paid/pos_unpaid = CBC+LPP totals for all rows (target base)
-      // cbcPaid = sum of Penal column values for paid rows only
+      // ── Aggregate penal per agent — BKT 1 rows only ──────────────────────────
+      // Target = 3.5% of BKT 1 CBC+LPP total
+      // Paid (Col CBC) = SUM of Penal column values for PAID BKT 1 rows only
 const penalByAgent: Record<number, { fosName: string; paid: number; unpaid: number; cbcPaid: number }> = {};
 for (let i = 0; i < rawRows.slice(headerRowIdx + 1).length; i++) {
   const row = rawRows.slice(headerRowIdx + 1)[i];
@@ -1786,24 +1784,26 @@ for (let i = 0; i < rawRows.slice(headerRowIdx + 1).length; i++) {
   }
   if (!mapped2.loan_no || !mapped2.customer_name || isRepeatHeaderRow(mapped2)) continue;
   if (!mapped2.fos_name) continue;
+  // Only BKT 1 rows contribute to penal
+  const rowBkt = mapped2.bkt ? parseInt(mapped2.bkt) : null;
+  if (rowBkt !== 1) continue;
   const fosLower = mapped2.fos_name.toLowerCase().trim();
   const agId = agentByName[fosLower];
   if (!agId) continue;
-  // CBC+LPP for this row — used as the target base (3.5% of grand total)
+  // CBC+LPP for this BKT 1 row — used as the 3.5% target base
   const cbcLppVal = parseFloat(mapped2.cbc_lpp || mapped2.cbc || "0") || 0;
   // Penal column value — only present on penal-flagged rows
   const penalCbc = parseFloat(mapped2.penal_cbc || "0") || 0;
-  // Skip rows that have neither a CBC+LPP value nor a Penal value
   if (cbcLppVal <= 0 && penalCbc <= 0) continue;
   const isPenalPaid = normalizeStatus(mapped2.status) === "Paid";
   if (!penalByAgent[agId]) penalByAgent[agId] = { fosName: mapped2.fos_name, paid: 0, unpaid: 0, cbcPaid: 0 };
-  // Accumulate CBC+LPP for ALL rows → 3.5% target base
+  // Accumulate BKT 1 CBC+LPP → 3.5% target base
   if (isPenalPaid) {
     penalByAgent[agId].paid += cbcLppVal;
   } else {
     penalByAgent[agId].unpaid += cbcLppVal;
   }
-  // Accumulate Penal column value for paid rows only → Paid (Col CBC)
+  // Accumulate Penal column value for paid rows → Paid (Col CBC)
   if (isPenalPaid && penalCbc > 0) {
     penalByAgent[agId].cbcPaid += penalCbc;
   }
