@@ -3,6 +3,7 @@ import {
   View, Text, StyleSheet, ScrollView, Pressable,
   TextInput, Modal, Alert, Platform,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const DETAIL_OPTIONS: Record<string, string[]> = {
@@ -149,6 +150,7 @@ export default function MonthlyFeedbackStepper({
   const [step, setStep] = useState(0);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [showSuccess, setShowSuccess] = useState(false);
+  const insets = useSafeAreaInsets();
 
   const setField = <K extends keyof FormState>(key: K, value: FormState[K]) =>
     setForm((f) => ({ ...f, [key]: value }));
@@ -337,7 +339,7 @@ export default function MonthlyFeedbackStepper({
   const inner = (
     <View style={s.container}>
       {/* Tab bar */}
-      <View style={s.tabBar}>
+      <View style={[s.tabBar, { paddingTop: Math.max(8, insets.top) }]}>
         <Pressable style={s.tabInactive} onPress={() => { onClose(); onCallLog?.(); }}>
           <Text style={s.tabInactiveText}>← Call Log</Text>
         </Pressable>
@@ -373,7 +375,7 @@ export default function MonthlyFeedbackStepper({
       </ScrollView>
 
       {/* Footer */}
-      <View style={s.footer}>
+      <View style={[s.footer, { paddingBottom: Math.max(10, insets.bottom) }]}>
         {step > 0 && (
           <Pressable style={s.backBtn} onPress={goBack}>
             <Text style={s.backBtnText}>Back</Text>
