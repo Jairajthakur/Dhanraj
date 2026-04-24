@@ -803,7 +803,7 @@ function FeedbackModal({
           )}
 
           {/* Tab bar */}
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12, flexShrink: 0 }}>
             <View style={{ flexDirection: "row", gap: 8, paddingRight: 8 }}>
               {FEEDBACK_TABS.map((t) => {
                 const isActive = activeTab === t;
@@ -841,7 +841,7 @@ function FeedbackModal({
           </ScrollView>
 
           {/* Tab content */}
-          <ScrollView showsVerticalScrollIndicator={false} style={{ flexGrow: 1, flexShrink: 1 }} keyboardShouldPersistTaps="handled">
+          <ScrollView showsVerticalScrollIndicator={false} style={{ flex: 1 }} keyboardShouldPersistTaps="handled">
 
             {/* ══ CALL LOG ══ */}
             {activeTab === "Call Log" && (
@@ -1423,7 +1423,7 @@ const styles = StyleSheet.create({
 
 const fbStyles = StyleSheet.create({
   overlay:             { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" },
-  sheet:               { backgroundColor: Colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 16, paddingTop: 20, maxHeight: "94%", flexShrink: 1 },
+  sheet:               { backgroundColor: Colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 16, paddingTop: 20, maxHeight: "94%", flexShrink: 1, flex: 1 },
   handle:              { width: 40, height: 4, backgroundColor: Colors.border, borderRadius: 2, alignSelf: "center", marginBottom: 12 },
   title:               { fontSize: 18, fontWeight: "700", color: Colors.text, marginBottom: 2 },
   customerName:        { fontSize: 12, color: Colors.textSecondary, marginBottom: 6, textTransform: "uppercase" },
