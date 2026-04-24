@@ -123,6 +123,8 @@ export default function MonthlyFeedbackStepper({
   visible,
   onClose,
   onSave,
+  onCallLog,
+  onFieldVisit,
   currentCaseName = "Rajesh Kumar",
   currentCaseId = "LN-2024-00481",
   nextCaseName = "Suresh Patel",
@@ -134,6 +136,8 @@ export default function MonthlyFeedbackStepper({
   visible: boolean;
   onClose: () => void;
   onSave?: (data: FormState) => void;
+  onCallLog?: () => void;
+  onFieldVisit?: () => void;
   currentCaseName?: string;
   currentCaseId?: string;
   nextCaseName?: string;
@@ -330,15 +334,15 @@ export default function MonthlyFeedbackStepper({
 
         {/* Tab bar */}
         <View style={s.tabBar}>
-          <Pressable style={s.tabInactive} onPress={onClose}>
+          <Pressable style={s.tabInactive} onPress={() => { onClose(); onCallLog?.(); }}>
             <Text style={s.tabInactiveText}>← Call Log</Text>
           </Pressable>
           <View style={s.tabActive}>
             <Text style={s.tabActiveText}>Monthly Feedback</Text>
           </View>
-          <View style={s.tabInactive}>
+          <Pressable style={s.tabInactive} onPress={() => { onClose(); onFieldVisit?.(); }}>
             <Text style={s.tabInactiveText}>+ Field Visit</Text>
-          </View>
+          </Pressable>
         </View>
 
         {/* Progress bar */}
