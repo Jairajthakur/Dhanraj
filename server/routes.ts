@@ -794,7 +794,7 @@ app.get("/api/companies", requireAuth, async (req, res) => {
 
   app.put("/api/cases/:id/feedback", requireAuth, async (req, res) => {
     try {
-      const { status, feedback, comments, ptp_date, rollback_yn, customer_available, vehicle_available, third_party, third_party_name, third_party_number, feedback_code, projection, non_starter, kyc_purchase, workable, monthly_feedback } = req.body;
+      const { status, feedback, comments, ptp_date, rollback_yn, customer_available, vehicle_available, third_party, third_party_name, third_party_number, feedback_code, projection, non_starter, kyc_purchase, workable, monthly_feedback, occupation, shifted_to } = req.body;
       const ynVal = rollback_yn === true || rollback_yn === "true" ? true : rollback_yn === false || rollback_yn === "false" ? false : null;
       const toBool = (v: any) => v === true || v === "true" ? true : v === false || v === "false" ? false : null;
       const caseId = Number(req.params.id);
@@ -811,6 +811,8 @@ app.get("/api/companies", requireAuth, async (req, res) => {
         ...(non_starter !== undefined && { nonStarter: toBool(non_starter) }),
         ...(kyc_purchase !== undefined && { kycPurchase: toBool(kyc_purchase) }),
         ...(workable !== undefined && { workable: toBool(workable) }),
+        ...(occupation !== undefined && { occupation: occupation || null }),
+        ...(shifted_to !== undefined && { shiftedCity: shifted_to || null }),
         monthlyFeedback: monthly_feedback || null,
       };
       await storage.updateLoanCaseFeedback(caseId, status, feedback, comments, ptp_date, ynVal, extraFields);
@@ -1606,7 +1608,7 @@ app.put("/api/fos-depositions/:id/pay-both", requireAuth, screenshotUpload.singl
 
   app.put("/api/bkt-cases/:id/feedback", requireAuth, async (req, res) => {
     try {
-      const { status, feedback, comments, ptp_date, rollback_yn, customer_available, vehicle_available, third_party, third_party_name, third_party_number, feedback_code, projection, non_starter, kyc_purchase, workable, monthly_feedback } = req.body;
+      const { status, feedback, comments, ptp_date, rollback_yn, customer_available, vehicle_available, third_party, third_party_name, third_party_number, feedback_code, projection, non_starter, kyc_purchase, workable, monthly_feedback, occupation, shifted_to } = req.body;
       const ynVal = rollback_yn === true || rollback_yn === "true" ? true : rollback_yn === false || rollback_yn === "false" ? false : null;
       const toBool = (v: any) => v === true || v === "true" ? true : v === false || v === "false" ? false : null;
       const caseId = Number(req.params.id);
@@ -1623,6 +1625,8 @@ app.put("/api/fos-depositions/:id/pay-both", requireAuth, screenshotUpload.singl
         ...(non_starter !== undefined && { nonStarter: toBool(non_starter) }),
         ...(kyc_purchase !== undefined && { kycPurchase: toBool(kyc_purchase) }),
         ...(workable !== undefined && { workable: toBool(workable) }),
+        ...(occupation !== undefined && { occupation: occupation || null }),
+        ...(shifted_to !== undefined && { shiftedCity: shifted_to || null }),
         monthlyFeedback: monthly_feedback || null,
       };
       await storage.updateBktCaseFeedback(caseId, status, feedback, comments, ptp_date, ynVal, bktExtraFields);
