@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import {
   View, Text, StyleSheet, ScrollView, Pressable,
-  TextInput, Modal, Alert,
+  TextInput, Modal, Alert, Platform,
 } from "react-native";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -328,63 +328,64 @@ export default function MonthlyFeedbackStepper({
 
   const pages = [Page1, Page2, Page3, Page4];
 
-  return (
-    <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
-      <View style={s.container}>
+  // On web, React Native Modal doesn't stack properly over other Modals.
+  // Use a full-screen absolute overlay instead so z-index works correctly.
+  const isWeb = Platform.OS === "web";
 
-        {/* Tab bar */}
-        <View style={s.tabBar}>
-          <Pressable style={s.tabInactive} onPress={() => { onClose(); onCallLog?.(); }}>
-            <Text style={s.tabInactiveText}>← Call Log</Text>
-          </Pressable>
-          <View style={s.tabActive}>
-            <Text style={s.tabActiveText}>Monthly Feedback</Text>
-          </View>
-          <Pressable style={s.tabInactive} onPress={() => { onClose(); onFieldVisit?.(); }}>
-            <Text style={s.tabInactiveText}>+ Field Visit</Text>
-          </Pressable>
+  const inner = (
+    <View style={s.container}>
+      {/* Tab bar */}
+      <View style={s.tabBar}>
+        <Pressable style={s.tabInactive} onPress={() => { onClose(); onCallLog?.(); }}>
+          <Text style={s.tabInactiveText}>← Call Log</Text>
+        </Pressable>
+        <View style={s.tabActive}>
+          <Text style={s.tabActiveText}>Monthly Feedback</Text>
         </View>
-
-        {/* Progress bar */}
-        <View style={s.progressBar}>
-          {Array.from({ length: TOTAL_STEPS }).map((_, i) => (
-            <View
-              key={i}
-              style={[
-                s.stepDot,
-                i < step && s.stepDone,
-                i === step && s.stepActive,
-              ]}
-            />
-          ))}
-          <Text style={s.stepLabel}>Step {step + 1} of {TOTAL_STEPS}</Text>
-        </View>
-
-        {/* Page content */}
-        <ScrollView style={s.scroll} showsVerticalScrollIndicator={false}>
-          <View style={s.pageContent}>
-            {pages[step]}
-          </View>
-          <View style={{ height: 24 }} />
-        </ScrollView>
-
-        {/* Footer */}
-        <View style={s.footer}>
-          {step > 0 && (
-            <Pressable style={s.backBtn} onPress={goBack}>
-              <Text style={s.backBtnText}>Back</Text>
-            </Pressable>
-          )}
-          <Pressable style={[s.nextBtn, step === 0 && { flex: 1 }]} onPress={goNext}>
-            <Text style={s.nextBtnText}>
-              {step === TOTAL_STEPS - 1 ? "Save ✓" : "Next →"}
-            </Text>
-          </Pressable>
-        </View>
+        <Pressable style={s.tabInactive} onPress={() => { onClose(); onFieldVisit?.(); }}>
+          <Text style={s.tabInactiveText}>+ Field Visit</Text>
+        </Pressable>
       </View>
 
-      {/* Success overlay */}
-      <Modal visible={showSuccess} transparent animationType="fade">
+      {/* Progress bar */}
+      <View style={s.progressBar}>
+        {Array.from({ length: TOTAL_STEPS }).map((_, i) => (
+          <View
+            key={i}
+            style={[
+              s.stepDot,
+              i < step && s.stepDone,
+              i === step && s.stepActive,
+            ]}
+          />
+        ))}
+        <Text style={s.stepLabel}>Step {step + 1} of {TOTAL_STEPS}</Text>
+      </View>
+
+      {/* Page content */}
+      <ScrollView style={s.scroll} showsVerticalScrollIndicator={false}>
+        <View style={s.pageContent}>
+          {pages[step]}
+        </View>
+        <View style={{ height: 24 }} />
+      </ScrollView>
+
+      {/* Footer */}
+      <View style={s.footer}>
+        {step > 0 && (
+          <Pressable style={s.backBtn} onPress={goBack}>
+            <Text style={s.backBtnText}>Back</Text>
+          </Pressable>
+        )}
+        <Pressable style={[s.nextBtn, step === 0 && { flex: 1 }]} onPress={goNext}>
+          <Text style={s.nextBtnText}>
+            {step === TOTAL_STEPS - 1 ? "Save ✓" : "Next →"}
+          </Text>
+        </Pressable>
+      </View>
+
+      {/* Success overlay — inline so it works on both web and native */}
+      {showSuccess && (
         <View style={s.overlay}>
           <View style={s.ovCard}>
             <View style={s.ovTop}>
@@ -411,7 +412,19 @@ export default function MonthlyFeedbackStepper({
             </View>
           </View>
         </View>
-      </Modal>
+      )}
+    </View>
+  );
+
+  if (!visible) return null;
+
+  if (isWeb) {
+    return <View style={s.webOverlay}>{inner}</View>;
+  }
+
+  return (
+    <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
+      {inner}
     </Modal>
   );
 }
@@ -428,6 +441,7 @@ const MUTED   = "#888888";
 
 const s = StyleSheet.create({
   container:       { flex: 1, backgroundColor: BG },
+  webOverlay:      { position: "absolute" as const, top: 0, left: 0, right: 0, bottom: 0, zIndex: 9999, backgroundColor: BG },
   tabBar:          { flexDirection: "row", paddingHorizontal: 10, paddingTop: 8, borderBottomWidth: 1, borderColor: BORDER, backgroundColor: BG },
   tabActive:       { paddingHorizontal: 14, paddingVertical: 7, backgroundColor: SURFACE, borderWidth: 1, borderBottomWidth: 0, borderColor: BORDER, borderRadius: 6, marginRight: 2 },
   tabActiveText:   { fontSize: 11, fontWeight: "600", color: PRIMARY },
@@ -500,7 +514,7 @@ const s = StyleSheet.create({
   nextBtnText: { fontSize: 13, fontWeight: "600", color: "#fff" },
 
   // Success overlay
-  overlay:      { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", alignItems: "center", justifyContent: "center" },
+  overlay:      { position: "absolute" as const, top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "rgba(0,0,0,0.5)", alignItems: "center", justifyContent: "center", zIndex: 10 },
   ovCard:       { backgroundColor: "#fff", borderRadius: 12, width: 290, overflow: "hidden" },
   ovTop:        { backgroundColor: SUCCESS, padding: 16, alignItems: "center" },
   ovTick:       { fontSize: 28, color: "#fff", marginBottom: 4 },
