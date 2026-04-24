@@ -1319,7 +1319,7 @@ const fbStyles = StyleSheet.create({
   numbersSection:      { marginBottom: 12 },
   numbersSectionLabel: { fontSize: 11, fontWeight: "700", color: Colors.textMuted, textTransform: "uppercase", marginBottom: 6 },
   numbersRow:          { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  numberChip:          { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: Colors.primary, borderRadius: 10, paddingVertical: 8, paddingHorizontal: 12 },
+  numberChip:          { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: Colors.primary, borderRadius: 10, paddingVertical: 8, paddingHorizontal: 12, alignSelf: "flex-start" },
   numberChipExtra:     { backgroundColor: Colors.success + "18", borderWidth: 1, borderColor: Colors.success + "50" },
   numberChipText:      { color: "#fff", fontWeight: "700", fontSize: 13 },
   numberChipTextExtra: { color: Colors.success },
@@ -1343,7 +1343,7 @@ const fvStyles = StyleSheet.create({
   contactSection:      { marginBottom: 14 },
   contactLabel:        { fontSize: 10, fontWeight: "700", color: Colors.textMuted, letterSpacing: 0.8, marginBottom: 7 },
   contactRow:          { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  contactChip:         { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: Colors.primary, borderRadius: 10, paddingVertical: 9, paddingHorizontal: 14 },
+  contactChip:         { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: Colors.primary, borderRadius: 10, paddingVertical: 9, paddingHorizontal: 14, alignSelf: "flex-start" },
   contactChipText:     { color: "#fff", fontWeight: "700", fontSize: 14, letterSpacing: 0.3 },
 
   // Amount row
