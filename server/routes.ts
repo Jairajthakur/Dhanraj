@@ -317,7 +317,7 @@ const COLUMN_MAP: Record<string, string> = {
   companyname: "company_name", company: "company_name", compname: "company_name",
   financecompany: "company_name", financeco: "company_name", lender: "company_name",
   nbfc: "company_name", bankname: "company_name", bank: "company_name",
-  penal: "penal_yn",
+  penal: "penal_cbc",
 penalstatus: "penal_yn",
 };
 
