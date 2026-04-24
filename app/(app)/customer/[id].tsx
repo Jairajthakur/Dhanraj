@@ -13,7 +13,6 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import Colors from "@/constants/colors";
 import { caseStore } from "@/lib/caseStore";
 import { api } from "@/lib/api";
-import MonthlyFeedbackStepper from "@/components/MonthlyFeedbackStepper";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const TABS = ["Unpaid", "PTP", "Paid", "Monthly Feedback"] as const;
