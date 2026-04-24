@@ -13,6 +13,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import Colors from "@/constants/colors";
 import { caseStore } from "@/lib/caseStore";
 import { api } from "@/lib/api";
+import MonthlyFeedbackStepper from "@/components/MonthlyFeedbackStepper";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const TABS = ["Unpaid", "PTP", "Paid", "Monthly Feedback"] as const;
@@ -1135,8 +1136,37 @@ export default function CustomerDetailScreen() {
       </ScrollView>
 
       {/* ── Modals ── */}
-      <FeedbackModal    visible={showFeedbackModal} item={item} onClose={() => setShowFeedbackModal(false)} extraNumbers={extraNumbers} />
-      <FieldVisitModal  visible={showVisitModal}    item={item} onClose={() => setShowVisitModal(false)} />
+<FeedbackModal visible={showFeedbackModal} item={item} onClose={() => setShowFeedbackModal(false)} extraNumbers={extraNumbers} />
+
+<MonthlyFeedbackStepper
+  visible={showFeedbackModal}
+  onClose={() => setShowFeedbackModal(false)}
+  onSave={async (data) => {
+    const caseType = (item as any).case_type === "bkt" ? "bkt" : "loan";
+    const payload = {
+      feedback_code:      data.feedbackCode,
+      feedback:           data.detailFeedback,
+      comments:           data.comments,
+      projection:         data.projection,
+      non_starter:        data.nonStarter,
+      kyc_purchase:       data.kycPurchase,
+      workable:           data.workable,
+      monthly_feedback:   "SUBMITTED",
+      customer_available: data.customerAvailable,
+      vehicle_available:  data.vehicleAvailable,
+      third_party:        data.thirdParty,
+      ptp_date:           data.feedbackCode === "PTP" ? data.smartInputValue : null,
+    };
+    if (caseType === "bkt") await api.updateBktFeedback(item.id, payload);
+    else await api.updateFeedback(item.id, payload);
+    qc.invalidateQueries({ queryKey: ["/api/cases"] });
+    qc.invalidateQueries({ queryKey: ["/api/bkt-cases"] });
+    qc.invalidateQueries({ queryKey: ["/api/stats"] });
+    qc.invalidateQueries({ queryKey: ["/api/broken-ptps"] });
+  }}
+  currentCaseName={item.name}
+  currentCaseId={item.loan_account_no ?? ""}
+/>      <FieldVisitModal  visible={showVisitModal}    item={item} onClose={() => setShowVisitModal(false)} />
       <PhoneCallModal   visible={showCallModal}     item={item} onClose={() => setShowCallModal(false)} extraNumbers={extraNumbers} />
       <ReceiptRequestModal visible={showReceiptModal} item={item} onClose={() => setShowReceiptModal(false)} />
     </>
