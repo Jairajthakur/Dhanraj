@@ -1285,7 +1285,9 @@ const styles = StyleSheet.create({
 });
 
 const fbStyles = StyleSheet.create({
-  overlay:             { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" },
+  overlay:             Platform.OS === "web"
+    ? { position: "fixed" as any, top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end", zIndex: 99999 }
+    : { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" },
   sheet:               { backgroundColor: Colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, maxHeight: "92%", flexShrink: 1 },
   handle:              { width: 40, height: 4, backgroundColor: Colors.border, borderRadius: 2, alignSelf: "center", marginBottom: 12 },
   title:               { fontSize: 20, fontWeight: "700", color: Colors.text, marginBottom: 4 },
@@ -1328,7 +1330,9 @@ const fbStyles = StyleSheet.create({
 });
 
 const fvStyles = StyleSheet.create({
-  overlay:             { flex: 1, backgroundColor: "rgba(0,0,0,0.55)", justifyContent: "flex-end" },
+  overlay:             Platform.OS === "web"
+    ? { position: "fixed" as any, top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "rgba(0,0,0,0.55)", justifyContent: "flex-end", zIndex: 99999 }
+    : { flex: 1, backgroundColor: "rgba(0,0,0,0.55)", justifyContent: "flex-end" },
   sheet:               { backgroundColor: Colors.surface, borderTopLeftRadius: 28, borderTopRightRadius: 28, paddingHorizontal: 20, paddingTop: 12, paddingBottom: 12, maxHeight: "94%", flexShrink: 1 },
   handle:              { width: 36, height: 4, backgroundColor: Colors.border, borderRadius: 2, alignSelf: "center", marginBottom: 18 },
 
@@ -1392,7 +1396,9 @@ const fvStyles = StyleSheet.create({
 });
 
 const rrStyles = StyleSheet.create({
-  overlay:          { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" },
+  overlay:          Platform.OS === "web"
+    ? { position: "fixed" as any, top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end", zIndex: 99999 }
+    : { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" },
   sheet:            { backgroundColor: Colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, gap: 16 },
   handle:           { width: 40, height: 4, backgroundColor: Colors.border, borderRadius: 2, alignSelf: "center", marginBottom: 4 },
   headerRow:        { flexDirection: "row", alignItems: "center", gap: 12 },
