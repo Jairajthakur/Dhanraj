@@ -1456,7 +1456,7 @@ const fbStyles = StyleSheet.create({
   numbersSection:      { marginBottom: 8 },
   numbersSectionLabel: { fontSize: 11, fontWeight: "700", color: Colors.textMuted, textTransform: "uppercase", marginBottom: 6 },
   numbersRow:          { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  numberChip:          { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: Colors.primary, borderRadius: 10, paddingVertical: 8, paddingHorizontal: 12 },
+  numberChip:          { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: Colors.primary, borderRadius: 10, paddingVertical: 8, paddingHorizontal: 12, alignSelf: "flex-start" },
   numberChipText:      { color: "#fff", fontWeight: "700", fontSize: 13 },
   tabHeaderRow:        { flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 16, backgroundColor: Colors.surfaceAlt, borderRadius: 12, padding: 12 },
   tabHeaderIcon:       { width: 36, height: 36, borderRadius: 10, alignItems: "center", justifyContent: "center" },
