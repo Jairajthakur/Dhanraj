@@ -14,6 +14,7 @@ import * as FileSystem from "expo-file-system";
 import Colors from "@/constants/colors";
 import { api } from "@/lib/api";
 import { caseStore } from "@/lib/caseStore";
+import MonthlyFeedbackStepper from "@/components/MonthlyFeedbackStepper";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const STATUS_TABS = ["All", "Unpaid", "PTP", "Paid"] as const;
@@ -419,10 +420,11 @@ interface FeedbackModalProps {
   onClose: () => void;
   isMonthlyLocked?: boolean;
   initialTab?: FeedbackTab;
+  onMonthlyFeedbackRequest?: () => void;
 }
 
 function FeedbackModal({
-  visible, caseItem, onClose, isMonthlyLocked = false, initialTab = "Call Log",
+  visible, caseItem, onClose, isMonthlyLocked = false, initialTab = "Call Log", onMonthlyFeedbackRequest,
 }: FeedbackModalProps) {
 
   const [activeTab, setActiveTab] = useState<FeedbackTab>(initialTab);
@@ -815,7 +817,14 @@ function FeedbackModal({
                       isActive && { backgroundColor: color, borderColor: color },
                       isLocked && !isActive && { borderColor: Colors.warning + "60", backgroundColor: Colors.warning + "10" },
                     ]}
-                    onPress={() => setActiveTab(t)}
+                    onPress={() => {
+                      if (t === "Monthly Feedback" && !isLocked && onMonthlyFeedbackRequest) {
+                        onClose();
+                        onMonthlyFeedbackRequest();
+                      } else {
+                        setActiveTab(t);
+                      }
+                    }}
                   >
                     <View style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
                       {t === "Call Log"    && <Ionicons name="call-outline"     size={12} color={isActive ? "#fff" : Colors.textSecondary} />}
@@ -1272,6 +1281,7 @@ export default function AllocationScreen() {
   const [search,        setSearch]        = useState("");
   const [modalItem,     setModalItem]     = useState<CaseItem | null>(null);
   const [modalInitTab,  setModalInitTab]  = useState<FeedbackTab>("Call Log");
+  const [monthlyStepperItem, setMonthlyStepperItem] = useState<CaseItem | null>(null);
   const [downloading,   setDownloading]   = useState(false);
 
   const { data: companiesData, isLoading: companiesLoading } = useQuery({
@@ -1435,6 +1445,45 @@ export default function AllocationScreen() {
           isMonthlyLocked={!!modalItem.monthly_feedback}
           initialTab={modalInitTab}
           onClose={() => setModalItem(null)}
+          onMonthlyFeedbackRequest={() => {
+            const item = modalItem;
+            setModalItem(null);
+            setMonthlyStepperItem(item);
+          }}
+        />
+      )}
+
+      {monthlyStepperItem && (
+        <MonthlyFeedbackStepper
+          visible={!!monthlyStepperItem}
+          onClose={() => setMonthlyStepperItem(null)}
+          currentCaseName={monthlyStepperItem.customer_name ?? ""}
+          currentCaseId={monthlyStepperItem.loan_no ?? ""}
+          onSave={async (data) => {
+            const caseType = (monthlyStepperItem as any).case_type === "bkt" ? "bkt" : "loan";
+            const payload = {
+              feedback_code:      data.feedbackCode,
+              feedback:           data.detailFeedback,
+              comments:           data.comments,
+              projection:         data.projection,
+              non_starter:        data.nonStarter,
+              kyc_purchase:       data.kycPurchase,
+              workable:           data.workable,
+              monthly_feedback:   "SUBMITTED",
+              customer_available: data.customerAvailable,
+              vehicle_available:  data.vehicleAvailable,
+              third_party:        data.thirdParty,
+              occupation:         data.occupation || null,
+              ptp_date:           data.feedbackCode === "PTP" ? data.smartInputValue : null,
+              shifted_to:         data.feedbackCode === "SFT" ? data.smartInputValue || null : null,
+            };
+            if (caseType === "bkt") await api.updateBktFeedback(monthlyStepperItem.id, payload);
+            else await api.updateFeedback(monthlyStepperItem.id, payload);
+            qc.invalidateQueries({ queryKey: ["/api/cases"] });
+            qc.invalidateQueries({ queryKey: ["/api/bkt-cases"] });
+            qc.invalidateQueries({ queryKey: ["/api/stats"] });
+            setMonthlyStepperItem(null);
+          }}
         />
       )}
 
