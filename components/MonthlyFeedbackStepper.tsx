@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import {
   View, Text, StyleSheet, ScrollView, Pressable,
-  TextInput, Modal, Alert, Platform,
+  TextInput, Modal, Alert,
 } from "react-native";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -328,10 +328,6 @@ export default function MonthlyFeedbackStepper({
 
   const pages = [Page1, Page2, Page3, Page4];
 
-  // On web, React Native Modal doesn't stack properly over other Modals.
-  // Use a full-screen absolute overlay instead so z-index works correctly.
-  const isWeb = Platform.OS === "web";
-
   // Guard early — must be before any JSX that references `inner`
   if (!visible) return null;
 
@@ -419,10 +415,8 @@ export default function MonthlyFeedbackStepper({
     </View>
   );
 
-  if (isWeb) {
-    return <View style={s.webOverlay}>{inner}</View>;
-  }
-
+  // Use Modal on all platforms — parent now conditionally mounts this component
+  // so we don't need the fragile position:absolute web workaround.
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
       {inner}
@@ -442,7 +436,6 @@ const MUTED   = "#888888";
 
 const s = StyleSheet.create({
   container:       { flex: 1, backgroundColor: BG },
-  webOverlay:      { position: "absolute" as const, top: 0, left: 0, right: 0, bottom: 0, zIndex: 9999, backgroundColor: BG },
   tabBar:          { flexDirection: "row", paddingHorizontal: 10, paddingTop: 8, borderBottomWidth: 1, borderColor: BORDER, backgroundColor: BG },
   tabActive:       { paddingHorizontal: 14, paddingVertical: 7, backgroundColor: SURFACE, borderWidth: 1, borderBottomWidth: 0, borderColor: BORDER, borderRadius: 6, marginRight: 2 },
   tabActiveText:   { fontSize: 11, fontWeight: "600", color: PRIMARY },
