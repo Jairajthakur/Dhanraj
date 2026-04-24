@@ -1158,6 +1158,8 @@ export default function CustomerDetailScreen() {
 <MonthlyFeedbackStepper
   visible={showMonthlyFeedbackModal}
   onClose={() => setShowMonthlyFeedbackModal(false)}
+  onCallLog={() => { setShowMonthlyFeedbackModal(false); setShowCallModal(true); }}
+  onFieldVisit={() => { setShowMonthlyFeedbackModal(false); setShowVisitModal(true); }}
   onSave={async (data) => {
     const caseType = (item as any).case_type === "bkt" ? "bkt" : "loan";
     const payload = {
