@@ -328,8 +328,11 @@ export default function MonthlyFeedbackStepper({
 
   const pages = [Page1, Page2, Page3, Page4];
 
-  // Guard early — must be before any JSX that references `inner`
   if (!visible) return null;
+
+  // On web, RN Modal renders inside the Expo Router shell and can't cover the
+  // Stack nav header. Use position:fixed to cover the full browser viewport.
+  const isWeb = Platform.OS === "web";
 
   const inner = (
     <View style={s.container}>
@@ -415,20 +418,8 @@ export default function MonthlyFeedbackStepper({
     </View>
   );
 
-  // Use Modal on all platforms — parent now conditionally mounts this component
-  // so we don't need the fragile position:absolute web workaround.
-  // On web: RN Modal doesn't cover the Expo Router Stack header, so we render
-  // a fixed-position div that covers the entire viewport via inline web styles.
-  if (Platform.OS === "web") {
-    return (
-      <View
-        style={s.webFixedOverlay}
-        // @ts-ignore – web-only CSS to cover entire viewport including nav header
-        // eslint-disable-next-line react-native/no-inline-styles
-      >
-        {inner}
-      </View>
-    );
+  if (isWeb) {
+    return <View style={s.webOverlay}>{inner}</View>;
   }
 
   return (
@@ -450,17 +441,7 @@ const MUTED   = "#888888";
 
 const s = StyleSheet.create({
   container:       { flex: 1, backgroundColor: BG },
-  // On web: position fixed covers viewport including the Expo Router nav header.
-  // The object spread uses web-only CSS that RN ignores on native.
-  webFixedOverlay: {
-    position: "fixed" as any,
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    zIndex: 99999,
-    backgroundColor: BG,
-  },
+  webOverlay:      { position: "fixed" as any, top: 0, left: 0, right: 0, bottom: 0, zIndex: 99999, backgroundColor: BG },
   tabBar:          { flexDirection: "row", paddingHorizontal: 10, paddingTop: 8, borderBottomWidth: 1, borderColor: BORDER, backgroundColor: BG },
   tabActive:       { paddingHorizontal: 14, paddingVertical: 7, backgroundColor: SURFACE, borderWidth: 1, borderBottomWidth: 0, borderColor: BORDER, borderRadius: 6, marginRight: 2 },
   tabActiveText:   { fontSize: 11, fontWeight: "600", color: PRIMARY },
