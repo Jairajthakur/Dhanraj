@@ -906,6 +906,7 @@ export default function CustomerDetailScreen() {
   const [removing,         setRemoving]         = useState<string | null>(null);
   const [showReceiptModal, setShowReceiptModal] = useState(false);
   const [showFeedbackModal,setShowFeedbackModal]= useState(false);
+  const [showMonthlyFeedbackModal, setShowMonthlyFeedbackModal] = useState(false);
   const [showVisitModal,   setShowVisitModal]   = useState(false);
   const [showCallModal,    setShowCallModal]    = useState(false);
 
@@ -1016,6 +1017,14 @@ export default function CustomerDetailScreen() {
           <Pressable style={[styles.actionBtn, { backgroundColor: Colors.primary }]} onPress={() => setShowFeedbackModal(true)}>
             <Ionicons name="chatbubble-ellipses" size={18} color="#fff" />
             <Text style={styles.actionBtnText}>Feedback</Text>
+          </Pressable>
+          <Pressable
+            style={[styles.actionBtn, { backgroundColor: isMonthlyLocked ? "#6B7280" : "#7C3AED" }]}
+            onPress={() => !isMonthlyLocked && setShowMonthlyFeedbackModal(true)}
+            disabled={isMonthlyLocked}
+          >
+            <Ionicons name="calendar" size={18} color="#fff" />
+            <Text style={styles.actionBtnText}>{isMonthlyLocked ? "Monthly ✓" : "Monthly"}</Text>
           </Pressable>
           <Pressable style={[styles.actionBtn, { backgroundColor: Colors.success ?? "#22C55E" }]} onPress={() => setShowVisitModal(true)}>
             <Ionicons name="location" size={18} color="#fff" />
@@ -1140,8 +1149,8 @@ export default function CustomerDetailScreen() {
 <FeedbackModal visible={showFeedbackModal} item={item} onClose={() => setShowFeedbackModal(false)} extraNumbers={extraNumbers} />
 
 <MonthlyFeedbackStepper
-  visible={showFeedbackModal}
-  onClose={() => setShowFeedbackModal(false)}
+  visible={showMonthlyFeedbackModal}
+  onClose={() => setShowMonthlyFeedbackModal(false)}
   onSave={async (data) => {
     const caseType = (item as any).case_type === "bkt" ? "bkt" : "loan";
     const payload = {
@@ -1156,7 +1165,9 @@ export default function CustomerDetailScreen() {
       customer_available: data.customerAvailable,
       vehicle_available:  data.vehicleAvailable,
       third_party:        data.thirdParty,
-      ptp_date:           data.feedbackCode === "PTP" ? data.smartInputValue : null,
+      occupation:         data.occupation || null,
+      ptp_date:           data.feedbackCode === "PTP" ? toIsoDate(data.smartInputValue) : null,
+      shifted_to:         data.feedbackCode === "SFT" ? data.smartInputValue || null : null,
     };
     if (caseType === "bkt") await api.updateBktFeedback(item.id, payload);
     else await api.updateFeedback(item.id, payload);
@@ -1164,6 +1175,7 @@ export default function CustomerDetailScreen() {
     qc.invalidateQueries({ queryKey: ["/api/bkt-cases"] });
     qc.invalidateQueries({ queryKey: ["/api/stats"] });
     qc.invalidateQueries({ queryKey: ["/api/broken-ptps"] });
+    setShowMonthlyFeedbackModal(false);
   }}
   currentCaseName={item.name}
   currentCaseId={item.loan_account_no ?? ""}
