@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import {
   View, Text, StyleSheet, ScrollView, Pressable,
-  TextInput, Modal, Alert,
+  TextInput, Modal, Alert, Platform,
 } from "react-native";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -417,6 +417,20 @@ export default function MonthlyFeedbackStepper({
 
   // Use Modal on all platforms — parent now conditionally mounts this component
   // so we don't need the fragile position:absolute web workaround.
+  // On web: RN Modal doesn't cover the Expo Router Stack header, so we render
+  // a fixed-position div that covers the entire viewport via inline web styles.
+  if (Platform.OS === "web") {
+    return (
+      <View
+        style={s.webFixedOverlay}
+        // @ts-ignore – web-only CSS to cover entire viewport including nav header
+        // eslint-disable-next-line react-native/no-inline-styles
+      >
+        {inner}
+      </View>
+    );
+  }
+
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
       {inner}
@@ -436,6 +450,17 @@ const MUTED   = "#888888";
 
 const s = StyleSheet.create({
   container:       { flex: 1, backgroundColor: BG },
+  // On web: position fixed covers viewport including the Expo Router nav header.
+  // The object spread uses web-only CSS that RN ignores on native.
+  webFixedOverlay: {
+    position: "fixed" as any,
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 99999,
+    backgroundColor: BG,
+  },
   tabBar:          { flexDirection: "row", paddingHorizontal: 10, paddingTop: 8, borderBottomWidth: 1, borderColor: BORDER, backgroundColor: BG },
   tabActive:       { paddingHorizontal: 14, paddingVertical: 7, backgroundColor: SURFACE, borderWidth: 1, borderBottomWidth: 0, borderColor: BORDER, borderRadius: 6, marginRight: 2 },
   tabActiveText:   { fontSize: 11, fontWeight: "600", color: PRIMARY },
