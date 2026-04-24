@@ -241,6 +241,8 @@ function FeedbackModal({ visible, item, onClose, extraNumbers = [], onMonthlyFee
   const isMonthlyTabLocked = isMonthlyLocked && activeTab === "Monthly Feedback";
   const tabColor = (t: FeedbackTab) => t === "Paid" ? Colors.success : t === "PTP" ? (Colors.statusPTP ?? "#F59E0B") : t === "Monthly Feedback" ? Colors.primary : (Colors.statusUnpaid ?? "#EF4444");
 
+  if (!visible) return null;
+
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <View style={fbStyles.overlay}>
@@ -275,7 +277,7 @@ function FeedbackModal({ visible, item, onClose, extraNumbers = [], onMonthlyFee
               </View>
             )}
           </View>
-          <View style={fbStyles.tabRow}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={fbStyles.tabRow} contentContainerStyle={fbStyles.tabRowContent}>
             {TABS.map((t) => {
               const isActive = activeTab === t;
               const isLocked = t === "Monthly Feedback" && isMonthlyLocked;
@@ -296,7 +298,7 @@ function FeedbackModal({ visible, item, onClose, extraNumbers = [], onMonthlyFee
                 </Pressable>
               );
             })}
-          </View>
+          </ScrollView>
           <ScrollView showsVerticalScrollIndicator={false} style={{ flexGrow: 1, flexShrink: 1 }}>
             {activeTab === "Unpaid" && (
               <>
@@ -498,6 +500,7 @@ function FieldVisitModal({ visible, item, onClose }: { visible: boolean; item: a
   }, [outcome, gps, remarks, ptpDate, photos, item, qc, reset, onClose]);
 
   if (!item) return null;
+  if (!visible) return null;
 
   const canSave = !!outcome && !!gps && !saving;
   const phones: string[] = (item?.mobile_no ?? "").split(",").map((p: string) => p.trim()).filter(Boolean);
@@ -746,6 +749,7 @@ function PhoneCallModal({ visible, item, onClose, extraNumbers = [] }: { visible
   };
 
   if (!item) return null;
+  if (!visible) return null;
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={handleClose}>
@@ -755,9 +759,6 @@ function PhoneCallModal({ visible, item, onClose, extraNumbers = [] }: { visible
           <View style={{ flexDirection: "row", alignItems: "center", gap: 12, marginBottom: 12 }}>
             <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: Colors.primary + "18", alignItems: "center", justifyContent: "center" }}>
               <Ionicons name="call" size={20} color={Colors.primary} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={fbStyles.title}>Log Phone Call</Text>
               <Text style={fbStyles.customerName}>{item?.customer_name} · {item?.loan_no}</Text>
             </View>
           </View>
@@ -931,6 +932,7 @@ export default function CustomerDetailScreen() {
   }
 
   const statusColor = STATUS_COLORS[item.status] ?? Colors.textMuted;
+  const isMonthlyLocked = !!(item?.monthly_feedback && item.monthly_feedback !== "");
 
   // Banner shown when navigated from blocking modal
   const blockingBanner = isFromBlocking ? (
@@ -1288,7 +1290,8 @@ const fbStyles = StyleSheet.create({
   lockedRow:           { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingVertical: 10, paddingHorizontal: 12, backgroundColor: SA, borderRadius: 10, marginBottom: 4 },
   lockedRowLabel:      { fontSize: 12, color: Colors.textSecondary, fontWeight: "600" },
   lockedRowValue:      { fontSize: 13, fontWeight: "700", flex: 1, textAlign: "right" },
-  tabRow:              { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 16 },
+  tabRow:              { marginBottom: 16 },
+  tabRowContent:       { flexDirection: "row", gap: 8, paddingBottom: 2 },
   chipWrapRow:         { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 12 },
   tabChip:             { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, backgroundColor: SE, borderWidth: 1, borderColor: Colors.border },
   tabChipText:         { fontSize: 13, fontWeight: "600", color: Colors.text, fontFamily: Platform.OS === "android" ? "Roboto" : undefined },
