@@ -241,8 +241,6 @@ function FeedbackModal({ visible, item, onClose, extraNumbers = [], onMonthlyFee
   const isMonthlyTabLocked = isMonthlyLocked && activeTab === "Monthly Feedback";
   const tabColor = (t: FeedbackTab) => t === "Paid" ? Colors.success : t === "PTP" ? (Colors.statusPTP ?? "#F59E0B") : t === "Monthly Feedback" ? Colors.primary : (Colors.statusUnpaid ?? "#EF4444");
 
-  if (!visible) return null;
-
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <View style={fbStyles.overlay}>
@@ -277,7 +275,7 @@ function FeedbackModal({ visible, item, onClose, extraNumbers = [], onMonthlyFee
               </View>
             )}
           </View>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={fbStyles.tabRow} contentContainerStyle={fbStyles.tabRowContent}>
+          <View style={fbStyles.tabRow}>
             {TABS.map((t) => {
               const isActive = activeTab === t;
               const isLocked = t === "Monthly Feedback" && isMonthlyLocked;
@@ -298,7 +296,7 @@ function FeedbackModal({ visible, item, onClose, extraNumbers = [], onMonthlyFee
                 </Pressable>
               );
             })}
-          </ScrollView>
+          </View>
           <ScrollView showsVerticalScrollIndicator={false} style={{ flexGrow: 1, flexShrink: 1 }}>
             {activeTab === "Unpaid" && (
               <>
@@ -500,7 +498,6 @@ function FieldVisitModal({ visible, item, onClose }: { visible: boolean; item: a
   }, [outcome, gps, remarks, ptpDate, photos, item, qc, reset, onClose]);
 
   if (!item) return null;
-  if (!visible) return null;
 
   const canSave = !!outcome && !!gps && !saving;
   const phones: string[] = (item?.mobile_no ?? "").split(",").map((p: string) => p.trim()).filter(Boolean);
@@ -749,7 +746,6 @@ function PhoneCallModal({ visible, item, onClose, extraNumbers = [] }: { visible
   };
 
   if (!item) return null;
-  if (!visible) return null;
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={handleClose}>
@@ -759,6 +755,9 @@ function PhoneCallModal({ visible, item, onClose, extraNumbers = [] }: { visible
           <View style={{ flexDirection: "row", alignItems: "center", gap: 12, marginBottom: 12 }}>
             <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: Colors.primary + "18", alignItems: "center", justifyContent: "center" }}>
               <Ionicons name="call" size={20} color={Colors.primary} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={fbStyles.title}>Log Phone Call</Text>
               <Text style={fbStyles.customerName}>{item?.customer_name} · {item?.loan_no}</Text>
             </View>
           </View>
@@ -1154,11 +1153,10 @@ export default function CustomerDetailScreen() {
         )}
       </ScrollView>
 
-      {/* ── Modals — conditionally mounted so nothing bleeds on web ── */}
+      {/* ── Modals — conditionally mounted to prevent web bleedthrough ── */}
       {showFeedbackModal && (
         <FeedbackModal visible={showFeedbackModal} item={item} onClose={() => setShowFeedbackModal(false)} extraNumbers={extraNumbers} onMonthlyFeedbackRequest={() => setShowMonthlyFeedbackModal(true)} />
       )}
-
       {showMonthlyFeedbackModal && (
         <MonthlyFeedbackStepper
           visible={showMonthlyFeedbackModal}
@@ -1195,7 +1193,6 @@ export default function CustomerDetailScreen() {
           currentCaseId={item.loan_account_no ?? ""}
         />
       )}
-
       {showVisitModal && (
         <FieldVisitModal visible={showVisitModal} item={item} onClose={() => setShowVisitModal(false)} />
       )}
@@ -1286,7 +1283,7 @@ const styles = StyleSheet.create({
 
 const fbStyles = StyleSheet.create({
   overlay:             Platform.OS === "web"
-    ? { position: "fixed" as any, top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end", zIndex: 99999 }
+    ? { position: "fixed" as any, top: 0, left: 0, right: 0, bottom: 0, zIndex: 99999, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" }
     : { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" },
   sheet:               { backgroundColor: Colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, maxHeight: "92%", flexShrink: 1 },
   handle:              { width: 40, height: 4, backgroundColor: Colors.border, borderRadius: 2, alignSelf: "center", marginBottom: 12 },
@@ -1304,8 +1301,7 @@ const fbStyles = StyleSheet.create({
   lockedRow:           { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingVertical: 10, paddingHorizontal: 12, backgroundColor: SA, borderRadius: 10, marginBottom: 4 },
   lockedRowLabel:      { fontSize: 12, color: Colors.textSecondary, fontWeight: "600" },
   lockedRowValue:      { fontSize: 13, fontWeight: "700", flex: 1, textAlign: "right" },
-  tabRow:              { marginBottom: 16 },
-  tabRowContent:       { flexDirection: "row", gap: 8, paddingBottom: 2 },
+  tabRow:              { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 16 },
   chipWrapRow:         { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 12 },
   tabChip:             { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, backgroundColor: SE, borderWidth: 1, borderColor: Colors.border },
   tabChipText:         { fontSize: 13, fontWeight: "600", color: Colors.text, fontFamily: Platform.OS === "android" ? "Roboto" : undefined },
@@ -1331,7 +1327,7 @@ const fbStyles = StyleSheet.create({
 
 const fvStyles = StyleSheet.create({
   overlay:             Platform.OS === "web"
-    ? { position: "fixed" as any, top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "rgba(0,0,0,0.55)", justifyContent: "flex-end", zIndex: 99999 }
+    ? { position: "fixed" as any, top: 0, left: 0, right: 0, bottom: 0, zIndex: 99999, backgroundColor: "rgba(0,0,0,0.55)", justifyContent: "flex-end" }
     : { flex: 1, backgroundColor: "rgba(0,0,0,0.55)", justifyContent: "flex-end" },
   sheet:               { backgroundColor: Colors.surface, borderTopLeftRadius: 28, borderTopRightRadius: 28, paddingHorizontal: 20, paddingTop: 12, paddingBottom: 12, maxHeight: "94%", flexShrink: 1 },
   handle:              { width: 36, height: 4, backgroundColor: Colors.border, borderRadius: 2, alignSelf: "center", marginBottom: 18 },
@@ -1397,7 +1393,7 @@ const fvStyles = StyleSheet.create({
 
 const rrStyles = StyleSheet.create({
   overlay:          Platform.OS === "web"
-    ? { position: "fixed" as any, top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end", zIndex: 99999 }
+    ? { position: "fixed" as any, top: 0, left: 0, right: 0, bottom: 0, zIndex: 99999, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" }
     : { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" },
   sheet:            { backgroundColor: Colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, gap: 16 },
   handle:           { width: 40, height: 4, backgroundColor: Colors.border, borderRadius: 2, alignSelf: "center", marginBottom: 4 },
