@@ -1339,8 +1339,16 @@ export default function AllocationScreen() {
         <MonthlyFeedbackStepper
           visible={!!monthlyStepperItem}
           onClose={() => setMonthlyStepperItem(null)}
-          onCallLog={() => { setModalItem(monthlyStepperItem); setModalInitTab("Call Log"); }}
-          onFieldVisit={() => { setModalItem(monthlyStepperItem); setModalInitTab("Field Visit"); }}
+          onCallLog={() => {
+              const item = monthlyStepperItem;
+              setMonthlyStepperItem(null);
+              setTimeout(() => { setModalItem(item); setModalInitTab("Call Log"); }, 50);
+            }}
+          onFieldVisit={() => {
+              const item = monthlyStepperItem;
+              setMonthlyStepperItem(null);
+              setTimeout(() => { setModalItem(item); setModalInitTab("Field Visit"); }, 50);
+            }}
           currentCaseName={monthlyStepperItem.customer_name ?? ""}
           currentCaseId={monthlyStepperItem.loan_no ?? ""}
           onSave={async (data) => {
