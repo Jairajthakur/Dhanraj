@@ -878,125 +878,7 @@ function FeedbackModal({
             {activeTab === "Monthly Feedback" && (
               isMonthlyLocked ? (
                 <LockedFeedbackView item={caseItem!} />
-              ) : (
-                <>
-                  <View style={fbStyles.divider} />
-
-                  {/* Customer availability */}
-                  <YNToggle label="Customer Available" value={customerAvailable} onChange={setCustomerAvailable} />
-                  <YNToggle label="Vehicle Available"  value={vehicleAvailable}  onChange={setVehicleAvailable}  />
-                  <YNToggle label="Third Party"        value={thirdParty}        onChange={setThirdParty}        />
-
-                  {thirdParty === true && (
-                    <>
-                      <Text style={fbStyles.sectionLabel}>Third Party Name</Text>
-                      <TextInput style={[fbStyles.textInput, { minHeight: 44, marginBottom: 8 }]} placeholder="Enter name" placeholderTextColor={Colors.textMuted} value={thirdPartyName} onChangeText={setThirdPartyName} />
-                      <Text style={fbStyles.sectionLabel}>Third Party Number</Text>
-                      <TextInput style={[fbStyles.textInput, { minHeight: 44, marginBottom: 8 }]} placeholder="Enter number" placeholderTextColor={Colors.textMuted} value={thirdPartyNumber} onChangeText={setThirdPartyNumber} keyboardType="phone-pad" />
-                    </>
-                  )}
-
-                  {/* Occupation */}
-                  <Text style={fbStyles.sectionLabel}>Customer Occupation</Text>
-                  <View style={mfStyles.occChips}>
-                    {OCCUPATION_LIST.map((occ) => (
-                      <Pressable
-                        key={occ}
-                        style={[
-                          mfStyles.occChip,
-                          occupation === occ && { backgroundColor: Colors.primary, borderColor: Colors.primary },
-                        ]}
-                        onPress={() => setOccupation(occupation === occ ? "" : occ)}
-                      >
-                        <Text style={[mfStyles.occChipText, occupation === occ && { color: "#fff" }]}>{occ}</Text>
-                      </Pressable>
-                    ))}
-                  </View>
-
-                  <View style={fbStyles.divider} />
-
-                  {/* Feedback Code — full rows */}
-                  <Text style={fbStyles.sectionLabel}>Feedback Code</Text>
-                  {renderFbCodeRows()}
-
-                  {/* Detail Feedback — full sentences */}
-                  <Text style={fbStyles.sectionLabel}>Detail Feedback</Text>
-                  {renderDetailSentences()}
-
-                  {/* PTP date (only when code = PTP) */}
-                  {feedbackCode === "PTP" && (
-                    <>
-                      <Text style={fbStyles.sectionLabel}>PTP Date</Text>
-                      <TextInput
-                        style={[fbStyles.textInput, { minHeight: 44, marginBottom: 12 }]}
-                        placeholder="DD-MM-YYYY" placeholderTextColor={Colors.textMuted}
-                        value={ptpDate} onChangeText={setPtpDate}
-                        keyboardType="numeric" maxLength={10}
-                      />
-                    </>
-                  )}
-
-                  {/* SFT city (only when code = SFT) */}
-                  {feedbackCode === "SFT" && (
-                    <>
-                      <Text style={fbStyles.sectionLabel}>City Customer Shifted To</Text>
-                      <TextInput
-                        style={[fbStyles.textInput, { minHeight: 44, marginBottom: 12 }]}
-                        placeholder="Enter city name..." placeholderTextColor={Colors.textMuted}
-                        value={sftCity} onChangeText={setSftCity}
-                      />
-                    </>
-                  )}
-
-                  <View style={fbStyles.divider} />
-
-                  {/* Projection */}
-                  <Text style={fbStyles.sectionLabel}>Projection</Text>
-                  <View style={{ flexDirection: "row", gap: 8, marginBottom: 12 }}>
-                    {PROJECTION_OPTIONS.map((p) => (
-                      <Pressable
-                        key={p}
-                        style={[
-                          fbStyles.feedbackOption, { flex: 1, alignItems: "center" },
-                          projection === p && { backgroundColor: Colors.primary, borderColor: Colors.primary },
-                        ]}
-                        onPress={() => setProjection(projection === p ? "" : p)}
-                      >
-                        <Text style={[fbStyles.feedbackOptionText, projection === p && { color: "#fff" }]}>{p}</Text>
-                      </Pressable>
-                    ))}
-                  </View>
-
-                  <YNToggle label="Non Starter"  value={nonStarter}  onChange={setNonStarter}  />
-                  <YNToggle label="KYC Purchase" value={kycPurchase} onChange={setKycPurchase} />
-
-                  <Text style={fbStyles.sectionLabel}>Workable</Text>
-                  <View style={{ flexDirection: "row", gap: 8, marginBottom: 12 }}>
-                    {(["Workable", "Non Workable"] as const).map((w) => {
-                      const val = w === "Workable";
-                      return (
-                        <Pressable
-                          key={w}
-                          style={[
-                            fbStyles.feedbackOption, { flex: 1, alignItems: "center" },
-                            workable === val && { backgroundColor: val ? Colors.success : Colors.danger, borderColor: val ? Colors.success : Colors.danger },
-                          ]}
-                          onPress={() => setWorkable(workable === val ? null : val)}
-                        >
-                          <Text style={[fbStyles.feedbackOptionText, workable === val && { color: "#fff" }]}>{w}</Text>
-                        </Pressable>
-                      );
-                    })}
-                  </View>
-
-                  <Text style={fbStyles.sectionLabel}>Comments (Optional)</Text>
-                  <TextInput
-                    style={fbStyles.textInput} placeholder="Add comments..."
-                    placeholderTextColor={Colors.textMuted} value={comments}
-                    onChangeText={setComments} multiline numberOfLines={3}
-                  />
-                </>
-              )
+              ) : null
             )}
 
             {/* ══ FIELD VISIT ══ */}
@@ -1457,6 +1339,8 @@ export default function AllocationScreen() {
         <MonthlyFeedbackStepper
           visible={!!monthlyStepperItem}
           onClose={() => setMonthlyStepperItem(null)}
+          onCallLog={() => { setModalItem(monthlyStepperItem); setModalInitTab("Call Log"); }}
+          onFieldVisit={() => { setModalItem(monthlyStepperItem); setModalInitTab("Field Visit"); }}
           currentCaseName={monthlyStepperItem.customer_name ?? ""}
           currentCaseId={monthlyStepperItem.loan_no ?? ""}
           onSave={async (data) => {
