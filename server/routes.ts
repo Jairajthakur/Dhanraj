@@ -820,6 +820,21 @@ app.get("/api/companies", requireAuth, async (req, res) => {
         `UPDATE loan_cases SET broken_ptp = false, broken_ptp_date = NULL WHERE id = $1`,
         [caseId]
       );
+      // ✅ Record call log history
+      if (feedback) {
+        const caseRow = await storage.query(
+          `SELECT loan_no, customer_name, agent_id FROM loan_cases WHERE id = $1`, [caseId]
+        );
+        const cr = caseRow.rows[0];
+        if (cr) {
+          await storage.insertCallLog({
+            caseId, caseType: "loan", agentId: cr.agent_id,
+            loanNo: cr.loan_no, customerName: cr.customer_name,
+            outcome: feedback, comments: comments || null,
+            ptpDate: ptp_date || null, status,
+          });
+        }
+      }
       if (old && old.bkt && old.agent_id && !["UC","RUC"].includes((old.pro || "").toUpperCase())) {
         const pos = parseFloat(old.pos) || 0;
         const bktKey = `bkt${old.bkt}`;
@@ -1661,6 +1676,21 @@ app.put("/api/fos-depositions/:id/pay-both", requireAuth, screenshotUpload.singl
         `UPDATE bkt_cases SET broken_ptp = false, broken_ptp_date = NULL WHERE id = $1`,
         [caseId]
       );
+      // ✅ Record call log history
+      if (feedback) {
+        const caseRow = await storage.query(
+          `SELECT loan_no, customer_name, agent_id FROM bkt_cases WHERE id = $1`, [caseId]
+        );
+        const cr = caseRow.rows[0];
+        if (cr) {
+          await storage.insertCallLog({
+            caseId, caseType: "bkt", agentId: cr.agent_id,
+            loanNo: cr.loan_no, customerName: cr.customer_name,
+            outcome: feedback, comments: comments || null,
+            ptpDate: ptp_date || null, status,
+          });
+        }
+      }
       if (old && old.case_category && old.agent_id && !["UC","RUC"].includes((old.pro || "").toUpperCase())) {
         const pos = parseFloat(old.pos) || 0;
         const bktKey = (old.case_category as string).toLowerCase().replace(/\s+/g, "");
@@ -1911,6 +1941,34 @@ res.json({ imported, updated: 0, skipped, agentsCreated, agentsRemoved, total: r
       res.send(Buffer.from(buf));
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
+
+// ─── Call Log Admin Endpoints ─────────────────────────────────────────────────
+
+app.get("/api/admin/call-logs", requireAdmin, async (req, res) => {
+  try {
+    const limit = Math.min(Number(req.query.limit) || 500, 2000);
+    const logs = await storage.getAllCallLogs(limit);
+    res.json({ logs });
+  } catch (e: any) { res.status(500).json({ message: e.message }); }
+});
+
+app.get("/api/admin/call-logs/agent/:agentId", requireAdmin, async (req, res) => {
+  try {
+    const agentId = Number(req.params.agentId);
+    const limit = Math.min(Number(req.query.limit) || 200, 1000);
+    const logs = await storage.getCallLogsByAgent(agentId, limit);
+    res.json({ logs });
+  } catch (e: any) { res.status(500).json({ message: e.message }); }
+});
+
+app.get("/api/admin/call-logs/case/:caseId", requireAdmin, async (req, res) => {
+  try {
+    const caseId = Number(req.params.caseId);
+    const caseType = (req.query.type as string) || "loan";
+    const logs = await storage.getCallLogsByCase(caseId, caseType);
+    res.json({ logs });
+  } catch (e: any) { res.status(500).json({ message: e.message }); }
+});
 
 app.get("/api/admin/feedback-export", requireAdmin, async (req, res) => {
   try {
