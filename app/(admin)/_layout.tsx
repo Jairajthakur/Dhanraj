@@ -20,6 +20,7 @@ const ADMIN_MENU = [
   { key: "attendance",   label: "Attendance",        icon: "checkmark-circle" as const, screen: "/(admin)/attendance"       },
   { key: "receipts",     label: "Receipt Requests",  icon: "receipt-outline"  as const, screen: "/(admin)/receipt-requests" },
   { key: "field-visits", label: "Field Visits",      icon: "location"         as const, screen: "/(admin)/field-visits"     },
+  { key: "call-logs",    label: "Call Logs",          icon: "call"             as const, screen: "/(admin)/call-logs"         },
   { key: "daily-report", label: "Daily Report",      icon: "bar-chart"        as const, screen: "/(admin)/daily-report"     },
 ];
 
@@ -226,6 +227,7 @@ useEffect(() => {
         <Stack.Screen name="agent/[id]" options={{ headerLeft: undefined, headerBackTitle: "Back" }} />
         <Stack.Screen name="receipt-requests" options={{ title: "Receipt Requests" }} />
         <Stack.Screen name="field-visits" options={{ title: "Field Visit Tracker" }} />
+        <Stack.Screen name="call-logs"    options={{ title: "Call Logs" }} />
         <Stack.Screen name="daily-report" options={{ title: "Daily Report" }} />
       </Stack>
 <AdminDrawer visible={drawerOpen} onClose={() => setDrawerOpen(false)} onVisible={refreshCompanies} />    </>
