@@ -228,6 +228,23 @@ export async function initDatabase() {
     `ALTER TABLE bkt_cases  ADD COLUMN IF NOT EXISTS monthly_feedback TEXT`,
     `ALTER TABLE loan_cases ADD COLUMN IF NOT EXISTS extra_numbers TEXT[] DEFAULT '{}'`,
     `ALTER TABLE bkt_cases  ADD COLUMN IF NOT EXISTS extra_numbers TEXT[] DEFAULT '{}'`,
+    // ✅ NEW: call_logs history table
+    `CREATE TABLE IF NOT EXISTS call_logs (
+      id           SERIAL PRIMARY KEY,
+      case_id      INTEGER NOT NULL,
+      case_type    TEXT NOT NULL DEFAULT 'loan',
+      agent_id     INTEGER REFERENCES fos_agents(id),
+      loan_no      TEXT,
+      customer_name TEXT,
+      outcome      TEXT,
+      comments     TEXT,
+      ptp_date     DATE,
+      status       TEXT,
+      logged_at    TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_call_logs_case    ON call_logs(case_id, case_type)`,
+    `CREATE INDEX IF NOT EXISTS idx_call_logs_agent   ON call_logs(agent_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_call_logs_logged  ON call_logs(logged_at DESC)`,
     // Normalize bkt
     `UPDATE bkt_perf_summary SET bkt = 'bkt1'  WHERE LOWER(REPLACE(bkt,' ','')) IN ('1','bkt1')  AND bkt <> 'bkt1'`,
     `UPDATE bkt_perf_summary SET bkt = 'bkt2'  WHERE LOWER(REPLACE(bkt,' ','')) IN ('2','bkt2')  AND bkt <> 'bkt2'`,
@@ -833,6 +850,68 @@ export async function getAllBktPerfSummary() {
 export async function getBktPerfSummaryByAgent(agentId: number) {
   const result = await query(
     `SELECT * FROM bkt_perf_summary WHERE agent_id = $1 ORDER BY bkt`, [agentId]
+  );
+  return result.rows;
+}
+
+// ─── Call Logs ────────────────────────────────────────────────────────────────
+
+export async function insertCallLog(data: {
+  caseId: number;
+  caseType: "loan" | "bkt";
+  agentId: number;
+  loanNo: string | null;
+  customerName: string | null;
+  outcome: string | null;
+  comments: string | null;
+  ptpDate: string | null;
+  status: string | null;
+}) {
+  await query(
+    `INSERT INTO call_logs
+       (case_id, case_type, agent_id, loan_no, customer_name, outcome, comments, ptp_date, status)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+    [
+      data.caseId, data.caseType, data.agentId,
+      data.loanNo, data.customerName,
+      data.outcome, data.comments, data.ptpDate || null, data.status,
+    ]
+  );
+}
+
+export async function getCallLogsByCase(caseId: number, caseType: string) {
+  const result = await query(
+    `SELECT cl.*, fa.name AS agent_name
+     FROM call_logs cl
+     LEFT JOIN fos_agents fa ON fa.id = cl.agent_id
+     WHERE cl.case_id = $1 AND cl.case_type = $2
+     ORDER BY cl.logged_at DESC`,
+    [caseId, caseType]
+  );
+  return result.rows;
+}
+
+export async function getCallLogsByAgent(agentId: number, limit = 200) {
+  const result = await query(
+    `SELECT cl.*, fa.name AS agent_name
+     FROM call_logs cl
+     LEFT JOIN fos_agents fa ON fa.id = cl.agent_id
+     WHERE cl.agent_id = $1
+     ORDER BY cl.logged_at DESC
+     LIMIT $2`,
+    [agentId, limit]
+  );
+  return result.rows;
+}
+
+export async function getAllCallLogs(limit = 500) {
+  const result = await query(
+    `SELECT cl.*, fa.name AS agent_name
+     FROM call_logs cl
+     LEFT JOIN fos_agents fa ON fa.id = cl.agent_id
+     ORDER BY cl.logged_at DESC
+     LIMIT $1`,
+    [limit]
   );
   return result.rows;
 }
