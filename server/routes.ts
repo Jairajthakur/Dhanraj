@@ -820,20 +820,24 @@ app.get("/api/companies", requireAuth, async (req, res) => {
         `UPDATE loan_cases SET broken_ptp = false, broken_ptp_date = NULL WHERE id = $1`,
         [caseId]
       );
-      // ✅ Record call log history
-      if (feedback) {
-        const caseRow = await storage.query(
-          `SELECT loan_no, customer_name, agent_id FROM loan_cases WHERE id = $1`, [caseId]
-        );
-        const cr = caseRow.rows[0];
-        if (cr) {
-          await storage.insertCallLog({
-            caseId, caseType: "loan", agentId: cr.agent_id,
-            loanNo: cr.loan_no, customerName: cr.customer_name,
-            outcome: feedback, comments: comments || null,
-            ptpDate: ptp_date || null, status,
-          });
+      // ✅ Record call log history (wrapped so it never breaks feedback saving)
+      try {
+        if (feedback) {
+          const caseRow = await storage.query(
+            `SELECT loan_no, customer_name, agent_id FROM loan_cases WHERE id = $1`, [caseId]
+          );
+          const cr = caseRow.rows[0];
+          if (cr) {
+            await storage.insertCallLog({
+              caseId, caseType: "loan", agentId: cr.agent_id,
+              loanNo: cr.loan_no, customerName: cr.customer_name,
+              outcome: feedback, comments: comments || null,
+              ptpDate: ptp_date || null, status,
+            });
+          }
         }
+      } catch (logErr: any) {
+        console.error("[call_log] loan insert failed:", logErr.message);
       }
       if (old && old.bkt && old.agent_id && !["UC","RUC"].includes((old.pro || "").toUpperCase())) {
         const pos = parseFloat(old.pos) || 0;
@@ -1676,20 +1680,24 @@ app.put("/api/fos-depositions/:id/pay-both", requireAuth, screenshotUpload.singl
         `UPDATE bkt_cases SET broken_ptp = false, broken_ptp_date = NULL WHERE id = $1`,
         [caseId]
       );
-      // ✅ Record call log history
-      if (feedback) {
-        const caseRow = await storage.query(
-          `SELECT loan_no, customer_name, agent_id FROM bkt_cases WHERE id = $1`, [caseId]
-        );
-        const cr = caseRow.rows[0];
-        if (cr) {
-          await storage.insertCallLog({
-            caseId, caseType: "bkt", agentId: cr.agent_id,
-            loanNo: cr.loan_no, customerName: cr.customer_name,
-            outcome: feedback, comments: comments || null,
-            ptpDate: ptp_date || null, status,
-          });
+      // ✅ Record call log history (wrapped so it never breaks feedback saving)
+      try {
+        if (feedback) {
+          const caseRow = await storage.query(
+            `SELECT loan_no, customer_name, agent_id FROM bkt_cases WHERE id = $1`, [caseId]
+          );
+          const cr = caseRow.rows[0];
+          if (cr) {
+            await storage.insertCallLog({
+              caseId, caseType: "bkt", agentId: cr.agent_id,
+              loanNo: cr.loan_no, customerName: cr.customer_name,
+              outcome: feedback, comments: comments || null,
+              ptpDate: ptp_date || null, status,
+            });
+          }
         }
+      } catch (logErr: any) {
+        console.error("[call_log] bkt insert failed:", logErr.message);
       }
       if (old && old.case_category && old.agent_id && !["UC","RUC"].includes((old.pro || "").toUpperCase())) {
         const pos = parseFloat(old.pos) || 0;
