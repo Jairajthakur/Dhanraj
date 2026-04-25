@@ -3468,6 +3468,66 @@ app.get("/api/receipt-requests", requireAuth, async (req, res) => {
   } catch (e: any) { console.error("[DB] field_visits constraint migration:", e.message); }
   
 
+
+// ── WhatsApp Visit Alert via Green API ───────────────────────────────────────
+// Docs: https://green-api.com/en/docs/api/sending/SendMessage/
+// Set these three env vars in your Railway / .env file:
+//   GREENAPI_INSTANCE_ID   — e.g. 1101234567
+//   GREENAPI_TOKEN         — your instance API token
+//   WHATSAPP_GROUP_ID      — group chat id, e.g. 120363XXXXXXXXXX@g.us
+async function sendWhatsAppVisitAlert(payload: {
+  agentName: string;
+  caseId: number;
+  customerName: string;
+  loanNo: string;
+  outcome: string;
+  remarks: string;
+  lat: number;
+  lng: number;
+}): Promise<void> {
+  const instanceId = process.env.GREENAPI_INSTANCE_ID;
+  const token      = process.env.GREENAPI_TOKEN;
+  const groupId    = process.env.WHATSAPP_GROUP_ID;
+
+  if (!instanceId || !token || !groupId) {
+    console.warn("[WhatsApp] Skipping — GREENAPI_INSTANCE_ID / GREENAPI_TOKEN / WHATSAPP_GROUP_ID not set");
+    return;
+  }
+
+  const now     = new Date();
+  const dateStr = now.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+  const timeStr = now.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true });
+  const mapsUrl = `https://maps.google.com/?q=${payload.lat.toFixed(6)},${payload.lng.toFixed(6)}`;
+
+  const message = [
+    "📍 *Field Visit Alert*",
+    "",
+    `👤 Agent    : ${payload.agentName}`,
+    `🗓 Time     : ${dateStr}  ${timeStr}`,
+    `📋 Loan No  : ${payload.loanNo}`,
+    `🏠 Customer : ${payload.customerName}`,
+    `✅ Outcome  : ${payload.outcome}`,
+    `💬 Remarks  : ${payload.remarks}`,
+    `📌 Location : ${mapsUrl}`,
+  ].join("\n");
+
+  const url = `https://api.green-api.com/waInstance${instanceId}/sendMessage/${token}`;
+
+  const resp = await fetch(url, {
+    method:  "POST",
+    headers: { "Content-Type": "application/json" },
+    body:    JSON.stringify({ chatId: groupId, message }),
+  });
+
+  if (!resp.ok) {
+    const body = await resp.text().catch(() => "");
+    console.error(`[WhatsApp] Green API error ${resp.status}: ${body}`);
+  } else {
+    console.log("[WhatsApp] Visit alert sent to group ✅");
+  }
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 // ── POST /api/cases/:id/visit — agent records a geo check-in ────────────────
 
  
@@ -3508,6 +3568,28 @@ app.post(
       );
 
       res.json({ visit: result.rows[0] });
+
+      // ── Fire WhatsApp alert after responding so it never delays the client ──
+      // Fetch agent name from DB for the message
+      storage.query(`SELECT name FROM fos_agents WHERE id = $1`, [agentId])
+        .then(async (agentRow) => {
+          // Also fetch customer name + loan_no from the case
+          const caseTable = case_type === "bkt" ? "bkt_cases" : "loan_cases";
+          const caseRow = await storage.query(
+            `SELECT customer_name, loan_no FROM ${caseTable} WHERE id = $1`, [caseId]
+          );
+          const agentName    = agentRow.rows[0]?.name    ?? "Agent";
+          const customerName = caseRow.rows[0]?.customer_name ?? "—";
+          const loanNo       = caseRow.rows[0]?.loan_no       ?? "—";
+          return sendWhatsAppVisitAlert({
+            agentName, caseId, customerName, loanNo,
+            outcome: visit_outcome ?? "—",
+            remarks: visit_remarks ?? "—",
+            lat, lng,
+          });
+        })
+        .catch((err: any) => console.error("[WhatsApp] Alert failed:", err));
+
     } catch (e: any) {
       console.error("[POST /api/cases/:id/visit]", e);
       res.status(500).json({ message: e.message });
