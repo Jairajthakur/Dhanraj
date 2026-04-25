@@ -1102,7 +1102,34 @@ app.get("/api/admin/companies", requireAuth, async (req, res) => {
        FROM loan_cases lc
        LEFT JOIN fos_agents fa ON fa.id = lc.agent_id
        WHERE lc.agent_id = $1
-       ORDER BY lc.customer_name`,
+
+       UNION ALL
+
+       SELECT
+        bc.id, bc.loan_no, bc.app_id, bc.customer_name, bc.status,
+        bc.pos::numeric AS pos, bc.case_category AS bkt,
+        bc.mobile_no, bc.address, bc.reference_address,
+        bc.latest_feedback, bc.feedback_code, bc.feedback_comments,
+        bc.feedback_date, bc.monthly_feedback,
+        bc.customer_available, bc.vehicle_available,
+        bc.third_party, bc.third_party_name, bc.third_party_number,
+        bc.projection, bc.non_starter, bc.kyc_purchase, bc.workable,
+        bc.ptp_date, bc.telecaller_ptp_date, bc.rollback_yn,
+        bc.agent_id, bc.registration_no, bc.pro,
+        bc.emi_amount, bc.emi_due, bc.cbc, bc.lpp, bc.cbc_lpp,
+        bc.rollback, bc.clearance,
+        bc.asset_name, bc.asset_make, bc.engine_no, bc.chassis_no,
+        bc.tenor, bc.first_emi_due_date, bc.loan_maturity_date,
+        bc.ref1_name, bc.ref1_mobile, bc.ref2_name, bc.ref2_mobile,
+        bc.extra_numbers,
+        NULL AS company_name,
+        fa.name AS agent_name,
+        'bkt' AS case_type
+       FROM bkt_cases bc
+       LEFT JOIN fos_agents fa ON fa.id = bc.agent_id
+       WHERE bc.agent_id = $1
+
+       ORDER BY customer_name`,
       [agentId]
     );
     res.json({ cases: result.rows });
