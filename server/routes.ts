@@ -3469,12 +3469,11 @@ app.get("/api/receipt-requests", requireAuth, async (req, res) => {
   
 
 
-// ── WhatsApp Visit Alert via Green API ───────────────────────────────────────
-// Docs: https://green-api.com/en/docs/api/sending/SendMessage/
-// Set these three env vars in your Railway / .env file:
-//   GREENAPI_INSTANCE_ID   — e.g. 1101234567
-//   GREENAPI_TOKEN         — your instance API token
-//   WHATSAPP_GROUP_ID      — group chat id, e.g. 120363XXXXXXXXXX@g.us
+// ── WhatsApp Visit Alert via Baileys self-hosted service ─────────────────────
+// Set these two env vars in your main Railway service:
+//   WHATSAPP_SERVICE_URL  — e.g. https://your-baileys-service.railway.app
+//   WHATSAPP_SERVICE_KEY  — the API_KEY you set in the Baileys service
+//   WHATSAPP_GROUP_ID     — group chat id, e.g. 120363XXXXXXXXXX@g.us
 async function sendWhatsAppVisitAlert(payload: {
   agentName: string;
   caseId: number;
@@ -3484,13 +3483,15 @@ async function sendWhatsAppVisitAlert(payload: {
   remarks: string;
   lat: number;
   lng: number;
+  photoBuffer?: Buffer | null;
+  photoMime?: string | null;
 }): Promise<void> {
-  const instanceId = process.env.GREENAPI_INSTANCE_ID;
-  const token      = process.env.GREENAPI_TOKEN;
+  const serviceUrl = process.env.WHATSAPP_SERVICE_URL;
+  const serviceKey = process.env.WHATSAPP_SERVICE_KEY;
   const groupId    = process.env.WHATSAPP_GROUP_ID;
 
-  if (!instanceId || !token || !groupId) {
-    console.warn("[WhatsApp] Skipping — GREENAPI_INSTANCE_ID / GREENAPI_TOKEN / WHATSAPP_GROUP_ID not set");
+  if (!serviceUrl || !serviceKey || !groupId) {
+    console.warn("[WhatsApp] Skipping — WHATSAPP_SERVICE_URL / WHATSAPP_SERVICE_KEY / WHATSAPP_GROUP_ID not set");
     return;
   }
 
@@ -3511,19 +3512,30 @@ async function sendWhatsAppVisitAlert(payload: {
     `📌 Location : ${mapsUrl}`,
   ].join("\n");
 
-  const url = `https://api.green-api.com/waInstance${instanceId}/sendMessage/${token}`;
+  // If a photo is available, encode it as base64 and send to Baileys /send-image
+  // Otherwise fall back to plain text /send
+  const endpoint = payload.photoBuffer ? `${serviceUrl}/send-image` : `${serviceUrl}/send`;
 
-  const resp = await fetch(url, {
+  const bodyObj: Record<string, any> = { chatId: groupId, message };
+  if (payload.photoBuffer) {
+    bodyObj.imageBase64 = payload.photoBuffer.toString("base64");
+    bodyObj.mimetype    = payload.photoMime || "image/jpeg";
+  }
+
+  const resp = await fetch(endpoint, {
     method:  "POST",
-    headers: { "Content-Type": "application/json" },
-    body:    JSON.stringify({ chatId: groupId, message }),
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key":    serviceKey,
+    },
+    body: JSON.stringify(bodyObj),
   });
 
   if (!resp.ok) {
     const body = await resp.text().catch(() => "");
-    console.error(`[WhatsApp] Green API error ${resp.status}: ${body}`);
+    console.error(`[WhatsApp] Baileys service error ${resp.status}: ${body}`);
   } else {
-    console.log("[WhatsApp] Visit alert sent to group ✅");
+    console.log("[WhatsApp] ✅ Visit alert sent to group");
   }
 }
 // ─────────────────────────────────────────────────────────────────────────────
@@ -3586,6 +3598,8 @@ app.post(
             outcome: visit_outcome ?? "—",
             remarks: visit_remarks ?? "—",
             lat, lng,
+            photoBuffer: req.file?.buffer ?? null,
+            photoMime:   req.file?.mimetype ?? null,
           });
         })
         .catch((err: any) => console.error("[WhatsApp] Alert failed:", err));
