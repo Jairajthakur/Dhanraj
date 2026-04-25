@@ -252,9 +252,15 @@ function AppLayoutInner() {
     if (item.type === "overdue_deposition") {
       router.push("/(app)/deposition" as any);
     } else {
+      // Pass ALL broken PTP ids (comma-separated) so allocation highlights every
+      // unresolved broken-PTP case — not just the one the agent tapped.
+      const allBrokenPtpIds = blockingItems
+        .filter((i) => i.type === "broken_ptp")
+        .map((i) => i.id)
+        .join(",");
       router.push({
         pathname: "/(app)/allocation" as any,
-        params:   { brokenPtpIds: String(item.id) },
+        params:   { brokenPtpIds: allBrokenPtpIds },
       });
     }
   };
