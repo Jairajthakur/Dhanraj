@@ -63,7 +63,7 @@ function BlockItem({
         <View style={{ alignItems: "flex-end" }}>
           {item.amount ? (
             <Text style={[s.itemAmt, { color: isBrokenPtp ? "#E24B4A" : "#EF9F27" }]}>
-              ₹{item.amount.toLocaleString("en-IN", { maximumFractionDigits: 0 })}
+              ₹{Number(String(item.amount).replace(/[^0-9.]/g, "")).toLocaleString("en-IN", { maximumFractionDigits: 0 })}
             </Text>
           ) : null}
           <Text style={[s.itemTag, {
