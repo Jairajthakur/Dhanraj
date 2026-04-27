@@ -1952,33 +1952,33 @@ res.json({ imported, updated: 0, skipped, agentsCreated, agentsRemoved, total: r
 
 // ─── Call Log Admin Endpoints ─────────────────────────────────────────────────
 
-app.get("/api/admin/call-logs", requireAdmin, async (req, res) => {
-  try {
-    const limit = Math.min(Number(req.query.limit) || 500, 2000);
-    const logs = await storage.getAllCallLogs(limit);
-    res.json({ logs });
-  } catch (e: any) { res.status(500).json({ message: e.message }); }
-});
+  app.get("/api/admin/call-logs", requireAdmin, async (req, res) => {
+    try {
+      const limit = Math.min(Number(req.query.limit) || 500, 2000);
+      const logs = await storage.getAllCallLogs(limit);
+      res.json({ logs });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
 
-app.get("/api/admin/call-logs/agent/:agentId", requireAdmin, async (req, res) => {
-  try {
-    const agentId = Number(req.params.agentId);
-    const limit = Math.min(Number(req.query.limit) || 200, 1000);
-    const logs = await storage.getCallLogsByAgent(agentId, limit);
-    res.json({ logs });
-  } catch (e: any) { res.status(500).json({ message: e.message }); }
-});
+  app.get("/api/admin/call-logs/agent/:agentId", requireAdmin, async (req, res) => {
+    try {
+      const agentId = Number(req.params.agentId);
+      const limit = Math.min(Number(req.query.limit) || 200, 1000);
+      const logs = await storage.getCallLogsByAgent(agentId, limit);
+      res.json({ logs });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
 
-app.get("/api/admin/call-logs/case/:caseId", requireAdmin, async (req, res) => {
-  try {
-    const caseId = Number(req.params.caseId);
-    const caseType = (req.query.type as string) || "loan";
-    const logs = await storage.getCallLogsByCase(caseId, caseType);
-    res.json({ logs });
-  } catch (e: any) { res.status(500).json({ message: e.message }); }
-});
+  app.get("/api/admin/call-logs/case/:caseId", requireAdmin, async (req, res) => {
+    try {
+      const caseId = Number(req.params.caseId);
+      const caseType = (req.query.type as string) || "loan";
+      const logs = await storage.getCallLogsByCase(caseId, caseType);
+      res.json({ logs });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
 
-app.get("/api/admin/feedback-export", requireAdmin, async (req, res) => {
+  app.get("/api/admin/feedback-export", requireAdmin, async (req, res) => {
   try {
     const result = await storage.query(`
       SELECT
