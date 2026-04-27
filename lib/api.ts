@@ -384,6 +384,15 @@ export const api = {
     getCasesByAgent: (agentId: number) =>
       apiRequest("GET", `/api/admin/cases/agent/${agentId}`),
 
+    getCallLogs: (limit?: number) =>
+      apiRequest("GET", `/api/admin/call-logs${limit ? `?limit=${limit}` : ""}`),
+
+    getCallLogsByAgent: (agentId: number, limit?: number) =>
+      apiRequest("GET", `/api/admin/call-logs/agent/${agentId}${limit ? `?limit=${limit}` : ""}`),
+
+    getCallLogsByCase: (caseId: number, caseType: "loan" | "bkt") =>
+      apiRequest("GET", `/api/admin/call-logs/case/${caseId}?type=${caseType}`),
+
     createCase: (data: any) => apiRequest("POST", "/api/admin/cases", data),
 
     updateCaseStatus: (
