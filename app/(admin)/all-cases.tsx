@@ -20,6 +20,7 @@ import { Ionicons } from "@expo/vector-icons";
 import Colors from "@/constants/colors";
 import { api, tokenStore } from "@/lib/api";
 import { getApiUrl } from "@/lib/query-client";
+import { ReassignCaseModal } from "@/components/ReassignCaseModal";
 
 const STATUS_COLORS: Record<string, string> = {
   Unpaid: Colors.statusUnpaid,
@@ -309,7 +310,7 @@ function StatusActionBar({ item, tableType, onUpdated, onPreIntimation, onPostIn
 }
 
 // ── Case Detail Modal ──────────────────────────────────────────────────────
-function CaseDetailModal({ item, tableType, onClose, onResetCase, onStatusUpdated, onPreIntimation, onPostIntimation }: { item: any; tableType: "loan" | "bkt"; onClose: () => void; onResetCase: (id: number) => void; onStatusUpdated: () => Promise<void>; onPreIntimation: (item: any) => void; onPostIntimation: (item: any) => void; }) {
+function CaseDetailModal({ item, tableType, onClose, onResetCase, onStatusUpdated, onPreIntimation, onPostIntimation, onTransferCase }: { item: any; tableType: "loan" | "bkt"; onClose: () => void; onResetCase: (id: number) => void; onStatusUpdated: () => Promise<void>; onPreIntimation: (item: any) => void; onPostIntimation: (item: any) => void; onTransferCase: (item: any) => void; }) {
   const insets = useSafeAreaInsets();
   const [resetting, setResetting] = useState(false);
   const [localItem, setLocalItem] = useState(item);
@@ -408,6 +409,10 @@ function CaseDetailModal({ item, tableType, onClose, onResetCase, onStatusUpdate
             </View>
             <View style={{ padding: 12, backgroundColor: Colors.surface, borderBottomWidth: 1, borderBottomColor: Colors.border }}>
               <StatusActionBar item={localItem} tableType={tableType} onUpdated={() => { onStatusUpdated(); }} onPreIntimation={onPreIntimation} onPostIntimation={onPostIntimation} />
+              <Pressable style={detailStyles.transferBtn} onPress={() => onTransferCase(localItem)}>
+                <Ionicons name="swap-horizontal-outline" size={15} color="#fff" />
+                <Text style={detailStyles.transferBtnText}>Transfer Case to Another FOS</Text>
+              </Pressable>
             </View>
             {localItem.monthly_feedback ? (
               <Pressable style={[detailStyles.resetCaseBtn, resetting && { opacity: 0.6 }]} onPress={handleResetCase} disabled={resetting}>
@@ -482,6 +487,7 @@ export default function AllCasesScreen() {
   const [resettingAgent, setResettingAgent] = useState<number | null>(null);
   const [agentCasesModal, setAgentCasesModal] = useState<{ agentId: number; agentName: string; cases: any[]; } | null>(null);
   const [resettingCaseId, setResettingCaseId] = useState<number | null>(null);
+  const [transferCase, setTransferCase] = useState<any>(null);
 
   const tableType = "loan";
   const queryKey = ["/api/admin/cases"];
@@ -703,6 +709,10 @@ export default function AllCasesScreen() {
                   <Ionicons name="eye-outline" size={14} color={Colors.primary} />
                   <Text style={styles.viewDetailText}>View Details</Text>
                 </Pressable>
+                <Pressable style={styles.transferCardBtn} onPress={() => setTransferCase(item)}>
+                  <Ionicons name="swap-horizontal-outline" size={14} color="#7c3aed" />
+                  <Text style={styles.transferCardBtnText}>Transfer</Text>
+                </Pressable>
               </View>
             </View>
           )}
@@ -717,9 +727,14 @@ export default function AllCasesScreen() {
         />
       )}
 
-      <CaseDetailModal item={selectedCase} tableType={tableType} onClose={() => setSelectedCase(null)} onResetCase={handleResetCase} onStatusUpdated={invalidateAndSyncSelected} onPreIntimation={setIntimationCase} onPostIntimation={setPostIntimationCase} />
+      <CaseDetailModal item={selectedCase} tableType={tableType} onClose={() => setSelectedCase(null)} onResetCase={handleResetCase} onStatusUpdated={invalidateAndSyncSelected} onPreIntimation={setIntimationCase} onPostIntimation={setPostIntimationCase} onTransferCase={(c) => { setSelectedCase(null); setTransferCase(c); }} />
       <PreIntimationModal item={intimationCase} onClose={() => setIntimationCase(null)} />
       <PostIntimationModal item={postIntimationCase} onClose={() => setPostIntimationCase(null)} />
+      <ReassignCaseModal
+        item={transferCase}
+        onClose={() => setTransferCase(null)}
+        onSuccess={() => { setTransferCase(null); invalidateAll(); }}
+      />
 
       {agentCasesModal && (
         <Modal visible={true} transparent={false} animationType="slide" onRequestClose={() => setAgentCasesModal(null)}>
@@ -835,9 +850,11 @@ const styles = StyleSheet.create({
   feedbackCodeBadge: { backgroundColor: Colors.accent + "20", borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 },
   feedbackCodeText: { fontSize: 11, fontWeight: "700", color: Colors.accent },
   feedback: { flex: 1, fontSize: 12, color: Colors.textSecondary, fontStyle: "italic" },
-  cardActions: { flexDirection: "row", justifyContent: "flex-end", marginTop: 2 },
+  cardActions: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginTop: 2 },
   viewDetail: { flexDirection: "row", alignItems: "center", gap: 4 },
   viewDetailText: { fontSize: 11, color: Colors.primary, fontWeight: "600" },
+  transferCardBtn: { flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: "#f3e8ff", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6, borderWidth: 1, borderColor: "#c4b5fd" },
+  transferCardBtnText: { fontSize: 11, color: "#7c3aed", fontWeight: "700" },
   empty: { flex: 1, justifyContent: "center", alignItems: "center", gap: 12, paddingVertical: 60 },
   emptyText: { fontSize: 15, color: Colors.textMuted, textAlign: "center" },
 });
@@ -875,6 +892,8 @@ const detailStyles = StyleSheet.create({
   resetCaseBtnText: { fontSize: 13, fontWeight: "700", color: Colors.danger },
   noFeedbackBanner: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: Colors.surfaceAlt, borderBottomWidth: 1, borderBottomColor: Colors.border, paddingHorizontal: 16, paddingVertical: 10 },
   noFeedbackText: { fontSize: 12, color: Colors.textMuted },
+  transferBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, marginTop: 10, backgroundColor: "#7c3aed", borderRadius: 10, paddingVertical: 11, paddingHorizontal: 16 },
+  transferBtnText: { fontSize: 13, fontWeight: "700", color: "#fff" },
   row: { flexDirection: "row", borderBottomWidth: 1, borderBottomColor: Colors.border, backgroundColor: Colors.surface },
   labelCell: { width: "42%", backgroundColor: Colors.surfaceAlt, padding: 12, justifyContent: "center", borderRightWidth: 1, borderRightColor: Colors.border },
   labelText: { fontSize: 13, fontWeight: "700", color: Colors.primary },
