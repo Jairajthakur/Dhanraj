@@ -2096,6 +2096,31 @@ res.json({ imported, updated: 0, skipped, agentsCreated, agentsRemoved, total: r
                             r.workable === false || r.workable === "false" || r.workable === "f" ? "NONWORKABLE" : "",
       "Rollback":           yn(r.rollback_yn),
       "Comments":           r.feedback_comments || "",
+      "Monthly Detail Feedback": (() => {
+          if (r.monthly_feedback !== "SUBMITTED") return "";
+          const custAvail   = r.customer_available === true  || r.customer_available === "t";
+          const custNA      = r.customer_available === false || r.customer_available === "f";
+          const vehAvail    = r.vehicle_available  === true  || r.vehicle_available  === "t";
+          const vehNA       = r.vehicle_available  === false || r.vehicle_available  === "f";
+          const tp          = r.third_party        === true  || r.third_party        === "t";
+          const tpNo        = r.third_party        === false || r.third_party        === "f";
+          const parts: string[] = [];
+          if (custAvail)      parts.push("The customer was available at the time of the field visit.");
+          else if (custNA)    parts.push("The customer was not available at the time of the field visit.");
+          if (vehAvail)       parts.push("The vehicle was present at the location.");
+          else if (vehNA)     parts.push("The vehicle was not present at the location.");
+          if (tp)             parts.push("A third party was present during the visit.");
+          else if (tpNo)      parts.push("No third party was present during the visit.");
+          if (r.occupation)   parts.push(`The customer's occupation is ${r.occupation}.`);
+          if (r.feedback_code && r.latest_feedback)
+            parts.push(`Feedback recorded as ${r.feedback_code} — ${r.latest_feedback}.`);
+          else if (r.feedback_code)
+            parts.push(`Feedback code recorded as ${r.feedback_code}.`);
+          if (r.ptp_date)     parts.push(`The customer has promised to make payment by ${fmtDate(r.ptp_date)}.`);
+          if (r.sft_city)     parts.push(`The customer has shifted to ${r.sft_city}.`);
+          if (r.non_starter === true || r.non_starter === "t") parts.push("This case is identified as a non-starter.");
+          return parts.join(" ");
+        })(),
     }));
 
     const callRows = callResult.rows.map((r: any) => ({
@@ -2132,7 +2157,7 @@ res.json({ imported, updated: 0, skipped, agentsCreated, agentsRemoved, total: r
       ws.columns = Object.keys(exportRows[0]).map((key) => ({
         header: key, key,
         width: ["CUSTOMER NAME", "Customer Name", "Latest Feedback", "Monthly Feedback",
-                "Outcome", "Comments", "Third Party Name"].includes(key) ? 35
+                "Monthly Detail Feedback", "Outcome", "Comments", "Third Party Name"].includes(key) ? 35
              : ["Logged At", "Visited At", "Feedback Date"].includes(key) ? 22
              : 16,
       }));
