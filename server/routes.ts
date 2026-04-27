@@ -1991,7 +1991,7 @@ res.json({ imported, updated: 0, skipped, agentsCreated, agentsRemoved, total: r
         lc.feedback_code, lc.latest_feedback, lc.monthly_feedback,
         lc.ptp_date, lc.telecaller_ptp_date, lc.projection, lc.non_starter,
         lc.kyc_purchase, lc.workable, lc.status, lc.feedback_comments,
-        lc.occupation, lc.sft_city, lc.rollback_yn,
+        lc.occupation, lc.shifted_city AS sft_city, lc.rollback_yn,
         lc.feedback_date,
         fa.name AS fos_name, 'Loan' AS case_type
       FROM loan_cases lc
@@ -2008,7 +2008,7 @@ res.json({ imported, updated: 0, skipped, agentsCreated, agentsRemoved, total: r
         bc.feedback_code, bc.latest_feedback, bc.monthly_feedback,
         bc.ptp_date, bc.telecaller_ptp_date, bc.projection, bc.non_starter,
         bc.kyc_purchase, bc.workable, bc.status, bc.feedback_comments,
-        bc.occupation, bc.sft_city, bc.rollback_yn,
+        bc.occupation, bc.shifted_city AS sft_city, bc.rollback_yn,
         bc.feedback_date,
         fa.name AS fos_name, 'BKT' AS case_type
       FROM bkt_cases bc
@@ -2018,39 +2018,37 @@ res.json({ imported, updated: 0, skipped, agentsCreated, agentsRemoved, total: r
     `);
 
     // ── Sheet 2: Call Log History ─────────────────────────────────────────────
-    const callResult = await storage.query(`
-      SELECT
-        cl.id,
-        cl.loan_no,
-        cl.customer_name,
-        cl.case_type,
-        cl.outcome,
-        cl.comments,
-        cl.status,
-        cl.ptp_date,
-        TO_CHAR(cl.logged_at AT TIME ZONE 'Asia/Kolkata', 'DD-Mon-YYYY HH12:MI AM') AS logged_at,
-        fa.name AS agent_name
-      FROM call_logs cl
-      LEFT JOIN fos_agents fa ON fa.id = cl.agent_id
-      ORDER BY cl.logged_at DESC
-    `);
+    let callResult: any = { rows: [] };
+    try {
+      callResult = await storage.query(`
+        SELECT
+          cl.loan_no, cl.customer_name, cl.case_type,
+          cl.outcome, cl.comments, cl.status, cl.ptp_date,
+          TO_CHAR(cl.logged_at AT TIME ZONE 'Asia/Kolkata', 'DD-Mon-YYYY HH12:MI AM') AS logged_at,
+          fa.name AS agent_name
+        FROM call_logs cl
+        LEFT JOIN fos_agents fa ON fa.id = cl.agent_id
+        ORDER BY cl.logged_at DESC
+      `);
+    } catch (e: any) { console.error("[export] call_logs query failed:", e.message); }
 
     // ── Sheet 3: Field Visits ─────────────────────────────────────────────────
-    const visitResult = await storage.query(`
-      SELECT
-        fv.id,
-        COALESCE(lc.loan_no, bc.loan_no)          AS loan_no,
-        COALESCE(lc.customer_name, bc.customer_name) AS customer_name,
-        fv.case_type,
-        fv.lat, fv.lng, fv.accuracy,
-        TO_CHAR(fv.visited_at AT TIME ZONE 'Asia/Kolkata', 'DD-Mon-YYYY HH12:MI AM') AS visited_at,
-        fa.name AS agent_name
-      FROM field_visits fv
-      LEFT JOIN fos_agents fa ON fa.id = fv.agent_id
-      LEFT JOIN loan_cases lc ON lc.id = fv.case_id AND fv.case_type = 'loan'
-      LEFT JOIN bkt_cases  bc ON bc.id = fv.case_id AND fv.case_type = 'bkt'
-      ORDER BY fv.visited_at DESC
-    `);
+    let visitResult: any = { rows: [] };
+    try {
+      visitResult = await storage.query(`
+        SELECT
+          COALESCE(lc.loan_no, bc.loan_no)            AS loan_no,
+          COALESCE(lc.customer_name, bc.customer_name) AS customer_name,
+          fv.case_type, fv.lat, fv.lng, fv.accuracy,
+          TO_CHAR(fv.visited_at AT TIME ZONE 'Asia/Kolkata', 'DD-Mon-YYYY HH12:MI AM') AS visited_at,
+          fa.name AS agent_name
+        FROM field_visits fv
+        LEFT JOIN fos_agents fa ON fa.id = fv.agent_id
+        LEFT JOIN loan_cases lc ON lc.id = fv.case_id AND fv.case_type = 'loan'
+        LEFT JOIN bkt_cases  bc ON bc.id = fv.case_id AND fv.case_type = 'bkt'
+        ORDER BY fv.visited_at DESC
+      `);
+    } catch (e: any) { console.error("[export] field_visits query failed:", e.message); }
 
     const yn = (v: any) =>
       v === true  || v === "true"  || v === "t" || v === 1 ? "Y" :
