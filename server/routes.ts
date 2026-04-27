@@ -1980,6 +1980,7 @@ res.json({ imported, updated: 0, skipped, agentsCreated, agentsRemoved, total: r
 
   app.get("/api/admin/feedback-export", requireAdmin, async (req, res) => {
   try {
+    // ── Sheet 1: Feedback Summary ─────────────────────────────────────────────
     const result = await storage.query(`
       SELECT
         TO_CHAR(COALESCE(lc.created_at, NOW()), 'DD-Mon') AS allu_date,
@@ -1988,10 +1989,11 @@ res.json({ imported, updated: 0, skipped, agentsCreated, agentsRemoved, total: r
         lc.customer_available, lc.vehicle_available, lc.third_party,
         lc.third_party_name, lc.third_party_number,
         lc.feedback_code, lc.latest_feedback, lc.monthly_feedback,
-        lc.ptp_date, lc.projection, lc.non_starter, lc.kyc_purchase,
-        lc.workable, lc.status, lc.feedback_comments,
-        lc.occupation, lc.sft_city,
-        fa.name AS fos_name
+        lc.ptp_date, lc.telecaller_ptp_date, lc.projection, lc.non_starter,
+        lc.kyc_purchase, lc.workable, lc.status, lc.feedback_comments,
+        lc.occupation, lc.sft_city, lc.rollback_yn,
+        lc.feedback_date,
+        fa.name AS fos_name, 'Loan' AS case_type
       FROM loan_cases lc
       LEFT JOIN fos_agents fa ON lc.agent_id = fa.id
 
@@ -2004,74 +2006,153 @@ res.json({ imported, updated: 0, skipped, agentsCreated, agentsRemoved, total: r
         bc.customer_available, bc.vehicle_available, bc.third_party,
         bc.third_party_name, bc.third_party_number,
         bc.feedback_code, bc.latest_feedback, bc.monthly_feedback,
-        bc.ptp_date, bc.projection, bc.non_starter, bc.kyc_purchase,
-        bc.workable, bc.status, bc.feedback_comments,
-        bc.occupation, bc.sft_city,
-        fa.name AS fos_name
+        bc.ptp_date, bc.telecaller_ptp_date, bc.projection, bc.non_starter,
+        bc.kyc_purchase, bc.workable, bc.status, bc.feedback_comments,
+        bc.occupation, bc.sft_city, bc.rollback_yn,
+        bc.feedback_date,
+        fa.name AS fos_name, 'BKT' AS case_type
       FROM bkt_cases bc
       LEFT JOIN fos_agents fa ON bc.agent_id = fa.id
 
       ORDER BY fos_name NULLS LAST, loan_no
     `);
 
+    // ── Sheet 2: Call Log History ─────────────────────────────────────────────
+    const callResult = await storage.query(`
+      SELECT
+        cl.id,
+        cl.loan_no,
+        cl.customer_name,
+        cl.case_type,
+        cl.outcome,
+        cl.comments,
+        cl.status,
+        cl.ptp_date,
+        TO_CHAR(cl.logged_at AT TIME ZONE 'Asia/Kolkata', 'DD-Mon-YYYY HH12:MI AM') AS logged_at,
+        fa.name AS agent_name
+      FROM call_logs cl
+      LEFT JOIN fos_agents fa ON fa.id = cl.agent_id
+      ORDER BY cl.logged_at DESC
+    `);
+
+    // ── Sheet 3: Field Visits ─────────────────────────────────────────────────
+    const visitResult = await storage.query(`
+      SELECT
+        fv.id,
+        COALESCE(lc.loan_no, bc.loan_no)          AS loan_no,
+        COALESCE(lc.customer_name, bc.customer_name) AS customer_name,
+        fv.case_type,
+        fv.lat, fv.lng, fv.accuracy,
+        TO_CHAR(fv.visited_at AT TIME ZONE 'Asia/Kolkata', 'DD-Mon-YYYY HH12:MI AM') AS visited_at,
+        fa.name AS agent_name
+      FROM field_visits fv
+      LEFT JOIN fos_agents fa ON fa.id = fv.agent_id
+      LEFT JOIN loan_cases lc ON lc.id = fv.case_id AND fv.case_type = 'loan'
+      LEFT JOIN bkt_cases  bc ON bc.id = fv.case_id AND fv.case_type = 'bkt'
+      ORDER BY fv.visited_at DESC
+    `);
+
     const yn = (v: any) =>
       v === true  || v === "true"  || v === "t" || v === 1 ? "Y" :
       v === false || v === "false" || v === "f" || v === 0 ? "N" : "";
 
-    const rows = result.rows.map((r: any) => ({
-      "Allu Date":          r.allu_date        || "",
+    const fmtDate = (v: any) =>
+      v ? (v instanceof Date ? v.toISOString().slice(0,10) : String(v).slice(0,10)) : "";
+
+    // ── Build rows ────────────────────────────────────────────────────────────
+    const feedbackRows = result.rows.map((r: any) => ({
+      "FOS Name":           r.fos_name          || "",
+      "Case Type":          r.case_type         || "",
+      "Allu Date":          r.allu_date         || "",
       "LOAN NO":            r.loan_no           || "",
       "APP ID":             r.app_id            || "",
-      "CUSTOMERNAME":       r.customer_name     || "",
-      "Bkt":                r.bkt               || "",
-      "Pro":                r.pro               || "",
+      "CUSTOMER NAME":      r.customer_name     || "",
+      "BKT":                r.bkt               || "",
+      "PRO":                r.pro               || "",
       "Branch":             r.branch            || "",
+      "Status":             r.status            || "",
+      "Feedback Date":      fmtDate(r.feedback_date),
       "Customer Y/N":       yn(r.customer_available),
       "Vehicle Y/N":        yn(r.vehicle_available),
-      "Third_party Y/N":    yn(r.third_party),
-      "Third Party Name":   (r.third_party === true || r.third_party === "true" || r.third_party === "t")
-                              ? r.third_party_name   || "" : "",
-      "Third Party Number": (r.third_party === true || r.third_party === "true" || r.third_party === "t")
-                              ? r.third_party_number || "" : "",
+      "Third Party Y/N":    yn(r.third_party),
+      "Third Party Name":   (r.third_party === true || r.third_party === "true" || r.third_party === "t") ? r.third_party_name || "" : "",
+      "Third Party Number": (r.third_party === true || r.third_party === "true" || r.third_party === "t") ? r.third_party_number || "" : "",
       "Occupation":         r.occupation        || "",
-      "FEEDBACK CODE":      r.feedback_code    != null ? String(r.feedback_code)    : "",
-      "Details FEEDBACK":   r.latest_feedback  != null ? String(r.latest_feedback)  : "",
+      "Feedback Code":      r.feedback_code    != null ? String(r.feedback_code)    : "",
+      "Latest Feedback":    r.latest_feedback  != null ? String(r.latest_feedback)  : "",
       "Monthly Feedback":   r.monthly_feedback != null ? String(r.monthly_feedback) : "",
-      "PTP DATE":           r.ptp_date
-                              ? (r.ptp_date instanceof Date
-                                  ? r.ptp_date.toISOString().slice(0, 10)
-                                  : String(r.ptp_date).slice(0, 10))
-                              : "",
+      "PTP Date":           fmtDate(r.ptp_date),
+      "Telecaller PTP":     fmtDate(r.telecaller_ptp_date),
       "Shifted To City":    r.sft_city          || "",
-      "Projection":         r.projection       != null ? String(r.projection)        : "",
-      "NON_STARTER (Y/N)":  yn(r.non_starter),
-      "KYC PURCHASE (Y/N)": yn(r.kyc_purchase),
-      "Workable/Non":       r.workable === true  || r.workable === "true"  || r.workable === "t"  ? "WORKABLE" :
-                            r.workable === false || r.workable === "false" || r.workable === "f"  ? "NONWORKABLE" : "",
+      "Projection":         r.projection       != null ? String(r.projection) : "",
+      "Non-Starter":        yn(r.non_starter),
+      "KYC Purchase":       yn(r.kyc_purchase),
+      "Workable":           r.workable === true || r.workable === "true" || r.workable === "t" ? "WORKABLE" :
+                            r.workable === false || r.workable === "false" || r.workable === "f" ? "NONWORKABLE" : "",
+      "Rollback":           yn(r.rollback_yn),
       "Comments":           r.feedback_comments || "",
-      "Status":             r.status            || "",
-      "FOS Name":           r.fos_name          || "",
     }));
 
-    const wb = new ExcelJS.Workbook();
-    const ws = wb.addWorksheet("Feedback Report");
-    const exportRows = rows.length ? rows : [{}];
-    ws.columns = Object.keys(exportRows[0]).map((key) => ({
-      header: key, key,
-      width: ["CUSTOMERNAME", "Details FEEDBACK", "Monthly Feedback", "Comments", "Third Party Name"].includes(key) ? 32
-           : ["Third Party Number", "Occupation", "Shifted To City"].includes(key) ? 20
-           : 16,
+    const callRows = callResult.rows.map((r: any) => ({
+      "Agent Name":    r.agent_name   || "",
+      "Loan No":       r.loan_no      || "",
+      "Customer Name": r.customer_name|| "",
+      "Case Type":     r.case_type    || "",
+      "Outcome":       r.outcome      || "",
+      "Comments":      r.comments     || "",
+      "Status":        r.status       || "",
+      "PTP Date":      fmtDate(r.ptp_date),
+      "Logged At":     r.logged_at    || "",
     }));
-    exportRows.forEach((row) => ws.addRow(row));
-    ws.getRow(1).eachCell((cell) => {
-      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFFF00" } };
-      cell.font = { bold: true };
-      cell.alignment = { vertical: "middle", horizontal: "center", wrapText: true };
-    });
-    ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: Object.keys(exportRows[0]).length } };
-    ws.views = [{ state: "frozen", ySplit: 1 }];
+
+    const visitRows = visitResult.rows.map((r: any) => ({
+      "Agent Name":    r.agent_name    || "",
+      "Loan No":       r.loan_no       || "",
+      "Customer Name": r.customer_name || "",
+      "Case Type":     r.case_type     || "",
+      "Latitude":      r.lat           || "",
+      "Longitude":     r.lng           || "",
+      "Accuracy (m)":  r.accuracy      || "",
+      "Visited At":    r.visited_at    || "",
+    }));
+
+    // ── Build workbook ────────────────────────────────────────────────────────
+    const wb = new ExcelJS.Workbook();
+
+    const styleSheet = (ws: ExcelJS.Worksheet, rows: any[], headerColor: string) => {
+      const exportRows = rows.length ? rows : [{}];
+      ws.columns = Object.keys(exportRows[0]).map((key) => ({
+        header: key, key,
+        width: ["CUSTOMER NAME", "Customer Name", "Latest Feedback", "Monthly Feedback",
+                "Outcome", "Comments", "Third Party Name"].includes(key) ? 35
+             : ["Logged At", "Visited At", "Feedback Date"].includes(key) ? 22
+             : 16,
+      }));
+      exportRows.forEach((row) => ws.addRow(row));
+      ws.getRow(1).eachCell((cell) => {
+        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: headerColor } };
+        cell.font = { bold: true, color: { argb: "FF000000" } };
+        cell.alignment = { vertical: "middle", horizontal: "center", wrapText: true };
+        cell.border = {
+          bottom: { style: "medium", color: { argb: "FF000000" } },
+        };
+      });
+      ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: Object.keys(exportRows[0]).length } };
+      ws.views = [{ state: "frozen", ySplit: 1 }];
+      ws.getRow(1).height = 28;
+    };
+
+    const ws1 = wb.addWorksheet("Feedback Summary");
+    styleSheet(ws1, feedbackRows, "FFFFFF00");   // yellow header
+
+    const ws2 = wb.addWorksheet("Call Log History");
+    styleSheet(ws2, callRows, "FFCCE5FF");       // blue header
+
+    const ws3 = wb.addWorksheet("Field Visits");
+    styleSheet(ws3, visitRows, "FFD4EDDA");      // green header
+
     const buf = await wb.xlsx.writeBuffer();
-    res.setHeader("Content-Disposition", `attachment; filename="Feedback_Report_${new Date().toISOString().slice(0, 10)}.xlsx"`);
+    res.setHeader("Content-Disposition", `attachment; filename="Full_Report_${new Date().toISOString().slice(0, 10)}.xlsx"`);
     res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
     res.send(Buffer.from(buf));
   } catch (e: any) { res.status(500).json({ message: e.message }); }
