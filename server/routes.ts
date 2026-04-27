@@ -319,6 +319,8 @@ const COLUMN_MAP: Record<string, string> = {
   nbfc: "company_name", bankname: "company_name", bank: "company_name",
   penal: "penal_cbc",
 penalstatus: "penal_yn",
+  collamount: "coll_amount", collamt: "coll_amount", collectionamount: "coll_amount",
+  twcollection: "coll_amount", twcoll: "coll_amount",
 };
 
 const MONTH_NAMES = ["January","February","March","April","May","June","July","August","September","October","November","December"];
@@ -1809,6 +1811,7 @@ await storage.deleteAllLoanCases();
             telecallerPtpDate: parseDate(mapped.telecaller_ptp_date),
             rollbackYn: parseRollbackYn(mapped.rollback),
             companyName: mapped.company_name || null,  // ← NEW
+            collAmount: mapped.coll_amount || null,    // ← NEW: from Coll Amount column
           });
           imported++;
         } catch (e: any) { errors.push(`Row ${i + headerRowIdx + 2}: ${e.message}`); skipped++; }
@@ -2365,19 +2368,13 @@ app.get("/api/bkt-tw-collection-summary", requireAuth, async (req, res) => {
          COUNT(*) FILTER (WHERE status = 'Paid')::int AS count_paid,
          COUNT(*)::int                                 AS count_total,
          COALESCE(SUM(pos::numeric), 0)               AS amount_total,
-         COALESCE((
-           SELECT SUM(fd.amount)
-           FROM fos_depositions fd
-           WHERE fd.agent_id = $1
-             AND LOWER(REPLACE(fd.bkt, ' ', '')) = bkt_key
-             AND DATE_TRUNC('month', fd.deposition_date) = DATE_TRUNC('month', CURRENT_DATE)
-         ), 0) AS amount_collected
+         COALESCE(SUM(coll_amount::numeric), 0)       AS amount_collected
        FROM (
-         SELECT 'bkt' || bkt::text AS bkt_key, pos, status
+         SELECT 'bkt' || bkt::text AS bkt_key, pos, status, coll_amount
          FROM loan_cases lc
          WHERE agent_id = $1 AND bkt IN (1, 2, 3) AND pos IS NOT NULL ${companyFilter}
          UNION ALL
-         SELECT case_category AS bkt_key, pos, status
+         SELECT case_category AS bkt_key, pos, status, NULL AS coll_amount
          FROM bkt_cases
          WHERE agent_id = $1 AND case_category IN ('bkt1','bkt2','bkt3') AND pos IS NOT NULL
        ) combined
