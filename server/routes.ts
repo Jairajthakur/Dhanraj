@@ -2359,22 +2359,27 @@ app.get("/api/bkt-tw-collection-summary", requireAuth, async (req, res) => {
   try {
     const agentId = req.session.agentId!;
     const company = (req.query.company as string) || null;
- 
-    const companyFilter = company ? `AND lc.company_name = '${company.replace(/'/g, "''")}'` : "";
- 
+
+    const companyFilter = company ? `AND company_name = '${company.replace(/'/g, "''")}'` : "";
+
     const result = await storage.query(
       `SELECT
          bkt_key AS case_category,
          COUNT(*) FILTER (WHERE status = 'Paid')::int AS count_paid,
          COUNT(*)::int                                 AS count_total,
          COALESCE(SUM(pos::numeric), 0)               AS amount_total,
-         COALESCE(SUM(coll_amount::numeric), 0)       AS amount_collected
+         -- Prefer coll_amount from allocation import; fall back to POS of Paid cases
+         CASE
+           WHEN COALESCE(SUM(coll_amount::numeric), 0) > 0
+           THEN SUM(coll_amount::numeric)
+           ELSE COALESCE(SUM(pos::numeric) FILTER (WHERE status = 'Paid'), 0)
+         END AS amount_collected
        FROM (
          SELECT 'bkt' || bkt::text AS bkt_key, pos, status, coll_amount
-         FROM loan_cases lc
+         FROM loan_cases
          WHERE agent_id = $1 AND bkt IN (1, 2, 3) AND pos IS NOT NULL ${companyFilter}
          UNION ALL
-         SELECT case_category AS bkt_key, pos, status, NULL AS coll_amount
+         SELECT case_category AS bkt_key, pos, status, NULL::numeric AS coll_amount
          FROM bkt_cases
          WHERE agent_id = $1 AND case_category IN ('bkt1','bkt2','bkt3') AND pos IS NOT NULL
        ) combined
@@ -2382,11 +2387,10 @@ app.get("/api/bkt-tw-collection-summary", requireAuth, async (req, res) => {
        ORDER BY bkt_key`,
       [agentId],
     );
- 
+
     res.json({ summary: result.rows });
   } catch (e: any) { res.status(500).json({ message: e.message }); }
 });
-
 app.get("/api/bkt-perf-summary", requireAuth, async (req, res) => {
   try {
     const agentId = req.session.agentId!;
@@ -3880,7 +3884,14 @@ app.get("/api/admin/field-visits", requireAdmin, async (req: Request, res: Respo
 
     const result = await storage.query(sql, params);
 
-    res.json({ visits: result.rows });
+    // Map lat/lng column names to latitude/longitude expected by the frontend
+    const visits = result.rows.map((r: any) => ({
+      ...r,
+      latitude:  r.lat  != null ? parseFloat(r.lat)  : null,
+      longitude: r.lng  != null ? parseFloat(r.lng)  : null,
+    }));
+
+    res.json({ visits });
   } catch (e: any) {
     console.error("[GET /api/admin/field-visits]", e);
     res.status(500).json({ message: e.message });
