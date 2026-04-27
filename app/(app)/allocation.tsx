@@ -1366,7 +1366,7 @@ export default function AllocationScreen() {
               vehicle_available:  data.vehicleAvailable,
               third_party:        data.thirdParty,
               occupation:         data.occupation || null,
-              ptp_date:           data.feedbackCode === "PTP" ? data.smartInputValue : null,
+              ptp_date:           data.feedbackCode === "PTP" ? toIsoDate(data.smartInputValue) : null,
               shifted_to:         data.feedbackCode === "SFT" ? data.smartInputValue || null : null,
             };
             if (caseType === "bkt") await api.updateBktFeedback(monthlyStepperItem.id, payload);
@@ -1374,6 +1374,7 @@ export default function AllocationScreen() {
             qc.invalidateQueries({ queryKey: ["/api/cases"] });
             qc.invalidateQueries({ queryKey: ["/api/bkt-cases"] });
             qc.invalidateQueries({ queryKey: ["/api/stats"] });
+            qc.invalidateQueries({ queryKey: ["/api/broken-ptps"] });
             setMonthlyStepperItem(null);
           }}
         />
