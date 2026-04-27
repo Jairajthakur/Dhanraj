@@ -166,8 +166,15 @@ export default function MonthlyFeedbackStepper({
         setStep(1);
         return;
       }
-      onSave?.(form);
-      setShowSuccess(true);
+      if (onSave) {
+        Promise.resolve(onSave(form))
+          .then(() => setShowSuccess(true))
+          .catch((err: any) => {
+            Alert.alert("Save Failed", err?.message || "Could not save feedback. Please try again.");
+          });
+      } else {
+        setShowSuccess(true);
+      }
     }
   }
 
