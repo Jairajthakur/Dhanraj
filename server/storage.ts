@@ -371,9 +371,9 @@ export async function updateLoanCaseFeedback(
 ) {
   await query(
     `UPDATE loan_cases SET
-       status             = $1,
-       latest_feedback    = $2,
-       feedback_comments  = $3,
+       status             = COALESCE($1, status),
+       latest_feedback    = COALESCE($2, latest_feedback),
+       feedback_comments  = COALESCE($3, feedback_comments),
        feedback_date      = NOW(),
        ptp_date           = $5,
        rollback_yn        = COALESCE($6,  rollback_yn),
@@ -736,9 +736,9 @@ export async function updateBktCaseFeedback(
 ) {
   await query(
     `UPDATE bkt_cases SET
-       status             = $1,
-       latest_feedback    = $2,
-       feedback_comments  = $3,
+       status             = COALESCE($1, status),
+       latest_feedback    = COALESCE($2, latest_feedback),
+       feedback_comments  = COALESCE($3, feedback_comments),
        feedback_date      = NOW(),
        ptp_date           = $5,
        rollback_yn        = COALESCE($6,  rollback_yn),
