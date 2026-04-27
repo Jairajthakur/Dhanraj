@@ -2037,21 +2037,21 @@ res.json({ imported, updated: 0, skipped, agentsCreated, agentsRemoved, total: r
     try {
       visitResult = await storage.query(`
         SELECT
-          fa.name                                       AS agent_name,
-          COALESCE(lc.loan_no, bc.loan_no)             AS loan_no,
-          COALESCE(lc.customer_name, bc.customer_name) AS customer_name,
+          fa.name AS agent_name,
+          CASE WHEN LOWER(TRIM(fv.case_type)) = 'bkt' THEN bc.loan_no      ELSE lc.loan_no      END AS loan_no,
+          CASE WHEN LOWER(TRIM(fv.case_type)) = 'bkt' THEN bc.customer_name ELSE lc.customer_name END AS customer_name,
           fv.case_type,
-          fv.outcome        AS visit_outcome,
-          fv.notes          AS visit_remarks,
+          fv.visit_outcome,
+          fv.visit_remarks,
           fv.lat,
           fv.lng,
           fv.accuracy,
           (fv.photo_url IS NOT NULL AND fv.photo_url <> '') AS has_photo,
           TO_CHAR(fv.visited_at AT TIME ZONE 'Asia/Kolkata', 'DD-Mon-YYYY HH12:MI AM') AS visited_at
         FROM field_visits fv
-        LEFT JOIN fos_agents fa ON fa.id = fv.agent_id
-        LEFT JOIN loan_cases lc ON lc.id = fv.case_id AND fv.case_type = 'loan'
-        LEFT JOIN bkt_cases  bc ON bc.id = fv.case_id AND fv.case_type = 'bkt'
+        LEFT JOIN fos_agents fa ON fa.id  = fv.agent_id::integer
+        LEFT JOIN loan_cases lc ON lc.id  = fv.case_id::integer
+        LEFT JOIN bkt_cases  bc ON bc.id  = fv.case_id::integer
         ORDER BY fv.visited_at DESC
       `);
       console.log("[export] field_visits rows:", visitResult.rows.length);
@@ -3793,6 +3793,7 @@ app.get("/api/admin/field-visits", requireAdmin, async (req: Request, res: Respo
         fv.accuracy, fv.visited_at,
         fv.visit_outcome,
         fv.visit_remarks,
+        fv.photo_url,
         (fv.photo_url IS NOT NULL AND fv.photo_url <> '') AS has_photo,
         fa.name AS agent_name,
         CASE
