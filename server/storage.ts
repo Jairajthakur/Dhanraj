@@ -228,6 +228,7 @@ export async function initDatabase() {
     `ALTER TABLE bkt_cases  ADD COLUMN IF NOT EXISTS monthly_feedback TEXT`,
     `ALTER TABLE loan_cases ADD COLUMN IF NOT EXISTS extra_numbers TEXT[] DEFAULT '{}'`,
     `ALTER TABLE bkt_cases  ADD COLUMN IF NOT EXISTS extra_numbers TEXT[] DEFAULT '{}'`,
+    `ALTER TABLE loan_cases ADD COLUMN IF NOT EXISTS coll_amount NUMERIC`,
     // ✅ NEW: call_logs history table
     `CREATE TABLE IF NOT EXISTS call_logs (
       id           SERIAL PRIMARY KEY,
@@ -552,7 +553,7 @@ export async function upsertLoanCase(data: {
   firstEmiDueDate?: string | null; loanMaturityDate?: string | null; tenor?: number | null;
   pro?: string | null; status?: string | null; latestFeedback?: string | null;
   feedbackComments?: string | null; ptpDate?: string | null; telecallerPtpDate?: string | null;
-  rollbackYn?: boolean | null; companyName?: string | null;
+  rollbackYn?: boolean | null; companyName?: string | null; collAmount?: string | null;
 }): Promise<"inserted" | "updated"> {
   const result = await query(
     `INSERT INTO loan_cases (
@@ -561,11 +562,11 @@ export async function upsertLoanCase(data: {
       emi_amount, emi_due, cbc, lpp, cbc_lpp, rollback, clearance,
       first_emi_due_date, loan_maturity_date, tenor, pro, status,
       latest_feedback, feedback_comments, ptp_date, telecaller_ptp_date, rollback_yn,
-      company_name
+      company_name, coll_amount
     ) VALUES (
       $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,
       $15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,
-      $32
+      $32,$33
     )
     ON CONFLICT (loan_no) DO UPDATE SET
       agent_id = EXCLUDED.agent_id, fos_name = EXCLUDED.fos_name,
@@ -595,7 +596,8 @@ export async function upsertLoanCase(data: {
       ptp_date = COALESCE(EXCLUDED.ptp_date, loan_cases.ptp_date),
       telecaller_ptp_date = EXCLUDED.telecaller_ptp_date,
       rollback_yn = COALESCE(EXCLUDED.rollback_yn, loan_cases.rollback_yn),
-      company_name = COALESCE(EXCLUDED.company_name, loan_cases.company_name)
+      company_name = COALESCE(EXCLUDED.company_name, loan_cases.company_name),
+      coll_amount = EXCLUDED.coll_amount
     RETURNING (xmax = 0) AS is_insert`,
     [
       data.agentId, data.fosName, data.loanNo, data.customerName,
@@ -609,6 +611,7 @@ export async function upsertLoanCase(data: {
       data.ptpDate || null, data.telecallerPtpDate || null,
       data.rollbackYn ?? null,
       data.companyName || null,
+      data.collAmount != null ? parseFloat(data.collAmount) || null : null,
     ]
   );
   return result.rows[0]?.is_insert ? "inserted" : "updated";
