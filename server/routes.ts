@@ -908,7 +908,8 @@ app.get("/api/broken-ptps", requireAuth, async (req, res) => {
     // ── Broken PTPs (loan + bkt) ──────────────────────────────────────────
     const ptpResult = await storage.query(`
       SELECT 'broken_ptp' AS type, 'loan' AS source, id, customer_name, loan_no,
-             pos::numeric AS amount, broken_ptp_date AS ptp_date,
+             NULLIF(REGEXP_REPLACE(COALESCE(pos::text, ''), '[^0-9.]', '', 'g'), '')::numeric AS amount,
+             broken_ptp_date AS ptp_date,
              NULL::text AS assigned_at, NULL::numeric AS hours_overdue
       FROM loan_cases
       WHERE agent_id = $1
@@ -916,7 +917,8 @@ app.get("/api/broken-ptps", requireAuth, async (req, res) => {
         AND (snooze_until IS NULL OR snooze_until < NOW())
       UNION ALL
       SELECT 'broken_ptp' AS type, 'bkt' AS source, id, customer_name, loan_no,
-             pos::numeric AS amount, broken_ptp_date AS ptp_date,
+             NULLIF(REGEXP_REPLACE(COALESCE(pos::text, ''), '[^0-9.]', '', 'g'), '')::numeric AS amount,
+             broken_ptp_date AS ptp_date,
              NULL::text AS assigned_at, NULL::numeric AS hours_overdue
       FROM bkt_cases
       WHERE agent_id = $1
