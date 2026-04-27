@@ -296,7 +296,7 @@ const company = selectedCompany === "All" ? null : selectedCompany;
                 return (
                   <View key={key} style={[styles.twBox, { borderTopColor: color }]}>
                     <Text style={[styles.twBoxLabel, { color }]}>{label}</Text>
-                    <Text style={styles.twBoxAmount}>{s ? fmt(parseFloat(s.amount_collected)) : "₹0"}</Text>
+                    <Text style={styles.twBoxAmount}>{s ? `₹${parseFloat(s.amount_collected).toLocaleString("en-IN", { maximumFractionDigits: 0 })}` : "₹0"}</Text>
                     <Text style={styles.twBoxSub}>{s ? `${s.count_paid}/${s.count_total} cases` : "0 cases"}</Text>
                   </View>
                 );
