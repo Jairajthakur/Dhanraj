@@ -2037,17 +2037,24 @@ res.json({ imported, updated: 0, skipped, agentsCreated, agentsRemoved, total: r
     try {
       visitResult = await storage.query(`
         SELECT
-          COALESCE(lc.loan_no, bc.loan_no)            AS loan_no,
+          fa.name                                       AS agent_name,
+          COALESCE(lc.loan_no, bc.loan_no)             AS loan_no,
           COALESCE(lc.customer_name, bc.customer_name) AS customer_name,
-          fv.case_type, fv.lat, fv.lng, fv.accuracy,
-          TO_CHAR(fv.visited_at AT TIME ZONE 'Asia/Kolkata', 'DD-Mon-YYYY HH12:MI AM') AS visited_at,
-          fa.name AS agent_name
+          fv.case_type,
+          fv.visit_outcome,
+          fv.visit_remarks,
+          fv.lat,
+          fv.lng,
+          fv.accuracy,
+          (fv.photo_url IS NOT NULL AND fv.photo_url <> '') AS has_photo,
+          TO_CHAR(fv.visited_at AT TIME ZONE 'Asia/Kolkata', 'DD-Mon-YYYY HH12:MI AM') AS visited_at
         FROM field_visits fv
         LEFT JOIN fos_agents fa ON fa.id = fv.agent_id
         LEFT JOIN loan_cases lc ON lc.id = fv.case_id AND fv.case_type = 'loan'
         LEFT JOIN bkt_cases  bc ON bc.id = fv.case_id AND fv.case_type = 'bkt'
         ORDER BY fv.visited_at DESC
       `);
+      console.log("[export] field_visits rows:", visitResult.rows.length);
     } catch (e: any) { console.error("[export] field_visits query failed:", e.message); }
 
     const yn = (v: any) =>
@@ -2104,14 +2111,17 @@ res.json({ imported, updated: 0, skipped, agentsCreated, agentsRemoved, total: r
     }));
 
     const visitRows = visitResult.rows.map((r: any) => ({
-      "Agent Name":    r.agent_name    || "",
-      "Loan No":       r.loan_no       || "",
-      "Customer Name": r.customer_name || "",
-      "Case Type":     r.case_type     || "",
-      "Latitude":      r.lat           || "",
-      "Longitude":     r.lng           || "",
-      "Accuracy (m)":  r.accuracy      || "",
-      "Visited At":    r.visited_at    || "",
+      "Agent Name":    r.agent_name     || "",
+      "Loan No":       r.loan_no        || "",
+      "Customer Name": r.customer_name  || "",
+      "Case Type":     r.case_type      || "",
+      "Visit Outcome": r.visit_outcome  || "",
+      "Remarks":       r.visit_remarks  || "",
+      "Photo":         r.has_photo ? "Yes" : "No",
+      "Latitude":      r.lat            || "",
+      "Longitude":     r.lng            || "",
+      "Accuracy (m)":  r.accuracy       || "",
+      "Visited At":    r.visited_at     || "",
     }));
 
     // ── Build workbook ────────────────────────────────────────────────────────
