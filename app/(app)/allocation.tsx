@@ -1001,7 +1001,109 @@ function FeedbackModal({
             {activeTab === "Monthly Feedback" && (
               isMonthlyLocked ? (
                 <LockedFeedbackView item={caseItem!} />
-              ) : null
+              ) : (
+                <>
+                  <View style={fbStyles.tabHeaderRow}>
+                    <View style={[fbStyles.tabHeaderIcon, { backgroundColor: Colors.primary + "18" }]}>
+                      <Ionicons name="calendar" size={16} color={Colors.primary} />
+                    </View>
+                    <Text style={fbStyles.tabHeaderText}>Select feedback code and details</Text>
+                  </View>
+
+                  <Text style={fbStyles.sectionLabel}>Feedback Code</Text>
+                  {renderFbCodeRows()}
+
+                  <Text style={fbStyles.sectionLabel}>Detail Feedback</Text>
+                  {renderDetailSentences()}
+
+                  {feedbackCode === "PTP" && (
+                    <>
+                      <Text style={fbStyles.sectionLabel}>PTP Date</Text>
+                      <TextInput
+                        style={[fbStyles.textInput, { minHeight: 44, marginBottom: 12 }]}
+                        placeholder="DD-MM-YYYY" placeholderTextColor={Colors.textMuted}
+                        value={ptpDate} onChangeText={setPtpDate}
+                        keyboardType="numeric" maxLength={10}
+                      />
+                    </>
+                  )}
+
+                  {feedbackCode === "SFT" && (
+                    <>
+                      <Text style={fbStyles.sectionLabel}>Shifted To (City)</Text>
+                      <TextInput
+                        style={[fbStyles.textInput, { minHeight: 44, marginBottom: 12 }]}
+                        placeholder="Enter city name" placeholderTextColor={Colors.textMuted}
+                        value={sftCity} onChangeText={setSftCity}
+                      />
+                    </>
+                  )}
+
+                  <Text style={fbStyles.sectionLabel}>Occupation</Text>
+                  <View style={mfStyles.occChips}>
+                    {OCCUPATION_LIST.map((occ) => {
+                      const isSelected = occupation === occ;
+                      return (
+                        <Pressable
+                          key={occ}
+                          style={[mfStyles.occChip, isSelected && { backgroundColor: Colors.primary, borderColor: Colors.primary }]}
+                          onPress={() => setOccupation(isSelected ? "" : occ)}
+                        >
+                          <Text style={[mfStyles.occChipText, isSelected && { color: "#fff", fontWeight: "700" }]}>{occ}</Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+
+                  <YNToggle label="Customer Available" value={customerAvailable} onChange={setCustomerAvailable} />
+                  <YNToggle label="Vehicle Available" value={vehicleAvailable} onChange={setVehicleAvailable} />
+                  <YNToggle label="Third Party" value={thirdParty} onChange={setThirdParty} />
+                  {thirdParty === true && (
+                    <>
+                      <Text style={fbStyles.sectionLabel}>Third Party Name</Text>
+                      <TextInput
+                        style={[fbStyles.textInput, { minHeight: 44, marginBottom: 8 }]}
+                        placeholder="Enter name" placeholderTextColor={Colors.textMuted}
+                        value={thirdPartyName} onChangeText={setThirdPartyName}
+                      />
+                      <Text style={fbStyles.sectionLabel}>Third Party Number</Text>
+                      <TextInput
+                        style={[fbStyles.textInput, { minHeight: 44, marginBottom: 8 }]}
+                        placeholder="Enter number" placeholderTextColor={Colors.textMuted}
+                        value={thirdPartyNumber} onChangeText={setThirdPartyNumber}
+                        keyboardType="phone-pad"
+                      />
+                    </>
+                  )}
+
+                  <Text style={fbStyles.sectionLabel}>Projection</Text>
+                  <View style={{ flexDirection: "row", gap: 8, marginBottom: 12 }}>
+                    {(PROJECTION_OPTIONS as readonly string[]).map((p) => (
+                      <Pressable
+                        key={p}
+                        style={[fbStyles.feedbackOption, { flex: 1, alignItems: "center" },
+                          projection === p && { backgroundColor: Colors.primary, borderColor: Colors.primary }]}
+                        onPress={() => setProjection(projection === p ? "" : p)}
+                      >
+                        <Text style={[fbStyles.feedbackOptionText, projection === p && { color: "#fff" }]}>{p}</Text>
+                      </Pressable>
+                    ))}
+                  </View>
+
+                  <YNToggle label="Non Starter" value={nonStarter} onChange={setNonStarter} />
+                  <YNToggle label="KYC Purchase" value={kycPurchase} onChange={setKycPurchase} />
+                  <YNToggle label="Workable" value={workable} onChange={setWorkable} />
+
+                  <Text style={fbStyles.sectionLabel}>Comments (Optional)</Text>
+                  <TextInput
+                    style={fbStyles.textInput}
+                    placeholder="Additional comments..."
+                    placeholderTextColor={Colors.textMuted}
+                    value={comments} onChangeText={setComments}
+                    multiline numberOfLines={3}
+                  />
+                </>
+              )
             )}
 
             {/* ══ FIELD VISIT ══ */}
@@ -1306,8 +1408,7 @@ export default function AllocationScreen() {
     staleTime: 60_000,
   });
 
-  const allCases: CaseItem[]    = data?.cases     ?? [];
-  const allBktCases: CaseItem[] = bktData?.cases  ?? [];
+  const allCases: CaseItem[] = data?.cases ?? [];
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase();
