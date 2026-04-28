@@ -11,7 +11,7 @@ import * as Haptics from "expo-haptics";
 import * as ImagePicker from "expo-image-picker";
 import * as Location from "expo-location";
 import * as FileSystem from "expo-file-system";
-import * as Sharing from "expo-sharing";
+import RNShare from "react-native-share";
 import Colors from "@/constants/colors";
 import { api } from "@/lib/api";
 import { caseStore } from "@/lib/caseStore";
@@ -482,7 +482,7 @@ async function shareToWhatsApp(
 ): Promise<void> {
   if (photoUri && Platform.OS !== "web") {
     try {
-      // Copy to a stable file:// cache path so share sheet can read it
+      // Ensure a stable file:// path in cache
       const ext    = photoUri.split(".").pop()?.split("?")[0]?.toLowerCase() ?? "jpg";
       const cached = `${FileSystem.cacheDirectory}wa_share_${Date.now()}.${ext}`;
       const info   = await FileSystem.getInfoAsync(photoUri);
@@ -491,28 +491,23 @@ async function shareToWhatsApp(
       }
       const stableUri = info.exists ? cached : photoUri;
 
-      const canShare = await Sharing.isAvailableAsync();
-      if (canShare) {
-        // Step 1 — pre-fill WhatsApp with the text caption
-        const waUrl = `whatsapp://send?text=${encodeURIComponent(msg)}`;
-        const canWA = await Linking.canOpenURL(waUrl).catch(() => false);
-        if (canWA) await Linking.openURL(waUrl);
-        // Step 2 — open native share sheet for the image so agent picks WhatsApp group
-        // NOTE: Share.share({ url }) is iOS-only and ignored on Android.
-        //       expo-sharing shareAsync works on both platforms.
-        await Sharing.shareAsync(stableUri, {
-          mimeType: "image/jpeg",
-          dialogTitle: `Send ${reportTitle} photo to WhatsApp`,
-          UTI: "public.jpeg",
-        });
-        return;
-      }
-    } catch (_) {
-      // fall through to text-only
+      // react-native-share sends image + caption as ONE WhatsApp message
+      // on both Android (ACTION_SEND EXTRA_STREAM + EXTRA_TEXT) and iOS.
+      await RNShare.shareSingle({
+        social:  RNShare.Social.WHATSAPP,
+        url:     stableUri,
+        message: msg,
+        type:    "image/jpeg",
+        title:   reportTitle,
+      });
+      return;
+    } catch (err: any) {
+      if (err?.message?.toLowerCase().includes("cancel")) return;
+      // WhatsApp not installed or other error → fall through to text-only
     }
   }
 
-  // Text-only (no photo, web, share unavailable, or error)
+  // Text-only fallback (no photo, web, or error)
   const waUrl = `whatsapp://send?text=${encodeURIComponent(msg)}`;
   const canWA = await Linking.canOpenURL(waUrl).catch(() => false);
   if (canWA) {
