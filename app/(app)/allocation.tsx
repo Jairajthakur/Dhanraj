@@ -11,6 +11,7 @@ import * as Haptics from "expo-haptics";
 import * as ImagePicker from "expo-image-picker";
 import * as Location from "expo-location";
 import * as FileSystem from "expo-file-system";
+import * as Sharing from "expo-sharing";
 import Colors from "@/constants/colors";
 import { api } from "@/lib/api";
 import { caseStore } from "@/lib/caseStore";
@@ -491,40 +492,51 @@ async function shareToWhatsApp(
   photoUri: string | null,
   reportTitle: string,
 ): Promise<void> {
+  // ── Strategy: open WhatsApp with text first, then immediately share the
+  // image via the native share sheet pre-filtered to WhatsApp.
+  // This is the most reliable cross-platform approach because:
+  //  • react-native-share v10 shareSingle requires a bare base64 on some
+  //    Android builds and breaks silently when given a file:// path.
+  //  • expo-sharing always works with a real file:// path on both platforms.
+
   if (photoUri && Platform.OS !== "web") {
     try {
-      // Copy to a stable cache path so react-native-share can always access it
+      // Step 1 — copy to stable cache so the file survives modal unmount
       const ext    = photoUri.split(".").pop()?.split("?")[0]?.toLowerCase() ?? "jpg";
       const cached = `${FileSystem.cacheDirectory}wa_share_${Date.now()}.${ext}`;
-
-      const info = await FileSystem.getInfoAsync(photoUri);
+      const info   = await FileSystem.getInfoAsync(photoUri);
       if (!info.exists) throw new Error("Photo file not found");
       await FileSystem.copyAsync({ from: photoUri, to: cached });
 
-      // react-native-share requires a file:// URI on Android.
-      // FileSystem.cacheDirectory already includes file:// on iOS but NOT always on Android.
-      const fileUri = cached.startsWith("file://") ? cached : `file://${cached}`;
+      // Step 2 — open WhatsApp with the report text pre-filled
+      const waUrl = `whatsapp://send?text=${encodeURIComponent(msg)}`;
+      const canWA = await Linking.canOpenURL(waUrl).catch(() => false);
+      if (canWA) {
+        await Linking.openURL(waUrl);
+        // Small delay so WhatsApp is in foreground before the share sheet appears
+        await new Promise((r) => setTimeout(r, 800));
+      }
 
-      // react-native-share sends image + caption as ONE WhatsApp message
-      // on both Android (ACTION_SEND EXTRA_STREAM + EXTRA_TEXT) and iOS.
-      // Dynamic require so the native module is never loaded on web.
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const RNShare = require("react-native-share").default;
-      await RNShare.shareSingle({
-        social:  RNShare.Social.WHATSAPP,
-        url:     fileUri,
-        message: msg,
-        type:    "image/jpeg",
-        title:   reportTitle,
-      });
+      // Step 3 — share the photo via native sheet; user picks the same WA group
+      const canShare = await Sharing.isAvailableAsync();
+      if (canShare) {
+        await Sharing.shareAsync(cached, {
+          mimeType:    "image/jpeg",
+          dialogTitle: reportTitle,
+          UTI:         "public.jpeg",
+        });
+      }
       return;
     } catch (err: any) {
-      if (err?.message?.toLowerCase().includes("cancel")) return;
-      // WhatsApp not installed or other error → fall through to text-only
+      if (
+        err?.message?.toLowerCase().includes("cancel") ||
+        err?.message?.toLowerCase().includes("dismissed")
+      ) return;
+      // Fall through to text-only on any other error
     }
   }
 
-  // Text-only fallback (no photo, web, or error)
+  // ── Text-only fallback (no photo, web, or share error) ───────────────────
   const waUrl = `whatsapp://send?text=${encodeURIComponent(msg)}`;
   const canWA = await Linking.canOpenURL(waUrl).catch(() => false);
   if (canWA) {
