@@ -494,45 +494,40 @@ async function shareToWhatsApp(
   photoUri: string | null,
   reportTitle: string,
 ): Promise<void> {
-  // With photo: send photo first, then text report right after (500ms delay).
-  // This gives the layout: [photo message] immediately followed by [text report].
+  // With photo: use react-native-share shareSingle with a file:// URI + message.
+  // WhatsApp treats `message` as the caption when url is a local file:// path —
+  // this produces a single bubble: image on top, caption text below.
   if (photoUri && Platform.OS !== "web") {
     try {
-      let base64Url: string | null = null;
+      // Ensure we have a file:// URI (not content:// or base64)
+      let fileUri = photoUri;
 
       if (photoUri.startsWith("data:")) {
-        base64Url = photoUri;
-      } else {
-        let localUri = photoUri;
-        if (Platform.OS === "android" && photoUri.startsWith("content://")) {
-          const dest = `${FileSystem.cacheDirectory}visit_photo_share.jpg`;
-          await FileSystem.copyAsync({ from: photoUri, to: dest });
-          localUri = dest;
-        }
-        const b64 = await FileSystem.readAsStringAsync(localUri, {
+        // base64 → write to cache file
+        const base64Data = photoUri.split(",")[1];
+        const dest = `${FileSystem.cacheDirectory}fv_share_photo.jpg`;
+        await FileSystem.writeAsStringAsync(dest, base64Data, {
           encoding: FileSystem.EncodingType.Base64,
         });
-        base64Url = `data:image/jpeg;base64,${b64}`;
+        fileUri = dest;
+      } else if (Platform.OS === "android" && photoUri.startsWith("content://")) {
+        // content:// → copy to cache file
+        const dest = `${FileSystem.cacheDirectory}fv_share_photo.jpg`;
+        await FileSystem.copyAsync({ from: photoUri, to: dest });
+        fileUri = dest;
       }
+      // file:// URIs can be used directly
 
-      if (base64Url) {
-        // eslint-disable-next-line @typescript-eslint/no-var-requires
-        const RNShare = require("react-native-share").default;
-        // Step 1: Send photo only
-        await RNShare.shareSingle({
-          social: RNShare.Social.WHATSAPP,
-          url:    base64Url,
-          type:   "image/jpeg",
-          title:  reportTitle,
-        });
-        // Step 2: Send text report immediately after
-        const waUrl = `whatsapp://send?text=${encodeURIComponent(msg)}`;
-        const canWA = await Linking.canOpenURL(waUrl).catch(() => false);
-        if (canWA) {
-          setTimeout(() => Linking.openURL(waUrl), 500);
-        }
-        return;
-      }
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const RNShare = require("react-native-share").default;
+      await RNShare.shareSingle({
+        social:  RNShare.Social.WHATSAPP,
+        url:     fileUri,          // file:// URI → WhatsApp shows image
+        message: msg,              // caption text shown below the image
+        type:    "image/jpeg",
+        title:   reportTitle,
+      });
+      return;
     } catch (e: any) {
       if (e?.error === "ECANCELLED" || e?.message?.includes("cancel")) return;
       console.warn("[shareToWhatsApp] photo share failed, falling back to text:", e);
