@@ -463,10 +463,11 @@ function buildCallLogMsg(
     `📞 *CALL LOG REPORT*`,
     `━━━━━━━━━━━━━━━━━━━━`,
     `👥 *Customer:* ${caseItem.customer_name?.toUpperCase() ?? "—"}`,
-    caseItem.loan_no ? `🔖 *Loan No:*  ${caseItem.loan_no}` : "",
-    callOutcome      ? `📞 *Outcome:*  ${callOutcome}`      : "",
-    callComments     ? `💬 *Comments:* ${callComments}`     : "",
-    callPtpDate      ? `📅 *PTP Date:* ${callPtpDate}`      : "",
+    caseItem.loan_no  ? `🔖 *Loan No:*  ${caseItem.loan_no}`      : "",
+    caseItem.pos != null ? `💰 *POS:*      ${fmtRupee(caseItem.pos)}` : "",
+    callOutcome       ? `📞 *Outcome:*  ${callOutcome}`             : "",
+    callComments      ? `💬 *Comments:* ${callComments}`            : "",
+    callPtpDate       ? `📅 *PTP Date:* ${callPtpDate}`             : "",
     `⏰ *Time:*     ${new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true })}`,
     `━━━━━━━━━━━━━━━━━━━━`,
     `_Dhanraj Collections App_`,
@@ -510,7 +511,26 @@ async function shareFieldVisitWhatsApp(
   }
 }
 
-async function shareCallLogWhatsApp(msg: string): Promise<void> {
+async function shareCallLogWhatsApp(msg: string, photoUri: string | null): Promise<void> {
+  if (photoUri && Platform.OS !== "web") {
+    try {
+      const canShare = await Sharing.isAvailableAsync();
+      if (canShare) {
+        if (Platform.OS === "ios") {
+          await Share.share({ message: msg, url: photoUri, title: "Call Log Report" });
+          return;
+        }
+        await Sharing.shareAsync(photoUri, {
+          mimeType: "image/jpeg",
+          dialogTitle: "Share Call Log to WhatsApp Group",
+          UTI: "public.jpeg",
+        });
+        return;
+      }
+    } catch (_) {
+      // fall through to text-only
+    }
+  }
   const waUrl = `whatsapp://send?text=${encodeURIComponent(msg)}`;
   const canWA = await Linking.canOpenURL(waUrl).catch(() => false);
   if (canWA) {
@@ -737,9 +757,10 @@ function FeedbackModal({
       }
 
       if (activeTab === "Call Log") {
-        const msg = buildCallLogMsg(caseItem, callOutcome, callComments, callPtpDate);
+        const msg      = buildCallLogMsg(caseItem, callOutcome, callComments, callPtpDate);
+        const photoUri = photos.length > 0 ? photos[0].uri : null;
         // Directly share to WhatsApp — no confirmation needed for agent
-        setTimeout(() => shareCallLogWhatsApp(msg), 300);
+        setTimeout(() => shareCallLogWhatsApp(msg, photoUri), 300);
       }
     } catch (e: unknown) {
       Alert.alert("Error", e instanceof Error ? e.message : "Something went wrong");
