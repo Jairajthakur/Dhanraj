@@ -497,23 +497,23 @@ async function shareToWhatsApp(
         return;
       }
 
-      // Android: first send text to WhatsApp, then open share sheet for the photo.
-      // WhatsApp on Android cannot receive both text + image in a single intent.
-      const waUrl = `whatsapp://send?text=${encodeURIComponent(msg)}`;
-      const canWA = await Linking.canOpenURL(waUrl).catch(() => false);
-      if (canWA) await Linking.openURL(waUrl);
-
-      // Small delay so WhatsApp has time to open before the share sheet appears
-      await new Promise(res => setTimeout(res, 1500));
-
+      // Android: share photo FIRST via native sheet (agent picks WhatsApp group),
+      // then WhatsApp deep link opens with the text pre-filled.
+      // Order matters — openURL backgrounds the app so anything after it won't run.
       const canShare = await Sharing.isAvailableAsync();
       if (canShare) {
         await Sharing.shareAsync(stableUri, {
           mimeType: "image/jpeg",
-          dialogTitle: "Select WhatsApp to attach this photo",
+          dialogTitle: "Send photo to WhatsApp group",
           UTI: "public.jpeg",
         });
       }
+
+      // After share sheet is dismissed, open WhatsApp with the report text
+      await new Promise(res => setTimeout(res, 500));
+      const waUrl = `whatsapp://send?text=${encodeURIComponent(msg)}`;
+      const canWA = await Linking.canOpenURL(waUrl).catch(() => false);
+      if (canWA) await Linking.openURL(waUrl);
       return;
     } catch (_) {
       // fall through to text-only
