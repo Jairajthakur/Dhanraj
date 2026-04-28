@@ -3320,6 +3320,50 @@ const logoData: Uint8Array | null = fsNode.existsSync(logoPath) ? new Uint8Array
   return await Packer.toBuffer(doc);
 }
 
+// ── GET preview routes (return HTML for WebView) ──────────────────────────
+app.get("/api/admin/preview-pre-intimation", requireAdmin, (req, res) => {
+  try {
+    const p = buildIntimationParams({
+      customer_name:   req.query.customer_name   || "___________",
+      address:         req.query.address         || "___________",
+      app_id:          req.query.app_id          || "___________",
+      loan_no:         req.query.loan_no         || "___________",
+      registration_no: req.query.registration_no || "___________",
+      asset_make:      req.query.asset_make      || "___________",
+      engine_no:       req.query.engine_no       || "___________",
+      chassis_no:      req.query.chassis_no      || "___________",
+      date:            req.query.date            || new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "2-digit", year: "numeric" }),
+      police_station:  req.query.police_station  || "________________________________",
+      tq:              req.query.tq              || "_____________",
+    });
+    res.setHeader("Content-Type", "text/html");
+    res.send(buildPreIntimationHtml(p));
+  } catch (err: any) { res.status(500).send(err.message); }
+});
+
+app.get("/api/admin/preview-post-intimation", requireAdmin, (req, res) => {
+  try {
+    const p = buildIntimationParams({
+      customer_name:        req.query.customer_name        || "___________",
+      address:              req.query.address              || "___________",
+      app_id:               req.query.app_id              || "___________",
+      loan_no:              req.query.loan_no             || "___________",
+      registration_no:      req.query.registration_no     || "___________",
+      asset_make:           req.query.asset_make          || "___________",
+      engine_no:            req.query.engine_no           || "___________",
+      chassis_no:           req.query.chassis_no          || "___________",
+      date:                 req.query.date                || new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "2-digit", year: "numeric" }),
+      police_station:       req.query.police_station       || "________________________________",
+      tq:                   req.query.tq                  || "_____________",
+      repossession_date:    req.query.repossession_date   || "",
+      repossession_address: req.query.repossession_address|| "",
+      reference_no:         req.query.reference_no        || "",
+    }, true);
+    res.setHeader("Content-Type", "text/html");
+    res.send(buildPostIntimationHtml(p));
+  } catch (err: any) { res.status(500).send(err.message); }
+});
+
 app.post("/api/admin/generate-pre-intimation", requireAdmin, async (req, res) => {
   try {
     const p           = buildIntimationParams(req.body);
