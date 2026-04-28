@@ -147,9 +147,6 @@ function CaseDetailModal({ item, onClose, onResetCase, onStatusUpdated }: CaseDe
     { label: "APP ID", value: localItem.app_id },
     { label: "BKT", value: localItem.bkt },
     { label: "Mobile No", value: localItem.mobile_no, phone: true },
-    ...(localItem.extra_numbers?.length > 0
-      ? localItem.extra_numbers.map((num: string, i: number) => ({ label: `Added No. ${i + 1}`, value: num, phone: true }))
-      : []),
     { label: "Address", value: localItem.address },
     { label: "Ref Address", value: localItem.reference_address },
     { label: "Ref 1 Name", value: localItem.ref1_name },
@@ -258,7 +255,7 @@ export default function AgentDetailScreen() {
   const [companyTab, setCompanyTab] = useState("All");
   const [selectedCase, setSelectedCase] = useState<any>(null);
 
-  const { data: agentsData } = useQuery({ queryKey: ["/api/admin/agents"], queryFn: () => api.admin.getAgents() });
+  const { data: agentsData } = useQuery({ queryKey: ["/api/admin/agents"], queryFn: () => api.admin.getAgents(), staleTime: 0 });
   const { data: casesData, isLoading, refetch } = useQuery({ queryKey: ["/api/admin/cases/agent", id], queryFn: () => api.admin.getCasesByAgent(Number(id)), enabled: !!id, refetchInterval: 20000 });
   const { data: statsData } = useQuery({ queryKey: ["/api/admin/agent/stats", id], queryFn: () => api.admin.getAgentStats(Number(id)), enabled: !!id });
 
@@ -292,7 +289,9 @@ export default function AgentDetailScreen() {
     } catch (e: any) { Alert.alert("Error", e.message); }
   };
 
-  const agent = agentsData?.agents?.find((a: any) => String(a.id) === id);
+  // Get agent from agents list, or fall back to agent_name embedded in case rows
+  const agent = agentsData?.agents?.find((a: any) => String(a.id) === id)
+    ?? (cases.length > 0 ? { name: cases[0].agent_name, phone: cases[0].agent_phone ?? null } : null);
   const cases: any[] = casesData?.cases || [];
 
   // ── Distinct companies for this agent ────────────────────────────────────
