@@ -69,6 +69,7 @@ interface FieldVisit {
   status?:       string;          // "Customer Absent" | "Payment Collected" | etc.
   remarks?:      string;
   photo_url?:    string;
+  has_photo?:    boolean;         // server sets this when photo_url is non-empty
   latitude?:     number;
   longitude?:    number;
   accuracy?:     number;
@@ -165,31 +166,65 @@ function buildVisitWhatsAppMsg(visit: FieldVisit): string {
 async function shareVisitToWhatsApp(visit: FieldVisit): Promise<void> {
   const msg = buildVisitWhatsAppMsg(visit);
 
-  if (visit.photo_url && Platform.OS !== "web") {
-    // ── Download photo → share via native sheet (user picks WhatsApp group) ──
-    const ext      = visit.photo_url.split("?")[0].split(".").pop()?.toLowerCase() ?? "jpg";
-    const localUri = `${FileSystem.cacheDirectory}visit_${visit.id}.${ext}`;
+  // ── has_photo is reliable; photo_url from admin API is a base64 data: URL
+  // which FileSystem.downloadAsync cannot fetch. Use the proper HTTP endpoint.
+  const hasPhoto = visit.has_photo || (visit.photo_url?.startsWith("data:") === false && !!visit.photo_url);
+
+  if (hasPhoto && Platform.OS !== "web") {
+    // ── Build the proper HTTP photo URL using the dedicated photo endpoint ──
+    const token = await tokenStore.get().catch(() => null);
+    const photoHttpUrl = `${API}/api/field-visits/${visit.id}/photo${token ? `?token=${encodeURIComponent(token)}` : ""}`;
+    const localUri = `${FileSystem.cacheDirectory}visit_${visit.id}.jpg`;
+
     try {
-      const info = await FileSystem.getInfoAsync(localUri);
-      if (!info.exists) {
-        await FileSystem.downloadAsync(visit.photo_url, localUri);
-      }
-      const canShare = await Sharing.isAvailableAsync();
-      if (canShare) {
-        // Step 1 — open WhatsApp with the text pre-filled so user can copy caption
-        const waUrl = `whatsapp://send?text=${encodeURIComponent(msg)}`;
-        const canWA = await Linking.canOpenURL(waUrl).catch(() => false);
-        if (canWA) await Linking.openURL(waUrl);
-        // Step 2 — share the image file (user selects same WhatsApp group)
-        await Sharing.shareAsync(localUri, {
-          mimeType: "image/jpeg",
-          dialogTitle: "Share visit photo to WhatsApp Group",
-          UTI: "public.jpeg",
-        });
-        return;
+      // Always re-download to ensure we have the latest photo
+      const downloadResult = await FileSystem.downloadAsync(photoHttpUrl, localUri, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+
+      if (downloadResult.status === 200) {
+        const canShare = await Sharing.isAvailableAsync();
+        if (canShare) {
+          // Step 1 — open WhatsApp with the text pre-filled so user can copy caption
+          const waUrl = `whatsapp://send?text=${encodeURIComponent(msg)}`;
+          const canWA = await Linking.canOpenURL(waUrl).catch(() => false);
+          if (canWA) await Linking.openURL(waUrl);
+          // Step 2 — share the image file (user selects same WhatsApp group)
+          await Sharing.shareAsync(localUri, {
+            mimeType: "image/jpeg",
+            dialogTitle: "Share visit photo to WhatsApp Group",
+            UTI: "public.jpeg",
+          });
+          return;
+        }
       }
     } catch (_) {
-      // fall through to text-only
+      // fall through to text-only if photo download fails
+    }
+  } else if (visit.photo_url && !visit.photo_url.startsWith("data:") && Platform.OS !== "web") {
+    // ── Legacy: photo_url is already a proper HTTP URL ──
+    const localUri = `${FileSystem.cacheDirectory}visit_${visit.id}.jpg`;
+    try {
+      const token = await tokenStore.get().catch(() => null);
+      const downloadResult = await FileSystem.downloadAsync(visit.photo_url, localUri, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (downloadResult.status === 200) {
+        const canShare = await Sharing.isAvailableAsync();
+        if (canShare) {
+          const waUrl = `whatsapp://send?text=${encodeURIComponent(msg)}`;
+          const canWA = await Linking.canOpenURL(waUrl).catch(() => false);
+          if (canWA) await Linking.openURL(waUrl);
+          await Sharing.shareAsync(localUri, {
+            mimeType: "image/jpeg",
+            dialogTitle: "Share visit photo to WhatsApp Group",
+            UTI: "public.jpeg",
+          });
+          return;
+        }
+      }
+    } catch (_) {
+      // fall through
     }
   }
 
@@ -276,12 +311,24 @@ function openMap(lat: number, lng: number, label?: string) {
 
 // ─── Visit Card ───────────────────────────────────────────────────────────────
 function VisitCard({ visit }: { visit: FieldVisit }) {
-  const [photoOpen, setPhotoOpen] = useState(false);
-  const [sharing,   setSharing]   = useState(false);
+  const [photoOpen,  setPhotoOpen]  = useState(false);
+  const [sharing,    setSharing]    = useState(false);
+  const [photoToken, setPhotoToken] = useState<string | null>(null);
 
-  // FIX: was calling setPhotoOpen(true) unconditionally even if photo_url undefined
+  // Build HTTP photo URL using the dedicated photo endpoint (avoids base64 data: issues)
+  const photoHttpUrl = photoToken != null
+    ? `${API}/api/field-visits/${visit.id}/photo?token=${encodeURIComponent(photoToken)}`
+    : `${API}/api/field-visits/${visit.id}/photo`;
+
+  // Load token once on mount so we can use it for the photo image
+  useEffect(() => {
+    tokenStore.get().then(setPhotoToken).catch(() => {});
+  }, []);
+
+  const hasPhoto = visit.has_photo || !!visit.photo_url;
+
   const handleViewPhoto = () => {
-    if (!visit.photo_url) {
+    if (!hasPhoto) {
       Alert.alert("No Photo", "No photo was captured for this visit.");
       return;
     }
@@ -322,9 +369,9 @@ function VisitCard({ visit }: { visit: FieldVisit }) {
       ) : null}
 
       {/* Photo */}
-      {visit.photo_url ? (
+      {hasPhoto ? (
         <View style={vc.photoWrap}>
-          <Image source={{ uri: visit.photo_url }} style={vc.photo} resizeMode="cover" />
+          <Image source={{ uri: photoHttpUrl }} style={vc.photo} resizeMode="cover" />
           <TouchableOpacity style={vc.viewPhotoBtn} onPress={handleViewPhoto} activeOpacity={0.85}>
             <Ionicons name="expand-outline" size={14} color="#fff" />
             <Text style={vc.viewPhotoText}>View photo</Text>
@@ -399,8 +446,8 @@ function VisitCard({ visit }: { visit: FieldVisit }) {
       </TouchableOpacity>
 
       {/* Photo viewer */}
-      {photoOpen && visit.photo_url ? (
-        <PhotoViewer uri={visit.photo_url} onClose={() => setPhotoOpen(false)} />
+      {photoOpen && hasPhoto ? (
+        <PhotoViewer uri={photoHttpUrl} onClose={() => setPhotoOpen(false)} />
       ) : null}
     </View>
   );
