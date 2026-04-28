@@ -460,7 +460,7 @@ function buildFieldVisitMsg(
     `⏰ *Time:*     ${new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true })}`,
     gps       ? `📍 *Location:* ${gps.lat.toFixed(5)}, ${gps.lng.toFixed(5)}` : "",
     mapsLink  ? `🗺️ ${mapsLink}` : "",
-    photoUrl  ? `📸 *Photo:* ${photoUrl}` : "",
+    // Photo is shared as an actual image attachment, not a URL link
     `━━━━━━━━━━━━━━━━━━━━`,
     `_Dhanraj Collections App_`,
   ];
@@ -491,17 +491,56 @@ function buildCallLogMsg(
 
 async function shareToWhatsApp(
   msg: string,
-  _photoUri: string | null,   // kept for signature compat; photo URL is now in msg
+  photoUri: string | null,
   reportTitle: string,
 ): Promise<void> {
-  // Photo is already embedded as a public server URL inside `msg`.
-  // Pure Linking approach — works on web, Android APK, iOS with zero native modules.
+  // With photo: use react-native-share to send image + caption directly to WhatsApp.
+  // This produces the correct layout: image preview at top, report text below it.
+  if (photoUri && Platform.OS !== "web") {
+    try {
+      let base64Url: string | null = null;
+
+      if (photoUri.startsWith("data:")) {
+        base64Url = photoUri; // already base64 data URL
+      } else {
+        // Convert file:// or content:// URI to base64
+        let localUri = photoUri;
+        if (Platform.OS === "android" && photoUri.startsWith("content://")) {
+          const dest = `${FileSystem.cacheDirectory}visit_photo_share.jpg`;
+          await FileSystem.copyAsync({ from: photoUri, to: dest });
+          localUri = dest;
+        }
+        const b64 = await FileSystem.readAsStringAsync(localUri, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+        base64Url = `data:image/jpeg;base64,${b64}`;
+      }
+
+      if (base64Url) {
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const RNShare = require("react-native-share").default;
+        await RNShare.shareSingle({
+          social:  RNShare.Social.WHATSAPP,
+          message: msg,
+          url:     base64Url,
+          type:    "image/jpeg",
+          title:   reportTitle,
+        });
+        return;
+      }
+    } catch (e: any) {
+      // User cancelled — do not fall through
+      if (e?.error === "ECANCELLED" || e?.message?.includes("cancel")) return;
+      console.warn("[shareToWhatsApp] image share failed, falling back to text:", e);
+    }
+  }
+
+  // No photo / web / fallback: text-only WhatsApp deep link
   const waUrl = `whatsapp://send?text=${encodeURIComponent(msg)}`;
   const canWA = await Linking.canOpenURL(waUrl).catch(() => false);
   if (canWA) {
     await Linking.openURL(waUrl);
   } else {
-    // Web fallback — wa.me deep-link works in browser
     const webWaUrl = `https://wa.me/?text=${encodeURIComponent(msg)}`;
     const canWeb = await Linking.canOpenURL(webWaUrl).catch(() => false);
     if (canWeb) {
