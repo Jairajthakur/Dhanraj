@@ -482,36 +482,45 @@ async function shareToWhatsApp(
 ): Promise<void> {
   if (photoUri && Platform.OS !== "web") {
     try {
-      // iOS — Share.share with both message + url sends image AND text together in one sheet
-      if (Platform.OS === "ios") {
-        await Share.share({ message: msg, url: photoUri, title: reportTitle });
-        return;
-      }
-
-      // Android — copy photo to a stable cache path, then share via native sheet.
-      // Agent selects WhatsApp from the sheet to send the image.
-      // Text is also encoded so WhatsApp receives it as a caption where supported.
-      const ext      = photoUri.split(".").pop()?.toLowerCase() ?? "jpg";
-      const cached   = `${FileSystem.cacheDirectory}wa_share_${Date.now()}.${ext}`;
-      const info     = await FileSystem.getInfoAsync(photoUri);
+      // Copy to a stable cache path so URI stays valid after modal closes
+      const ext    = photoUri.split(".").pop()?.split("?")[0]?.toLowerCase() ?? "jpg";
+      const cached = `${FileSystem.cacheDirectory}wa_share_${Date.now()}.${ext}`;
+      const info   = await FileSystem.getInfoAsync(photoUri);
       if (info.exists) {
         await FileSystem.copyAsync({ from: photoUri, to: cached });
       }
-      const canShare = await Sharing.isAvailableAsync();
-      if (canShare) {
-        await Sharing.shareAsync(cached, {
-          mimeType: "image/jpeg",
-          dialogTitle: "Send to WhatsApp — select your group",
-          UTI: "public.jpeg",
-        });
+      const stableUri = info.exists ? cached : photoUri;
+
+      if (Platform.OS === "ios") {
+        // iOS: Share.share with message + url sends both text and image together
+        await Share.share({ message: msg, url: stableUri, title: reportTitle });
         return;
       }
+
+      // Android: first send text to WhatsApp, then open share sheet for the photo.
+      // WhatsApp on Android cannot receive both text + image in a single intent.
+      const waUrl = `whatsapp://send?text=${encodeURIComponent(msg)}`;
+      const canWA = await Linking.canOpenURL(waUrl).catch(() => false);
+      if (canWA) await Linking.openURL(waUrl);
+
+      // Small delay so WhatsApp has time to open before the share sheet appears
+      await new Promise(res => setTimeout(res, 1500));
+
+      const canShare = await Sharing.isAvailableAsync();
+      if (canShare) {
+        await Sharing.shareAsync(stableUri, {
+          mimeType: "image/jpeg",
+          dialogTitle: "Select WhatsApp to attach this photo",
+          UTI: "public.jpeg",
+        });
+      }
+      return;
     } catch (_) {
       // fall through to text-only
     }
   }
 
-  // Text-only (no photo, web, or share unavailable)
+  // Text-only (no photo, web, or error)
   const waUrl = `whatsapp://send?text=${encodeURIComponent(msg)}`;
   const canWA = await Linking.canOpenURL(waUrl).catch(() => false);
   if (canWA) {
