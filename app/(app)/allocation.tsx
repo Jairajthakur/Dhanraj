@@ -482,38 +482,36 @@ async function shareToWhatsApp(
 ): Promise<void> {
   if (photoUri && Platform.OS !== "web") {
     try {
-      // iOS — Share.share with both message + url sends image AND text together
+      // iOS — Share.share with both message + url sends image AND text together in one sheet
       if (Platform.OS === "ios") {
         await Share.share({ message: msg, url: photoUri, title: reportTitle });
         return;
       }
 
-      // Android — WhatsApp doesn't accept text+image in a single intent via Expo.
-      // Best UX: open the native share sheet targeted at WhatsApp with the image
-      // AND pre-open WhatsApp with text so the agent can send both.
-      // Step 1: open WhatsApp with text pre-filled
-      const waUrl = `whatsapp://send?text=${encodeURIComponent(msg)}`;
-      const canWA = await Linking.canOpenURL(waUrl).catch(() => false);
-      if (canWA) await Linking.openURL(waUrl);
-
-      // Step 2: after a short delay, open native share sheet with the photo
-      // Agent picks WhatsApp again to attach the image
-      await new Promise(res => setTimeout(res, 1200));
+      // Android — copy photo to a stable cache path, then share via native sheet.
+      // Agent selects WhatsApp from the sheet to send the image.
+      // Text is also encoded so WhatsApp receives it as a caption where supported.
+      const ext      = photoUri.split(".").pop()?.toLowerCase() ?? "jpg";
+      const cached   = `${FileSystem.cacheDirectory}wa_share_${Date.now()}.${ext}`;
+      const info     = await FileSystem.getInfoAsync(photoUri);
+      if (info.exists) {
+        await FileSystem.copyAsync({ from: photoUri, to: cached });
+      }
       const canShare = await Sharing.isAvailableAsync();
       if (canShare) {
-        await Sharing.shareAsync(photoUri, {
+        await Sharing.shareAsync(cached, {
           mimeType: "image/jpeg",
-          dialogTitle: `Attach photo — ${reportTitle}`,
+          dialogTitle: "Send to WhatsApp — select your group",
           UTI: "public.jpeg",
         });
+        return;
       }
-      return;
     } catch (_) {
       // fall through to text-only
     }
   }
 
-  // Text-only (no photo, or web, or error)
+  // Text-only (no photo, web, or share unavailable)
   const waUrl = `whatsapp://send?text=${encodeURIComponent(msg)}`;
   const canWA = await Linking.canOpenURL(waUrl).catch(() => false);
   if (canWA) {
@@ -741,20 +739,27 @@ function FeedbackModal({
       qc.invalidateQueries({ queryKey: ["/api/stats"] });
       qc.invalidateQueries({ queryKey: ["/api/bkt-perf-summary"] });
       qc.invalidateQueries({ queryKey: ["/api/broken-ptps"] }); // re-check blocking after feedback
+
+      // Capture share data BEFORE onClose() unmounts the modal and clears state
+      const shareTab     = activeTab;
+      const sharePhotoUri = photos.length > 0 ? photos[0].uri : null;
+      const shareMsg =
+        shareTab === "Field Visit"
+          ? buildFieldVisitMsg(caseItem, visitOutcome, visitRemarks, gps)
+          : shareTab === "Call Log"
+          ? buildCallLogMsg(caseItem, callOutcome, callComments, callPtpDate)
+          : null;
+
       onClose();
 
-      if (activeTab === "Field Visit") {
-        const msg      = buildFieldVisitMsg(caseItem, visitOutcome, visitRemarks, gps);
-        const photoUri = photos.length > 0 ? photos[0].uri : null;
+      if (shareMsg && shareTab === "Field Visit") {
         // Directly share to WhatsApp — no confirmation needed for agent
-        setTimeout(() => shareFieldVisitWhatsApp(msg, photoUri), 300);
+        setTimeout(() => shareFieldVisitWhatsApp(shareMsg, sharePhotoUri), 300);
       }
 
-      if (activeTab === "Call Log") {
-        const msg      = buildCallLogMsg(caseItem, callOutcome, callComments, callPtpDate);
-        const photoUri = photos.length > 0 ? photos[0].uri : null;
+      if (shareMsg && shareTab === "Call Log") {
         // Directly share to WhatsApp — no confirmation needed for agent
-        setTimeout(() => shareCallLogWhatsApp(msg, photoUri), 300);
+        setTimeout(() => shareCallLogWhatsApp(shareMsg, sharePhotoUri), 300);
       }
     } catch (e: unknown) {
       Alert.alert("Error", e instanceof Error ? e.message : "Something went wrong");
