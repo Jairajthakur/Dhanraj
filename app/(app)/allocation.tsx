@@ -783,8 +783,7 @@ function FeedbackModal({
       qc.invalidateQueries({ queryKey: ["/api/broken-ptps"] }); // re-check blocking after feedback
 
       // Capture share data BEFORE onClose() unmounts the modal and clears state
-      const shareTab     = activeTab;
-      const sharePhotoUri = photos.length > 0 ? photos[0].uri : null;
+      const shareTab = activeTab;
       const shareMsg =
         shareTab === "Field Visit"
           ? buildFieldVisitMsg(caseItem, visitOutcome, visitRemarks, gps, visitPhotoUrl)
@@ -792,16 +791,27 @@ function FeedbackModal({
           ? buildCallLogMsg(caseItem, callOutcome, callComments, callPtpDate)
           : null;
 
+      // For field visit photo: download server URL to a stable local cache file
+      // so the URI stays valid after the modal closes and state is cleared.
+      let sharePhotoUri: string | null = null;
+      if (shareTab === "Field Visit" && visitPhotoUrl) {
+        try {
+          const dest = `${FileSystem.cacheDirectory}fv_share_photo.jpg`;
+          const dl = await FileSystem.downloadAsync(visitPhotoUrl, dest);
+          if (dl.status === 200) sharePhotoUri = dl.uri;
+        } catch (e) {
+          console.warn("[share] photo download failed:", e);
+        }
+      }
+
       onClose();
 
       if (shareMsg && shareTab === "Field Visit") {
-        // Directly share to WhatsApp — no confirmation needed for agent
         setTimeout(() => shareFieldVisitWhatsApp(shareMsg, sharePhotoUri), 300);
       }
 
       if (shareMsg && shareTab === "Call Log") {
-        // Directly share to WhatsApp — no confirmation needed for agent
-        setTimeout(() => shareCallLogWhatsApp(shareMsg, sharePhotoUri), 300);
+        setTimeout(() => shareCallLogWhatsApp(shareMsg, null), 300);
       }
     } catch (e: unknown) {
       Alert.alert("Error", e instanceof Error ? e.message : "Something went wrong");
