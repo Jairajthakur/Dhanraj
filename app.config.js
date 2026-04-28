@@ -41,7 +41,12 @@ module.exports = ({ config }) => {
         "VIBRATE",
         "ACCESS_NETWORK_STATE",
         "USE_FULL_SCREEN_INTENT",   // allows heads-up / full screen alert
+        "READ_EXTERNAL_STORAGE",    // needed for sharing files/images
+        "WRITE_EXTERNAL_STORAGE",   // needed for sharing files/images
       ],
+      intentFilters: [],
+      // Allow Linking.canOpenURL to query WhatsApp on Android 11+
+      blockedPermissions: [],
       backgroundColor: "#000000",
       notification: {
         icon: "./assets/images/dhanraj-logo.png",
