@@ -23,6 +23,7 @@ import { getApiUrl } from "@/lib/query-client";
 import { ReassignCaseModal } from "@/components/ReassignCaseModal";
 import * as FileSystem from "expo-file-system";
 import * as Sharing from "expo-sharing";
+import { WebView } from "react-native-webview";
 
 const STATUS_COLORS: Record<string, string> = {
   Unpaid: Colors.statusUnpaid,
@@ -137,14 +138,14 @@ async function downloadIntimation(
     a.href = blobUrl; a.download = fileName; a.click();
     URL.revokeObjectURL(blobUrl);
   } else {
-    // Native (Android/iOS) — save to cache then share
     const arrayBuf = await res.arrayBuffer();
     const base64   = btoa(
       new Uint8Array(arrayBuf).reduce((s, b) => s + String.fromCharCode(b), ""),
     );
-    const mime     = format === "pdf" ? "application/pdf"
+    const mime = format === "pdf"
+      ? "application/pdf"
       : "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
-    const fileUri  = FileSystem.cacheDirectory + fileName;
+    const fileUri = FileSystem.cacheDirectory + fileName;
     await FileSystem.writeAsStringAsync(fileUri, base64, {
       encoding: FileSystem.EncodingType.Base64,
     });
@@ -156,41 +157,26 @@ async function downloadIntimation(
   }
 }
 
-// ── Letter preview helper ──────────────────────────────────────────────────
-function LetterPreview({ fields }: { fields: Record<string, string> }) {
-  const row = (label: string, value: string) => (
-    <View key={label} style={{ flexDirection: "row", marginBottom: 4 }}>
-      <Text style={{ width: 160, fontWeight: "600", color: "#374151", fontSize: 12 }}>{label}:</Text>
-      <Text style={{ flex: 1, color: "#111827", fontSize: 12 }}>{value || "___________"}</Text>
-    </View>
-  );
-  return (
-    <View style={{ backgroundColor: "#fff", borderRadius: 10, padding: 16, marginTop: 12, borderWidth: 1, borderColor: "#e5e7eb" }}>
-      <Text style={{ fontSize: 11, color: "#6b7280", marginBottom: 10, fontStyle: "italic" }}>Document preview — fill in details above then download</Text>
-      {Object.entries(fields).map(([k, v]) => row(k, v))}
-    </View>
-  );
-}
-
 // ── Pre Intimation Modal ───────────────────────────────────────────────────
 function PreIntimationModal({ item, onClose }: { item: any; onClose: () => void }) {
   const insets = useSafeAreaInsets();
-  const [downloading, setDownloading] = useState(false);
+  const [downloading, setDownloading]     = useState(false);
   const [downloadingPdf, setDownloadingPdf] = useState(false);
+  const [showPreview, setShowPreview]     = useState(false);
   const today = new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "2-digit", year: "numeric" });
   const [policeStation, setPoliceStation] = useState("");
-  const [tq, setTq] = useState("");
+  const [tq, setTq]                       = useState("");
 
   if (!item) return null;
 
-  const customerName = item.customer_name || "___________";
-  const address      = item.address       || "___________";
-  const appId        = item.app_id        || "___________";
-  const loanNo       = item.loan_no       || "___________";
-  const regNo        = item.registration_no || "___________";
-  const assetMake    = item.asset_make    || "___________";
-  const engineNo     = item.engine_no     || "___________";
-  const chassisNo    = item.chassis_no    || "___________";
+  const customerName = item.customer_name    || "___________";
+  const address      = item.address          || "___________";
+  const appId        = item.app_id           || "___________";
+  const loanNo       = item.loan_no          || "___________";
+  const regNo        = item.registration_no  || "___________";
+  const assetMake    = item.asset_make       || "___________";
+  const engineNo     = item.engine_no        || "___________";
+  const chassisNo    = item.chassis_no       || "___________";
 
   const body = {
     customer_name: customerName, address, app_id: appId, loan_no: loanNo,
@@ -200,14 +186,28 @@ function PreIntimationModal({ item, onClose }: { item: any; onClose: () => void 
     tq: tq.trim() || "_____________",
   };
 
+  // Build preview URL with live query params
+  const previewParams = new URLSearchParams({
+    customer_name: customerName, address, app_id: appId, loan_no: loanNo,
+    registration_no: regNo, asset_make: assetMake, engine_no: engineNo,
+    chassis_no: chassisNo, date: today,
+    police_station: policeStation.trim() || "________________________________",
+    tq: tq.trim() || "_____________",
+  });
+  const previewUrl = new URL(
+    "/api/admin/preview-pre-intimation?" + previewParams.toString(),
+    getApiUrl(),
+  ).toString();
+
   const handleDownload = async (format: "docx" | "pdf") => {
     const setter = format === "pdf" ? setDownloadingPdf : setDownloading;
     setter(true);
     try {
       const ext      = format === "pdf" ? "pdf" : "docx";
-      const endpoint = format === "pdf" ? "/api/admin/generate-pre-intimation" : "/api/admin/generate-pre-intimation-docx";
-      const fileName = `Pre_Intimation_${customerName.replace(/\s+/g, "_")}.${ext}`;
-      await downloadIntimation(endpoint, format, fileName, body);
+      const endpoint = format === "pdf"
+        ? "/api/admin/generate-pre-intimation"
+        : "/api/admin/generate-pre-intimation-docx";
+      await downloadIntimation(endpoint, format, `Pre_Intimation_${customerName.replace(/\s+/g, "_")}.${ext}`, body);
     } catch (e: any) { Alert.alert("Error", e.message || "Could not generate document"); }
     finally { setter(false); }
   };
@@ -215,52 +215,71 @@ function PreIntimationModal({ item, onClose }: { item: any; onClose: () => void 
   return (
     <Modal visible={!!item} transparent={false} animationType="slide" onRequestClose={onClose}>
       <View style={[intimStyles.screen, { paddingTop: insets.top }]}>
+        {/* Header */}
         <View style={intimStyles.header}>
-          <Pressable onPress={onClose} style={{ padding: 6 }}><Ionicons name="arrow-back" size={22} color="#fff" /></Pressable>
+          <Pressable onPress={onClose} style={{ padding: 6 }}>
+            <Ionicons name="arrow-back" size={22} color="#fff" />
+          </Pressable>
           <Text style={intimStyles.headerTitle} numberOfLines={1}>Pre Intimation</Text>
           <View style={{ flexDirection: "row", gap: 8 }}>
-            <Pressable style={[intimStyles.downloadBtn, { backgroundColor: "rgba(255,255,255,0.25)" }, downloading && { opacity: 0.6 }]} onPress={() => handleDownload("docx")} disabled={downloading || downloadingPdf}>
+            <Pressable
+              style={[intimStyles.downloadBtn, { backgroundColor: "rgba(255,255,255,0.25)" }, downloading && { opacity: 0.6 }]}
+              onPress={() => handleDownload("docx")} disabled={downloading || downloadingPdf}>
               {downloading ? <ActivityIndicator size="small" color="#fff" /> : <Ionicons name="document-outline" size={16} color="#fff" />}
               <Text style={intimStyles.downloadBtnText}>{downloading ? "…" : "DOCX"}</Text>
             </Pressable>
-            <Pressable style={[intimStyles.downloadBtn, { backgroundColor: "#dc2626" }, downloadingPdf && { opacity: 0.6 }]} onPress={() => handleDownload("pdf")} disabled={downloading || downloadingPdf}>
+            <Pressable
+              style={[intimStyles.downloadBtn, { backgroundColor: "#dc2626" }, downloadingPdf && { opacity: 0.6 }]}
+              onPress={() => handleDownload("pdf")} disabled={downloading || downloadingPdf}>
               {downloadingPdf ? <ActivityIndicator size="small" color="#fff" /> : <Ionicons name="document-text-outline" size={16} color="#fff" />}
               <Text style={intimStyles.downloadBtnText}>{downloadingPdf ? "…" : "PDF"}</Text>
             </Pressable>
           </View>
         </View>
-        <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={{ flex: 1 }}>
-          <ScrollView style={{ flex: 1 }} contentContainerStyle={intimStyles.letterContainer}>
-            <View style={intimStyles.editableCard}>
-              <Text style={intimStyles.editableTitle}>Fill in Details</Text>
-              <View style={intimStyles.editableRow}>
-                <Text style={intimStyles.editableLabel}>Police Station Name</Text>
-                <TextInput style={intimStyles.editableInput} placeholder="Enter police station name" placeholderTextColor={Colors.textMuted} value={policeStation} onChangeText={setPoliceStation} />
+
+        {/* Tab toggle */}
+        <View style={intimStyles.tabRow}>
+          <Pressable style={[intimStyles.tab, !showPreview && intimStyles.tabActive]} onPress={() => setShowPreview(false)}>
+            <Text style={[intimStyles.tabText, !showPreview && intimStyles.tabTextActive]}>Fill Details</Text>
+          </Pressable>
+          <Pressable style={[intimStyles.tab, showPreview && intimStyles.tabActive]} onPress={() => setShowPreview(true)}>
+            <Text style={[intimStyles.tabText, showPreview && intimStyles.tabTextActive]}>Preview Letter</Text>
+          </Pressable>
+        </View>
+
+        {!showPreview ? (
+          <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={{ flex: 1 }}>
+            <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 24 }}>
+              <View style={intimStyles.editableCard}>
+                <Text style={intimStyles.editableTitle}>Fill in Details</Text>
+                <View style={intimStyles.editableRow}>
+                  <Text style={intimStyles.editableLabel}>Police Station Name</Text>
+                  <TextInput style={intimStyles.editableInput} placeholder="Enter police station name" placeholderTextColor={Colors.textMuted} value={policeStation} onChangeText={setPoliceStation} />
+                </View>
+                <View style={intimStyles.editableRow}>
+                  <Text style={intimStyles.editableLabel}>TQ (Taluka)</Text>
+                  <TextInput style={intimStyles.editableInput} placeholder="Enter taluka name" placeholderTextColor={Colors.textMuted} value={tq} onChangeText={setTq} />
+                </View>
               </View>
-              <View style={intimStyles.editableRow}>
-                <Text style={intimStyles.editableLabel}>TQ (Taluka)</Text>
-                <TextInput style={intimStyles.editableInput} placeholder="Enter taluka name" placeholderTextColor={Colors.textMuted} value={tq} onChangeText={setTq} />
+              <Pressable style={intimStyles.previewBtn} onPress={() => setShowPreview(true)}>
+                <Ionicons name="eye-outline" size={16} color="#fff" />
+                <Text style={intimStyles.previewBtnText}>Preview Letter →</Text>
+              </Pressable>
+            </ScrollView>
+          </KeyboardAvoidingView>
+        ) : (
+          <WebView
+            source={{ uri: previewUrl }}
+            style={{ flex: 1 }}
+            startInLoadingState
+            renderLoading={() => (
+              <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
+                <ActivityIndicator size="large" color={Colors.primary} />
+                <Text style={{ marginTop: 8, color: Colors.textSecondary }}>Loading letter…</Text>
               </View>
-            </View>
-            <LetterPreview fields={{
-              "Customer Name":   customerName,
-              "Loan No":         loanNo,
-              "App ID":          appId,
-              "Address":         address,
-              "Asset Make":      assetMake,
-              "Reg No":          regNo,
-              "Engine No":       engineNo,
-              "Chassis No":      chassisNo,
-              "Date":            today,
-              "Police Station":  policeStation || "________________________________",
-              "TQ (Taluka)":     tq || "_____________",
-            }} />
-            <Text style={{ textAlign: "center", color: "#6b7280", fontSize: 12, marginTop: 16 }}>
-              Tap DOCX or PDF above to download the full document
-            </Text>
-            <View style={{ height: insets.bottom + 24 }} />
-          </ScrollView>
-        </KeyboardAvoidingView>
+            )}
+          />
+        )}
       </View>
     </Modal>
   );
@@ -269,11 +288,12 @@ function PreIntimationModal({ item, onClose }: { item: any; onClose: () => void 
 // ── Post Intimation Modal ──────────────────────────────────────────────────
 function PostIntimationModal({ item, onClose }: { item: any; onClose: () => void }) {
   const insets = useSafeAreaInsets();
-  const [downloading, setDownloading] = useState(false);
+  const [downloading, setDownloading]       = useState(false);
   const [downloadingPdf, setDownloadingPdf] = useState(false);
+  const [showPreview, setShowPreview]       = useState(false);
   const today = new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "2-digit", year: "numeric" });
-  const [policeStation, setPoliceStation] = useState("");
-  const [tq, setTq] = useState("");
+  const [policeStation, setPoliceStation]       = useState("");
+  const [tq, setTq]                             = useState("");
   const [repossessionDate, setRepossessionDate] = useState(today);
   const [repossessionAddress, setRepossessionAddress] = useState(item?.address || "");
 
@@ -294,14 +314,30 @@ function PostIntimationModal({ item, onClose }: { item: any; onClose: () => void
     reference_no: loanNo,
   };
 
+  const previewParams = new URLSearchParams({
+    customer_name: customerName, address: item.address || "", app_id: item.app_id || "",
+    loan_no: loanNo, registration_no: regNo, asset_make: item.asset_make || "",
+    engine_no: item.engine_no || "", chassis_no: item.chassis_no || "", date: today,
+    police_station: policeStation.trim() || "________________________________",
+    tq: tq.trim() || "_____________",
+    repossession_date: repossessionDate || today,
+    repossession_address: repossessionAddress || item.address || "",
+    reference_no: loanNo,
+  });
+  const previewUrl = new URL(
+    "/api/admin/preview-post-intimation?" + previewParams.toString(),
+    getApiUrl(),
+  ).toString();
+
   const handleDownload = async (format: "docx" | "pdf") => {
     const setter = format === "pdf" ? setDownloadingPdf : setDownloading;
     setter(true);
     try {
       const ext      = format === "pdf" ? "pdf" : "docx";
-      const endpoint = format === "pdf" ? "/api/admin/generate-post-intimation" : "/api/admin/generate-post-intimation-docx";
-      const fileName = `Post_Intimation_${customerName.replace(/\s+/g, "_")}.${ext}`;
-      await downloadIntimation(endpoint, format, fileName, body);
+      const endpoint = format === "pdf"
+        ? "/api/admin/generate-post-intimation"
+        : "/api/admin/generate-post-intimation-docx";
+      await downloadIntimation(endpoint, format, `Post_Intimation_${customerName.replace(/\s+/g, "_")}.${ext}`, body);
     } catch (e: any) { Alert.alert("Error", e.message || "Could not generate document"); }
     finally { setter(false); }
   };
@@ -309,55 +345,74 @@ function PostIntimationModal({ item, onClose }: { item: any; onClose: () => void
   return (
     <Modal visible={!!item} transparent={false} animationType="slide" onRequestClose={onClose}>
       <View style={[intimStyles.screen, { paddingTop: insets.top }]}>
+        {/* Header */}
         <View style={[intimStyles.header, { backgroundColor: "#1e40af" }]}>
-          <Pressable onPress={onClose} style={{ padding: 6 }}><Ionicons name="arrow-back" size={22} color="#fff" /></Pressable>
+          <Pressable onPress={onClose} style={{ padding: 6 }}>
+            <Ionicons name="arrow-back" size={22} color="#fff" />
+          </Pressable>
           <Text style={intimStyles.headerTitle} numberOfLines={1}>Post Intimation</Text>
           <View style={{ flexDirection: "row", gap: 8 }}>
-            <Pressable style={[intimStyles.downloadBtn, { backgroundColor: "rgba(255,255,255,0.25)" }, downloading && { opacity: 0.6 }]} onPress={() => handleDownload("docx")} disabled={downloading || downloadingPdf}>
+            <Pressable
+              style={[intimStyles.downloadBtn, { backgroundColor: "rgba(255,255,255,0.25)" }, downloading && { opacity: 0.6 }]}
+              onPress={() => handleDownload("docx")} disabled={downloading || downloadingPdf}>
               {downloading ? <ActivityIndicator size="small" color="#fff" /> : <Ionicons name="document-outline" size={16} color="#fff" />}
               <Text style={intimStyles.downloadBtnText}>{downloading ? "…" : "DOCX"}</Text>
             </Pressable>
-            <Pressable style={[intimStyles.downloadBtn, { backgroundColor: "#dc2626" }, downloadingPdf && { opacity: 0.6 }]} onPress={() => handleDownload("pdf")} disabled={downloading || downloadingPdf}>
+            <Pressable
+              style={[intimStyles.downloadBtn, { backgroundColor: "#dc2626" }, downloadingPdf && { opacity: 0.6 }]}
+              onPress={() => handleDownload("pdf")} disabled={downloading || downloadingPdf}>
               {downloadingPdf ? <ActivityIndicator size="small" color="#fff" /> : <Ionicons name="document-text-outline" size={16} color="#fff" />}
               <Text style={intimStyles.downloadBtnText}>{downloadingPdf ? "…" : "PDF"}</Text>
             </Pressable>
           </View>
         </View>
-        <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={{ flex: 1 }}>
-          <ScrollView style={{ flex: 1 }} contentContainerStyle={intimStyles.letterContainer}>
-            <View style={intimStyles.editableCard}>
-              <Text style={intimStyles.editableTitle}>Fill in Details</Text>
-              {([
-                ["Police Station Name", policeStation, setPoliceStation, "Enter police station name"],
-                ["TQ (Taluka)",         tq,             setTq,             "Enter taluka name"],
-                ["Date of Repossession", repossessionDate, setRepossessionDate, "DD/MM/YYYY"],
-                ["Repossession Address", repossessionAddress, setRepossessionAddress, "Where vehicle was taken from"],
-              ] as [string, string, (v: string) => void, string][]).map(([label, val, setter, ph]) => (
-                <View key={label} style={intimStyles.editableRow}>
-                  <Text style={intimStyles.editableLabel}>{label}</Text>
-                  <TextInput style={intimStyles.editableInput} placeholder={ph} placeholderTextColor={Colors.textMuted} value={val} onChangeText={setter} />
-                </View>
-              ))}
-            </View>
-            <LetterPreview fields={{
-              "Customer Name":        customerName,
-              "Loan No":              loanNo,
-              "Reg No":               regNo,
-              "Asset Make":           item.asset_make   || "___________",
-              "Engine No":            item.engine_no    || "___________",
-              "Chassis No":           item.chassis_no   || "___________",
-              "Date":                 today,
-              "Police Station":       policeStation || "________________________________",
-              "TQ (Taluka)":          tq || "_____________",
-              "Date of Repossession": repossessionDate || today,
-              "Repossession Address": repossessionAddress || item.address || "___________",
-            }} />
-            <Text style={{ textAlign: "center", color: "#6b7280", fontSize: 12, marginTop: 16 }}>
-              Tap DOCX or PDF above to download the full document
-            </Text>
-            <View style={{ height: insets.bottom + 24 }} />
-          </ScrollView>
-        </KeyboardAvoidingView>
+
+        {/* Tab toggle */}
+        <View style={intimStyles.tabRow}>
+          <Pressable style={[intimStyles.tab, !showPreview && intimStyles.tabActive]} onPress={() => setShowPreview(false)}>
+            <Text style={[intimStyles.tabText, !showPreview && intimStyles.tabTextActive]}>Fill Details</Text>
+          </Pressable>
+          <Pressable style={[intimStyles.tab, showPreview && intimStyles.tabActive]} onPress={() => setShowPreview(true)}>
+            <Text style={[intimStyles.tabText, showPreview && intimStyles.tabTextActive]}>Preview Letter</Text>
+          </Pressable>
+        </View>
+
+        {!showPreview ? (
+          <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={{ flex: 1 }}>
+            <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 24 }}>
+              <View style={intimStyles.editableCard}>
+                <Text style={intimStyles.editableTitle}>Fill in Details</Text>
+                {([
+                  ["Police Station Name", policeStation, setPoliceStation, "Enter police station name"],
+                  ["TQ (Taluka)",         tq,             setTq,             "Enter taluka name"],
+                  ["Date of Repossession", repossessionDate, setRepossessionDate, "DD/MM/YYYY"],
+                  ["Repossession Address", repossessionAddress, setRepossessionAddress, "Where vehicle was taken from"],
+                ] as [string, string, (v: string) => void, string][]).map(([label, val, setter, ph]) => (
+                  <View key={label} style={intimStyles.editableRow}>
+                    <Text style={intimStyles.editableLabel}>{label}</Text>
+                    <TextInput style={intimStyles.editableInput} placeholder={ph} placeholderTextColor={Colors.textMuted} value={val} onChangeText={setter} />
+                  </View>
+                ))}
+              </View>
+              <Pressable style={[intimStyles.previewBtn, { backgroundColor: "#1e40af" }]} onPress={() => setShowPreview(true)}>
+                <Ionicons name="eye-outline" size={16} color="#fff" />
+                <Text style={intimStyles.previewBtnText}>Preview Letter →</Text>
+              </Pressable>
+            </ScrollView>
+          </KeyboardAvoidingView>
+        ) : (
+          <WebView
+            source={{ uri: previewUrl }}
+            style={{ flex: 1 }}
+            startInLoadingState
+            renderLoading={() => (
+              <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
+                <ActivityIndicator size="large" color="#1e40af" />
+                <Text style={{ marginTop: 8, color: Colors.textSecondary }}>Loading letter…</Text>
+              </View>
+            )}
+          />
+        )}
       </View>
     </Modal>
   );
@@ -1010,4 +1065,11 @@ const intimStyles = StyleSheet.create({
   editableRow: { gap: 4 },
   editableLabel: { fontSize: 12, fontWeight: "600", color: Colors.textSecondary },
   editableInput: { backgroundColor: "#fff", borderRadius: 8, borderWidth: 1, borderColor: Colors.border, paddingHorizontal: 12, paddingVertical: 8, fontSize: 13, color: Colors.text },
+  tabRow:        { flexDirection: "row", backgroundColor: "#f3f4f6", borderBottomWidth: 1, borderBottomColor: Colors.border },
+  tab:           { flex: 1, paddingVertical: 11, alignItems: "center" },
+  tabActive:     { borderBottomWidth: 2, borderBottomColor: Colors.primary, backgroundColor: "#fff" },
+  tabText:       { fontSize: 13, fontWeight: "600", color: Colors.textSecondary },
+  tabTextActive: { color: Colors.primary },
+  previewBtn:    { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, backgroundColor: "#92400e", borderRadius: 10, paddingVertical: 12, marginTop: 12 },
+  previewBtnText: { fontSize: 14, fontWeight: "700", color: "#fff" },
 });
