@@ -12,7 +12,8 @@ import * as ImagePicker from "expo-image-picker";
 import * as Location from "expo-location";
 import * as FileSystem from "expo-file-system";
 import Colors from "@/constants/colors";
-import { api } from "@/lib/api";
+import { api, tokenStore } from "@/lib/api";
+import { getApiUrl } from "@/lib/query-client";
 import { caseStore } from "@/lib/caseStore";
 import MonthlyFeedbackStepper from "@/components/MonthlyFeedbackStepper";
 
@@ -445,6 +446,7 @@ function buildFieldVisitMsg(
   visitOutcome: string,
   visitRemarks: string,
   gps: { lat: number; lng: number } | null,
+  photoUrl?: string | null,
 ): string {
   const mapsLink = gps ? `https://maps.google.com/?q=${gps.lat},${gps.lng}` : null;
   const lines = [
@@ -458,6 +460,7 @@ function buildFieldVisitMsg(
     `⏰ *Time:*     ${new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true })}`,
     gps       ? `📍 *Location:* ${gps.lat.toFixed(5)}, ${gps.lng.toFixed(5)}` : "",
     mapsLink  ? `🗺️ ${mapsLink}` : "",
+    photoUrl  ? `📸 *Photo:* ${photoUrl}` : "",
     `━━━━━━━━━━━━━━━━━━━━`,
     `_Dhanraj Collections App_`,
   ];
@@ -488,49 +491,24 @@ function buildCallLogMsg(
 
 async function shareToWhatsApp(
   msg: string,
-  photoUri: string | null,
+  _photoUri: string | null,   // kept for signature compat; photo URL is now in msg
   reportTitle: string,
 ): Promise<void> {
-  // ── Photo + text together via react-native-share ──────────────────────────
-  // react-native-share v10 shareSingle requires the image as a base64 data URI
-  // (not a file:// path) to reliably attach the photo inside WhatsApp on Android.
-  if (photoUri && Platform.OS !== "web") {
-    try {
-      const info = await FileSystem.getInfoAsync(photoUri);
-      if (!info.exists) throw new Error("Photo file not found");
-
-      // Read file as base64 and build a data URI for react-native-share
-      const base64 = await FileSystem.readAsStringAsync(photoUri, {
-        encoding: FileSystem.EncodingType.Base64,
-      });
-      const dataUri = `data:image/jpeg;base64,${base64}`;
-
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const RNShare = require("react-native-share").default;
-      await RNShare.shareSingle({
-        social:  RNShare.Social.WHATSAPP,
-        url:     dataUri,
-        message: msg,
-        type:    "image/jpeg",
-        title:   reportTitle,
-      });
-      return;
-    } catch (err: any) {
-      if (
-        err?.message?.toLowerCase().includes("cancel") ||
-        err?.message?.toLowerCase().includes("dismissed")
-      ) return;
-      // Fall through to text-only on any other error
-    }
-  }
-
-  // ── Text-only fallback (no photo, web, or share error) ───────────────────
+  // Photo is already embedded as a public server URL inside `msg`.
+  // Pure Linking approach — works on web, Android APK, iOS with zero native modules.
   const waUrl = `whatsapp://send?text=${encodeURIComponent(msg)}`;
   const canWA = await Linking.canOpenURL(waUrl).catch(() => false);
   if (canWA) {
     await Linking.openURL(waUrl);
   } else {
-    await Share.share({ message: msg, title: reportTitle });
+    // Web fallback — wa.me deep-link works in browser
+    const webWaUrl = `https://wa.me/?text=${encodeURIComponent(msg)}`;
+    const canWeb = await Linking.canOpenURL(webWaUrl).catch(() => false);
+    if (canWeb) {
+      await Linking.openURL(webWaUrl);
+    } else {
+      await Share.share({ message: msg, title: reportTitle });
+    }
   }
 }
 
@@ -685,6 +663,7 @@ function FeedbackModal({
     setLoading(true);
     try {
       let payload: Record<string, unknown> = {};
+      let visitPhotoUrl: string | null = null;
 
       if (activeTab === "Call Log") {
         const newStatus = OUTCOME_TO_STATUS[callOutcome] ?? caseItem.status;
@@ -726,7 +705,7 @@ function FeedbackModal({
           : visitOutcome === "PTP" ? "PTP"
           : caseItem.status;
 
-        await api.recordFieldVisit(caseItem.id, {
+        const visitResult = await api.recordFieldVisit(caseItem.id, {
           lat: gps!.lat, lng: gps!.lng, accuracy: gps!.accuracy, case_type: "allocation",
           visit_outcome: visitOutcome || undefined,
           visit_remarks: visitRemarks.trim() || undefined,
@@ -734,6 +713,13 @@ function FeedbackModal({
             ? { uri: photos[0].uri, name: photos[0].fileName, mimeType: photos[0].mimeType }
             : undefined,
         });
+
+        // Build public photo URL from the saved visit ID so WhatsApp can display it
+        const savedVisitId = visitResult?.visit?.id ?? visitResult?.id ?? null;
+        const savedToken   = savedVisitId ? await tokenStore.get().catch(() => null) : null;
+        visitPhotoUrl = savedVisitId
+          ? `${getApiUrl()}/api/field-visits/${savedVisitId}/photo${savedToken ? `?token=${encodeURIComponent(savedToken)}` : ""}`
+          : null;
 
         payload = {
           status:            newStatus,
@@ -758,7 +744,7 @@ function FeedbackModal({
       const sharePhotoUri = photos.length > 0 ? photos[0].uri : null;
       const shareMsg =
         shareTab === "Field Visit"
-          ? buildFieldVisitMsg(caseItem, visitOutcome, visitRemarks, gps)
+          ? buildFieldVisitMsg(caseItem, visitOutcome, visitRemarks, gps, visitPhotoUrl)
           : shareTab === "Call Log"
           ? buildCallLogMsg(caseItem, callOutcome, callComments, callPtpDate)
           : null;
