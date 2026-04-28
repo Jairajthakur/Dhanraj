@@ -494,16 +494,16 @@ async function shareToWhatsApp(
   photoUri: string | null,
   reportTitle: string,
 ): Promise<void> {
-  // With photo: use react-native-share to send image + caption directly to WhatsApp.
-  // This produces the correct layout: image preview at top, report text below it.
+  // With photo: share image with report text as caption in one WhatsApp message.
+  // react-native-share v10 supports this via shareSingle with Social.WHATSAPP.
+  // The `message` field becomes the caption shown below the image.
   if (photoUri && Platform.OS !== "web") {
     try {
       let base64Url: string | null = null;
 
       if (photoUri.startsWith("data:")) {
-        base64Url = photoUri; // already base64 data URL
+        base64Url = photoUri;
       } else {
-        // Convert file:// or content:// URI to base64
         let localUri = photoUri;
         if (Platform.OS === "android" && photoUri.startsWith("content://")) {
           const dest = `${FileSystem.cacheDirectory}visit_photo_share.jpg`;
@@ -517,33 +517,25 @@ async function shareToWhatsApp(
       }
 
       if (base64Url) {
-        // WhatsApp does NOT support image + caption together via shareSingle.
-        // Solution: Step 1 — send the photo, Step 2 — open WhatsApp with the text.
         // eslint-disable-next-line @typescript-eslint/no-var-requires
         const RNShare = require("react-native-share").default;
-        // Step 1: Share the image (photo only, no caption)
         await RNShare.shareSingle({
-          social: RNShare.Social.WHATSAPP,
-          url:    base64Url,
-          type:   "image/jpeg",
-          title:  reportTitle,
+          social:          RNShare.Social.WHATSAPP,
+          url:             base64Url,
+          type:            "image/jpeg",
+          message:         msg,          // caption shown with the image in WhatsApp
+          title:           reportTitle,
+          backgroundImage: base64Url,
         });
-        // Step 2: After photo is sent, open WhatsApp with the text report
-        const waUrl = `whatsapp://send?text=${encodeURIComponent(msg)}`;
-        const canWA = await Linking.canOpenURL(waUrl).catch(() => false);
-        if (canWA) {
-          setTimeout(() => Linking.openURL(waUrl), 1500);
-        }
         return;
       }
     } catch (e: any) {
-      // User cancelled — do not fall through
       if (e?.error === "ECANCELLED" || e?.message?.includes("cancel")) return;
-      console.warn("[shareToWhatsApp] image share failed, falling back to text:", e);
+      console.warn("[shareToWhatsApp] photo share failed, falling back to text:", e);
     }
   }
 
-  // No photo / web / fallback: text-only WhatsApp deep link
+  // No photo / web / fallback: text-only
   const waUrl = `whatsapp://send?text=${encodeURIComponent(msg)}`;
   const canWA = await Linking.canOpenURL(waUrl).catch(() => false);
   if (canWA) {
