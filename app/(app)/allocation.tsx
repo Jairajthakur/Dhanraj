@@ -493,14 +493,17 @@ async function shareToWhatsApp(
 ): Promise<void> {
   if (photoUri && Platform.OS !== "web") {
     try {
-      // Ensure a stable file:// path in cache
+      // Copy to a stable cache path so react-native-share can always access it
       const ext    = photoUri.split(".").pop()?.split("?")[0]?.toLowerCase() ?? "jpg";
       const cached = `${FileSystem.cacheDirectory}wa_share_${Date.now()}.${ext}`;
-      const info   = await FileSystem.getInfoAsync(photoUri);
-      if (info.exists) {
-        await FileSystem.copyAsync({ from: photoUri, to: cached });
-      }
-      const stableUri = info.exists ? cached : photoUri;
+
+      const info = await FileSystem.getInfoAsync(photoUri);
+      if (!info.exists) throw new Error("Photo file not found");
+      await FileSystem.copyAsync({ from: photoUri, to: cached });
+
+      // react-native-share requires a file:// URI on Android.
+      // FileSystem.cacheDirectory already includes file:// on iOS but NOT always on Android.
+      const fileUri = cached.startsWith("file://") ? cached : `file://${cached}`;
 
       // react-native-share sends image + caption as ONE WhatsApp message
       // on both Android (ACTION_SEND EXTRA_STREAM + EXTRA_TEXT) and iOS.
@@ -509,7 +512,7 @@ async function shareToWhatsApp(
       const RNShare = require("react-native-share").default;
       await RNShare.shareSingle({
         social:  RNShare.Social.WHATSAPP,
-        url:     stableUri,
+        url:     fileUri,
         message: msg,
         type:    "image/jpeg",
         title:   reportTitle,
