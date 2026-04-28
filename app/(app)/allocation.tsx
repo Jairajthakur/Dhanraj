@@ -11,6 +11,7 @@ import * as Haptics from "expo-haptics";
 import * as ImagePicker from "expo-image-picker";
 import * as Location from "expo-location";
 import * as FileSystem from "expo-file-system";
+import * as Sharing from "expo-sharing";
 import Colors from "@/constants/colors";
 import { api } from "@/lib/api";
 import { caseStore } from "@/lib/caseStore";
@@ -481,7 +482,7 @@ async function shareToWhatsApp(
 ): Promise<void> {
   if (photoUri && Platform.OS !== "web") {
     try {
-      // Copy to a stable file:// cache path — both iOS and Android need this
+      // Copy to a stable file:// cache path so share sheet can read it
       const ext    = photoUri.split(".").pop()?.split("?")[0]?.toLowerCase() ?? "jpg";
       const cached = `${FileSystem.cacheDirectory}wa_share_${Date.now()}.${ext}`;
       const info   = await FileSystem.getInfoAsync(photoUri);
@@ -490,21 +491,28 @@ async function shareToWhatsApp(
       }
       const stableUri = info.exists ? cached : photoUri;
 
-      // React Native Share.share supports { message, url } on both iOS and Android (RN 0.73+).
-      // On Android the share sheet opens with image + text together — agent picks WhatsApp group.
-      const result = await Share.share(
-        { message: msg, url: stableUri, title: reportTitle },
-        { dialogTitle: "Send to WhatsApp group" },
-      );
-      if (result.action !== Share.dismissedAction) return;
-
-      // If dismissed, fall back to text-only via deep link
+      const canShare = await Sharing.isAvailableAsync();
+      if (canShare) {
+        // Step 1 — pre-fill WhatsApp with the text caption
+        const waUrl = `whatsapp://send?text=${encodeURIComponent(msg)}`;
+        const canWA = await Linking.canOpenURL(waUrl).catch(() => false);
+        if (canWA) await Linking.openURL(waUrl);
+        // Step 2 — open native share sheet for the image so agent picks WhatsApp group
+        // NOTE: Share.share({ url }) is iOS-only and ignored on Android.
+        //       expo-sharing shareAsync works on both platforms.
+        await Sharing.shareAsync(stableUri, {
+          mimeType: "image/jpeg",
+          dialogTitle: `Send ${reportTitle} photo to WhatsApp`,
+          UTI: "public.jpeg",
+        });
+        return;
+      }
     } catch (_) {
       // fall through to text-only
     }
   }
 
-  // Text-only (no photo, web, dismissed, or error)
+  // Text-only (no photo, web, share unavailable, or error)
   const waUrl = `whatsapp://send?text=${encodeURIComponent(msg)}`;
   const canWA = await Linking.canOpenURL(waUrl).catch(() => false);
   if (canWA) {
