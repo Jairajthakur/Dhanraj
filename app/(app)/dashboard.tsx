@@ -187,9 +187,9 @@ function DRRWidget({ rows }: { rows: any[] }) {
 
 // ─── Main Dashboard ───────────────────────────────────────────────────────────
 export default function Dashboard() {
-  const insets              = useSafeAreaInsets();
- const { selectedCompany, setSelectedCompany } = useCompany();
-const company = selectedCompany === "All" ? null : selectedCompany;
+  const insets = useSafeAreaInsets();
+  const { selectedCompany, setSelectedCompany } = useCompany();
+  const company = selectedCompany === "All" || selectedCompany === null ? null : selectedCompany;
   
   const { data: stats, isLoading, refetch: refetchStats } = useQuery({
     queryKey:  ["/api/stats", company],
@@ -212,9 +212,9 @@ const company = selectedCompany === "All" ? null : selectedCompany;
   });
 
   const { data: companiesData } = useQuery({
-  queryKey: ["/api/companies"],
-  queryFn:  () => api.getCompanies(),
-});
+    queryKey: ["/api/companies"],
+    queryFn:  () => api.getCompanies(),
+  });
 
   const refetch = useCallback(() => {
     refetchStats(); refetchPtp(); refetchDrr(); refetchTw();
@@ -243,13 +243,13 @@ const company = selectedCompany === "All" ? null : selectedCompany;
     <View style={{ flex: 1, backgroundColor: Colors.background }}>
       {/* Company Filter Bar */}
       <CompanyFilterBar
-  companies={companiesData?.companies ?? []}
-  selected={selectedCompany}
-  onSelect={(company) => {
-    setSelectedCompany(company);
-    refetch();
-  }}
-/>
+        companies={companiesData?.companies ?? []}
+        selected={selectedCompany ?? "All"}
+        onSelect={(c) => {
+          setSelectedCompany(c === "All" ? null : c);
+          refetch();
+        }}
+      />
       <ScrollView
         contentContainerStyle={[styles.container, {
           paddingBottom: insets.bottom + 24,
