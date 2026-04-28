@@ -1515,7 +1515,7 @@ app.put("/api/fos-depositions/:id/pay-both", requireAuth, screenshotUpload.singl
         for (const [dbName, id] of Object.entries(agentByName)) { if (lower.includes(dbName) || dbName.includes(lower)) return id; }
         return null;
       }
-      try { await storage.query(`DELETE FROM fos_depositions WHERE payment_method!='pending' AND deposition_date<CURRENT_DATE`); } catch {}
+      // ── Do NOT delete historical depositions – preserve all past records ──
       let imported = 0, skipped = 0; const errors: string[] = [];
       const today = new Date().toISOString().slice(0, 10);
       for (let i = 0; i < rawRows.slice(headerIdx + 1).length; i++) {
@@ -2706,8 +2706,8 @@ app.post("/api/admin/reset-monthly-feedback/case/:caseId", requireAdmin, async (
       const day = ist.getUTCDate(); const month = ist.getUTCMonth() + 1; const year = ist.getUTCFullYear();
       if (day !== 1) return;
       const monthKey = `${year}-${String(month).padStart(2, "0")}`; if (monthlyCleanupDone.has(monthKey)) return;
-      const deleteResult = await storage.query(`DELETE FROM fos_depositions WHERE DATE_TRUNC('month', deposition_date) < DATE_TRUNC('month', CURRENT_DATE)`);
-      console.log(`[monthly-cleanup] ✅ Deleted ${deleteResult.rowCount ?? 0} old records`);
+      // ── Depositions are NEVER auto-deleted – only admin can delete individually via UI ──
+      // Old screenshot files older than 2 months are cleaned up to save disk space
       try {
         const uploadsDir = path.join(process.cwd(), "server/uploads/screenshots"); const cutoff = new Date(year, month - 2, 1);
         const files = fs.readdirSync(uploadsDir); let deletedFiles = 0;
