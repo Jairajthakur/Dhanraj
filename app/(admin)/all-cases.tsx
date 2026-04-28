@@ -23,7 +23,37 @@ import { getApiUrl } from "@/lib/query-client";
 import { ReassignCaseModal } from "@/components/ReassignCaseModal";
 import * as FileSystem from "expo-file-system";
 import * as Sharing from "expo-sharing";
-import { WebView } from "react-native-webview";
+// WebView is native-only; on web we use an iframe instead
+const HtmlPreview = ({ html }: { html: string }) => {
+  if (Platform.OS === "web") {
+    // On web: render HTML in a sandboxed iframe via a blob URL
+    const [src, setSrc] = React.useState("");
+    React.useEffect(() => {
+      const blob = new Blob([html], { type: "text/html" });
+      const url  = URL.createObjectURL(blob);
+      setSrc(url);
+      return () => URL.revokeObjectURL(url);
+    }, [html]);
+    return (
+      <iframe
+        src={src}
+        style={{ flex: 1, border: "none", width: "100%", height: "100%", background: "#fff" } as any}
+        sandbox="allow-same-origin"
+        title="Letter Preview"
+      />
+    );
+  }
+  // Native: use react-native-webview
+  const { WebView } = require("react-native-webview");
+  return (
+    <WebView
+      source={{ html, baseUrl: "" }}
+      style={{ flex: 1, backgroundColor: "#fff" }}
+      scrollEnabled
+      originWhitelist={["*"]}
+    />
+  );
+};
 
 const STATUS_COLORS: Record<string, string> = {
   Unpaid: Colors.statusUnpaid,
@@ -390,14 +420,9 @@ function PreIntimationModal({ item, onClose }: { item: any; onClose: () => void 
             </ScrollView>
           </KeyboardAvoidingView>
         ) : (
-          <WebView
-            key={previewHtml}
-            source={{ html: previewHtml, baseUrl: "" }}
-            style={{ flex: 1, backgroundColor: "#fff" }}
-            scrollEnabled
-            showsVerticalScrollIndicator
-            originWhitelist={["*"]}
-          />
+          <View style={{ flex: 1 }}>
+            <HtmlPreview html={previewHtml} />
+          </View>
         )}
       </View>
     </Modal>
@@ -509,14 +534,9 @@ function PostIntimationModal({ item, onClose }: { item: any; onClose: () => void
             </ScrollView>
           </KeyboardAvoidingView>
         ) : (
-          <WebView
-            key={previewHtml}
-            source={{ html: previewHtml, baseUrl: "" }}
-            style={{ flex: 1, backgroundColor: "#fff" }}
-            scrollEnabled
-            showsVerticalScrollIndicator
-            originWhitelist={["*"]}
-          />
+          <View style={{ flex: 1 }}>
+            <HtmlPreview html={previewHtml} />
+          </View>
         )}
       </View>
     </Modal>
