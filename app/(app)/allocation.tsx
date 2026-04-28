@@ -517,15 +517,23 @@ async function shareToWhatsApp(
       }
 
       if (base64Url) {
+        // WhatsApp does NOT support image + caption together via shareSingle.
+        // Solution: Step 1 — send the photo, Step 2 — open WhatsApp with the text.
         // eslint-disable-next-line @typescript-eslint/no-var-requires
         const RNShare = require("react-native-share").default;
+        // Step 1: Share the image (photo only, no caption)
         await RNShare.shareSingle({
-          social:  RNShare.Social.WHATSAPP,
-          message: msg,
-          url:     base64Url,
-          type:    "image/jpeg",
-          title:   reportTitle,
+          social: RNShare.Social.WHATSAPP,
+          url:    base64Url,
+          type:   "image/jpeg",
+          title:  reportTitle,
         });
+        // Step 2: After photo is sent, open WhatsApp with the text report
+        const waUrl = `whatsapp://send?text=${encodeURIComponent(msg)}`;
+        const canWA = await Linking.canOpenURL(waUrl).catch(() => false);
+        if (canWA) {
+          setTimeout(() => Linking.openURL(waUrl), 1500);
+        }
         return;
       }
     } catch (e: any) {
