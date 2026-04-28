@@ -11,7 +11,6 @@ import * as Haptics from "expo-haptics";
 import * as ImagePicker from "expo-image-picker";
 import * as Location from "expo-location";
 import * as FileSystem from "expo-file-system";
-import RNShare from "react-native-share";
 import Colors from "@/constants/colors";
 import { api } from "@/lib/api";
 import { caseStore } from "@/lib/caseStore";
@@ -226,6 +225,18 @@ async function downloadAllocationCsv(cases: CaseItem[], filename: string): Promi
   ].map(escCsv).join(","));
 
   const csv = [headers.map(escCsv).join(","), ...rows].join("\n");
+
+  // Web: trigger a browser download
+  if (Platform.OS === "web") {
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+    return;
+  }
 
   if (Platform.OS === "android") {
     // Android: save directly to Downloads via StorageAccessFramework
@@ -493,6 +504,9 @@ async function shareToWhatsApp(
 
       // react-native-share sends image + caption as ONE WhatsApp message
       // on both Android (ACTION_SEND EXTRA_STREAM + EXTRA_TEXT) and iOS.
+      // Dynamic require so the native module is never loaded on web.
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const RNShare = require("react-native-share").default;
       await RNShare.shareSingle({
         social:  RNShare.Social.WHATSAPP,
         url:     stableUri,
