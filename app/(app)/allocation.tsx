@@ -494,9 +494,8 @@ async function shareToWhatsApp(
   photoUri: string | null,
   reportTitle: string,
 ): Promise<void> {
-  // With photo: share image with report text as caption in one WhatsApp message.
-  // react-native-share v10 supports this via shareSingle with Social.WHATSAPP.
-  // The `message` field becomes the caption shown below the image.
+  // With photo: send photo first, then text report right after (500ms delay).
+  // This gives the layout: [photo message] immediately followed by [text report].
   if (photoUri && Platform.OS !== "web") {
     try {
       let base64Url: string | null = null;
@@ -519,14 +518,19 @@ async function shareToWhatsApp(
       if (base64Url) {
         // eslint-disable-next-line @typescript-eslint/no-var-requires
         const RNShare = require("react-native-share").default;
+        // Step 1: Send photo only
         await RNShare.shareSingle({
-          social:          RNShare.Social.WHATSAPP,
-          url:             base64Url,
-          type:            "image/jpeg",
-          message:         msg,          // caption shown with the image in WhatsApp
-          title:           reportTitle,
-          backgroundImage: base64Url,
+          social: RNShare.Social.WHATSAPP,
+          url:    base64Url,
+          type:   "image/jpeg",
+          title:  reportTitle,
         });
+        // Step 2: Send text report immediately after
+        const waUrl = `whatsapp://send?text=${encodeURIComponent(msg)}`;
+        const canWA = await Linking.canOpenURL(waUrl).catch(() => false);
+        if (canWA) {
+          setTimeout(() => Linking.openURL(waUrl), 500);
+        }
         return;
       }
     } catch (e: any) {
