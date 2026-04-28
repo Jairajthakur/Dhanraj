@@ -34,6 +34,7 @@ import { Stack } from "expo-router";
 import { Ionicons, MaterialCommunityIcons, MaterialIcons } from "@expo/vector-icons";
 import * as FileSystem from "expo-file-system";
 import * as Sharing from "expo-sharing";
+import RNShare from "react-native-share";
 import Constants from "expo-constants";
 import { tokenStore } from "@/lib/api";
 
@@ -135,6 +136,75 @@ function buildCSV(visits: FieldVisit[], dateStr: string): string {
   return [header, ...rows].join("\r\n");
 }
 
+// ─── WhatsApp share helper ────────────────────────────────────────────────────
+function buildVisitWhatsAppMsg(visit: FieldVisit): string {
+  const hasLocation = visit.latitude != null && visit.longitude != null;
+  const mapsLink    = hasLocation
+    ? `https://maps.google.com/?q=${visit.latitude},${visit.longitude}`
+    : null;
+
+  const lines: string[] = [
+    `📍 *FIELD VISIT REPORT*`,
+    `━━━━━━━━━━━━━━━━━━━━`,
+    `👤 *Agent:*   ${visit.agent_name}`,
+
+    visit.case_id    ? `🆔 *Case ID:* ${visit.case_id}`                 : "",
+    visit.customer_name ? `👥 *Customer:* ${visit.customer_name.toUpperCase()}` : "",
+    visit.pos != null   ? `💰 *POS:*     ${rupee(visit.pos)}`            : "",
+    visit.status        ? `📊 *Status:*  ${visit.status}`               : "",
+    visit.remarks       ? `💬 *Remarks:* ${visit.remarks}`              : "",
+    `⏰ *Time:*    ${fmtTime(visit.visited_at)}`,
+    hasLocation         ? `📍 *Location:* ${visit.latitude!.toFixed(5)}, ${visit.longitude!.toFixed(5)}` : "",
+    mapsLink            ? `🗺️ ${mapsLink}`                              : "",
+    `━━━━━━━━━━━━━━━━━━━━`,
+    `_Dhanraj Collections App_`,
+  ];
+
+  return lines.filter(Boolean).join("\n");
+}
+
+async function shareVisitToWhatsApp(visit: FieldVisit): Promise<void> {
+  const msg = buildVisitWhatsAppMsg(visit);
+
+  if (visit.photo_url) {
+    // ── Download photo → convert to base64 → share image + text together ──
+    const ext      = visit.photo_url.split("?")[0].split(".").pop()?.toLowerCase() ?? "jpg";
+    const localUri = `${FileSystem.cacheDirectory}visit_${visit.id}.${ext}`;
+    try {
+      const info = await FileSystem.getInfoAsync(localUri);
+      if (!info.exists) {
+        await FileSystem.downloadAsync(visit.photo_url, localUri);
+      }
+
+      // Read as base64 so react-native-share can attach it inline
+      const base64 = await FileSystem.readAsStringAsync(localUri, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+
+      await RNShare.shareSingle({
+        title:    "Field Visit Report",
+        message:  msg,
+        url:      `data:image/jpeg;base64,${base64}`,
+        social:   RNShare.Social.WHATSAPP,
+        filename: `visit_${visit.id}`,
+      });
+      return;
+    } catch (_) {
+      // Photo download or base64 failed → fall through to text-only
+    }
+  }
+
+  // ── Text-only fallback — opens WhatsApp with pre-filled message ───────────
+  const waUrl = `whatsapp://send?text=${encodeURIComponent(msg)}`;
+  const canWA = await Linking.canOpenURL(waUrl).catch(() => false);
+  if (canWA) {
+    await Linking.openURL(waUrl);
+  } else {
+    // No WhatsApp installed → native share sheet
+    await Share.share({ message: msg, title: "Field Visit Report" });
+  }
+}
+
 async function downloadReport(visits: FieldVisit[], dateStr: string) {
   try {
     if (visits.length === 0) {
@@ -209,6 +279,7 @@ function openMap(lat: number, lng: number, label?: string) {
 // ─── Visit Card ───────────────────────────────────────────────────────────────
 function VisitCard({ visit }: { visit: FieldVisit }) {
   const [photoOpen, setPhotoOpen] = useState(false);
+  const [sharing,   setSharing]   = useState(false);
 
   // FIX: was calling setPhotoOpen(true) unconditionally even if photo_url undefined
   const handleViewPhoto = () => {
@@ -217,6 +288,17 @@ function VisitCard({ visit }: { visit: FieldVisit }) {
       return;
     }
     setPhotoOpen(true);
+  };
+
+  const handleShareWhatsApp = async () => {
+    setSharing(true);
+    try {
+      await shareVisitToWhatsApp(visit);
+    } catch (err: any) {
+      Alert.alert("Share Failed", err?.message ?? "Could not share this visit.");
+    } finally {
+      setSharing(false);
+    }
   };
 
   const hasLocation = visit.latitude != null && visit.longitude != null;
@@ -303,6 +385,21 @@ function VisitCard({ visit }: { visit: FieldVisit }) {
         </View>
       )}
 
+      {/* WhatsApp Share Button */}
+      <TouchableOpacity
+        style={vc.waBtn}
+        onPress={handleShareWhatsApp}
+        activeOpacity={0.8}
+        disabled={sharing}
+      >
+        {sharing ? (
+          <ActivityIndicator size={15} color="#fff" />
+        ) : (
+          <MaterialCommunityIcons name="whatsapp" size={16} color="#fff" />
+        )}
+        <Text style={vc.waBtnText}>{sharing ? "Sharing…" : "Share on WhatsApp"}</Text>
+      </TouchableOpacity>
+
       {/* Photo viewer */}
       {photoOpen && visit.photo_url ? (
         <PhotoViewer uri={visit.photo_url} onClose={() => setPhotoOpen(false)} />
@@ -339,6 +436,8 @@ const vc = StyleSheet.create({
   locationText: { flex: 1, fontSize: 11, color: C.textMuted, fontVariant: ["tabular-nums"] },
   mapBtn:       { flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: C.primary + "12", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 4 },
   mapBtnText:   { fontSize: 12, fontWeight: "600", color: C.primary },
+  waBtn:        { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 7, backgroundColor: "#25D366", borderRadius: 10, marginHorizontal: 14, marginBottom: 12, marginTop: 4, paddingVertical: 9 },
+  waBtnText:    { fontSize: 13, fontWeight: "700", color: "#fff", letterSpacing: 0.2 },
 });
 
 // ─── Stats Bar ────────────────────────────────────────────────────────────────
