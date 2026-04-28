@@ -157,15 +157,149 @@ async function downloadIntimation(
   }
 }
 
+// ── Letter HTML builders (mirrors server templates exactly) ───────────────
+function buildPreHtml(p: {
+  date: string; police_station: string; tq: string;
+  customer_name: string; address: string; app_id: string; loan_no: string;
+  registration_no: string; asset_make: string; engine_no: string; chassis_no: string;
+}): string {
+  return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: Arial, sans-serif; font-size: 13px; color: #000; padding: 28px 32px; line-height: 1.65; background: #fff; }
+    .title { text-align: center; font-size: 15px; font-weight: bold; margin-bottom: 6px; }
+    .divider { border: none; border-top: 1.5px solid #888; margin: 8px 0 14px; }
+    .date { font-weight: bold; margin-bottom: 14px; }
+    .to-block { margin-left: 24px; margin-bottom: 12px; }
+    .to-block p { margin-bottom: 2px; }
+    .subject { margin-bottom: 12px; }
+    .body-text { margin-bottom: 10px; text-align: justify; }
+    .details-table { width: 100%; border-collapse: collapse; margin: 10px 0; font-size: 12px; }
+    .details-table tr:nth-child(even) { background-color: #f5f5f5; }
+    .details-table td { padding: 5px 8px; border: 1px solid #ccc; vertical-align: top; }
+    .details-table td:first-child { width: 46%; color: #333; }
+    .details-table td:last-child { font-weight: bold; }
+    .footer { margin-top: 18px; text-align: center; font-size: 11px; border-top: 1px solid #ccc; padding-top: 7px; font-weight: bold; }
+    .signature { margin-top: 36px; }
+  </style>
+</head>
+<body>
+  <p class="title">Pre Repossession Intimation to Police Station</p>
+  <hr class="divider">
+  <p class="date">Date :- ${p.date}</p>
+  <div class="to-block">
+    <p>To,</p>
+    <p>The Senior Inspector,</p>
+    <p><strong>${p.police_station},</strong></p>
+    <p>TQ. ${p.tq}&nbsp;&nbsp;&nbsp;Dist. Nanded</p>
+  </div>
+  <div class="subject">
+    <p><strong>Sub :</strong> Pre intimation of repossession of the vehicle from <strong>${p.customer_name}</strong></p>
+    <p>(Borrower) residing <strong>${p.address}</strong></p>
+  </div>
+  <p class="body-text"><strong>Respected Sir,</strong></p>
+  <p class="body-text">The afore mentioned borrower has taken a loan from Hero Fin-Corp Limited ("Company") for the purchase of the Vehicle having the below mentioned details and further the Borrower hypothecated the said vehicle to the Company in terms of loan-cum-hypothecation agreement executed between the borrower and the Company.</p>
+  <table class="details-table">
+    <tr><td>Name of the Borrower</td><td>${p.customer_name}</td></tr>
+    <tr><td>Address of Borrower</td><td>${p.address}</td></tr>
+    <tr><td>App ID</td><td>${p.app_id}</td></tr>
+    <tr><td>Loan cum Hypothecation Agreement No.</td><td>${p.loan_no}</td></tr>
+    <tr><td>Date</td><td>${p.date}</td></tr>
+    <tr><td>Vehicle Registration No.</td><td>${p.registration_no}</td></tr>
+    <tr><td>Model Make</td><td>${p.asset_make}</td></tr>
+    <tr><td>Engine No.</td><td>${p.engine_no}</td></tr>
+    <tr><td>Chassis No.</td><td>${p.chassis_no}</td></tr>
+  </table>
+  <p class="body-text">The Borrower has committed default on the scheduled payment of the Monthly Payments and/or other charges payable on the loan obtained by the Borrower from the Company in terms of the provisions of the aforesaid loan-cum-hypothecation agreement. In spite of Company's requests and reminders, the Borrower has not remitted the outstanding dues; as a result of which the company was left with no option but to enforce the terms and conditions of the said agreement. Under the said agreement, the said Borrower has specifically authorized Company or any of its authorized persons to take charge/repossession of the vehicle, in the event he fails to pay the loan amount when due to the Company. Pursuant to our right therein we are taking steps to recover possession of the said vehicle. This communication is for your record and to prevent confusion that may arise from any complaint that the borrower may lodge with respect to the aforesaid vehicle.</p>
+  <p class="body-text">Thanking you,</p>
+  <p class="body-text">Yours Sincerely,</p>
+  <div class="signature"><p><strong>For, Hero Fin-Corp Limited</strong></p></div>
+  <div class="footer">Hero Fincorp Ltd. Corporate Office: 09, Basant Lok, Vasant Vihar, New Delhi-110057 India</div>
+</body>
+</html>`;
+}
+
+function buildPostHtml(p: {
+  date: string; police_station: string; tq: string;
+  customer_name: string; address: string; app_id: string; loan_no: string;
+  registration_no: string; asset_make: string; engine_no: string; chassis_no: string;
+  repossession_date: string; repossession_address: string; reference_no: string;
+}): string {
+  return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: Arial, sans-serif; font-size: 13px; color: #000; padding: 28px 32px; line-height: 1.65; background: #fff; }
+    .title { text-align: center; font-size: 15px; font-weight: bold; text-decoration: underline; margin-bottom: 6px; }
+    .divider { border: none; border-top: 1.5px solid #888; margin: 8px 0 14px; }
+    .date { font-weight: bold; margin-bottom: 14px; }
+    .to-block { margin-left: 24px; margin-bottom: 12px; }
+    .to-block p { margin-bottom: 2px; }
+    .subject { margin-bottom: 12px; }
+    .body-text { margin-bottom: 10px; text-align: justify; }
+    .details-table { width: 100%; border-collapse: collapse; margin: 10px 0; font-size: 12px; }
+    .details-table tr:nth-child(even) { background-color: #f5f5f5; }
+    .details-table td { padding: 5px 8px; border: 1px solid #ccc; vertical-align: top; }
+    .details-table td:first-child { width: 46%; color: #333; }
+    .details-table td:last-child { font-weight: bold; }
+    .footer { margin-top: 18px; text-align: center; font-size: 11px; border-top: 1px solid #ccc; padding-top: 7px; font-weight: bold; }
+    .signature { margin-top: 36px; }
+  </style>
+</head>
+<body>
+  <p class="title">Post Repossession Intimation to Police Station</p>
+  <hr class="divider">
+  <p class="date">Date: ${p.date}</p>
+  <div class="to-block">
+    <p>To,</p>
+    <p>The Senior Inspector,</p>
+    <p><strong>${p.police_station},</strong></p>
+    <p>TQ. ${p.tq}&nbsp;&nbsp;&nbsp;Dist. Nanded</p>
+  </div>
+  <div class="subject">
+    <p><strong>Sub :</strong> Intimation after repossession of the vehicle No <strong>${p.registration_no}</strong> From Mr. <strong>${p.customer_name}</strong></p>
+    <p>(Borrower) residing <strong>${p.address}</strong></p>
+  </div>
+  <p class="body-text"><strong>Respected Sir,</strong></p>
+  <p class="body-text">This is in furtherance to our letter dated bearing reference number <strong>${p.reference_no}</strong> whereby it was intimated to you that despite our repeated requests, reminders and personal visits the above said borrower has defaulted in repaying the above TW Loan as expressly agreed by him/her under the Loan (cum Hypothecation) Agreement and guarantee entered between the said borrower and the company.</p>
+  <p class="body-text">Pursuant to our right under the said Agreement we have taken peaceful repossession of the said vehicle.</p>
+  <p class="body-text">We have taken peaceful repossession of the said vehicle on <strong>${p.repossession_date}</strong> at from <strong>${p.repossession_address}</strong></p>
+  <p class="body-text"><strong>DETAILS OF THE VEHICLE REPOSSESSED:-</strong></p>
+  <table class="details-table">
+    <tr><td>Name of the Borrower</td><td>${p.customer_name}</td></tr>
+    <tr><td>Address of Borrower</td><td>${p.address}</td></tr>
+    <tr><td>Loan Agreement No.</td><td>${p.loan_no}</td></tr>
+    <tr><td>App ID</td><td>${p.app_id}</td></tr>
+    <tr><td>Vehicle Registration Number</td><td>${p.registration_no}</td></tr>
+    <tr><td>Model Make</td><td>${p.asset_make}</td></tr>
+    <tr><td>Engine No.</td><td>${p.engine_no}</td></tr>
+    <tr><td>Chassis No.</td><td>${p.chassis_no}</td></tr>
+  </table>
+  <p class="body-text">This communication is for your records and to prevent any confusion that may arise for any complaint that the Borrower may lodge with respect to the said vehicle.</p>
+  <p class="body-text">Thanking You,</p>
+  <p class="body-text">Yours Sincerely,</p>
+  <div class="signature"><p><strong>For, Hero Fin Corp Limited</strong></p></div>
+  <div class="footer">Hero Fincorp Ltd. Corporate Office: 09, Basant Lok, Vasant Vihar, New Delhi-110057 India</div>
+</body>
+</html>`;
+}
+
 // ── Pre Intimation Modal ───────────────────────────────────────────────────
 function PreIntimationModal({ item, onClose }: { item: any; onClose: () => void }) {
   const insets = useSafeAreaInsets();
-  const [downloading, setDownloading]     = useState(false);
+  const [downloading, setDownloading]       = useState(false);
   const [downloadingPdf, setDownloadingPdf] = useState(false);
-  const [showPreview, setShowPreview]     = useState(false);
+  const [showPreview, setShowPreview]       = useState(false);
   const today = new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "2-digit", year: "numeric" });
-  const [policeStation, setPoliceStation] = useState("");
-  const [tq, setTq]                       = useState("");
+  const [policeStation, setPoliceStation]   = useState("");
+  const [tq, setTq]                         = useState("");
 
   if (!item) return null;
 
@@ -178,26 +312,18 @@ function PreIntimationModal({ item, onClose }: { item: any; onClose: () => void 
   const engineNo     = item.engine_no        || "___________";
   const chassisNo    = item.chassis_no       || "___________";
 
-  const body = {
+  const letterParams = {
+    date: today,
+    police_station: policeStation.trim() || "________________________________",
+    tq: tq.trim() || "_____________",
     customer_name: customerName, address, app_id: appId, loan_no: loanNo,
-    registration_no: regNo, asset_make: assetMake, engine_no: engineNo,
-    chassis_no: chassisNo, date: today,
+    registration_no: regNo, asset_make: assetMake, engine_no: engineNo, chassis_no: chassisNo,
+  };
+
+  const body = { ...letterParams,
     police_station: policeStation.trim() || "________________________________",
     tq: tq.trim() || "_____________",
   };
-
-  // Build preview URL with live query params
-  const previewParams = new URLSearchParams({
-    customer_name: customerName, address, app_id: appId, loan_no: loanNo,
-    registration_no: regNo, asset_make: assetMake, engine_no: engineNo,
-    chassis_no: chassisNo, date: today,
-    police_station: policeStation.trim() || "________________________________",
-    tq: tq.trim() || "_____________",
-  });
-  const previewUrl = new URL(
-    "/api/admin/preview-pre-intimation?" + previewParams.toString(),
-    getApiUrl(),
-  ).toString();
 
   const handleDownload = async (format: "docx" | "pdf") => {
     const setter = format === "pdf" ? setDownloadingPdf : setDownloading;
@@ -212,32 +338,28 @@ function PreIntimationModal({ item, onClose }: { item: any; onClose: () => void 
     finally { setter(false); }
   };
 
+  const previewHtml = buildPreHtml(letterParams);
+
   return (
     <Modal visible={!!item} transparent={false} animationType="slide" onRequestClose={onClose}>
       <View style={[intimStyles.screen, { paddingTop: insets.top }]}>
-        {/* Header */}
         <View style={intimStyles.header}>
           <Pressable onPress={onClose} style={{ padding: 6 }}>
             <Ionicons name="arrow-back" size={22} color="#fff" />
           </Pressable>
           <Text style={intimStyles.headerTitle} numberOfLines={1}>Pre Intimation</Text>
           <View style={{ flexDirection: "row", gap: 8 }}>
-            <Pressable
-              style={[intimStyles.downloadBtn, { backgroundColor: "rgba(255,255,255,0.25)" }, downloading && { opacity: 0.6 }]}
-              onPress={() => handleDownload("docx")} disabled={downloading || downloadingPdf}>
+            <Pressable style={[intimStyles.downloadBtn, { backgroundColor: "rgba(255,255,255,0.25)" }, downloading && { opacity: 0.6 }]} onPress={() => handleDownload("docx")} disabled={downloading || downloadingPdf}>
               {downloading ? <ActivityIndicator size="small" color="#fff" /> : <Ionicons name="document-outline" size={16} color="#fff" />}
               <Text style={intimStyles.downloadBtnText}>{downloading ? "…" : "DOCX"}</Text>
             </Pressable>
-            <Pressable
-              style={[intimStyles.downloadBtn, { backgroundColor: "#dc2626" }, downloadingPdf && { opacity: 0.6 }]}
-              onPress={() => handleDownload("pdf")} disabled={downloading || downloadingPdf}>
+            <Pressable style={[intimStyles.downloadBtn, { backgroundColor: "#dc2626" }, downloadingPdf && { opacity: 0.6 }]} onPress={() => handleDownload("pdf")} disabled={downloading || downloadingPdf}>
               {downloadingPdf ? <ActivityIndicator size="small" color="#fff" /> : <Ionicons name="document-text-outline" size={16} color="#fff" />}
               <Text style={intimStyles.downloadBtnText}>{downloadingPdf ? "…" : "PDF"}</Text>
             </Pressable>
           </View>
         </View>
 
-        {/* Tab toggle */}
         <View style={intimStyles.tabRow}>
           <Pressable style={[intimStyles.tab, !showPreview && intimStyles.tabActive]} onPress={() => setShowPreview(false)}>
             <Text style={[intimStyles.tabText, !showPreview && intimStyles.tabTextActive]}>Fill Details</Text>
@@ -269,15 +391,12 @@ function PreIntimationModal({ item, onClose }: { item: any; onClose: () => void 
           </KeyboardAvoidingView>
         ) : (
           <WebView
-            source={{ uri: previewUrl }}
-            style={{ flex: 1 }}
-            startInLoadingState
-            renderLoading={() => (
-              <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
-                <ActivityIndicator size="large" color={Colors.primary} />
-                <Text style={{ marginTop: 8, color: Colors.textSecondary }}>Loading letter…</Text>
-              </View>
-            )}
+            key={previewHtml}
+            source={{ html: previewHtml, baseUrl: "" }}
+            style={{ flex: 1, backgroundColor: "#fff" }}
+            scrollEnabled
+            showsVerticalScrollIndicator
+            originWhitelist={["*"]}
           />
         )}
       </View>
@@ -292,9 +411,9 @@ function PostIntimationModal({ item, onClose }: { item: any; onClose: () => void
   const [downloadingPdf, setDownloadingPdf] = useState(false);
   const [showPreview, setShowPreview]       = useState(false);
   const today = new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "2-digit", year: "numeric" });
-  const [policeStation, setPoliceStation]       = useState("");
-  const [tq, setTq]                             = useState("");
-  const [repossessionDate, setRepossessionDate] = useState(today);
+  const [policeStation, setPoliceStation]             = useState("");
+  const [tq, setTq]                                   = useState("");
+  const [repossessionDate, setRepossessionDate]       = useState(today);
   const [repossessionAddress, setRepossessionAddress] = useState(item?.address || "");
 
   if (!item) return null;
@@ -303,31 +422,24 @@ function PostIntimationModal({ item, onClose }: { item: any; onClose: () => void
   const loanNo       = item.loan_no          || "___________";
   const regNo        = item.registration_no  || "___________";
 
-  const body = {
-    customer_name: customerName, address: item.address, app_id: item.app_id,
-    loan_no: loanNo, registration_no: regNo, asset_make: item.asset_make,
-    engine_no: item.engine_no, chassis_no: item.chassis_no, date: today,
+  const letterParams = {
+    date: today,
     police_station: policeStation.trim() || "________________________________",
     tq: tq.trim() || "_____________",
-    repossession_date: repossessionDate || today,
-    repossession_address: repossessionAddress || item.address,
-    reference_no: loanNo,
+    customer_name: customerName,
+    address:       item.address   || "___________",
+    app_id:        item.app_id    || "___________",
+    loan_no:       loanNo,
+    registration_no: regNo,
+    asset_make:    item.asset_make  || "___________",
+    engine_no:     item.engine_no   || "___________",
+    chassis_no:    item.chassis_no  || "___________",
+    repossession_date:    repossessionDate    || today,
+    repossession_address: repossessionAddress || item.address || "___________",
+    reference_no:  loanNo,
   };
 
-  const previewParams = new URLSearchParams({
-    customer_name: customerName, address: item.address || "", app_id: item.app_id || "",
-    loan_no: loanNo, registration_no: regNo, asset_make: item.asset_make || "",
-    engine_no: item.engine_no || "", chassis_no: item.chassis_no || "", date: today,
-    police_station: policeStation.trim() || "________________________________",
-    tq: tq.trim() || "_____________",
-    repossession_date: repossessionDate || today,
-    repossession_address: repossessionAddress || item.address || "",
-    reference_no: loanNo,
-  });
-  const previewUrl = new URL(
-    "/api/admin/preview-post-intimation?" + previewParams.toString(),
-    getApiUrl(),
-  ).toString();
+  const body = { ...letterParams };
 
   const handleDownload = async (format: "docx" | "pdf") => {
     const setter = format === "pdf" ? setDownloadingPdf : setDownloading;
@@ -342,38 +454,34 @@ function PostIntimationModal({ item, onClose }: { item: any; onClose: () => void
     finally { setter(false); }
   };
 
+  const previewHtml = buildPostHtml(letterParams);
+
   return (
     <Modal visible={!!item} transparent={false} animationType="slide" onRequestClose={onClose}>
       <View style={[intimStyles.screen, { paddingTop: insets.top }]}>
-        {/* Header */}
         <View style={[intimStyles.header, { backgroundColor: "#1e40af" }]}>
           <Pressable onPress={onClose} style={{ padding: 6 }}>
             <Ionicons name="arrow-back" size={22} color="#fff" />
           </Pressable>
           <Text style={intimStyles.headerTitle} numberOfLines={1}>Post Intimation</Text>
           <View style={{ flexDirection: "row", gap: 8 }}>
-            <Pressable
-              style={[intimStyles.downloadBtn, { backgroundColor: "rgba(255,255,255,0.25)" }, downloading && { opacity: 0.6 }]}
-              onPress={() => handleDownload("docx")} disabled={downloading || downloadingPdf}>
+            <Pressable style={[intimStyles.downloadBtn, { backgroundColor: "rgba(255,255,255,0.25)" }, downloading && { opacity: 0.6 }]} onPress={() => handleDownload("docx")} disabled={downloading || downloadingPdf}>
               {downloading ? <ActivityIndicator size="small" color="#fff" /> : <Ionicons name="document-outline" size={16} color="#fff" />}
               <Text style={intimStyles.downloadBtnText}>{downloading ? "…" : "DOCX"}</Text>
             </Pressable>
-            <Pressable
-              style={[intimStyles.downloadBtn, { backgroundColor: "#dc2626" }, downloadingPdf && { opacity: 0.6 }]}
-              onPress={() => handleDownload("pdf")} disabled={downloading || downloadingPdf}>
+            <Pressable style={[intimStyles.downloadBtn, { backgroundColor: "#dc2626" }, downloadingPdf && { opacity: 0.6 }]} onPress={() => handleDownload("pdf")} disabled={downloading || downloadingPdf}>
               {downloadingPdf ? <ActivityIndicator size="small" color="#fff" /> : <Ionicons name="document-text-outline" size={16} color="#fff" />}
               <Text style={intimStyles.downloadBtnText}>{downloadingPdf ? "…" : "PDF"}</Text>
             </Pressable>
           </View>
         </View>
 
-        {/* Tab toggle */}
         <View style={intimStyles.tabRow}>
-          <Pressable style={[intimStyles.tab, !showPreview && intimStyles.tabActive]} onPress={() => setShowPreview(false)}>
-            <Text style={[intimStyles.tabText, !showPreview && intimStyles.tabTextActive]}>Fill Details</Text>
+          <Pressable style={[intimStyles.tab, !showPreview && { ...intimStyles.tabActive, borderBottomColor: "#1e40af" }]} onPress={() => setShowPreview(false)}>
+            <Text style={[intimStyles.tabText, !showPreview && { ...intimStyles.tabTextActive, color: "#1e40af" }]}>Fill Details</Text>
           </Pressable>
-          <Pressable style={[intimStyles.tab, showPreview && intimStyles.tabActive]} onPress={() => setShowPreview(true)}>
-            <Text style={[intimStyles.tabText, showPreview && intimStyles.tabTextActive]}>Preview Letter</Text>
+          <Pressable style={[intimStyles.tab, showPreview && { ...intimStyles.tabActive, borderBottomColor: "#1e40af" }]} onPress={() => setShowPreview(true)}>
+            <Text style={[intimStyles.tabText, showPreview && { ...intimStyles.tabTextActive, color: "#1e40af" }]}>Preview Letter</Text>
           </Pressable>
         </View>
 
@@ -383,9 +491,9 @@ function PostIntimationModal({ item, onClose }: { item: any; onClose: () => void
               <View style={intimStyles.editableCard}>
                 <Text style={intimStyles.editableTitle}>Fill in Details</Text>
                 {([
-                  ["Police Station Name", policeStation, setPoliceStation, "Enter police station name"],
-                  ["TQ (Taluka)",         tq,             setTq,             "Enter taluka name"],
-                  ["Date of Repossession", repossessionDate, setRepossessionDate, "DD/MM/YYYY"],
+                  ["Police Station Name",  policeStation,       setPoliceStation,       "Enter police station name"],
+                  ["TQ (Taluka)",          tq,                  setTq,                  "Enter taluka name"],
+                  ["Date of Repossession", repossessionDate,    setRepossessionDate,    "DD/MM/YYYY"],
                   ["Repossession Address", repossessionAddress, setRepossessionAddress, "Where vehicle was taken from"],
                 ] as [string, string, (v: string) => void, string][]).map(([label, val, setter, ph]) => (
                   <View key={label} style={intimStyles.editableRow}>
@@ -402,15 +510,12 @@ function PostIntimationModal({ item, onClose }: { item: any; onClose: () => void
           </KeyboardAvoidingView>
         ) : (
           <WebView
-            source={{ uri: previewUrl }}
-            style={{ flex: 1 }}
-            startInLoadingState
-            renderLoading={() => (
-              <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
-                <ActivityIndicator size="large" color="#1e40af" />
-                <Text style={{ marginTop: 8, color: Colors.textSecondary }}>Loading letter…</Text>
-              </View>
-            )}
+            key={previewHtml}
+            source={{ html: previewHtml, baseUrl: "" }}
+            style={{ flex: 1, backgroundColor: "#fff" }}
+            scrollEnabled
+            showsVerticalScrollIndicator
+            originWhitelist={["*"]}
           />
         )}
       </View>
