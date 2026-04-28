@@ -1,16 +1,17 @@
 import React, { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import {
   View, Text, StyleSheet, FlatList, Pressable, TextInput, Linking,
-  Alert, ActivityIndicator, Modal, ScrollView, Platform, Image,
+  Alert, ActivityIndicator, Modal, ScrollView, Platform, Image, Share,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Ionicons } from "@expo/vector-icons";
+import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { router, useLocalSearchParams } from "expo-router";
 import * as Haptics from "expo-haptics";
 import * as ImagePicker from "expo-image-picker";
 import * as Location from "expo-location";
 import * as FileSystem from "expo-file-system";
+import * as Sharing from "expo-sharing";
 import Colors from "@/constants/colors";
 import { api } from "@/lib/api";
 import { caseStore } from "@/lib/caseStore";
@@ -423,6 +424,102 @@ interface FeedbackModalProps {
   onMonthlyFeedbackRequest?: () => void;
 }
 
+// ─── WhatsApp helpers ─────────────────────────────────────────────────────────
+function fmtRupee(n?: number) {
+  return n != null ? `₹${n.toLocaleString("en-IN")}` : "—";
+}
+
+function buildFieldVisitMsg(
+  caseItem: CaseItem,
+  visitOutcome: string,
+  visitRemarks: string,
+  gps: { lat: number; lng: number } | null,
+): string {
+  const mapsLink = gps ? `https://maps.google.com/?q=${gps.lat},${gps.lng}` : null;
+  const lines = [
+    `📍 *FIELD VISIT REPORT*`,
+    `━━━━━━━━━━━━━━━━━━━━`,
+    `👥 *Customer:* ${caseItem.customer_name?.toUpperCase() ?? "—"}`,
+    caseItem.loan_no  ? `🔖 *Loan No:*  ${caseItem.loan_no}`  : "",
+    caseItem.pos != null ? `💰 *POS:*      ${fmtRupee(caseItem.pos)}` : "",
+    visitOutcome      ? `📊 *Outcome:*  ${visitOutcome}`      : "",
+    visitRemarks      ? `💬 *Remarks:*  ${visitRemarks}`      : "",
+    `⏰ *Time:*     ${new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true })}`,
+    gps       ? `📍 *Location:* ${gps.lat.toFixed(5)}, ${gps.lng.toFixed(5)}` : "",
+    mapsLink  ? `🗺️ ${mapsLink}` : "",
+    `━━━━━━━━━━━━━━━━━━━━`,
+    `_Dhanraj Collections App_`,
+  ];
+  return lines.filter(Boolean).join("\n");
+}
+
+function buildCallLogMsg(
+  caseItem: CaseItem,
+  callOutcome: string,
+  callComments: string,
+  callPtpDate: string,
+): string {
+  const lines = [
+    `📞 *CALL LOG REPORT*`,
+    `━━━━━━━━━━━━━━━━━━━━`,
+    `👥 *Customer:* ${caseItem.customer_name?.toUpperCase() ?? "—"}`,
+    caseItem.loan_no ? `🔖 *Loan No:*  ${caseItem.loan_no}` : "",
+    callOutcome      ? `📞 *Outcome:*  ${callOutcome}`      : "",
+    callComments     ? `💬 *Comments:* ${callComments}`     : "",
+    callPtpDate      ? `📅 *PTP Date:* ${callPtpDate}`      : "",
+    `⏰ *Time:*     ${new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true })}`,
+    `━━━━━━━━━━━━━━━━━━━━`,
+    `_Dhanraj Collections App_`,
+  ];
+  return lines.filter(Boolean).join("\n");
+}
+
+async function shareFieldVisitWhatsApp(
+  msg: string,
+  photoUri: string | null,
+): Promise<void> {
+  // Photo is a LOCAL uri (just taken by camera) — share directly, no download needed
+  if (photoUri && Platform.OS !== "web") {
+    try {
+      const canShare = await Sharing.isAvailableAsync();
+      if (canShare) {
+        // On iOS: Share.share with url attaches image + pre-fills message
+        if (Platform.OS === "ios") {
+          await Share.share({ message: msg, url: photoUri, title: "Field Visit Report" });
+          return;
+        }
+        // On Android: open share sheet with the image file
+        await Sharing.shareAsync(photoUri, {
+          mimeType: "image/jpeg",
+          dialogTitle: "Share Field Visit to WhatsApp Group",
+          UTI: "public.jpeg",
+        });
+        return;
+      }
+    } catch (_) {
+      // fall through to text-only
+    }
+  }
+  // Text-only fallback
+  const waUrl = `whatsapp://send?text=${encodeURIComponent(msg)}`;
+  const canWA = await Linking.canOpenURL(waUrl).catch(() => false);
+  if (canWA) {
+    await Linking.openURL(waUrl);
+  } else {
+    await Share.share({ message: msg, title: "Field Visit Report" });
+  }
+}
+
+async function shareCallLogWhatsApp(msg: string): Promise<void> {
+  const waUrl = `whatsapp://send?text=${encodeURIComponent(msg)}`;
+  const canWA = await Linking.canOpenURL(waUrl).catch(() => false);
+  if (canWA) {
+    await Linking.openURL(waUrl);
+  } else {
+    await Share.share({ message: msg, title: "Call Log Report" });
+  }
+}
+
 function FeedbackModal({
   visible, caseItem, onClose, isMonthlyLocked = false, initialTab = "Call Log", onMonthlyFeedbackRequest,
 }: FeedbackModalProps) {
@@ -631,8 +728,40 @@ function FeedbackModal({
       qc.invalidateQueries({ queryKey: ["/api/bkt-perf-summary"] });
       qc.invalidateQueries({ queryKey: ["/api/broken-ptps"] }); // re-check blocking after feedback
       onClose();
+
       if (activeTab === "Field Visit") {
-        setTimeout(() => Alert.alert("Visit Recorded", "Field visit has been saved successfully."), 300);
+        const msg       = buildFieldVisitMsg(caseItem, visitOutcome, visitRemarks, gps);
+        const photoUri  = photos.length > 0 ? photos[0].uri : null;
+        setTimeout(() => {
+          Alert.alert(
+            "✅ Visit Recorded",
+            "Field visit saved successfully.\nWould you like to share it on WhatsApp?",
+            [
+              { text: "Not Now", style: "cancel" },
+              {
+                text: "Share on WhatsApp",
+                onPress: () => shareFieldVisitWhatsApp(msg, photoUri),
+              },
+            ],
+          );
+        }, 300);
+      }
+
+      if (activeTab === "Call Log") {
+        const msg = buildCallLogMsg(caseItem, callOutcome, callComments, callPtpDate);
+        setTimeout(() => {
+          Alert.alert(
+            "✅ Call Logged",
+            "Call log saved successfully.\nWould you like to share it on WhatsApp?",
+            [
+              { text: "Not Now", style: "cancel" },
+              {
+                text: "Share on WhatsApp",
+                onPress: () => shareCallLogWhatsApp(msg),
+              },
+            ],
+          );
+        }, 300);
       }
     } catch (e: unknown) {
       Alert.alert("Error", e instanceof Error ? e.message : "Something went wrong");
