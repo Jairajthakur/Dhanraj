@@ -34,7 +34,6 @@ import { Stack } from "expo-router";
 import { Ionicons, MaterialCommunityIcons, MaterialIcons } from "@expo/vector-icons";
 import * as FileSystem from "expo-file-system";
 import * as Sharing from "expo-sharing";
-import RNShare from "react-native-share";
 import Constants from "expo-constants";
 import { tokenStore } from "@/lib/api";
 
@@ -166,8 +165,8 @@ function buildVisitWhatsAppMsg(visit: FieldVisit): string {
 async function shareVisitToWhatsApp(visit: FieldVisit): Promise<void> {
   const msg = buildVisitWhatsAppMsg(visit);
 
-  if (visit.photo_url) {
-    // ── Download photo → convert to base64 → share image + text together ──
+  if (visit.photo_url && Platform.OS !== "web") {
+    // ── Download photo → share via native sheet (user picks WhatsApp group) ──
     const ext      = visit.photo_url.split("?")[0].split(".").pop()?.toLowerCase() ?? "jpg";
     const localUri = `${FileSystem.cacheDirectory}visit_${visit.id}.${ext}`;
     try {
@@ -175,32 +174,31 @@ async function shareVisitToWhatsApp(visit: FieldVisit): Promise<void> {
       if (!info.exists) {
         await FileSystem.downloadAsync(visit.photo_url, localUri);
       }
-
-      // Read as base64 so react-native-share can attach it inline
-      const base64 = await FileSystem.readAsStringAsync(localUri, {
-        encoding: FileSystem.EncodingType.Base64,
-      });
-
-      await RNShare.shareSingle({
-        title:    "Field Visit Report",
-        message:  msg,
-        url:      `data:image/jpeg;base64,${base64}`,
-        social:   RNShare.Social.WHATSAPP,
-        filename: `visit_${visit.id}`,
-      });
-      return;
+      const canShare = await Sharing.isAvailableAsync();
+      if (canShare) {
+        // Step 1 — open WhatsApp with the text pre-filled so user can copy caption
+        const waUrl = `whatsapp://send?text=${encodeURIComponent(msg)}`;
+        const canWA = await Linking.canOpenURL(waUrl).catch(() => false);
+        if (canWA) await Linking.openURL(waUrl);
+        // Step 2 — share the image file (user selects same WhatsApp group)
+        await Sharing.shareAsync(localUri, {
+          mimeType: "image/jpeg",
+          dialogTitle: "Share visit photo to WhatsApp Group",
+          UTI: "public.jpeg",
+        });
+        return;
+      }
     } catch (_) {
-      // Photo download or base64 failed → fall through to text-only
+      // fall through to text-only
     }
   }
 
-  // ── Text-only fallback — opens WhatsApp with pre-filled message ───────────
+  // ── Text-only (web, no photo, or share unavailable) ───────────────────────
   const waUrl = `whatsapp://send?text=${encodeURIComponent(msg)}`;
   const canWA = await Linking.canOpenURL(waUrl).catch(() => false);
   if (canWA) {
     await Linking.openURL(waUrl);
   } else {
-    // No WhatsApp installed → native share sheet
     await Share.share({ message: msg, title: "Field Visit Report" });
   }
 }
