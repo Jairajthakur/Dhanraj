@@ -475,69 +475,63 @@ function buildCallLogMsg(
   return lines.filter(Boolean).join("\n");
 }
 
+async function shareToWhatsApp(
+  msg: string,
+  photoUri: string | null,
+  reportTitle: string,
+): Promise<void> {
+  if (photoUri && Platform.OS !== "web") {
+    try {
+      // iOS — Share.share with both message + url sends image AND text together
+      if (Platform.OS === "ios") {
+        await Share.share({ message: msg, url: photoUri, title: reportTitle });
+        return;
+      }
+
+      // Android — WhatsApp doesn't accept text+image in a single intent via Expo.
+      // Best UX: open the native share sheet targeted at WhatsApp with the image
+      // AND pre-open WhatsApp with text so the agent can send both.
+      // Step 1: open WhatsApp with text pre-filled
+      const waUrl = `whatsapp://send?text=${encodeURIComponent(msg)}`;
+      const canWA = await Linking.canOpenURL(waUrl).catch(() => false);
+      if (canWA) await Linking.openURL(waUrl);
+
+      // Step 2: after a short delay, open native share sheet with the photo
+      // Agent picks WhatsApp again to attach the image
+      await new Promise(res => setTimeout(res, 1200));
+      const canShare = await Sharing.isAvailableAsync();
+      if (canShare) {
+        await Sharing.shareAsync(photoUri, {
+          mimeType: "image/jpeg",
+          dialogTitle: `Attach photo — ${reportTitle}`,
+          UTI: "public.jpeg",
+        });
+      }
+      return;
+    } catch (_) {
+      // fall through to text-only
+    }
+  }
+
+  // Text-only (no photo, or web, or error)
+  const waUrl = `whatsapp://send?text=${encodeURIComponent(msg)}`;
+  const canWA = await Linking.canOpenURL(waUrl).catch(() => false);
+  if (canWA) {
+    await Linking.openURL(waUrl);
+  } else {
+    await Share.share({ message: msg, title: reportTitle });
+  }
+}
+
 async function shareFieldVisitWhatsApp(
   msg: string,
   photoUri: string | null,
 ): Promise<void> {
-  // Photo is a LOCAL uri (just taken by camera) — share directly, no download needed
-  if (photoUri && Platform.OS !== "web") {
-    try {
-      const canShare = await Sharing.isAvailableAsync();
-      if (canShare) {
-        // On iOS: Share.share with url attaches image + pre-fills message
-        if (Platform.OS === "ios") {
-          await Share.share({ message: msg, url: photoUri, title: "Field Visit Report" });
-          return;
-        }
-        // On Android: open share sheet with the image file
-        await Sharing.shareAsync(photoUri, {
-          mimeType: "image/jpeg",
-          dialogTitle: "Share Field Visit to WhatsApp Group",
-          UTI: "public.jpeg",
-        });
-        return;
-      }
-    } catch (_) {
-      // fall through to text-only
-    }
-  }
-  // Text-only fallback
-  const waUrl = `whatsapp://send?text=${encodeURIComponent(msg)}`;
-  const canWA = await Linking.canOpenURL(waUrl).catch(() => false);
-  if (canWA) {
-    await Linking.openURL(waUrl);
-  } else {
-    await Share.share({ message: msg, title: "Field Visit Report" });
-  }
+  return shareToWhatsApp(msg, photoUri, "Field Visit Report");
 }
 
 async function shareCallLogWhatsApp(msg: string, photoUri: string | null): Promise<void> {
-  if (photoUri && Platform.OS !== "web") {
-    try {
-      const canShare = await Sharing.isAvailableAsync();
-      if (canShare) {
-        if (Platform.OS === "ios") {
-          await Share.share({ message: msg, url: photoUri, title: "Call Log Report" });
-          return;
-        }
-        await Sharing.shareAsync(photoUri, {
-          mimeType: "image/jpeg",
-          dialogTitle: "Share Call Log to WhatsApp Group",
-          UTI: "public.jpeg",
-        });
-        return;
-      }
-    } catch (_) {
-      // fall through to text-only
-    }
-  }
-  const waUrl = `whatsapp://send?text=${encodeURIComponent(msg)}`;
-  const canWA = await Linking.canOpenURL(waUrl).catch(() => false);
-  if (canWA) {
-    await Linking.openURL(waUrl);
-  } else {
-    await Share.share({ message: msg, title: "Call Log Report" });
-  }
+  return shareToWhatsApp(msg, photoUri, "Call Log Report");
 }
 
 function FeedbackModal({
