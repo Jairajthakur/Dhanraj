@@ -21,6 +21,8 @@ import Colors from "@/constants/colors";
 import { api, tokenStore } from "@/lib/api";
 import { getApiUrl } from "@/lib/query-client";
 import { ReassignCaseModal } from "@/components/ReassignCaseModal";
+import * as FileSystem from "expo-file-system";
+import * as Sharing from "expo-sharing";
 
 const STATUS_COLORS: Record<string, string> = {
   Unpaid: Colors.statusUnpaid,
@@ -108,6 +110,68 @@ function CompanyBadge({ name }: { name?: string | null }) {
   );
 }
 
+// ── Shared download helper ────────────────────────────────────────────────
+async function downloadIntimation(
+  endpoint: string,
+  format: "pdf" | "docx",
+  fileName: string,
+  body: object,
+) {
+  const token = await tokenStore.get();
+  const url   = new URL(endpoint, getApiUrl()).toString();
+  const res   = await fetch(url, {
+    method: "POST",
+    credentials: "include",
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error("Failed to generate document");
+
+  if (Platform.OS === "web") {
+    const blob    = await res.blob();
+    const blobUrl = URL.createObjectURL(blob);
+    const a       = document.createElement("a");
+    a.href = blobUrl; a.download = fileName; a.click();
+    URL.revokeObjectURL(blobUrl);
+  } else {
+    // Native (Android/iOS) — save to cache then share
+    const arrayBuf = await res.arrayBuffer();
+    const base64   = btoa(
+      new Uint8Array(arrayBuf).reduce((s, b) => s + String.fromCharCode(b), ""),
+    );
+    const mime     = format === "pdf" ? "application/pdf"
+      : "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+    const fileUri  = FileSystem.cacheDirectory + fileName;
+    await FileSystem.writeAsStringAsync(fileUri, base64, {
+      encoding: FileSystem.EncodingType.Base64,
+    });
+    if (await Sharing.isAvailableAsync()) {
+      await Sharing.shareAsync(fileUri, { mimeType: mime, dialogTitle: "Save " + fileName });
+    } else {
+      Alert.alert("Saved", "File saved to: " + fileUri);
+    }
+  }
+}
+
+// ── Letter preview helper ──────────────────────────────────────────────────
+function LetterPreview({ fields }: { fields: Record<string, string> }) {
+  const row = (label: string, value: string) => (
+    <View key={label} style={{ flexDirection: "row", marginBottom: 4 }}>
+      <Text style={{ width: 160, fontWeight: "600", color: "#374151", fontSize: 12 }}>{label}:</Text>
+      <Text style={{ flex: 1, color: "#111827", fontSize: 12 }}>{value || "___________"}</Text>
+    </View>
+  );
+  return (
+    <View style={{ backgroundColor: "#fff", borderRadius: 10, padding: 16, marginTop: 12, borderWidth: 1, borderColor: "#e5e7eb" }}>
+      <Text style={{ fontSize: 11, color: "#6b7280", marginBottom: 10, fontStyle: "italic" }}>Document preview — fill in details above then download</Text>
+      {Object.entries(fields).map(([k, v]) => row(k, v))}
+    </View>
+  );
+}
+
 // ── Pre Intimation Modal ───────────────────────────────────────────────────
 function PreIntimationModal({ item, onClose }: { item: any; onClose: () => void }) {
   const insets = useSafeAreaInsets();
@@ -120,37 +184,30 @@ function PreIntimationModal({ item, onClose }: { item: any; onClose: () => void 
   if (!item) return null;
 
   const customerName = item.customer_name || "___________";
-  const address = item.address || "___________";
-  const appId = item.app_id || "___________";
-  const loanNo = item.loan_no || "___________";
-  const regNo = item.registration_no || "___________";
-  const assetMake = item.asset_make || "___________";
-  const engineNo = item.engine_no || "___________";
-  const chassisNo = item.chassis_no || "___________";
+  const address      = item.address       || "___________";
+  const appId        = item.app_id        || "___________";
+  const loanNo       = item.loan_no       || "___________";
+  const regNo        = item.registration_no || "___________";
+  const assetMake    = item.asset_make    || "___________";
+  const engineNo     = item.engine_no     || "___________";
+  const chassisNo    = item.chassis_no    || "___________";
+
+  const body = {
+    customer_name: customerName, address, app_id: appId, loan_no: loanNo,
+    registration_no: regNo, asset_make: assetMake, engine_no: engineNo,
+    chassis_no: chassisNo, date: today,
+    police_station: policeStation.trim() || "________________________________",
+    tq: tq.trim() || "_____________",
+  };
 
   const handleDownload = async (format: "docx" | "pdf") => {
     const setter = format === "pdf" ? setDownloadingPdf : setDownloading;
     setter(true);
     try {
-      const token = await tokenStore.get();
+      const ext      = format === "pdf" ? "pdf" : "docx";
       const endpoint = format === "pdf" ? "/api/admin/generate-pre-intimation" : "/api/admin/generate-pre-intimation-docx";
-      const url = new URL(endpoint, getApiUrl()).toString();
-      const res = await fetch(url, {
-        method: "POST", credentials: "include",
-        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-        body: JSON.stringify({ customer_name: customerName, address, app_id: appId, loan_no: loanNo, registration_no: regNo, asset_make: assetMake, engine_no: engineNo, chassis_no: chassisNo, date: today, police_station: policeStation.trim() || "________________________________", tq: tq.trim() || "_____________" }),
-      });
-      if (!res.ok) throw new Error("Failed to generate document");
-      const ext = format === "pdf" ? "pdf" : "docx";
-      const mimeType = format === "pdf" ? "application/pdf" : "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
       const fileName = `Pre_Intimation_${customerName.replace(/\s+/g, "_")}.${ext}`;
-      if (Platform.OS === "web") {
-        const blob = await res.blob();
-        const blobUrl = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = blobUrl; a.download = fileName; a.click();
-        URL.revokeObjectURL(blobUrl);
-      }
+      await downloadIntimation(endpoint, format, fileName, body);
     } catch (e: any) { Alert.alert("Error", e.message || "Could not generate document"); }
     finally { setter(false); }
   };
@@ -185,6 +242,22 @@ function PreIntimationModal({ item, onClose }: { item: any; onClose: () => void 
                 <TextInput style={intimStyles.editableInput} placeholder="Enter taluka name" placeholderTextColor={Colors.textMuted} value={tq} onChangeText={setTq} />
               </View>
             </View>
+            <LetterPreview fields={{
+              "Customer Name":   customerName,
+              "Loan No":         loanNo,
+              "App ID":          appId,
+              "Address":         address,
+              "Asset Make":      assetMake,
+              "Reg No":          regNo,
+              "Engine No":       engineNo,
+              "Chassis No":      chassisNo,
+              "Date":            today,
+              "Police Station":  policeStation || "________________________________",
+              "TQ (Taluka)":     tq || "_____________",
+            }} />
+            <Text style={{ textAlign: "center", color: "#6b7280", fontSize: 12, marginTop: 16 }}>
+              Tap DOCX or PDF above to download the full document
+            </Text>
             <View style={{ height: insets.bottom + 24 }} />
           </ScrollView>
         </KeyboardAvoidingView>
@@ -206,26 +279,29 @@ function PostIntimationModal({ item, onClose }: { item: any; onClose: () => void
 
   if (!item) return null;
 
-  const customerName = item.customer_name || "___________";
-  const loanNo = item.loan_no || "___________";
-  const regNo = item.registration_no || "___________";
+  const customerName = item.customer_name    || "___________";
+  const loanNo       = item.loan_no          || "___________";
+  const regNo        = item.registration_no  || "___________";
+
+  const body = {
+    customer_name: customerName, address: item.address, app_id: item.app_id,
+    loan_no: loanNo, registration_no: regNo, asset_make: item.asset_make,
+    engine_no: item.engine_no, chassis_no: item.chassis_no, date: today,
+    police_station: policeStation.trim() || "________________________________",
+    tq: tq.trim() || "_____________",
+    repossession_date: repossessionDate || today,
+    repossession_address: repossessionAddress || item.address,
+    reference_no: loanNo,
+  };
 
   const handleDownload = async (format: "docx" | "pdf") => {
     const setter = format === "pdf" ? setDownloadingPdf : setDownloading;
     setter(true);
     try {
-      const token = await tokenStore.get();
+      const ext      = format === "pdf" ? "pdf" : "docx";
       const endpoint = format === "pdf" ? "/api/admin/generate-post-intimation" : "/api/admin/generate-post-intimation-docx";
-      const url = new URL(endpoint, getApiUrl()).toString();
-      const res = await fetch(url, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) }, body: JSON.stringify({ customer_name: customerName, address: item.address, app_id: item.app_id, loan_no: loanNo, registration_no: regNo, asset_make: item.asset_make, engine_no: item.engine_no, chassis_no: item.chassis_no, date: today, police_station: policeStation.trim() || "________________________________", tq: tq.trim() || "_____________", repossession_date: repossessionDate || today, repossession_address: repossessionAddress || item.address, reference_no: loanNo }) });
-      if (!res.ok) throw new Error("Failed to generate document");
-      if (Platform.OS === "web") {
-        const blob = await res.blob();
-        const blobUrl = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = blobUrl; a.download = `Post_Intimation_${customerName.replace(/\s+/g, "_")}.${format === "pdf" ? "pdf" : "docx"}`; a.click();
-        URL.revokeObjectURL(blobUrl);
-      }
+      const fileName = `Post_Intimation_${customerName.replace(/\s+/g, "_")}.${ext}`;
+      await downloadIntimation(endpoint, format, fileName, body);
     } catch (e: any) { Alert.alert("Error", e.message || "Could not generate document"); }
     finally { setter(false); }
   };
@@ -251,13 +327,34 @@ function PostIntimationModal({ item, onClose }: { item: any; onClose: () => void
           <ScrollView style={{ flex: 1 }} contentContainerStyle={intimStyles.letterContainer}>
             <View style={intimStyles.editableCard}>
               <Text style={intimStyles.editableTitle}>Fill in Details</Text>
-              {[["Police Station Name", policeStation, setPoliceStation, "Enter police station name"], ["TQ (Taluka)", tq, setTq, "Enter taluka name"], ["Date of Repossession", repossessionDate, setRepossessionDate, "DD/MM/YYYY"], ["Repossession Address", repossessionAddress, setRepossessionAddress, "Where vehicle was taken from"]].map(([label, val, setter, ph]: any) => (
+              {([
+                ["Police Station Name", policeStation, setPoliceStation, "Enter police station name"],
+                ["TQ (Taluka)",         tq,             setTq,             "Enter taluka name"],
+                ["Date of Repossession", repossessionDate, setRepossessionDate, "DD/MM/YYYY"],
+                ["Repossession Address", repossessionAddress, setRepossessionAddress, "Where vehicle was taken from"],
+              ] as [string, string, (v: string) => void, string][]).map(([label, val, setter, ph]) => (
                 <View key={label} style={intimStyles.editableRow}>
                   <Text style={intimStyles.editableLabel}>{label}</Text>
                   <TextInput style={intimStyles.editableInput} placeholder={ph} placeholderTextColor={Colors.textMuted} value={val} onChangeText={setter} />
                 </View>
               ))}
             </View>
+            <LetterPreview fields={{
+              "Customer Name":        customerName,
+              "Loan No":              loanNo,
+              "Reg No":               regNo,
+              "Asset Make":           item.asset_make   || "___________",
+              "Engine No":            item.engine_no    || "___________",
+              "Chassis No":           item.chassis_no   || "___________",
+              "Date":                 today,
+              "Police Station":       policeStation || "________________________________",
+              "TQ (Taluka)":          tq || "_____________",
+              "Date of Repossession": repossessionDate || today,
+              "Repossession Address": repossessionAddress || item.address || "___________",
+            }} />
+            <Text style={{ textAlign: "center", color: "#6b7280", fontSize: 12, marginTop: 16 }}>
+              Tap DOCX or PDF above to download the full document
+            </Text>
             <View style={{ height: insets.bottom + 24 }} />
           </ScrollView>
         </KeyboardAvoidingView>
