@@ -1,11 +1,11 @@
 import React, { useState, useMemo } from "react";
 import {
   View, Text, StyleSheet, ScrollView, Pressable,
-  ActivityIndicator, TextInput, Platform,
+  ActivityIndicator, TextInput, Platform, TouchableOpacity, Linking, Share,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQuery } from "@tanstack/react-query";
-import { Ionicons } from "@expo/vector-icons";
+import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import Colors from "@/constants/colors";
 import { api } from "@/lib/api";
 
@@ -46,10 +46,53 @@ const STATUS_COLORS: Record<string, string> = {
   Paid:   Colors.statusPaid,
 };
 
+// ─── WhatsApp share helper ────────────────────────────────────────────────────
+function buildCallLogWhatsAppMsg(log: any): string {
+  const lines: string[] = [
+    `📞 *CALL LOG REPORT*`,
+    `━━━━━━━━━━━━━━━━━━━━`,
+    log.customer_name ? `👥 *Customer:* ${log.customer_name.toUpperCase()}` : "",
+    log.loan_no       ? `🔖 *Loan No:*  ${log.loan_no}`                     : "",
+
+    log.status        ? `📊 *Status:*   ${log.status}`                      : "",
+    log.outcome       ? `📞 *Outcome:*  ${log.outcome}`                     : "",
+    log.comments      ? `💬 *Comments:* ${log.comments}`                    : "",
+    log.ptp_date      ? `📅 *PTP Date:* ${fmtDate(log.ptp_date)}`           : "",
+    log.agent_name    ? `👤 *Agent:*    ${log.agent_name}`                  : "",
+    log.logged_at     ? `⏰ *Time:*     ${fmtDateTime(log.logged_at)}`       : "",
+    `━━━━━━━━━━━━━━━━━━━━`,
+    `_Dhanraj Collections App_`,
+  ];
+  return lines.filter(Boolean).join("\n");
+}
+
+async function shareCallLogToWhatsApp(log: any): Promise<void> {
+  const msg   = buildCallLogWhatsAppMsg(log);
+  const waUrl = `whatsapp://send?text=${encodeURIComponent(msg)}`;
+  const canWA = await Linking.canOpenURL(waUrl).catch(() => false);
+  if (canWA) {
+    await Linking.openURL(waUrl);
+  } else {
+    await Share.share({ message: msg, title: "Call Log Report" });
+  }
+}
+
 // ─── Log Card ─────────────────────────────────────────────────────────────────
 function LogCard({ log }: { log: any }) {
+  const [sharing, setSharing] = useState(false);
   const oc = outcomeColor(log.outcome);
   const sc = STATUS_COLORS[log.status] || Colors.textMuted;
+
+  const handleShareWhatsApp = async () => {
+    setSharing(true);
+    try {
+      await shareCallLogToWhatsApp(log);
+    } catch (err: any) {
+      // Silent – Share.share() throws if user dismisses on Android
+    } finally {
+      setSharing(false);
+    }
+  };
   return (
     <View style={card.wrap}>
       {/* Header row */}
@@ -105,6 +148,21 @@ function LogCard({ log }: { log: any }) {
           <Text style={card.timeText}>{fmtDateTime(log.logged_at)}</Text>
         </View>
       </View>
+
+      {/* WhatsApp Share Button */}
+      <TouchableOpacity
+        style={card.waBtn}
+        onPress={handleShareWhatsApp}
+        activeOpacity={0.8}
+        disabled={sharing}
+      >
+        {sharing ? (
+          <ActivityIndicator size={14} color="#fff" />
+        ) : (
+          <MaterialCommunityIcons name="whatsapp" size={15} color="#fff" />
+        )}
+        <Text style={card.waBtnText}>{sharing ? "Sharing…" : "Share on WhatsApp"}</Text>
+      </TouchableOpacity>
     </View>
   );
 }
@@ -322,4 +380,6 @@ const card = StyleSheet.create({
   agentText:    { fontSize: 11, fontWeight: "700", color: Colors.primary },
   timeChip:     { flexDirection: "row", alignItems: "center", gap: 4 },
   timeText:     { fontSize: 10, color: Colors.textMuted },
+  waBtn:        { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, backgroundColor: "#25D366", borderRadius: 9, paddingVertical: 8, marginTop: 4 },
+  waBtnText:    { fontSize: 12, fontWeight: "700", color: "#fff", letterSpacing: 0.2 },
 });
