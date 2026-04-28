@@ -730,38 +730,16 @@ function FeedbackModal({
       onClose();
 
       if (activeTab === "Field Visit") {
-        const msg       = buildFieldVisitMsg(caseItem, visitOutcome, visitRemarks, gps);
-        const photoUri  = photos.length > 0 ? photos[0].uri : null;
-        setTimeout(() => {
-          Alert.alert(
-            "✅ Visit Recorded",
-            "Field visit saved successfully.\nWould you like to share it on WhatsApp?",
-            [
-              { text: "Not Now", style: "cancel" },
-              {
-                text: "Share on WhatsApp",
-                onPress: () => shareFieldVisitWhatsApp(msg, photoUri),
-              },
-            ],
-          );
-        }, 300);
+        const msg      = buildFieldVisitMsg(caseItem, visitOutcome, visitRemarks, gps);
+        const photoUri = photos.length > 0 ? photos[0].uri : null;
+        // Directly share to WhatsApp — no confirmation needed for agent
+        setTimeout(() => shareFieldVisitWhatsApp(msg, photoUri), 300);
       }
 
       if (activeTab === "Call Log") {
         const msg = buildCallLogMsg(caseItem, callOutcome, callComments, callPtpDate);
-        setTimeout(() => {
-          Alert.alert(
-            "✅ Call Logged",
-            "Call log saved successfully.\nWould you like to share it on WhatsApp?",
-            [
-              { text: "Not Now", style: "cancel" },
-              {
-                text: "Share on WhatsApp",
-                onPress: () => shareCallLogWhatsApp(msg),
-              },
-            ],
-          );
-        }, 300);
+        // Directly share to WhatsApp — no confirmation needed for agent
+        setTimeout(() => shareCallLogWhatsApp(msg), 300);
       }
     } catch (e: unknown) {
       Alert.alert("Error", e instanceof Error ? e.message : "Something went wrong");
