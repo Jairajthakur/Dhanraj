@@ -10,6 +10,7 @@ import { Ionicons } from "@expo/vector-icons";
 import Colors from "@/constants/colors";
 import { api, tokenStore } from "@/lib/api";
 import { getApiUrl } from "@/lib/query-client";
+import { ReassignCaseModal } from "@/components/ReassignCaseModal";
 
 const STATUS_COLORS: Record<string, string> = {
   Unpaid: Colors.statusUnpaid,
@@ -254,6 +255,7 @@ export default function AgentDetailScreen() {
   const [activeTab, setActiveTab] = useState("All");
   const [companyTab, setCompanyTab] = useState("All");
   const [selectedCase, setSelectedCase] = useState<any>(null);
+  const [transferCase, setTransferCase] = useState<any>(null);
 
   const { data: agentsData } = useQuery({ queryKey: ["/api/admin/agents"], queryFn: () => api.admin.getAgents() });
   const { data: casesData, isLoading, refetch } = useQuery({ queryKey: ["/api/admin/cases/agent", id], queryFn: () => api.admin.getCasesByAgent(Number(id)), enabled: !!id, refetchInterval: 20000 });
@@ -461,6 +463,13 @@ export default function AgentDetailScreen() {
                 <Ionicons name="eye-outline" size={13} color={Colors.primary} />
                 <Text style={styles.viewDetailHintText}>Tap to view full details</Text>
               </View>
+              <Pressable
+                style={styles.transferBtn}
+                onPress={(e) => { e.stopPropagation?.(); setTransferCase(c); }}
+              >
+                <Ionicons name="swap-horizontal-outline" size={13} color="#7c3aed" />
+                <Text style={styles.transferBtnText}>Transfer</Text>
+              </Pressable>
             </Pressable>
           );
         })}
@@ -476,6 +485,16 @@ export default function AgentDetailScreen() {
       </ScrollView>
 
       <CaseDetailModal item={selectedCase} onClose={() => setSelectedCase(null)} onResetCase={handleResetCase} onStatusUpdated={invalidateAndSyncSelected} />
+      <ReassignCaseModal
+        item={transferCase}
+        caseType={transferCase?.case_type === "bkt" ? "bkt" : "loan"}
+        onClose={() => setTransferCase(null)}
+        onSuccess={() => {
+          setTransferCase(null);
+          qc.invalidateQueries({ queryKey: ["/api/admin/cases/agent"] });
+          qc.invalidateQueries({ queryKey: ["/api/admin/bkt-cases"] });
+        }}
+      />
     </View>
   );
 }
@@ -541,6 +560,8 @@ const styles = StyleSheet.create({
   feedbackCodeText: { fontSize: 11, fontWeight: "700", color: Colors.accent },
   caseFeedback: { flex: 1, fontSize: 11, color: Colors.textSecondary, fontStyle: "italic" },
   viewDetailHint: { flexDirection: "row", alignItems: "center", gap: 4, justifyContent: "flex-end", marginTop: 2 },
+  transferBtn: { flexDirection: "row", alignItems: "center", gap: 5, alignSelf: "flex-start", marginTop: 6, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, backgroundColor: "#7c3aed18", borderWidth: 1, borderColor: "#7c3aed40" },
+  transferBtnText: { fontSize: 12, fontWeight: "700", color: "#7c3aed" },
   viewDetailHintText: { fontSize: 11, color: Colors.primary, fontWeight: "600" },
   empty: { flex: 1, justifyContent: "center", alignItems: "center", gap: 12, paddingVertical: 60 },
   emptyText: { fontSize: 15, color: Colors.textMuted, textAlign: "center" },
