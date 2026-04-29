@@ -2010,10 +2010,12 @@ res.json({ imported, updated: 0, skipped, agentsCreated, agentsRemoved, total: r
         lc.customer_available, lc.vehicle_available, lc.third_party,
         lc.third_party_name, lc.third_party_number,
         lc.feedback_code, lc.latest_feedback, lc.monthly_feedback,
-        lc.ptp_date, lc.telecaller_ptp_date, lc.projection, lc.non_starter,
+        lc.ptp_date, lc.telecaller_ptp_date, lc.ptp_date_mf,
+        lc.projection, lc.non_starter,
         lc.kyc_purchase, lc.workable, lc.status, lc.feedback_comments,
         lc.occupation, lc.shifted_city AS sft_city, lc.rollback_yn,
         lc.feedback_date,
+        lc.cbc_paid, lc.lpp_paid, lc.emi_paid,
         fa.name AS fos_name, 'Loan' AS case_type
       FROM loan_cases lc
       LEFT JOIN fos_agents fa ON lc.agent_id = fa.id
@@ -2027,10 +2029,12 @@ res.json({ imported, updated: 0, skipped, agentsCreated, agentsRemoved, total: r
         bc.customer_available, bc.vehicle_available, bc.third_party,
         bc.third_party_name, bc.third_party_number,
         bc.feedback_code, bc.latest_feedback, bc.monthly_feedback,
-        bc.ptp_date, bc.telecaller_ptp_date, bc.projection, bc.non_starter,
+        bc.ptp_date, bc.telecaller_ptp_date, bc.ptp_date_mf,
+        bc.projection, bc.non_starter,
         bc.kyc_purchase, bc.workable, bc.status, bc.feedback_comments,
         bc.occupation, bc.shifted_city AS sft_city, bc.rollback_yn,
         bc.feedback_date,
+        bc.cbc_paid, bc.lpp_paid, bc.emi_paid,
         fa.name AS fos_name, 'BKT' AS case_type
       FROM bkt_cases bc
       LEFT JOIN fos_agents fa ON bc.agent_id = fa.id
@@ -2109,6 +2113,7 @@ res.json({ imported, updated: 0, skipped, agentsCreated, agentsRemoved, total: r
       "Monthly Feedback":   r.monthly_feedback != null ? String(r.monthly_feedback) : "",
       "PTP Date":           fmtDate(r.ptp_date),
       "Telecaller PTP":     fmtDate(r.telecaller_ptp_date),
+      "MF PTP Date":        fmtDate(r.ptp_date_mf),
       "Shifted To City":    r.sft_city          || "",
       "Projection":         r.projection       != null ? String(r.projection) : "",
       "Non-Starter":        yn(r.non_starter),
@@ -2116,9 +2121,12 @@ res.json({ imported, updated: 0, skipped, agentsCreated, agentsRemoved, total: r
       "Workable":           r.workable === true || r.workable === "true" || r.workable === "t" ? "WORKABLE" :
                             r.workable === false || r.workable === "false" || r.workable === "f" ? "NONWORKABLE" : "",
       "Rollback":           yn(r.rollback_yn),
+      "CBC Paid":           yn(r.cbc_paid),
+      "LPP Paid":           yn(r.lpp_paid),
+      "EMI Paid":           yn(r.emi_paid),
       "Comments":           r.feedback_comments || "",
       "Monthly Detail Feedback": (() => {
-          if (r.monthly_feedback !== "SUBMITTED") return "";
+          if (!r.monthly_feedback) return "";
           const custAvail   = r.customer_available === true  || r.customer_available === "t";
           const custNA      = r.customer_available === false || r.customer_available === "f";
           const vehAvail    = r.vehicle_available  === true  || r.vehicle_available  === "t";
