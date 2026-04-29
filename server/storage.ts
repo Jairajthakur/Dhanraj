@@ -358,8 +358,9 @@ export interface FeedbackExtra {
    ptpDateMf?: string | null;
   shiftedCity?: string | null;
   occupation?: string | null;
-  paymentType?: string | null;
-  paymentAmount?: number | null;
+  cbcPaid?: number | null;
+  lppPaid?: number | null;
+  emiPaid?: number | null;
 }
 
 // ✅ UPDATED: $17 = monthly_feedback
@@ -394,8 +395,9 @@ export async function updateLoanCaseFeedback(
        ptp_date_mf        = COALESCE($18, ptp_date_mf),
        shifted_city       = COALESCE(NULLIF($19,''), shifted_city),
        occupation         = COALESCE(NULLIF($20,''), occupation),
-       payment_type       = COALESCE(NULLIF($21,''), payment_type),
-       payment_amount     = COALESCE($22, payment_amount)
+       cbc_paid           = COALESCE($21, cbc_paid),
+       lpp_paid           = COALESCE($22, lpp_paid),
+       emi_paid           = COALESCE($23, emi_paid)
      WHERE id = $4`,
     [
       status, feedback, comments, id,
@@ -415,8 +417,9 @@ export async function updateLoanCaseFeedback(
       extra?.ptpDateMf           ?? null,  // $18
       extra?.shiftedCity         ?? null,  // $19
       extra?.occupation          ?? null,  // $20
-      extra?.paymentType         ?? null,  // $21
-      extra?.paymentAmount       ?? null,  // $22
+      extra?.cbcPaid             ?? null,  // $21
+      extra?.lppPaid             ?? null,  // $22
+      extra?.emiPaid             ?? null,  // $23
     ]
   );
 }
@@ -765,8 +768,9 @@ export async function updateBktCaseFeedback(
        ptp_date_mf        = COALESCE($18, ptp_date_mf),
        shifted_city       = COALESCE(NULLIF($19,''), shifted_city),
        occupation         = COALESCE(NULLIF($20,''), occupation),
-       payment_type       = COALESCE(NULLIF($21,''), payment_type),
-       payment_amount     = COALESCE($22, payment_amount)
+       cbc_paid           = COALESCE($21, cbc_paid),
+       lpp_paid           = COALESCE($22, lpp_paid),
+       emi_paid           = COALESCE($23, emi_paid)
      WHERE id = $4`,
     [
       status, feedback, comments, id,
@@ -786,8 +790,9 @@ export async function updateBktCaseFeedback(
       extra?.ptpDateMf           ?? null,  // $18
       extra?.shiftedCity         ?? null,  // $19
       extra?.occupation          ?? null,  // $20
-      extra?.paymentType         ?? null,  // $21
-      extra?.paymentAmount       ?? null,  // $22
+      extra?.cbcPaid             ?? null,  // $21
+      extra?.lppPaid             ?? null,  // $22
+      extra?.emiPaid             ?? null,  // $23
     ]
   );
 }
