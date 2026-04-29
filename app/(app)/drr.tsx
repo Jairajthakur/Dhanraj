@@ -23,8 +23,6 @@ function getNextMilestone(today: number) {
 }
 
 function fmt(n: number) {
-  if (n >= 100000) return `₹${(n / 100000).toFixed(1)}L`;
-  if (n >= 1000)   return `₹${(n / 1000).toFixed(1)}K`;
   return `₹${Math.round(n).toLocaleString("en-IN")}`;
 }
 
