@@ -3987,6 +3987,60 @@ app.get("/api/admin/field-visits", requireAdmin, async (req: Request, res: Respo
     console.error("[case_reassign_log] Table creation error:", e);
   }
  
+// ── Helper: recalculate bkt_perf_summary for one agent+bkt from live case data
+async function recalcBktPerfSummary(agentId: number, bktNorm: string): Promise<void> {
+  // Aggregate POS from both loan_cases and bkt_cases for this agent+bkt
+  const agg = await storage.query(`
+    SELECT
+      COALESCE(SUM(pos::numeric) FILTER (WHERE status = 'Paid'),  0) AS pos_paid,
+      COALESCE(SUM(pos::numeric) FILTER (WHERE status <> 'Paid'), 0) AS pos_unpaid,
+      COALESCE(SUM(pos::numeric), 0)                                  AS pos_grand_total,
+      COUNT(*) FILTER (WHERE status = 'Paid')::int                    AS count_paid,
+      COUNT(*) FILTER (WHERE status <> 'Paid')::int                   AS count_unpaid,
+      COUNT(*)::int                                                    AS count_total,
+      COALESCE(SUM(pos::numeric) FILTER (WHERE rollback_yn = true), 0)                  AS rollback_paid,
+      COALESCE(SUM(pos::numeric) FILTER (WHERE rollback_yn IS DISTINCT FROM true), 0)   AS rollback_unpaid,
+      COALESCE(SUM(pos::numeric), 0)                                                     AS rollback_grand_total
+    FROM (
+      SELECT pos, status, rollback_yn
+      FROM loan_cases
+      WHERE agent_id = $1 AND 'bkt' || bkt::text = $2
+      UNION ALL
+      SELECT pos, status, rollback_yn
+      FROM bkt_cases
+      WHERE agent_id = $1 AND LOWER(REPLACE(case_category, ' ', '')) = $2
+    ) combined
+  `, [agentId, bktNorm]);
+
+  const r = agg.rows[0];
+  if (!r) return;
+
+  const posGrand      = parseFloat(r.pos_grand_total)      || 0;
+  const rbGrand       = parseFloat(r.rollback_grand_total) || 0;
+  const posPerc       = posGrand > 0 ? Math.round((parseFloat(r.pos_paid) / posGrand) * 10000) / 100 : 0;
+  const rbPerc        = rbGrand  > 0 ? Math.round((parseFloat(r.rollback_paid) / rbGrand) * 10000) / 100 : 0;
+
+  // Fetch agent name
+  const agentRow = await storage.query(`SELECT name FROM fos_agents WHERE id = $1`, [agentId]);
+  const fosName  = agentRow.rows[0]?.name ?? "";
+
+  // Insert a fresh row — the bkt-perf-summary CTE picks latest by uploaded_at DESC
+  await storage.query(`
+    INSERT INTO bkt_perf_summary
+      (fos_name, agent_id, bkt,
+       pos_paid, pos_unpaid, pos_grand_total, pos_percentage,
+       count_paid, count_unpaid, count_total,
+       rollback_paid, rollback_unpaid, rollback_grand_total, rollback_percentage,
+       uploaded_at)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14, NOW())
+  `, [
+    fosName, agentId, bktNorm,
+    r.pos_paid, r.pos_unpaid, r.pos_grand_total, posPerc,
+    r.count_paid, r.count_unpaid, r.count_total,
+    r.rollback_paid, r.rollback_unpaid, r.rollback_grand_total, rbPerc,
+  ]);
+}
+
 // ── PATCH /api/admin/cases/:id/reassign ─────────────────────────────────────
 app.patch("/api/admin/cases/:id/reassign", requireAdmin, async (req: Request, res: Response) => {
   try {
@@ -3995,28 +4049,30 @@ app.patch("/api/admin/cases/:id/reassign", requireAdmin, async (req: Request, re
     const { to_agent_id, case_type = "loan", reason } = req.body as {
       to_agent_id: number; case_type?: string; reason?: string;
     };
- 
+
     if (!to_agent_id) {
       return res.status(400).json({ message: "to_agent_id is required" });
     }
- 
-    // 1. Fetch current agent for the log
+
+    // 1. Fetch current agent + BKT for the log and POS recalc
     const table = case_type === "bkt" ? "bkt_cases" : "loan_cases";
+    const bktCol = case_type === "bkt" ? "LOWER(REPLACE(case_category,' ',''))" : "'bkt'||bkt::text";
     const current = await storage.query(
-      `SELECT agent_id FROM ${table} WHERE id = $1`,
+      `SELECT agent_id, ${bktCol} AS bkt_norm FROM ${table} WHERE id = $1`,
       [caseId]
     );
     if (!current.rows.length) {
       return res.status(404).json({ message: "Case not found" });
     }
     const fromAgentId: number | null = current.rows[0].agent_id ?? null;
- 
+    const bktNorm: string | null     = current.rows[0].bkt_norm ?? null;
+
     // 2. Update agent_id on the case
     await storage.query(
       `UPDATE ${table} SET agent_id = $1 WHERE id = $2`,
       [to_agent_id, caseId]
     );
- 
+
     // 3. Write audit log
     await storage.query(
       `INSERT INTO case_reassign_log
@@ -4024,7 +4080,13 @@ app.patch("/api/admin/cases/:id/reassign", requireAdmin, async (req: Request, re
        VALUES ($1, $2, $3, $4, $5, $6)`,
       [caseId, case_type, fromAgentId, to_agent_id, reason ?? null, adminId]
     );
- 
+
+    // 4. Recalculate bkt_perf_summary for both agents so POS updates immediately
+    if (bktNorm) {
+      const agentsToRefresh = [...new Set([fromAgentId, to_agent_id].filter(Boolean))] as number[];
+      await Promise.all(agentsToRefresh.map((aid) => recalcBktPerfSummary(aid, bktNorm)));
+    }
+
     res.json({ success: true, case_id: caseId, to_agent_id });
   } catch (e: any) {
     console.error("[PATCH /api/admin/cases/:id/reassign]", e);
