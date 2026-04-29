@@ -604,6 +604,13 @@ function FeedbackModal({
   const [locLoading,   setLocLoading]   = useState(false);
   const [photoError,   setPhotoError]   = useState("");
 
+  // ── Payment type state (shown when outcome is Paid) ────────────────────────
+  const PAYMENT_TYPES = ["CBC", "LPP", "EMI", "CBC+LPP"] as const;
+  const [visitPaymentType, setVisitPaymentType] = useState<string>("");
+  const [visitRollbackYn,  setVisitRollbackYn]  = useState<boolean | null>(null);
+  const [callPaymentType,  setCallPaymentType]  = useState<string>("");
+  const [callRollbackYn,   setCallRollbackYn]   = useState<boolean | null>(null);
+
   const [loading,    setLoading]    = useState(false);
   const saveGuardRef = useRef(false);
   const qc = useQueryClient();
@@ -706,11 +713,12 @@ function FeedbackModal({
       if (activeTab === "Call Log") {
         const newStatus = OUTCOME_TO_STATUS[callOutcome] ?? caseItem.status;
         payload = {
-          status:       newStatus,
-          call_outcome: callOutcome,
+          status:        newStatus,
+          call_outcome:  callOutcome,
           call_comments: callComments.trim() || null,
           ...(callOutcomeIsPtp && { ptp_date: toIsoDate(callPtpDate.trim()) }),
-          logged_at:    new Date().toISOString(),
+          ...(callOutcomeIsPaid && { payment_type: callPaymentType || null, rollback_yn: callRollbackYn }),
+          logged_at:     new Date().toISOString(),
         };
       } else if (activeTab === "Monthly Feedback") {
         // Determine status from code
@@ -766,7 +774,8 @@ function FeedbackModal({
           visit_location:    `${gps!.lat.toFixed(6)},${gps!.lng.toFixed(6)}`,
           visit_photo_count: photos.length,
           visited_at:        new Date().toISOString(),
-          ...(visitOutcome === "PTP" && { ptp_date: toIsoDate(visitPtpDate.trim()) }),
+          ...(visitOutcome === "PTP"  && { ptp_date: toIsoDate(visitPtpDate.trim()) }),
+          ...(visitOutcome === "Paid" && { payment_type: visitPaymentType || null, rollback_yn: visitRollbackYn }),
         };
       }
 
@@ -1039,6 +1048,27 @@ function FeedbackModal({
                     />
                   </>
                 )}
+                {callOutcomeIsPaid && (
+                  <>
+                    <Text style={fbStyles.sectionLabel}>Payment Type</Text>
+                    <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
+                      {PAYMENT_TYPES.map((pt) => {
+                        const isSelected = callPaymentType === pt;
+                        return (
+                          <Pressable
+                            key={pt}
+                            style={[fbStyles.feedbackOption, { paddingHorizontal: 18 },
+                              isSelected && { backgroundColor: Colors.success, borderColor: Colors.success }]}
+                            onPress={() => setCallPaymentType(isSelected ? "" : pt)}
+                          >
+                            <Text style={[fbStyles.feedbackOptionText, isSelected && { color: "#fff", fontWeight: "700" }]}>{pt}</Text>
+                          </Pressable>
+                        );
+                      })}
+                    </View>
+                    <YNToggle label="Rollback Y/N" value={callRollbackYn} onChange={setCallRollbackYn} />
+                  </>
+                )}
                 <Text style={fbStyles.sectionLabel}>Comments (Optional)</Text>
                 <TextInput
                   style={fbStyles.textInput} placeholder="What happened on this call..."
@@ -1247,6 +1277,28 @@ function FeedbackModal({
                     {visitPtpDate && !PTP_DATE_REGEX.test(visitPtpDate) && (
                       <Text style={fvStyles.fieldError}>Enter date as DD-MM-YYYY</Text>
                     )}
+                  </>
+                )}
+
+                {visitOutcome === "Paid" && (
+                  <>
+                    <Text style={fvStyles.sectionLabel}>Payment Type</Text>
+                    <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
+                      {PAYMENT_TYPES.map((pt) => {
+                        const isSelected = visitPaymentType === pt;
+                        return (
+                          <Pressable
+                            key={pt}
+                            style={[fbStyles.feedbackOption, { paddingHorizontal: 18 },
+                              isSelected && { backgroundColor: Colors.success, borderColor: Colors.success }]}
+                            onPress={() => setVisitPaymentType(isSelected ? "" : pt)}
+                          >
+                            <Text style={[fbStyles.feedbackOptionText, isSelected && { color: "#fff", fontWeight: "700" }]}>{pt}</Text>
+                          </Pressable>
+                        );
+                      })}
+                    </View>
+                    <YNToggle label="Rollback Y/N" value={visitRollbackYn} onChange={setVisitRollbackYn} />
                   </>
                 )}
 
