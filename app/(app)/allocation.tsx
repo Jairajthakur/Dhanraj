@@ -33,21 +33,37 @@ const STATUS_COLORS: Record<string, string> = {
 
 // Call Log dispositions
 const CALL_LOG_OPTIONS = [
-  "SWITCH OFF", "NOT AVAILABLE", "DISCONNECTED", "REFUSED TO PAY",
-  "DISPUTED", "NOT AT HOME", "WILL PAY", "PTP DATE SET", "PTP",
-  "PARTIAL PAYMENT DONE", "PAID", "PART PAYMENT", "SETTLED",
-  "RESCHEDULED", "CALL BACK REQUESTED",
+  // Not reachable
+  "SWITCH OFF",
+  "NOT AVAILABLE",
+  "DISCONNECTED",
+  "BUSY",
+  "NO RESPONSE",
+  // Promise / intent
+  "PTP",
+  "WILL PAY",
+  "CALL BACK REQUESTED",
+  // Payment
+  "PAID",
+  "PART PAYMENT",
+  "SETTLED",
+  // Negative
+  "REFUSED TO PAY",
+  "DISPUTED",
+  "LANGUAGE BARRIER",
+  // Other
+  "NOT AT HOME",
+  "WRONG NUMBER",
+  "NUMBER DOES NOT EXIST",
 ] as const;
 
 const OUTCOME_TO_STATUS: Record<string, string> = {
-  "PAID":               "Paid",
-  "PART PAYMENT":       "Paid",
-  "SETTLED":            "Paid",
-  "PTP DATE SET":       "PTP",
-  "PTP":                "PTP",
-  "WILL PAY TOMORROW":  "PTP",
-  "WILL ARRANGE FUNDS": "PTP",
-  "CALL LATER":         "PTP",
+  "PAID":                "Paid",
+  "PART PAYMENT":        "Paid",
+  "SETTLED":             "Paid",
+  "PTP":                 "PTP",
+  "WILL PAY":            "PTP",
+  "CALL BACK REQUESTED": "PTP",
 };
 
 // ── Full feedback codes with descriptions & colours ───────────────────────────
@@ -162,16 +178,28 @@ const PROJECTION_OPTIONS = ["ST", "RF", "RB"] as const;
 
 // Field Visit
 const VISIT_OUTCOMES = [
-  "PTP", "Paid", "Refused to Pay", "Customer Absent", "Skip / Not Found",
+  "Paid",
+  "Part Payment",
+  "PTP",
+  "Refused to Pay",
+  "Customer Absent",
+  "Address Not Found",
+  "Skip / Not Found",
+  "Third Party Response",
+  "Door Locked",
 ] as const;
 type VisitOutcome = typeof VISIT_OUTCOMES[number];
 
 const VISIT_OUTCOME_COLORS: Record<VisitOutcome, string> = {
-  "PTP":              Colors.statusPTP,
-  "Paid":             Colors.success,
-  "Refused to Pay":   Colors.danger,
-  "Customer Absent":  Colors.warning,
-  "Skip / Not Found": Colors.textSecondary,
+  "Paid":                 Colors.success,
+  "Part Payment":         Colors.success,
+  "PTP":                  Colors.statusPTP,
+  "Refused to Pay":       Colors.danger,
+  "Customer Absent":      Colors.warning,
+  "Address Not Found":    Colors.textMuted,
+  "Skip / Not Found":     Colors.textSecondary,
+  "Third Party Response": Colors.primary,
+  "Door Locked":          Colors.warning,
 };
 
 const MAX_PHOTOS     = 4;
@@ -453,7 +481,7 @@ function buildFieldVisitMsg(
   rollbackYn?: boolean | null,
 ): string {
   const mapsLink = gps ? `https://maps.google.com/?q=${gps.lat},${gps.lng}` : null;
-  const isPaid = visitOutcome === "Paid";
+  const isPaid = visitOutcome === "Paid" || visitOutcome === "Part Payment";
   const time = new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true });
   const sep = `-------------------`;
   const lines = [
@@ -722,7 +750,6 @@ function FeedbackModal({
       if (!gps) return "GPS location is required. Tap 'Capture GPS' before saving.";
       if (visitOutcome === "PTP" && !visitPtpDate.trim()) return "PTP date is required when outcome is PTP.";
       if (visitOutcome === "PTP" && !PTP_DATE_REGEX.test(visitPtpDate.trim())) return "PTP date must be DD-MM-YYYY.";
-      if (!visitRemarks.trim()) return "Visit remarks are required.";
       return null;
     }
     return null;
@@ -781,8 +808,9 @@ function FeedbackModal({
         };
       } else if (activeTab === "Field Visit") {
         const newStatus =
-          visitOutcome === "Paid" ? "Paid"
-          : visitOutcome === "PTP" ? "PTP"
+          visitOutcome === "Paid"         ? "Paid"
+          : visitOutcome === "Part Payment" ? "Paid"
+          : visitOutcome === "PTP"          ? "PTP"
           : caseItem.status;
 
         const visitResult = await api.recordFieldVisit(caseItem.id, {
