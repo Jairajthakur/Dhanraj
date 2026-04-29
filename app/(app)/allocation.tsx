@@ -455,19 +455,25 @@ function buildFieldVisitMsg(
   const mapsLink = gps ? `https://maps.google.com/?q=${gps.lat},${gps.lng}` : null;
   const isPaid = visitOutcome === "Paid";
   const time = new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true });
+  const sep = `-------------------`;
   const lines = [
-    `📍 *Field Visit Report*`,
-    `👤 ${caseItem.customer_name?.toUpperCase() ?? "—"}  |  ${caseItem.app_id ?? caseItem.loan_no ?? ""}`,
-    `💰 POS: ${caseItem.pos != null ? fmtRupee(caseItem.pos) : "—"}  |  ✅ ${visitOutcome}`,
+    `*Field Visit Report*`,
+    sep,
+    `Customer : ${caseItem.customer_name?.toUpperCase() ?? "—"}`,
+    `Loan ID  : ${caseItem.app_id ?? caseItem.loan_no ?? "—"}`,
+    `POS      : ${caseItem.pos != null ? fmtRupee(caseItem.pos) : "—"}`,
+    `Status   : ${visitOutcome}`,
     ...(isPaid ? [
-      cbcAmount   ? `🏦 CBC: ₹${cbcAmount}` : "",
-      lppAmount   ? `📋 LPP: ₹${lppAmount}` : "",
-      emiAmount   ? `📅 EMI: ₹${emiAmount}` : "",
-      rollbackYn === true ? `🔄 Rollback: Yes` : "",
+      cbcAmount              ? `CBC      : ₹${cbcAmount}` : "",
+      lppAmount              ? `LPP      : ₹${lppAmount}` : "",
+      emiAmount              ? `EMI      : ₹${emiAmount}` : "",
+      rollbackYn === true    ? `Rollback : Yes`           : "",
     ] : []),
-    visitRemarks ? `💬 ${visitRemarks}` : "",
-    `🕐 ${time}${gps ? `  |  📍 ${gps.lat.toFixed(4)}, ${gps.lng.toFixed(4)}` : ""}`,
-    mapsLink     ? mapsLink : "",
+    visitRemarks             ? `Remarks  : ${visitRemarks}` : "",
+    `Time     : ${time}`,
+    gps                      ? `Location : ${gps.lat.toFixed(4)}, ${gps.lng.toFixed(4)}` : "",
+    mapsLink                 ? mapsLink : "",
+    sep,
     `_Dhanraj Collections App_`,
   ];
   return lines.filter(Boolean).join("\n");
@@ -485,19 +491,24 @@ function buildCallLogMsg(
 ): string {
   const isPaid = OUTCOME_TO_STATUS[callOutcome] === "Paid";
   const time = new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true });
+  const sep = `-------------------`;
   const lines = [
-    `📞 *Call Log*`,
-    `👤 ${caseItem.customer_name?.toUpperCase() ?? "—"}  |  ${caseItem.app_id ?? caseItem.loan_no ?? ""}`,
-    `💰 POS: ${caseItem.pos != null ? fmtRupee(caseItem.pos) : "—"}  |  📞 ${callOutcome}`,
+    `*Call Log*`,
+    sep,
+    `Customer : ${caseItem.customer_name?.toUpperCase() ?? "—"}`,
+    `Loan ID  : ${caseItem.app_id ?? caseItem.loan_no ?? "—"}`,
+    `POS      : ${caseItem.pos != null ? fmtRupee(caseItem.pos) : "—"}`,
+    `Status   : ${callOutcome}`,
     ...(isPaid ? [
-      cbcAmount   ? `🏦 CBC: ₹${cbcAmount}` : "",
-      lppAmount   ? `📋 LPP: ₹${lppAmount}` : "",
-      emiAmount   ? `📅 EMI: ₹${emiAmount}` : "",
-      rollbackYn === true ? `🔄 Rollback: Yes` : "",
+      cbcAmount              ? `CBC      : ₹${cbcAmount}` : "",
+      lppAmount              ? `LPP      : ₹${lppAmount}` : "",
+      emiAmount              ? `EMI      : ₹${emiAmount}` : "",
+      rollbackYn === true    ? `Rollback : Yes`           : "",
     ] : []),
-    callComments ? `💬 ${callComments}` : "",
-    callPtpDate  ? `📅 PTP: ${callPtpDate}` : "",
-    `🕐 ${time}`,
+    callComments             ? `Remarks  : ${callComments}` : "",
+    callPtpDate              ? `PTP Date : ${callPtpDate}`  : "",
+    `Time     : ${time}`,
+    sep,
     `_Dhanraj Collections App_`,
   ];
   return lines.filter(Boolean).join("\n");
