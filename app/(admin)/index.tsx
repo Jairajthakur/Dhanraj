@@ -24,7 +24,7 @@ function CompanyStatsCard({ cases, companyName }: { cases: any[]; companyName: s
   const rate   = total > 0 ? ((paid / total) * 100).toFixed(0) : "0";
   const totalPOS = filtered.reduce((s, c) => s + parseFloat(c.pos || 0), 0);
   const paidPOS  = filtered.filter((c) => c.status === "Paid").reduce((s, c) => s + parseFloat(c.pos || 0), 0);
-  const fmtAmt = (n: number) => n >= 100000 ? `₹${(n / 100000).toFixed(2)}L` : `₹${Math.round(n).toLocaleString("en-IN")}`;
+  const fmtAmt = (n: number) => `₹${Math.round(n).toLocaleString("en-IN")}`;
 
   return (
     <View style={csc.wrap}>
@@ -127,7 +127,7 @@ function CompanyBreakdownStrip({ cases }: { cases: any[] }) {
 
   if (byCompany.length === 0) return null;
 
-  const fmtAmt = (n: number) => n >= 100000 ? `₹${(n / 100000).toFixed(1)}L` : `₹${Math.round(n).toLocaleString("en-IN")}`;
+  const fmtAmt = (n: number) => `₹${Math.round(n).toLocaleString("en-IN")}`;
 
   return (
     <View style={cb.wrap}>
