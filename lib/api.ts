@@ -57,10 +57,8 @@ async function apiRequest(method: string, route: string, data?: any) {
   const baseUrl = getApiUrl();
   const url     = buildUrl(route, baseUrl);
   const headers: Record<string, string> = { "Content-Type": "application/json" };
-  if (Platform.OS !== "web") {
-    const token = await tokenStore.get();
-    if (token) headers["Authorization"] = `Bearer ${token}`;
-  }
+  const token = await tokenStore.get();
+  if (token) headers["Authorization"] = `Bearer ${token}`;
   const res = await fetch(url, {
     method,
     headers,
