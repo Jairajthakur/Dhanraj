@@ -3971,7 +3971,7 @@ app.get("/api/admin/field-visits", requireAdmin, async (req: Request, res: Respo
 });
  
   // ── Case Reassign ────────────────────────────────────────────────────────────
- 
+
   // ── Auto-create case_reassign_log table ─────────────────────────────────────
   try {
     await storage.query(`
@@ -3990,7 +3990,7 @@ app.get("/api/admin/field-visits", requireAdmin, async (req: Request, res: Respo
   } catch (e) {
     console.error("[case_reassign_log] Table creation error:", e);
   }
- 
+
 // ── Helper: recalculate bkt_perf_summary for one agent+bkt from live case data
 async function recalcBktPerfSummary(agentId: number, bktNorm: string): Promise<void> {
   // Aggregate POS from both loan_cases and bkt_cases for this agent+bkt
@@ -4028,7 +4028,7 @@ async function recalcBktPerfSummary(agentId: number, bktNorm: string): Promise<v
   const agentRow = await storage.query(`SELECT name FROM fos_agents WHERE id = $1`, [agentId]);
   const fosName  = agentRow.rows[0]?.name ?? "";
 
-  // Insert a fresh row — the bkt-perf-summary CTE picks latest by uploaded_at DESC
+  // Upsert — update existing row if (fos_name, bkt) already exists
   await storage.query(`
     INSERT INTO bkt_perf_summary
       (fos_name, agent_id, bkt,
@@ -4037,6 +4037,20 @@ async function recalcBktPerfSummary(agentId: number, bktNorm: string): Promise<v
        rollback_paid, rollback_unpaid, rollback_grand_total, rollback_percentage,
        uploaded_at)
     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14, NOW())
+    ON CONFLICT (fos_name, bkt) DO UPDATE SET
+      agent_id              = EXCLUDED.agent_id,
+      pos_paid              = EXCLUDED.pos_paid,
+      pos_unpaid            = EXCLUDED.pos_unpaid,
+      pos_grand_total       = EXCLUDED.pos_grand_total,
+      pos_percentage        = EXCLUDED.pos_percentage,
+      count_paid            = EXCLUDED.count_paid,
+      count_unpaid          = EXCLUDED.count_unpaid,
+      count_total           = EXCLUDED.count_total,
+      rollback_paid         = EXCLUDED.rollback_paid,
+      rollback_unpaid       = EXCLUDED.rollback_unpaid,
+      rollback_grand_total  = EXCLUDED.rollback_grand_total,
+      rollback_percentage   = EXCLUDED.rollback_percentage,
+      uploaded_at           = NOW()
   `, [
     fosName, agentId, bktNorm,
     r.pos_paid, r.pos_unpaid, r.pos_grand_total, posPerc,
