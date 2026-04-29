@@ -2776,9 +2776,7 @@ app.post("/api/admin/reset-monthly-feedback/case/:caseId", requireAdmin, async (
       console.log(`[drr-push] Day ${dayOfMonth} | ${daysLeft}d to ${nextMilestone.label} | ${agents.rows.length} agents`);
 
       const fmtAmt = (v: number) =>
-        v >= 100000 ? `₹${(v / 100000).toFixed(1)}L`
-        : v >= 1000  ? `₹${(v / 1000).toFixed(1)}K`
-        : `₹${Math.round(v)}`;
+        `₹${Math.round(v).toLocaleString("en-IN")}`;
 
       let sent = 0;
       for (const agent of agents.rows) {
