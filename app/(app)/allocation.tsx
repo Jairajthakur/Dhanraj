@@ -2,6 +2,7 @@ import React, { useState, useMemo, useCallback, useEffect, useRef } from "react"
 import {
   View, Text, StyleSheet, FlatList, Pressable, TextInput, Linking,
   Alert, ActivityIndicator, Modal, ScrollView, Platform, Image, Share,
+  KeyboardAvoidingView,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -699,35 +700,29 @@ function buildFieldVisitMsg(
   const mapsLink = gps ? `https://maps.google.com/?q=${gps.lat},${gps.lng}` : null;
   const isPaid = visitOutcome === "Paid" || visitOutcome === "Part Payment";
   const time = new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true });
+  const box = `┌─────────────────────────┐`;
+  const boxEnd = `└─────────────────────────┘`;
   const lines = [
-    `📋 *Field Visit Report*`,
+    `\`\`\``,
+    `Field Visit Report`,
     ``,
-    `*Customer*`,
-    `${caseItem.customer_name?.toUpperCase() ?? "—"}`,
-    ``,
-    `*Loan ID*`,
-    `${caseItem.app_id ?? caseItem.loan_no ?? "—"}`,
-    ``,
-    `*POS Amount*`,
-    `${caseItem.pos != null ? fmtRupee(caseItem.pos) : "—"}`,
-    ``,
-    `*Status*`,
-    `${visitOutcome}`,
+    `Customer  : ${caseItem.customer_name ?? "—"}`,
+    `Loan ID   : ${caseItem.app_id ?? caseItem.loan_no ?? "—"}`,
+    `POS       : ${caseItem.pos != null ? fmtRupee(caseItem.pos) : "—"}`,
+    `Status    : ${visitOutcome}`,
     ...(isPaid ? [
-      cbcAmount           ? `\n*CBC*\n₹${cbcAmount}`   : "",
-      lppAmount           ? `\n*LPP*\n₹${lppAmount}`   : "",
-      emiAmount           ? `\n*EMI*\n₹${emiAmount}`   : "",
-      rollbackYn === true ? `\n*Rollback*\nYes`         : "",
+      cbcAmount           ? `CBC       : ₹${cbcAmount}`  : "",
+      lppAmount           ? `LPP       : ₹${lppAmount}`  : "",
+      emiAmount           ? `EMI       : ₹${emiAmount}`  : "",
+      rollbackYn === true ? `Rollback  : Yes`            : "",
     ] : []),
-    visitRemarks          ? `\n*Remarks*\n${visitRemarks}` : "",
-    ``,
-    `*Time*`,
-    `${time}`,
-    gps ? `\n*Location*\n${gps.lat.toFixed(4)}, ${gps.lng.toFixed(4)}` : "",
+    visitRemarks          ? `Remarks   : ${visitRemarks}` : "",
+    `Time      : ${time}`,
+    gps ? `Location  : ${gps.lat.toFixed(4)}, ${gps.lng.toFixed(4)}` : "",
     mapsLink ?? "",
     ``,
-    `━━━━━━━━━━━━━━━━━━━━━━━━━`,
-    `_Dhanraj Collections App_`,
+    `Dhanraj Collections App`,
+    `\`\`\``,
   ];
   return lines.filter(Boolean).join("\n");
 }
@@ -745,33 +740,25 @@ function buildCallLogMsg(
   const isPaid = OUTCOME_TO_STATUS[callOutcome] === "Paid";
   const time = new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true });
   const lines = [
-    `📞 *Call Log*`,
+    `\`\`\``,
+    `Call Log`,
     ``,
-    `*Customer*`,
-    `${caseItem.customer_name?.toUpperCase() ?? "—"}`,
-    ``,
-    `*Loan ID*`,
-    `${caseItem.app_id ?? caseItem.loan_no ?? "—"}`,
-    ``,
-    `*POS Amount*`,
-    `${caseItem.pos != null ? fmtRupee(caseItem.pos) : "—"}`,
-    ``,
-    `*Status*`,
-    `${callOutcome}`,
+    `Customer  : ${caseItem.customer_name ?? "—"}`,
+    `Loan ID   : ${caseItem.app_id ?? caseItem.loan_no ?? "—"}`,
+    `POS       : ${caseItem.pos != null ? fmtRupee(caseItem.pos) : "—"}`,
+    `Status    : ${callOutcome}`,
     ...(isPaid ? [
-      cbcAmount           ? `\n*CBC*\n₹${cbcAmount}`   : "",
-      lppAmount           ? `\n*LPP*\n₹${lppAmount}`   : "",
-      emiAmount           ? `\n*EMI*\n₹${emiAmount}`   : "",
-      rollbackYn === true ? `\n*Rollback*\nYes`         : "",
+      cbcAmount           ? `CBC       : ₹${cbcAmount}`  : "",
+      lppAmount           ? `LPP       : ₹${lppAmount}`  : "",
+      emiAmount           ? `EMI       : ₹${emiAmount}`  : "",
+      rollbackYn === true ? `Rollback  : Yes`            : "",
     ] : []),
-    callComments          ? `\n*Remarks*\n${callComments}`   : "",
-    callPtpDate           ? `\n*PTP Date*\n${callPtpDate}`   : "",
+    callComments          ? `Remarks   : ${callComments}` : "",
+    callPtpDate           ? `PTP Date  : ${callPtpDate}`  : "",
+    `Time      : ${time}`,
     ``,
-    `*Time*`,
-    `${time}`,
-    ``,
-    `━━━━━━━━━━━━━━━━━━━━━━━━━`,
-    `_Dhanraj Collections App_`,
+    `Dhanraj Collections App`,
+    `\`\`\``,
   ];
   return lines.filter(Boolean).join("\n");
 }
@@ -1240,6 +1227,11 @@ function FeedbackModal({
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        style={{ flex: 1 }}
+        keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 24}
+      >
       <View style={fbStyles.overlay}>
         <View style={fbStyles.sheet}>
           <View style={fbStyles.handle} />
@@ -1736,6 +1728,7 @@ function FeedbackModal({
           <View style={{ height: 24 }} />
         </View>
       </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
