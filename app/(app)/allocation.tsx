@@ -247,7 +247,8 @@ function useSpeechToText(onResult: (text: string) => void) {
       };
       Voice.onSpeechEnd = () => { setListening(false); };
     } catch (_) {
-      // package not available in Expo Go — show clear message on tap
+      // Voice module not available — mic button will be hidden silently
+      VoiceRef.current = null;
     }
     return () => {
       try { Voice?.destroy?.().then(() => Voice?.removeAllListeners?.()); } catch (_) {}
@@ -276,10 +277,7 @@ function useSpeechToText(onResult: (text: string) => void) {
     // Native
     const Voice = VoiceRef.current;
     if (!Voice) {
-      Alert.alert(
-        "Mic Not Available",
-        "Speech recognition requires a development build (not Expo Go). Please use a custom build.",
-      );
+      // Voice module not installed — silently do nothing, user can type instead
       return;
     }
     try {
@@ -700,8 +698,6 @@ function buildFieldVisitMsg(
   const mapsLink = gps ? `https://maps.google.com/?q=${gps.lat},${gps.lng}` : null;
   const isPaid = visitOutcome === "Paid" || visitOutcome === "Part Payment";
   const time = new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true });
-  const box = `┌─────────────────────────┐`;
-  const boxEnd = `└─────────────────────────┘`;
   const lines = [
     `\`\`\``,
     `Field Visit Report`,
@@ -1228,9 +1224,9 @@ function FeedbackModal({
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <KeyboardAvoidingView
-        behavior={Platform.OS === "ios" ? "padding" : "height"}
         style={{ flex: 1 }}
-        keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 24}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 0}
       >
       <View style={fbStyles.overlay}>
         <View style={fbStyles.sheet}>
@@ -2086,7 +2082,7 @@ const styles = StyleSheet.create({
 
 const fbStyles = StyleSheet.create({
   overlay:             { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" },
-  sheet:               { backgroundColor: Colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 16, paddingTop: 20, maxHeight: "94%", flex: 1, flexDirection: "column" },
+  sheet:               { backgroundColor: Colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 16, paddingTop: 20, maxHeight: "94%", flex: 1, flexDirection: "column", flexShrink: 1 },
   handle:              { width: 40, height: 4, backgroundColor: Colors.border, borderRadius: 2, alignSelf: "center", marginBottom: 12 },
   title:               { fontSize: 18, fontWeight: "700", color: Colors.text, marginBottom: 2 },
   customerName:        { fontSize: 12, color: Colors.textSecondary, marginBottom: 6, textTransform: "uppercase" },
