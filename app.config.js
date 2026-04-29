@@ -32,6 +32,10 @@ module.exports = ({ config }) => {
     ios: {
       supportsTablet: false,
       bundleIdentifier: "com.dhanraj.app",
+      infoPlist: {
+        NSSpeechRecognitionUsageDescription: "Dhanraj Collections uses speech recognition to convert your voice to text for remarks and comments.",
+        NSMicrophoneUsageDescription: "Dhanraj Collections needs microphone access to record your voice for speech-to-text.",
+      },
     },
     android: {
       package: "com.dhanraj.app",
@@ -43,6 +47,7 @@ module.exports = ({ config }) => {
         "USE_FULL_SCREEN_INTENT",   // allows heads-up / full screen alert
         "READ_EXTERNAL_STORAGE",    // needed for sharing files/images
         "WRITE_EXTERNAL_STORAGE",   // needed for sharing files/images
+        "RECORD_AUDIO",             // needed for speech-to-text mic input
       ],
       intentFilters: [],
       // Allow Linking.canOpenURL to query WhatsApp on Android 11+
