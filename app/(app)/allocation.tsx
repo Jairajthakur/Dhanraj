@@ -203,9 +203,34 @@ const PTP_DATE_REGEX = /^\d{2}-\d{2}-\d{4}$/;
 function useSpeechToText(onResult: (text: string) => void) {
   const [listening,   setListening]   = React.useState(false);
   const [error,       setError]       = React.useState<string | null>(null);
-  const VoiceRef = React.useRef<any>(null);
+  const VoiceRef    = React.useRef<any>(null);
+  const WebSpeechRef = React.useRef<any>(null);
 
   React.useEffect(() => {
+    if (Platform.OS === "web") {
+      // Web Speech API
+      const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+      if (SpeechRecognition) {
+        const recognition = new SpeechRecognition();
+        recognition.lang = "en-IN";
+        recognition.continuous = false;
+        recognition.interimResults = false;
+        recognition.onresult = (e: any) => {
+          const text = e.results?.[0]?.[0]?.transcript ?? "";
+          if (text) onResult(text);
+          setListening(false);
+        };
+        recognition.onerror = (e: any) => {
+          setError(e.error ?? "Speech error");
+          setListening(false);
+        };
+        recognition.onend = () => setListening(false);
+        WebSpeechRef.current = recognition;
+      }
+      return;
+    }
+
+    // Native: @react-native-voice/voice
     let Voice: any = null;
     try {
       Voice = require("@react-native-voice/voice").default;
@@ -221,7 +246,7 @@ function useSpeechToText(onResult: (text: string) => void) {
       };
       Voice.onSpeechEnd = () => { setListening(false); };
     } catch (_) {
-      // package not available
+      // package not available in Expo Go — show clear message on tap
     }
     return () => {
       try { Voice?.destroy?.().then(() => Voice?.removeAllListeners?.()); } catch (_) {}
@@ -230,23 +255,55 @@ function useSpeechToText(onResult: (text: string) => void) {
   }, []);
 
   const start = React.useCallback(async () => {
-    const Voice = VoiceRef.current;
-    if (!Voice) {
-      Alert.alert("Not Supported", "Speech recognition is not available on this device.");
+    setError(null);
+
+    // Web
+    if (Platform.OS === "web") {
+      if (!WebSpeechRef.current) {
+        Alert.alert("Not Supported", "Your browser does not support speech recognition. Try Chrome.");
+        return;
+      }
+      try {
+        WebSpeechRef.current.start();
+        setListening(true);
+      } catch (e: any) {
+        setError(e?.message ?? "Could not start speech recognition");
+      }
       return;
     }
-    setError(null);
+
+    // Native
+    const Voice = VoiceRef.current;
+    if (!Voice) {
+      Alert.alert(
+        "Mic Not Available",
+        "Speech recognition requires a development build (not Expo Go). Please use a custom build.",
+      );
+      return;
+    }
     try {
+      // Request mic permission first
+      const { Audio } = require("expo-av");
+      const { status } = await Audio.requestPermissionsAsync();
+      if (status !== "granted") {
+        Alert.alert("Permission Denied", "Please allow microphone access in your device settings.");
+        return;
+      }
       await Voice.start("en-IN");
       setListening(true);
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     } catch (e: any) {
       setError(e?.message ?? "Could not start speech recognition");
+      Alert.alert("Mic Error", e?.message ?? "Could not start speech recognition");
     }
   }, []);
 
   const stop = React.useCallback(async () => {
-    try { await VoiceRef.current?.stop(); } catch (_) {}
+    if (Platform.OS === "web") {
+      try { WebSpeechRef.current?.stop(); } catch (_) {}
+    } else {
+      try { await VoiceRef.current?.stop(); } catch (_) {}
+    }
     setListening(false);
   }, []);
 
@@ -642,25 +699,31 @@ function buildFieldVisitMsg(
   const mapsLink = gps ? `https://maps.google.com/?q=${gps.lat},${gps.lng}` : null;
   const isPaid = visitOutcome === "Paid" || visitOutcome === "Part Payment";
   const time = new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true });
-  const sep = `-------------------`;
+  const box = `┌─────────────────────────┐`;
+  const boxEnd = `└─────────────────────────┘`;
   const lines = [
-    `*Field Visit Report*`,
-    sep,
-    `Customer : ${caseItem.customer_name?.toUpperCase() ?? "—"}`,
-    `Loan ID  : ${caseItem.app_id ?? caseItem.loan_no ?? "—"}`,
-    `POS      : ${caseItem.pos != null ? fmtRupee(caseItem.pos) : "—"}`,
-    `Status   : ${visitOutcome}`,
+    box,
+    `│  🏠 *Field Visit Report*  │`,
+    boxEnd,
+    ``,
+    `👤 *Customer*`,
+    `    ${caseItem.customer_name?.toUpperCase() ?? "—"}`,
+    ``,
+    `🔢 *Loan ID* : ${caseItem.app_id ?? caseItem.loan_no ?? "—"}`,
+    `💰 *POS*     : ${caseItem.pos != null ? fmtRupee(caseItem.pos) : "—"}`,
+    `📋 *Status*  : ${visitOutcome}`,
     ...(isPaid ? [
-      cbcAmount              ? `CBC      : ₹${cbcAmount}` : "",
-      lppAmount              ? `LPP      : ₹${lppAmount}` : "",
-      emiAmount              ? `EMI      : ₹${emiAmount}` : "",
-      rollbackYn === true    ? `Rollback : Yes`           : "",
+      cbcAmount           ? `💵 *CBC*     : ₹${cbcAmount}` : "",
+      lppAmount           ? `💵 *LPP*     : ₹${lppAmount}` : "",
+      emiAmount           ? `💵 *EMI*     : ₹${emiAmount}` : "",
+      rollbackYn === true ? `🔄 *Rollback*: Yes`           : "",
     ] : []),
-    visitRemarks             ? `Remarks  : ${visitRemarks}` : "",
-    `Time     : ${time}`,
-    gps                      ? `Location : ${gps.lat.toFixed(4)}, ${gps.lng.toFixed(4)}` : "",
-    mapsLink                 ? mapsLink : "",
-    sep,
+    visitRemarks          ? `📝 *Remarks* : ${visitRemarks}` : "",
+    `🕐 *Time*    : ${time}`,
+    gps ? `📍 *Location*: ${gps.lat.toFixed(4)}, ${gps.lng.toFixed(4)}` : "",
+    mapsLink ? mapsLink : "",
+    ``,
+    `━━━━━━━━━━━━━━━━━━━━━━━━━`,
     `_Dhanraj Collections App_`,
   ];
   return lines.filter(Boolean).join("\n");
@@ -678,24 +741,30 @@ function buildCallLogMsg(
 ): string {
   const isPaid = OUTCOME_TO_STATUS[callOutcome] === "Paid";
   const time = new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true });
-  const sep = `-------------------`;
+  const box = `┌─────────────────────────┐`;
+  const boxEnd = `└─────────────────────────┘`;
   const lines = [
-    `*Call Log*`,
-    sep,
-    `Customer : ${caseItem.customer_name?.toUpperCase() ?? "—"}`,
-    `Loan ID  : ${caseItem.app_id ?? caseItem.loan_no ?? "—"}`,
-    `POS      : ${caseItem.pos != null ? fmtRupee(caseItem.pos) : "—"}`,
-    `Status   : ${callOutcome}`,
+    box,
+    `│     📞 *Call Log*        │`,
+    boxEnd,
+    ``,
+    `👤 *Customer*`,
+    `    ${caseItem.customer_name?.toUpperCase() ?? "—"}`,
+    ``,
+    `🔢 *Loan ID* : ${caseItem.app_id ?? caseItem.loan_no ?? "—"}`,
+    `💰 *POS*     : ${caseItem.pos != null ? fmtRupee(caseItem.pos) : "—"}`,
+    `📋 *Status*  : ${callOutcome}`,
     ...(isPaid ? [
-      cbcAmount              ? `CBC      : ₹${cbcAmount}` : "",
-      lppAmount              ? `LPP      : ₹${lppAmount}` : "",
-      emiAmount              ? `EMI      : ₹${emiAmount}` : "",
-      rollbackYn === true    ? `Rollback : Yes`           : "",
+      cbcAmount           ? `💵 *CBC*     : ₹${cbcAmount}` : "",
+      lppAmount           ? `💵 *LPP*     : ₹${lppAmount}` : "",
+      emiAmount           ? `EMI      : ₹${emiAmount}` : "",
+      rollbackYn === true ? `🔄 *Rollback*: Yes`           : "",
     ] : []),
-    callComments             ? `Remarks  : ${callComments}` : "",
-    callPtpDate              ? `PTP Date : ${callPtpDate}`  : "",
-    `Time     : ${time}`,
-    sep,
+    callComments          ? `📝 *Remarks* : ${callComments}` : "",
+    callPtpDate           ? `📅 *PTP Date*: ${callPtpDate}`  : "",
+    `🕐 *Time*    : ${time}`,
+    ``,
+    `━━━━━━━━━━━━━━━━━━━━━━━━━`,
     `_Dhanraj Collections App_`,
   ];
   return lines.filter(Boolean).join("\n");
