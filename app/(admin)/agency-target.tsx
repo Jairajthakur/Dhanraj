@@ -38,9 +38,7 @@ const BKT_META: Record<string, { label: string; color: string }> = {
 const STORAGE_KEY = "agency_bkt_targets_v1";
 
 function fmtAmt(n: number): string {
-  if (n >= 10_000_000) return `₹${(n / 10_000_000).toFixed(2)}Cr`;
-  if (n >= 100_000)    return `₹${(n / 100_000).toFixed(2)}L`;
-  return `₹${n.toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
+  return `₹${Math.round(n).toLocaleString("en-IN")}`;
 }
 function pct(a: number, b: number): number { return b > 0 ? (a / b) * 100 : 0; }
 
