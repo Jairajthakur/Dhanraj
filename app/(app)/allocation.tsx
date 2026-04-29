@@ -199,6 +199,104 @@ const GPS_TIMEOUT_MS = 20_000;
 const GPS_MAX_AGE_MS = 10_000;
 const PTP_DATE_REGEX = /^\d{2}-\d{2}-\d{4}$/;
 
+// ─── Speech-to-Text hook ──────────────────────────────────────────────────────
+function useSpeechToText(onResult: (text: string) => void) {
+  const [listening,   setListening]   = React.useState(false);
+  const [error,       setError]       = React.useState<string | null>(null);
+  const VoiceRef = React.useRef<any>(null);
+
+  React.useEffect(() => {
+    let Voice: any = null;
+    try {
+      Voice = require("@react-native-voice/voice").default;
+      VoiceRef.current = Voice;
+      Voice.onSpeechResults = (e: any) => {
+        const text = e?.value?.[0] ?? "";
+        if (text) { onResult(text); }
+        setListening(false);
+      };
+      Voice.onSpeechError = (e: any) => {
+        setError(e?.error?.message ?? "Speech error");
+        setListening(false);
+      };
+      Voice.onSpeechEnd = () => { setListening(false); };
+    } catch (_) {
+      // package not available
+    }
+    return () => {
+      try { Voice?.destroy?.().then(() => Voice?.removeAllListeners?.()); } catch (_) {}
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const start = React.useCallback(async () => {
+    const Voice = VoiceRef.current;
+    if (!Voice) {
+      Alert.alert("Not Supported", "Speech recognition is not available on this device.");
+      return;
+    }
+    setError(null);
+    try {
+      await Voice.start("en-IN");
+      setListening(true);
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    } catch (e: any) {
+      setError(e?.message ?? "Could not start speech recognition");
+    }
+  }, []);
+
+  const stop = React.useCallback(async () => {
+    try { await VoiceRef.current?.stop(); } catch (_) {}
+    setListening(false);
+  }, []);
+
+  return { listening, error, start, stop };
+}
+
+// ─── MicButton component ──────────────────────────────────────────────────────
+function MicButton({ onResult, disabled }: { onResult: (text: string) => void; disabled?: boolean }) {
+  const { listening, start, stop } = useSpeechToText(onResult);
+
+  return (
+    <Pressable
+      style={[micStyles.btn, listening && micStyles.btnActive, disabled && micStyles.btnDisabled]}
+      onPress={listening ? stop : start}
+      disabled={disabled}
+    >
+      <Ionicons
+        name={listening ? "stop-circle" : "mic"}
+        size={18}
+        color={listening ? "#fff" : Colors.primary}
+      />
+      {listening && (
+        <View style={micStyles.pulse} />
+      )}
+    </Pressable>
+  );
+}
+
+const micStyles = StyleSheet.create({
+  btn: {
+    width: 38, height: 38, borderRadius: 19,
+    backgroundColor: Colors.primary + "14",
+    borderWidth: 1.5, borderColor: Colors.primary + "50",
+    alignItems: "center", justifyContent: "center",
+    position: "relative",
+  },
+  btnActive: {
+    backgroundColor: Colors.danger,
+    borderColor: Colors.danger,
+  },
+  btnDisabled: {
+    opacity: 0.4,
+  },
+  pulse: {
+    position: "absolute",
+    width: 46, height: 46, borderRadius: 23,
+    borderWidth: 2, borderColor: Colors.danger + "60",
+  },
+});
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function fmt(v: unknown, prefix = ""): string {
   if (v === null || v === undefined || v === "") return "—";
@@ -1216,9 +1314,15 @@ function FeedbackModal({
                     <YNToggle label="Rollback Y/N" value={callRollbackYn} onChange={setCallRollbackYn} />
                   </>
                 )}
-                <Text style={fbStyles.sectionLabel}>Comments (Optional)</Text>
+                <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+                  <Text style={fbStyles.sectionLabel}>Comments (Optional)</Text>
+                  <MicButton
+                    onResult={(text) => setCallComments((prev) => prev ? prev + " " + text : text)}
+                    disabled={loading}
+                  />
+                </View>
                 <TextInput
-                  style={fbStyles.textInput} placeholder="What happened on this call..."
+                  style={fbStyles.textInput} placeholder="What happened on this call... (or tap mic to speak)"
                   placeholderTextColor={Colors.textMuted} value={callComments}
                   onChangeText={setCallComments} multiline numberOfLines={3}
                 />
@@ -1464,13 +1568,19 @@ function FeedbackModal({
                   </>
                 )}
 
-                <View style={fvStyles.sectionRow}>
-                  <Text style={fvStyles.sectionLabel}>Visit Remarks</Text>
-                  <View style={fvStyles.requiredBadge}><Text style={fvStyles.requiredText}>Optional</Text></View>
+                <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+                  <View style={fvStyles.sectionRow}>
+                    <Text style={fvStyles.sectionLabel}>Visit Remarks</Text>
+                    <View style={fvStyles.requiredBadge}><Text style={fvStyles.requiredText}>Optional</Text></View>
+                  </View>
+                  <MicButton
+                    onResult={(text) => setVisitRemarks((prev) => prev ? prev + " " + text : text)}
+                    disabled={loading}
+                  />
                 </View>
                 <TextInput
                   style={[fvStyles.input, { minHeight: 90, textAlignVertical: "top" }]}
-                  placeholder="Describe what happened — customer status, conversation outcome, address confirmed, etc."
+                  placeholder="Describe what happened — or tap mic to speak..."
                   placeholderTextColor={Colors.textMuted} value={visitRemarks} onChangeText={setVisitRemarks}
                   multiline numberOfLines={4} editable={!loading}
                 />
