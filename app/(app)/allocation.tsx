@@ -219,48 +219,109 @@ function toIsoDate(val: string): string {
   return val;
 }
 
-// ─── CSV Download ─────────────────────────────────────────────────────────────
-function escCsv(v: unknown): string {
-  const s = v === null || v === undefined ? "" : String(v);
-  if (s.includes(",") || s.includes("\"") || s.includes("\n")) {
-    return `"${s.replace(/"/g, '""')}"`;
-  }
-  return s;
-}
+// ─── Excel Download ───────────────────────────────────────────────────────────
+async function downloadAllocationExcel(cases: CaseItem[], filename: string): Promise<void> {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const ExcelJS = require("exceljs");
+  const wb = new ExcelJS.Workbook();
+  wb.creator = "Dhanraj Collections App";
+  wb.created = new Date();
 
-async function downloadAllocationCsv(cases: CaseItem[], filename: string): Promise<void> {
-  const headers = [
-    "Customer Name", "Loan No", "App ID", "Mobile No",
-    "Status", "Bucket", "EMI Amount", "POS",
-    "CBC", "LPP", "CBC+LPP", "PTP Date",
-    "Address", "Registration No", "Company",
+  const ws = wb.addWorksheet("Allocation");
+
+  // ── Columns matching screenshot format ──
+  const columns = [
+    { header: "PRO",              key: "pro",             width: 6  },
+    { header: "BKT",              key: "bkt",             width: 8  },
+    { header: "LOAN NO",          key: "loan_no",         width: 20 },
+    { header: "APP ID",           key: "app_id",          width: 22 },
+    { header: "customer name",    key: "customer_name",   width: 26 },
+    { header: "customer_address", key: "address",         width: 40 },
+    { header: "Cust Name_",       key: "cust_name2",      width: 26 },
+    { header: "REF",              key: "ref",             width: 10 },
+    { header: "asset_make",       key: "asset_make",      width: 14 },
+    { header: "registration_no",  key: "registration_no", width: 16 },
+    { header: "chassis_no",       key: "chassis_no",      width: 18 },
+    { header: "loan_maturity_date", key: "loan_maturity_date", width: 18 },
+    { header: "EMI",              key: "emi_amount",      width: 12 },
+    { header: "CBC",              key: "cbc",             width: 10 },
+    { header: "LPP",              key: "lpp",             width: 10 },
+    { header: "POS",              key: "pos",             width: 12 },
   ];
+  ws.columns = columns;
 
-  const rows = cases.map((c) => [
-    c.customer_name, c.loan_no, c.app_id ?? "", c.mobile_no ?? "",
-    c.status, c.bkt ?? "", c.emi_amount ?? "", c.pos ?? "",
-    c.cbc ?? "", c.lpp ?? "", c.cbc_lpp ?? "",
-    c.ptp_date ? String(c.ptp_date).slice(0, 10) : "",
-    c.address ?? "", c.registration_no ?? "",
-    c.company_name ?? "",
-  ].map(escCsv).join(","));
+  // ── Header row styling ──
+  const headerRow = ws.getRow(1);
+  headerRow.height = 22;
+  headerRow.eachCell((cell: any) => {
+    cell.font      = { name: "Arial", bold: true, size: 10, color: { argb: "FFFFFFFF" } };
+    cell.fill      = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1F5C2E" } };
+    cell.alignment = { vertical: "middle", horizontal: "center", wrapText: false };
+    cell.border    = {
+      top:    { style: "thin", color: { argb: "FF0D3A1C" } },
+      left:   { style: "thin", color: { argb: "FF0D3A1C" } },
+      bottom: { style: "thin", color: { argb: "FF0D3A1C" } },
+      right:  { style: "thin", color: { argb: "FF0D3A1C" } },
+    };
+  });
 
-  const csv = [headers.map(escCsv).join(","), ...rows].join("\n");
+  // ── Add data rows ──
+  cases.forEach((c, idx) => {
+    const rowData = {
+      pro:               c.company_name ?? "",
+      bkt:               c.bkt != null ? String(c.bkt) : "",
+      loan_no:           c.loan_no ?? "",
+      app_id:            c.app_id ?? "",
+      customer_name:     c.customer_name ?? "",
+      address:           c.address ?? "",
+      cust_name2:        c.customer_name ?? "",
+      ref:               c.mobile_no ?? "",
+      asset_make:        "",
+      registration_no:   c.registration_no ?? "",
+      chassis_no:        "",
+      loan_maturity_date: "",
+      emi_amount:        c.emi_amount != null ? Number(c.emi_amount) : "",
+      cbc:               c.cbc != null ? Number(c.cbc) : "",
+      lpp:               c.lpp != null ? Number(c.lpp) : "",
+      pos:               c.pos != null ? Number(c.pos) : "",
+    };
+    const row = ws.addRow(rowData);
+    row.height = 18;
 
-  // Web: trigger a browser download
-  if (Platform.OS === "web") {
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = filename;
-    a.click();
-    URL.revokeObjectURL(url);
-    return;
-  }
+    // Alternate row fill for readability
+    const bg = idx % 2 === 0 ? "FFFFFFFF" : "FFF0F7F0";
+    row.eachCell({ includeEmpty: true }, (cell: any, colNum: number) => {
+      cell.font      = { name: "Arial", size: 9, color: { argb: "FF111111" } };
+      cell.fill      = { type: "pattern", pattern: "solid", fgColor: { argb: bg } };
+      cell.alignment = { vertical: "middle", horizontal: colNum >= 13 ? "right" : "left" };
+      cell.border    = {
+        top:    { style: "hair", color: { argb: "FFCCCCCC" } },
+        left:   { style: "hair", color: { argb: "FFCCCCCC" } },
+        bottom: { style: "hair", color: { argb: "FFCCCCCC" } },
+        right:  { style: "hair", color: { argb: "FFCCCCCC" } },
+      };
+      // Number format for currency columns
+      if (colNum >= 13) cell.numFmt = "#,##0.00";
+    });
+  });
+
+  // ── Auto-filter on header row ──
+  ws.autoFilter = { from: "A1", to: { row: 1, column: columns.length } };
+
+  // ── Freeze top row ──
+  ws.views = [{ state: "frozen", xSplit: 0, ySplit: 1, topLeftCell: "A2" }];
+
+  // ── Generate buffer and save ──
+  const buffer: ArrayBuffer = await wb.xlsx.writeBuffer();
+  const base64 = btoa(
+    new Uint8Array(buffer).reduce((data, byte) => data + String.fromCharCode(byte), "")
+  );
 
   if (Platform.OS === "android") {
-    // Android: save directly to Downloads via StorageAccessFramework
+    // Write to cache first, then copy to Downloads via SAF
+    const tmpPath = `${FileSystem.cacheDirectory}${filename}`;
+    await FileSystem.writeAsStringAsync(tmpPath, base64, { encoding: FileSystem.EncodingType.Base64 });
+
     const permissions = await FileSystem.StorageAccessFramework.requestDirectoryPermissionsAsync(
       "content://com.android.externalstorage.documents/tree/primary%3ADownload"
     );
@@ -268,18 +329,30 @@ async function downloadAllocationCsv(cases: CaseItem[], filename: string): Promi
       Alert.alert("Permission Denied", "Please allow access to the Downloads folder.");
       return;
     }
-    const fileUri = await FileSystem.StorageAccessFramework.createFileAsync(
+    const destUri = await FileSystem.StorageAccessFramework.createFileAsync(
       permissions.directoryUri,
       filename,
-      "text/csv"
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     );
-    await FileSystem.writeAsStringAsync(fileUri, csv, { encoding: FileSystem.EncodingType.UTF8 });
+    // Read back as base64 and write to SAF uri
+    const data = await FileSystem.readAsStringAsync(tmpPath, { encoding: FileSystem.EncodingType.Base64 });
+    await FileSystem.writeAsStringAsync(destUri, data, { encoding: FileSystem.EncodingType.Base64 });
+    await FileSystem.deleteAsync(tmpPath, { idempotent: true });
     Alert.alert("✅ Downloaded", `Saved to Downloads:\n${filename}`);
-  } else {
-    // iOS: save to app's Documents folder (accessible via Files app)
+  } else if (Platform.OS === "ios") {
     const path = `${FileSystem.documentDirectory}${filename}`;
-    await FileSystem.writeAsStringAsync(path, csv, { encoding: FileSystem.EncodingType.UTF8 });
+    await FileSystem.writeAsStringAsync(path, base64, { encoding: FileSystem.EncodingType.Base64 });
     Alert.alert("✅ Downloaded", `Saved to Files app:\n${filename}`);
+  } else {
+    // Web fallback
+    const byteChars = atob(base64);
+    const byteArr = new Uint8Array(byteChars.length);
+    for (let i = 0; i < byteChars.length; i++) byteArr[i] = byteChars.charCodeAt(i);
+    const blob = new Blob([byteArr], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement("a");
+    a.href = url; a.download = filename; a.click();
+    URL.revokeObjectURL(url);
   }
 }
 
@@ -1635,10 +1708,10 @@ export default function AllocationScreen() {
       const date = new Date().toISOString().slice(0, 10);
       const company = activeCompany !== "All" ? `_${activeCompany.replace(/\s+/g, "_")}` : "";
       const tab = activeTab !== "All" ? `_${activeTab}` : "";
-      const filename = `allocation${company}${tab}_${date}.csv`;
+      const filename = `Allocation${company}${tab}_${date}.xlsx`;
       // Download currently visible (filtered) cases, or all if no filter
       const toExport = filtered.length > 0 ? filtered : allCases;
-      await downloadAllocationCsv(toExport, filename);
+      await downloadAllocationExcel(toExport, filename);
     } catch (e: unknown) {
       Alert.alert("Download Failed", e instanceof Error ? e.message : "Something went wrong.");
     } finally {
