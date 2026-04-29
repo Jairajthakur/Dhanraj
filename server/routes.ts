@@ -1086,7 +1086,11 @@ app.get("/api/today-ptp", requireAuth, async (req, res) => {
     const company = (req.query.company as string) || null;
     if (company) {
       const result = await storage.query(
-        `SELECT * FROM loan_cases WHERE company_name = $1 ORDER BY customer_name`,
+        `SELECT lc.*, fa.name AS agent_name
+         FROM loan_cases lc
+         LEFT JOIN fos_agents fa ON lc.agent_id = fa.id
+         WHERE lc.company_name = $1
+         ORDER BY lc.customer_name`,
         [company]
       );
       res.json({ cases: result.rows });
