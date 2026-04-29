@@ -606,10 +606,12 @@ function FeedbackModal({
 
   // ── Payment type state (shown when outcome is Paid) ────────────────────────
   const PAYMENT_TYPES = ["CBC", "LPP", "EMI", "CBC+LPP"] as const;
-  const [visitPaymentType, setVisitPaymentType] = useState<string>("");
-  const [visitRollbackYn,  setVisitRollbackYn]  = useState<boolean | null>(null);
-  const [callPaymentType,  setCallPaymentType]  = useState<string>("");
-  const [callRollbackYn,   setCallRollbackYn]   = useState<boolean | null>(null);
+  const [visitPaymentType,   setVisitPaymentType]   = useState<string>("");
+  const [visitPaymentAmount, setVisitPaymentAmount] = useState<string>("");
+  const [visitRollbackYn,    setVisitRollbackYn]    = useState<boolean | null>(null);
+  const [callPaymentType,    setCallPaymentType]    = useState<string>("");
+  const [callPaymentAmount,  setCallPaymentAmount]  = useState<string>("");
+  const [callRollbackYn,     setCallRollbackYn]     = useState<boolean | null>(null);
 
   const [loading,    setLoading]    = useState(false);
   const saveGuardRef = useRef(false);
@@ -717,7 +719,7 @@ function FeedbackModal({
           call_outcome:  callOutcome,
           call_comments: callComments.trim() || null,
           ...(callOutcomeIsPtp && { ptp_date: toIsoDate(callPtpDate.trim()) }),
-          ...(callOutcomeIsPaid && { payment_type: callPaymentType || null, rollback_yn: callRollbackYn }),
+          ...(callOutcomeIsPaid && { payment_type: callPaymentType || null, payment_amount: callPaymentAmount ? parseFloat(callPaymentAmount) : null, rollback_yn: callRollbackYn }),
           logged_at:     new Date().toISOString(),
         };
       } else if (activeTab === "Monthly Feedback") {
@@ -775,7 +777,7 @@ function FeedbackModal({
           visit_photo_count: photos.length,
           visited_at:        new Date().toISOString(),
           ...(visitOutcome === "PTP"  && { ptp_date: toIsoDate(visitPtpDate.trim()) }),
-          ...(visitOutcome === "Paid" && { payment_type: visitPaymentType || null, rollback_yn: visitRollbackYn }),
+          ...(visitOutcome === "Paid" && { payment_type: visitPaymentType || null, payment_amount: visitPaymentAmount ? parseFloat(visitPaymentAmount) : null, rollback_yn: visitRollbackYn }),
         };
       }
 
@@ -1066,6 +1068,19 @@ function FeedbackModal({
                         );
                       })}
                     </View>
+                    {callPaymentType && (
+                      <>
+                        <Text style={fbStyles.sectionLabel}>Amount Paid (₹)</Text>
+                        <TextInput
+                          style={[fbStyles.textInput, { minHeight: 44, marginBottom: 12 }]}
+                          placeholder="Enter amount e.g. 5000"
+                          placeholderTextColor={Colors.textMuted}
+                          value={callPaymentAmount}
+                          onChangeText={setCallPaymentAmount}
+                          keyboardType="numeric"
+                        />
+                      </>
+                    )}
                     <YNToggle label="Rollback Y/N" value={callRollbackYn} onChange={setCallRollbackYn} />
                   </>
                 )}
@@ -1298,6 +1313,20 @@ function FeedbackModal({
                         );
                       })}
                     </View>
+                    {visitPaymentType && (
+                      <>
+                        <Text style={fvStyles.sectionLabel}>Amount Paid (₹)</Text>
+                        <TextInput
+                          style={[fvStyles.input, { minHeight: 44, marginBottom: 12 }]}
+                          placeholder="Enter amount e.g. 5000"
+                          placeholderTextColor={Colors.textMuted}
+                          value={visitPaymentAmount}
+                          onChangeText={setVisitPaymentAmount}
+                          keyboardType="numeric"
+                          editable={!loading}
+                        />
+                      </>
+                    )}
                     <YNToggle label="Rollback Y/N" value={visitRollbackYn} onChange={setVisitRollbackYn} />
                   </>
                 )}
