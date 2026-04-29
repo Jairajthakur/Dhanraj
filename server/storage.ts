@@ -358,6 +358,7 @@ export interface FeedbackExtra {
    ptpDateMf?: string | null;
   shiftedCity?: string | null;
   occupation?: string | null;
+  paymentType?: string | null;
 }
 
 // ✅ UPDATED: $17 = monthly_feedback
@@ -391,7 +392,8 @@ export async function updateLoanCaseFeedback(
        monthly_feedback   = COALESCE(NULLIF($17,''), monthly_feedback),
        ptp_date_mf        = COALESCE($18, ptp_date_mf),
        shifted_city       = COALESCE(NULLIF($19,''), shifted_city),
-       occupation         = COALESCE(NULLIF($20,''), occupation)
+       occupation         = COALESCE(NULLIF($20,''), occupation),
+       payment_type       = COALESCE(NULLIF($21,''), payment_type)
      WHERE id = $4`,
     [
       status, feedback, comments, id,
@@ -407,10 +409,11 @@ export async function updateLoanCaseFeedback(
       extra?.nonStarter          ?? null,
       extra?.kycPurchase         ?? null,
       extra?.workable            ?? null,
-      extra?.monthlyFeedback     ?? null,  // ✅ $17
-       extra?.ptpDateMf           ?? null,  // $18
+      extra?.monthlyFeedback     ?? null,  // $17
+      extra?.ptpDateMf           ?? null,  // $18
       extra?.shiftedCity         ?? null,  // $19
       extra?.occupation          ?? null,  // $20
+      extra?.paymentType         ?? null,  // $21
     ]
   );
 }
@@ -758,7 +761,8 @@ export async function updateBktCaseFeedback(
        monthly_feedback   = COALESCE(NULLIF($17,''), monthly_feedback),
        ptp_date_mf        = COALESCE($18, ptp_date_mf),
        shifted_city       = COALESCE(NULLIF($19,''), shifted_city),
-       occupation         = COALESCE(NULLIF($20,''), occupation)
+       occupation         = COALESCE(NULLIF($20,''), occupation),
+       payment_type       = COALESCE(NULLIF($21,''), payment_type)
      WHERE id = $4`,
     [
       status, feedback, comments, id,
@@ -774,10 +778,11 @@ export async function updateBktCaseFeedback(
       extra?.nonStarter          ?? null,
       extra?.kycPurchase         ?? null,
       extra?.workable            ?? null,
-      extra?.monthlyFeedback     ?? null,  // ✅ $17
-       extra?.ptpDateMf           ?? null,  // $18
+      extra?.monthlyFeedback     ?? null,  // $17
+      extra?.ptpDateMf           ?? null,  // $18
       extra?.shiftedCity         ?? null,  // $19
       extra?.occupation          ?? null,  // $20
+      extra?.paymentType         ?? null,  // $21
     ]
   );
 }
