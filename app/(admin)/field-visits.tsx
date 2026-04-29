@@ -143,20 +143,20 @@ function buildVisitWhatsAppMsg(visit: FieldVisit): string {
     ? `https://maps.google.com/?q=${visit.latitude},${visit.longitude}`
     : null;
 
+  const sep = `-------------------`;
   const lines: string[] = [
-    `📍 *FIELD VISIT REPORT*`,
-    `━━━━━━━━━━━━━━━━━━━━`,
-    `👤 *Agent:*   ${visit.agent_name}`,
-
-    visit.case_id    ? `🆔 *Case ID:* ${visit.case_id}`                 : "",
-    visit.customer_name ? `👥 *Customer:* ${visit.customer_name.toUpperCase()}` : "",
-    visit.pos != null   ? `💰 *POS:*     ${rupee(visit.pos)}`            : "",
-    visit.status        ? `📊 *Status:*  ${visit.status}`               : "",
-    visit.remarks       ? `💬 *Remarks:* ${visit.remarks}`              : "",
-    `⏰ *Time:*    ${fmtTime(visit.visited_at)}`,
-    hasLocation         ? `📍 *Location:* ${visit.latitude!.toFixed(5)}, ${visit.longitude!.toFixed(5)}` : "",
-    mapsLink            ? `🗺️ ${mapsLink}`                              : "",
-    `━━━━━━━━━━━━━━━━━━━━`,
+    `*Field Visit Report*`,
+    sep,
+    `Agent    : ${visit.agent_name}`,
+    visit.case_id       ? `Case ID  : ${visit.case_id}`                        : "",
+    visit.customer_name ? `Customer : ${visit.customer_name.toUpperCase()}`    : "",
+    visit.pos != null   ? `POS      : ${rupee(visit.pos)}`                     : "",
+    visit.status        ? `Status   : ${visit.status}`                         : "",
+    visit.remarks       ? `Remarks  : ${visit.remarks}`                        : "",
+    `Time     : ${fmtTime(visit.visited_at)}`,
+    hasLocation         ? `Location : ${visit.latitude!.toFixed(5)}, ${visit.longitude!.toFixed(5)}` : "",
+    mapsLink            ? mapsLink                                              : "",
+    sep,
     `_Dhanraj Collections App_`,
   ];
 
