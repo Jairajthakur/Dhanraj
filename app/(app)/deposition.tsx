@@ -523,6 +523,7 @@ export default function FosDepositionScreen() {
   const [bulkPayVisible, setBulkPayVisible] = useState(false);
   const [amountEntryItem, setAmountEntryItem] = useState<any>(null);
   const [enteredAmount,   setEnteredAmount]   = useState("");
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
 
   const { data: depData, isLoading, error, refetch } = useQuery({
     queryKey: ["/api/fos-depositions"],
