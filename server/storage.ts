@@ -359,6 +359,7 @@ export interface FeedbackExtra {
   shiftedCity?: string | null;
   occupation?: string | null;
   paymentType?: string | null;
+  paymentAmount?: number | null;
 }
 
 // ✅ UPDATED: $17 = monthly_feedback
@@ -393,7 +394,8 @@ export async function updateLoanCaseFeedback(
        ptp_date_mf        = COALESCE($18, ptp_date_mf),
        shifted_city       = COALESCE(NULLIF($19,''), shifted_city),
        occupation         = COALESCE(NULLIF($20,''), occupation),
-       payment_type       = COALESCE(NULLIF($21,''), payment_type)
+       payment_type       = COALESCE(NULLIF($21,''), payment_type),
+       payment_amount     = COALESCE($22, payment_amount)
      WHERE id = $4`,
     [
       status, feedback, comments, id,
@@ -414,6 +416,7 @@ export async function updateLoanCaseFeedback(
       extra?.shiftedCity         ?? null,  // $19
       extra?.occupation          ?? null,  // $20
       extra?.paymentType         ?? null,  // $21
+      extra?.paymentAmount       ?? null,  // $22
     ]
   );
 }
@@ -762,7 +765,8 @@ export async function updateBktCaseFeedback(
        ptp_date_mf        = COALESCE($18, ptp_date_mf),
        shifted_city       = COALESCE(NULLIF($19,''), shifted_city),
        occupation         = COALESCE(NULLIF($20,''), occupation),
-       payment_type       = COALESCE(NULLIF($21,''), payment_type)
+       payment_type       = COALESCE(NULLIF($21,''), payment_type),
+       payment_amount     = COALESCE($22, payment_amount)
      WHERE id = $4`,
     [
       status, feedback, comments, id,
@@ -783,6 +787,7 @@ export async function updateBktCaseFeedback(
       extra?.shiftedCity         ?? null,  // $19
       extra?.occupation          ?? null,  // $20
       extra?.paymentType         ?? null,  // $21
+      extra?.paymentAmount       ?? null,  // $22
     ]
   );
 }
