@@ -447,21 +447,27 @@ function buildFieldVisitMsg(
   visitRemarks: string,
   gps: { lat: number; lng: number } | null,
   photoUrl?: string | null,
+  cbcAmount?: string,
+  lppAmount?: string,
+  emiAmount?: string,
+  rollbackYn?: boolean | null,
 ): string {
   const mapsLink = gps ? `https://maps.google.com/?q=${gps.lat},${gps.lng}` : null;
+  const isPaid = visitOutcome === "Paid";
+  const time = new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true });
   const lines = [
-    `📍 *FIELD VISIT REPORT*`,
-    `━━━━━━━━━━━━━━━━━━━━`,
-    `👥 *Customer:* ${caseItem.customer_name?.toUpperCase() ?? "—"}`,
-    caseItem.loan_no  ? `🔖 *Loan No:*  ${caseItem.loan_no}`  : "",
-    caseItem.pos != null ? `💰 *POS:*      ${fmtRupee(caseItem.pos)}` : "",
-    visitOutcome      ? `📊 *Outcome:*  ${visitOutcome}`      : "",
-    visitRemarks      ? `💬 *Remarks:*  ${visitRemarks}`      : "",
-    `⏰ *Time:*     ${new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true })}`,
-    gps       ? `📍 *Location:* ${gps.lat.toFixed(5)}, ${gps.lng.toFixed(5)}` : "",
-    mapsLink  ? `🗺️ ${mapsLink}` : "",
-    // Photo is shared as an actual image attachment, not a URL link
-    `━━━━━━━━━━━━━━━━━━━━`,
+    `📍 *Field Visit Report*`,
+    `👤 ${caseItem.customer_name?.toUpperCase() ?? "—"}  |  ${caseItem.app_id ?? caseItem.loan_no ?? ""}`,
+    `💰 POS: ${caseItem.pos != null ? fmtRupee(caseItem.pos) : "—"}  |  ✅ ${visitOutcome}`,
+    ...(isPaid ? [
+      cbcAmount   ? `🏦 CBC: ₹${cbcAmount}` : "",
+      lppAmount   ? `📋 LPP: ₹${lppAmount}` : "",
+      emiAmount   ? `📅 EMI: ₹${emiAmount}` : "",
+      rollbackYn === true ? `🔄 Rollback: Yes` : "",
+    ] : []),
+    visitRemarks ? `💬 ${visitRemarks}` : "",
+    `🕐 ${time}${gps ? `  |  📍 ${gps.lat.toFixed(4)}, ${gps.lng.toFixed(4)}` : ""}`,
+    mapsLink     ? mapsLink : "",
     `_Dhanraj Collections App_`,
   ];
   return lines.filter(Boolean).join("\n");
@@ -472,18 +478,26 @@ function buildCallLogMsg(
   callOutcome: string,
   callComments: string,
   callPtpDate: string,
+  cbcAmount?: string,
+  lppAmount?: string,
+  emiAmount?: string,
+  rollbackYn?: boolean | null,
 ): string {
+  const isPaid = OUTCOME_TO_STATUS[callOutcome] === "Paid";
+  const time = new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true });
   const lines = [
-    `📞 *CALL LOG REPORT*`,
-    `━━━━━━━━━━━━━━━━━━━━`,
-    `👥 *Customer:* ${caseItem.customer_name?.toUpperCase() ?? "—"}`,
-    caseItem.loan_no  ? `🔖 *Loan No:*  ${caseItem.loan_no}`      : "",
-    caseItem.pos != null ? `💰 *POS:*      ${fmtRupee(caseItem.pos)}` : "",
-    callOutcome       ? `📞 *Outcome:*  ${callOutcome}`             : "",
-    callComments      ? `💬 *Comments:* ${callComments}`            : "",
-    callPtpDate       ? `📅 *PTP Date:* ${callPtpDate}`             : "",
-    `⏰ *Time:*     ${new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true })}`,
-    `━━━━━━━━━━━━━━━━━━━━`,
+    `📞 *Call Log*`,
+    `👤 ${caseItem.customer_name?.toUpperCase() ?? "—"}  |  ${caseItem.app_id ?? caseItem.loan_no ?? ""}`,
+    `💰 POS: ${caseItem.pos != null ? fmtRupee(caseItem.pos) : "—"}  |  📞 ${callOutcome}`,
+    ...(isPaid ? [
+      cbcAmount   ? `🏦 CBC: ₹${cbcAmount}` : "",
+      lppAmount   ? `📋 LPP: ₹${lppAmount}` : "",
+      emiAmount   ? `📅 EMI: ₹${emiAmount}` : "",
+      rollbackYn === true ? `🔄 Rollback: Yes` : "",
+    ] : []),
+    callComments ? `💬 ${callComments}` : "",
+    callPtpDate  ? `📅 PTP: ${callPtpDate}` : "",
+    `🕐 ${time}`,
     `_Dhanraj Collections App_`,
   ];
   return lines.filter(Boolean).join("\n");
@@ -605,13 +619,15 @@ function FeedbackModal({
   const [photoError,   setPhotoError]   = useState("");
 
   // ── Payment type state (shown when outcome is Paid) ────────────────────────
-  const PAYMENT_TYPES = ["CBC", "LPP", "EMI", "CBC+LPP"] as const;
-  const [visitPaymentType,   setVisitPaymentType]   = useState<string>("");
-  const [visitPaymentAmount, setVisitPaymentAmount] = useState<string>("");
-  const [visitRollbackYn,    setVisitRollbackYn]    = useState<boolean | null>(null);
-  const [callPaymentType,    setCallPaymentType]    = useState<string>("");
-  const [callPaymentAmount,  setCallPaymentAmount]  = useState<string>("");
-  const [callRollbackYn,     setCallRollbackYn]     = useState<boolean | null>(null);
+  // Separate amount fields for CBC, LPP, EMI (no CBC+LPP combined)
+  const [visitCbcAmount, setVisitCbcAmount] = useState<string>("");
+  const [visitLppAmount, setVisitLppAmount] = useState<string>("");
+  const [visitEmiAmount, setVisitEmiAmount] = useState<string>("");
+  const [visitRollbackYn, setVisitRollbackYn] = useState<boolean | null>(null);
+  const [callCbcAmount,  setCallCbcAmount]  = useState<string>("");
+  const [callLppAmount,  setCallLppAmount]  = useState<string>("");
+  const [callEmiAmount,  setCallEmiAmount]  = useState<string>("");
+  const [callRollbackYn,  setCallRollbackYn]  = useState<boolean | null>(null);
 
   const [loading,    setLoading]    = useState(false);
   const saveGuardRef = useRef(false);
@@ -719,7 +735,12 @@ function FeedbackModal({
           call_outcome:  callOutcome,
           call_comments: callComments.trim() || null,
           ...(callOutcomeIsPtp && { ptp_date: toIsoDate(callPtpDate.trim()) }),
-          ...(callOutcomeIsPaid && { payment_type: callPaymentType || null, payment_amount: callPaymentAmount ? parseFloat(callPaymentAmount) : null, rollback_yn: callRollbackYn }),
+          ...(callOutcomeIsPaid && {
+            cbc_paid: callCbcAmount ? parseFloat(callCbcAmount) : null,
+            lpp_paid: callLppAmount ? parseFloat(callLppAmount) : null,
+            emi_paid: callEmiAmount ? parseFloat(callEmiAmount) : null,
+            rollback_yn: callRollbackYn,
+          }),
           logged_at:     new Date().toISOString(),
         };
       } else if (activeTab === "Monthly Feedback") {
@@ -777,7 +798,12 @@ function FeedbackModal({
           visit_photo_count: photos.length,
           visited_at:        new Date().toISOString(),
           ...(visitOutcome === "PTP"  && { ptp_date: toIsoDate(visitPtpDate.trim()) }),
-          ...(visitOutcome === "Paid" && { payment_type: visitPaymentType || null, payment_amount: visitPaymentAmount ? parseFloat(visitPaymentAmount) : null, rollback_yn: visitRollbackYn }),
+          ...(visitOutcome === "Paid" && {
+            cbc_paid: visitCbcAmount ? parseFloat(visitCbcAmount) : null,
+            lpp_paid: visitLppAmount ? parseFloat(visitLppAmount) : null,
+            emi_paid: visitEmiAmount ? parseFloat(visitEmiAmount) : null,
+            rollback_yn: visitRollbackYn,
+          }),
         };
       }
 
@@ -792,9 +818,9 @@ function FeedbackModal({
       const shareTab = activeTab;
       const shareMsg =
         shareTab === "Field Visit"
-          ? buildFieldVisitMsg(caseItem, visitOutcome, visitRemarks, gps, visitPhotoUrl)
+          ? buildFieldVisitMsg(caseItem, visitOutcome, visitRemarks, gps, visitPhotoUrl, visitCbcAmount, visitLppAmount, visitEmiAmount, visitRollbackYn)
           : shareTab === "Call Log"
-          ? buildCallLogMsg(caseItem, callOutcome, callComments, callPtpDate)
+          ? buildCallLogMsg(caseItem, callOutcome, callComments, callPtpDate, callCbcAmount, callLppAmount, callEmiAmount, callRollbackYn)
           : null;
 
       // For field visit photo: download server URL to a stable local cache file
@@ -1052,35 +1078,37 @@ function FeedbackModal({
                 )}
                 {callOutcomeIsPaid && (
                   <>
-                    <Text style={fbStyles.sectionLabel}>Payment Type</Text>
-                    <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
-                      {PAYMENT_TYPES.map((pt) => {
-                        const isSelected = callPaymentType === pt;
-                        return (
-                          <Pressable
-                            key={pt}
-                            style={[fbStyles.feedbackOption, { paddingHorizontal: 18 },
-                              isSelected && { backgroundColor: Colors.success, borderColor: Colors.success }]}
-                            onPress={() => setCallPaymentType(isSelected ? "" : pt)}
-                          >
-                            <Text style={[fbStyles.feedbackOptionText, isSelected && { color: "#fff", fontWeight: "700" }]}>{pt}</Text>
-                          </Pressable>
-                        );
-                      })}
-                    </View>
-                    {callPaymentType && (
-                      <>
-                        <Text style={fbStyles.sectionLabel}>Amount Paid (₹)</Text>
+                    <Text style={fbStyles.sectionLabel}>Payment Amounts (₹)</Text>
+                    <View style={{ flexDirection: "row", gap: 8, marginBottom: 4 }}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={[fbStyles.sectionLabel, { fontSize: 11, marginBottom: 4 }]}>CBC</Text>
                         <TextInput
-                          style={[fbStyles.textInput, { minHeight: 44, marginBottom: 12 }]}
-                          placeholder="Enter amount e.g. 5000"
-                          placeholderTextColor={Colors.textMuted}
-                          value={callPaymentAmount}
-                          onChangeText={setCallPaymentAmount}
+                          style={[fbStyles.textInput, { minHeight: 44 }]}
+                          placeholder="0" placeholderTextColor={Colors.textMuted}
+                          value={callCbcAmount} onChangeText={setCallCbcAmount}
                           keyboardType="numeric"
                         />
-                      </>
-                    )}
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={[fbStyles.sectionLabel, { fontSize: 11, marginBottom: 4 }]}>LPP</Text>
+                        <TextInput
+                          style={[fbStyles.textInput, { minHeight: 44 }]}
+                          placeholder="0" placeholderTextColor={Colors.textMuted}
+                          value={callLppAmount} onChangeText={setCallLppAmount}
+                          keyboardType="numeric"
+                        />
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={[fbStyles.sectionLabel, { fontSize: 11, marginBottom: 4 }]}>EMI</Text>
+                        <TextInput
+                          style={[fbStyles.textInput, { minHeight: 44 }]}
+                          placeholder="0" placeholderTextColor={Colors.textMuted}
+                          value={callEmiAmount} onChangeText={setCallEmiAmount}
+                          keyboardType="numeric"
+                        />
+                      </View>
+                    </View>
+                    <View style={{ marginBottom: 12 }} />
                     <YNToggle label="Rollback Y/N" value={callRollbackYn} onChange={setCallRollbackYn} />
                   </>
                 )}
@@ -1297,36 +1325,37 @@ function FeedbackModal({
 
                 {visitOutcome === "Paid" && (
                   <>
-                    <Text style={fvStyles.sectionLabel}>Payment Type</Text>
-                    <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
-                      {PAYMENT_TYPES.map((pt) => {
-                        const isSelected = visitPaymentType === pt;
-                        return (
-                          <Pressable
-                            key={pt}
-                            style={[fbStyles.feedbackOption, { paddingHorizontal: 18 },
-                              isSelected && { backgroundColor: Colors.success, borderColor: Colors.success }]}
-                            onPress={() => setVisitPaymentType(isSelected ? "" : pt)}
-                          >
-                            <Text style={[fbStyles.feedbackOptionText, isSelected && { color: "#fff", fontWeight: "700" }]}>{pt}</Text>
-                          </Pressable>
-                        );
-                      })}
-                    </View>
-                    {visitPaymentType && (
-                      <>
-                        <Text style={fvStyles.sectionLabel}>Amount Paid (₹)</Text>
+                    <Text style={fvStyles.sectionLabel}>Payment Amounts (₹)</Text>
+                    <View style={{ flexDirection: "row", gap: 8, marginBottom: 4 }}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={[fvStyles.sectionLabel, { fontSize: 11, marginBottom: 4 }]}>CBC</Text>
                         <TextInput
-                          style={[fvStyles.input, { minHeight: 44, marginBottom: 12 }]}
-                          placeholder="Enter amount e.g. 5000"
-                          placeholderTextColor={Colors.textMuted}
-                          value={visitPaymentAmount}
-                          onChangeText={setVisitPaymentAmount}
-                          keyboardType="numeric"
-                          editable={!loading}
+                          style={[fvStyles.input, { minHeight: 44 }]}
+                          placeholder="0" placeholderTextColor={Colors.textMuted}
+                          value={visitCbcAmount} onChangeText={setVisitCbcAmount}
+                          keyboardType="numeric" editable={!loading}
                         />
-                      </>
-                    )}
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={[fvStyles.sectionLabel, { fontSize: 11, marginBottom: 4 }]}>LPP</Text>
+                        <TextInput
+                          style={[fvStyles.input, { minHeight: 44 }]}
+                          placeholder="0" placeholderTextColor={Colors.textMuted}
+                          value={visitLppAmount} onChangeText={setVisitLppAmount}
+                          keyboardType="numeric" editable={!loading}
+                        />
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={[fvStyles.sectionLabel, { fontSize: 11, marginBottom: 4 }]}>EMI</Text>
+                        <TextInput
+                          style={[fvStyles.input, { minHeight: 44 }]}
+                          placeholder="0" placeholderTextColor={Colors.textMuted}
+                          value={visitEmiAmount} onChangeText={setVisitEmiAmount}
+                          keyboardType="numeric" editable={!loading}
+                        />
+                      </View>
+                    </View>
+                    <View style={{ marginBottom: 12 }} />
                     <YNToggle label="Rollback Y/N" value={visitRollbackYn} onChange={setVisitRollbackYn} />
                   </>
                 )}
