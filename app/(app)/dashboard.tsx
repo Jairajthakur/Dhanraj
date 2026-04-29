@@ -26,9 +26,7 @@ function getNextMilestone(today: number) {
 }
 
 function fmt(v: number) {
-  if (v >= 100000) return `₹${(v / 100000).toFixed(1)}L`;
-  if (v >= 1000)   return `₹${(v / 1000).toFixed(1)}K`;
-  return `₹${v.toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
+  return `₹${Math.round(v).toLocaleString("en-IN")}`;
 }
 
 // ─── StatCard ─────────────────────────────────────────────────────────────────
@@ -237,7 +235,7 @@ export default function Dashboard() {
   const hasTwData = !!twSummaryData;
 
   const fmtNum = (v: number) =>
-    v >= 100000 ? `₹${(v / 100000).toFixed(1)}L` : `₹${v.toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
+    `₹${Math.round(v).toLocaleString("en-IN")}`;
 
   return (
     <View style={{ flex: 1, backgroundColor: Colors.background }}>
