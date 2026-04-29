@@ -1009,6 +1009,7 @@ export default function AllCasesScreen() {
       <PostIntimationModal item={postIntimationCase} onClose={() => setPostIntimationCase(null)} />
       <ReassignCaseModal
         item={transferCase}
+        caseType="loan"
         onClose={() => setTransferCase(null)}
         onSuccess={() => { setTransferCase(null); invalidateAll(); }}
       />
