@@ -12,9 +12,7 @@ import { getApiUrl } from "@/lib/query-client";
 const n = (v: any) => parseFloat(v) || 0;
 
 const fmt = (v: number) =>
-  v >= 10000000 ? `₹${(v / 10000000).toFixed(2)}Cr`
-  : v >= 100000 ? `₹${(v / 100000).toFixed(2)}L`
-  : `₹${v.toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
+  `₹${Math.round(v).toLocaleString("en-IN")}`;
 
 const BKT_TARGETS: Record<string, { resolution: number; rollback?: number }> = {
   bkt1:  { resolution: 92,  rollback: 22 },
