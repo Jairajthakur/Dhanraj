@@ -35,9 +35,6 @@ const STATUS_COLORS: Record<string, string> = {
 const CALL_LOG_OPTIONS = [
   // Not reachable
   "SWITCH OFF",
-  "NOT AVAILABLE",
-  "DISCONNECTED",
-  "BUSY",
   "NO RESPONSE",
   // Promise / intent
   "PTP",
@@ -45,21 +42,16 @@ const CALL_LOG_OPTIONS = [
   "CALL BACK REQUESTED",
   // Payment
   "PAID",
-  "PART PAYMENT",
   "SETTLED",
   // Negative
   "REFUSED TO PAY",
-  "DISPUTED",
-  "LANGUAGE BARRIER",
   // Other
-  "NOT AT HOME",
   "WRONG NUMBER",
   "NUMBER DOES NOT EXIST",
 ] as const;
 
 const OUTCOME_TO_STATUS: Record<string, string> = {
   "PAID":                "Paid",
-  "PART PAYMENT":        "Paid",
   "SETTLED":             "Paid",
   "PTP":                 "PTP",
   "WILL PAY":            "PTP",
@@ -1404,8 +1396,7 @@ function FeedbackModal({
                   <View style={fvStyles.requiredBadge}><Text style={fvStyles.requiredText}>Optional</Text></View>
                 </View>
                 <TextInput
-                  style={[fvStyles.input, { minHeight: 90, textAlignVertical: "top" },
-                    visitRemarks.trim().length > 0 && visitRemarks.trim().length < 10 && fvStyles.inputError]}
+                  style={[fvStyles.input, { minHeight: 90, textAlignVertical: "top" }]}
                   placeholder="Describe what happened — customer status, conversation outcome, address confirmed, etc."
                   placeholderTextColor={Colors.textMuted} value={visitRemarks} onChangeText={setVisitRemarks}
                   multiline numberOfLines={4} editable={!loading}
