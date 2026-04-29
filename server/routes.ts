@@ -557,8 +557,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   try {
     await storage.query(`ALTER TABLE loan_cases ADD COLUMN IF NOT EXISTS payment_type TEXT`);
+    await storage.query(`ALTER TABLE loan_cases ADD COLUMN IF NOT EXISTS payment_amount NUMERIC`);
     await storage.query(`ALTER TABLE bkt_cases  ADD COLUMN IF NOT EXISTS payment_type TEXT`);
-    console.log("[DB] payment_type columns ready ✅");
+    await storage.query(`ALTER TABLE bkt_cases  ADD COLUMN IF NOT EXISTS payment_amount NUMERIC`);
+    console.log("[DB] payment_type/amount columns ready ✅");
   } catch (e: any) { console.error("[DB] payment_type migration error:", e.message); }
 
   try {
@@ -802,7 +804,7 @@ app.get("/api/companies", requireAuth, async (req, res) => {
 
   app.put("/api/cases/:id/feedback", requireAuth, async (req, res) => {
     try {
-      const { status, feedback, comments, ptp_date, rollback_yn, customer_available, vehicle_available, third_party, third_party_name, third_party_number, feedback_code, projection, non_starter, kyc_purchase, workable, monthly_feedback, occupation, shifted_to, payment_type } = req.body;
+      const { status, feedback, comments, ptp_date, rollback_yn, customer_available, vehicle_available, third_party, third_party_name, third_party_number, feedback_code, projection, non_starter, kyc_purchase, workable, monthly_feedback, occupation, shifted_to, payment_type, payment_amount } = req.body;
       const ynVal = rollback_yn === true || rollback_yn === "true" ? true : rollback_yn === false || rollback_yn === "false" ? false : null;
       const toBool = (v: any) => v === true || v === "true" ? true : v === false || v === "false" ? false : null;
       const caseId = Number(req.params.id);
@@ -822,6 +824,7 @@ app.get("/api/companies", requireAuth, async (req, res) => {
         ...(occupation !== undefined && { occupation: occupation || null }),
         ...(shifted_to !== undefined && { shiftedCity: shifted_to || null }),
         ...(payment_type !== undefined && { paymentType: payment_type || null }),
+        ...(payment_amount !== undefined && { paymentAmount: payment_amount != null ? parseFloat(payment_amount) : null }),
         monthlyFeedback: monthly_feedback || null,
       };
       await storage.updateLoanCaseFeedback(caseId, status, feedback, comments, ptp_date, ynVal, extraFields);
@@ -1665,7 +1668,7 @@ app.put("/api/fos-depositions/:id/pay-both", requireAuth, screenshotUpload.singl
 
   app.put("/api/bkt-cases/:id/feedback", requireAuth, async (req, res) => {
     try {
-      const { status, feedback, comments, ptp_date, rollback_yn, customer_available, vehicle_available, third_party, third_party_name, third_party_number, feedback_code, projection, non_starter, kyc_purchase, workable, monthly_feedback, occupation, shifted_to, payment_type } = req.body;
+      const { status, feedback, comments, ptp_date, rollback_yn, customer_available, vehicle_available, third_party, third_party_name, third_party_number, feedback_code, projection, non_starter, kyc_purchase, workable, monthly_feedback, occupation, shifted_to, payment_type, payment_amount } = req.body;
       const ynVal = rollback_yn === true || rollback_yn === "true" ? true : rollback_yn === false || rollback_yn === "false" ? false : null;
       const toBool = (v: any) => v === true || v === "true" ? true : v === false || v === "false" ? false : null;
       const caseId = Number(req.params.id);
@@ -1685,6 +1688,7 @@ app.put("/api/fos-depositions/:id/pay-both", requireAuth, screenshotUpload.singl
         ...(occupation !== undefined && { occupation: occupation || null }),
         ...(shifted_to !== undefined && { shiftedCity: shifted_to || null }),
         ...(payment_type !== undefined && { paymentType: payment_type || null }),
+        ...(payment_amount !== undefined && { paymentAmount: payment_amount != null ? parseFloat(payment_amount) : null }),
         monthlyFeedback: monthly_feedback || null,
       };
       await storage.updateBktCaseFeedback(caseId, status, feedback, comments, ptp_date, ynVal, bktExtraFields);
