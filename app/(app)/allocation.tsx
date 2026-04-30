@@ -200,130 +200,175 @@ const GPS_TIMEOUT_MS = 20_000;
 const GPS_MAX_AGE_MS = 10_000;
 const PTP_DATE_REGEX = /^\d{2}-\d{2}-\d{4}$/;
 
-// ─── Speech-to-Text hook ──────────────────────────────────────────────────────
+// ─── Speech-to-Text + Auto-translate hook ─────────────────────────────────────
+// Check once at module load time whether @react-native-voice/voice is installed.
+// This prevents "Cannot find module" errors from ever reaching the user.
+let _voiceModule: any = null;
+let _voiceChecked = false;
+function getVoiceModule() {
+  if (_voiceChecked) return _voiceModule;
+  _voiceChecked = true;
+  try { _voiceModule = require("@react-native-voice/voice").default; } catch (_) { _voiceModule = null; }
+  return _voiceModule;
+}
+
+// Translate any language text to English using Claude API
+async function translateToEnglish(text: string): Promise<string> {
+  try {
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: "claude-sonnet-4-20250514",
+        max_tokens: 1000,
+        messages: [{
+          role: "user",
+          content: `Translate the following text to English. If it is already in English, return it as-is. Return ONLY the translated text with no explanation, no quotes, no prefix.
+
+Text: ${text}`,
+        }],
+      }),
+    });
+    const data = await response.json();
+    const translated = data?.content?.[0]?.text?.trim() ?? "";
+    return translated || text; // fallback to original if translation fails
+  } catch (_) {
+    return text; // fallback to original on network error
+  }
+}
+
 function useSpeechToText(onResult: (text: string) => void) {
-  const [listening,   setListening]   = React.useState(false);
-  const [error,       setError]       = React.useState<string | null>(null);
-  const VoiceRef    = React.useRef<any>(null);
+  const [listening,    setListening]    = React.useState(false);
+  const [translating,  setTranslating]  = React.useState(false);
+  const [error,        setError]        = React.useState<string | null>(null);
+  const [available,    setAvailable]    = React.useState(false);
+  const VoiceRef     = React.useRef<any>(null);
   const WebSpeechRef = React.useRef<any>(null);
+
+  // Handle raw transcript — translate then pass to caller
+  const handleTranscript = React.useCallback(async (raw: string) => {
+    if (!raw) return;
+    setTranslating(true);
+    const english = await translateToEnglish(raw);
+    setTranslating(false);
+    onResult(english);
+  }, [onResult]);
 
   React.useEffect(() => {
     if (Platform.OS === "web") {
-      // Web Speech API
       const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
       if (SpeechRecognition) {
         const recognition = new SpeechRecognition();
-        recognition.lang = "en-IN";
+        // Allow any language — translation handled by Claude
+        recognition.lang = "";
         recognition.continuous = false;
         recognition.interimResults = false;
         recognition.onresult = (e: any) => {
           const text = e.results?.[0]?.[0]?.transcript ?? "";
-          if (text) onResult(text);
           setListening(false);
+          if (text) handleTranscript(text);
         };
-        recognition.onerror = (e: any) => {
-          setError(e.error ?? "Speech error");
-          setListening(false);
-        };
+        recognition.onerror = (e: any) => { setError(e.error ?? "Speech error"); setListening(false); };
         recognition.onend = () => setListening(false);
         WebSpeechRef.current = recognition;
+        setAvailable(true);
       }
       return;
     }
 
-    // Native: @react-native-voice/voice
-    let Voice: any = null;
-    try {
-      Voice = require("@react-native-voice/voice").default;
-      VoiceRef.current = Voice;
-      Voice.onSpeechResults = (e: any) => {
-        const text = e?.value?.[0] ?? "";
-        if (text) { onResult(text); }
-        setListening(false);
-      };
-      Voice.onSpeechError = (e: any) => {
-        setError(e?.error?.message ?? "Speech error");
-        setListening(false);
-      };
-      Voice.onSpeechEnd = () => { setListening(false); };
-    } catch (_) {
-      // Voice module not available — mic button will be hidden silently
-      VoiceRef.current = null;
+    // Native: only proceed if module is actually installed
+    const Voice = getVoiceModule();
+    if (!Voice) {
+      setAvailable(false); // mic button will be hidden — no error shown to user
+      return;
     }
+    VoiceRef.current = Voice;
+    setAvailable(true);
+    Voice.onSpeechResults = (e: any) => {
+      const text = e?.value?.[0] ?? "";
+      setListening(false);
+      if (text) handleTranscript(text);
+    };
+    Voice.onSpeechError = (e: any) => {
+      const msg = e?.error?.message ?? "";
+      if (!msg || msg.includes("find module") || msg.includes("NativeModule")) {
+        setListening(false);
+        return;
+      }
+      setError(msg);
+      setListening(false);
+    };
+    Voice.onSpeechEnd = () => setListening(false);
     return () => {
       try { Voice?.destroy?.().then(() => Voice?.removeAllListeners?.()); } catch (_) {}
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [handleTranscript]);
 
   const start = React.useCallback(async () => {
     setError(null);
-
-    // Web
     if (Platform.OS === "web") {
       if (!WebSpeechRef.current) {
         Alert.alert("Not Supported", "Your browser does not support speech recognition. Try Chrome.");
         return;
       }
-      try {
-        WebSpeechRef.current.start();
-        setListening(true);
-      } catch (e: any) {
-        setError(e?.message ?? "Could not start speech recognition");
-      }
+      try { WebSpeechRef.current.start(); setListening(true); }
+      catch (e: any) { setError(e?.message ?? "Could not start speech recognition"); }
       return;
     }
-
-    // Native
     const Voice = VoiceRef.current;
-    if (!Voice) {
-      // Voice module not installed — silently do nothing, user can type instead
-      return;
-    }
+    if (!Voice) return;
     try {
-      // Request mic permission first
       const { Audio } = require("expo-av");
       const { status } = await Audio.requestPermissionsAsync();
       if (status !== "granted") {
         Alert.alert("Permission Denied", "Please allow microphone access in your device settings.");
         return;
       }
-      await Voice.start("en-IN");
+      // Start with no language lock — accepts any language spoken
+      await Voice.start("");
       setListening(true);
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     } catch (e: any) {
-      setError(e?.message ?? "Could not start speech recognition");
-      Alert.alert("Mic Error", e?.message ?? "Could not start speech recognition");
+      const msg: string = e?.message ?? "";
+      if (msg.includes("find module") || msg.includes("NativeModule")) { setListening(false); return; }
+      setError(msg || "Could not start speech recognition");
     }
   }, []);
 
   const stop = React.useCallback(async () => {
-    if (Platform.OS === "web") {
-      try { WebSpeechRef.current?.stop(); } catch (_) {}
-    } else {
-      try { await VoiceRef.current?.stop(); } catch (_) {}
-    }
+    if (Platform.OS === "web") { try { WebSpeechRef.current?.stop(); } catch (_) {} }
+    else { try { await VoiceRef.current?.stop(); } catch (_) {} }
     setListening(false);
   }, []);
 
-  return { listening, error, start, stop };
+  return { listening, translating, error, start, stop, available };
 }
 
 // ─── MicButton component ──────────────────────────────────────────────────────
 function MicButton({ onResult, disabled }: { onResult: (text: string) => void; disabled?: boolean }) {
-  const { listening, start, stop } = useSpeechToText(onResult);
+  const { listening, translating, start, stop, available } = useSpeechToText(onResult);
+
+  // Hide mic button entirely when speech recognition module is not installed
+  if (!available) return null;
+
+  const isbusy = listening || translating;
 
   return (
     <Pressable
-      style={[micStyles.btn, listening && micStyles.btnActive, disabled && micStyles.btnDisabled]}
+      style={[micStyles.btn, isbusy && micStyles.btnActive, disabled && micStyles.btnDisabled]}
       onPress={listening ? stop : start}
-      disabled={disabled}
+      disabled={disabled || translating}
     >
-      <Ionicons
-        name={listening ? "stop-circle" : "mic"}
-        size={18}
-        color={listening ? "#fff" : Colors.primary}
-      />
+      {translating ? (
+        <ActivityIndicator size={14} color="#fff" />
+      ) : (
+        <Ionicons
+          name={listening ? "stop-circle" : "mic"}
+          size={18}
+          color={listening ? "#fff" : Colors.primary}
+        />
+      )}
       {listening && (
         <View style={micStyles.pulse} />
       )}
