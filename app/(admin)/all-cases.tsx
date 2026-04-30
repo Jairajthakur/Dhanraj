@@ -769,7 +769,7 @@ export default function AllCasesScreen() {
   const tableType = "loan";
   const queryKey = ["/api/admin/cases"];
 
-  const { data, isLoading } = useQuery({ queryKey, queryFn: () => api.admin.getCases(), refetchInterval: 15000 });
+  const { data, isLoading } = useQuery({ queryKey, queryFn: () => api.admin.getCases(), refetchInterval: 60000 });
 
   const invalidateAll = () => {
     qc.invalidateQueries({ queryKey: ["/api/admin/cases"] });
