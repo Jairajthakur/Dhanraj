@@ -532,6 +532,25 @@ function fmtRupee(n?: number) {
   return n != null ? `₹${n.toLocaleString("en-IN")}` : "—";
 }
 
+// Shared box-drawing config used by both Field Visit and Call Log builders
+const BOX_W = 34;  // inner content width between ║ borders
+const BOX = {
+  top  : `╔${"═".repeat(BOX_W)}╗`,
+  div  : `╠${"═".repeat(BOX_W)}╣`,
+  bot  : `╚${"═".repeat(BOX_W)}╝`,
+  empty: `║${" ".repeat(BOX_W)}║`,
+  // 1-space padding each side; truncate so value never overflows the border
+  row(lbl: string, val: string) {
+    const maxVal = BOX_W - 2 - lbl.length - 2; // 2 for padding, 2 for ": "
+    const safe   = val.length > maxVal ? val.slice(0, maxVal - 1) + "…" : val;
+    return `║ ${(lbl + ": " + safe).padEnd(BOX_W - 2)} ║`;
+  },
+  title(t: string) {
+    const sp = Math.floor((BOX_W - t.length) / 2);
+    return `║${" ".repeat(sp)}${t}${" ".repeat(BOX_W - sp - t.length)}║`;
+  },
+};
+
 function buildFieldVisitMsg(
   caseItem: CaseItem,
   visitOutcome: string,
@@ -543,48 +562,31 @@ function buildFieldVisitMsg(
   emiAmount?: string,
   rollbackYn?: boolean | null,
 ): string {
-  const W   = 33;
-  const TOP = `╔${"═".repeat(W)}╗`;
-  const DIV = `╠${"═".repeat(W)}╣`;
-  const BOT = `╚${"═".repeat(W)}╝`;
-  const mid = (s: string) => `║${s.padEnd(W)}║`;
-  const row = (lbl: string, val: string) => mid(` ${lbl.padEnd(9)}: ${val}`);
-  const titleLine = (t: string) => {
-    const spaces = Math.floor((W - t.length) / 2);
-    return mid(" ".repeat(spaces) + t);
-  };
-
   const mapsLink = gps ? `https://maps.google.com/?q=${gps.lat},${gps.lng}` : null;
   const isPaid   = visitOutcome === "Paid" || visitOutcome === "Part Payment";
   const time     = new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true });
 
-  const contentRows: string[] = [];
-  contentRows.push(row("Customer", caseItem.customer_name ?? "—"));
-  contentRows.push(row("Loan ID",  caseItem.app_id ?? caseItem.loan_no ?? "—"));
-  contentRows.push(row("POS",      caseItem.pos != null ? fmtRupee(caseItem.pos) : "—"));
-  contentRows.push(row("Status",   visitOutcome));
+  const rows: string[] = [];
+  rows.push(BOX.row("Customer", caseItem.customer_name ?? "—"));
+  rows.push(BOX.row("Loan ID",  caseItem.app_id ?? caseItem.loan_no ?? "—"));
+  rows.push(BOX.row("POS",      caseItem.pos != null ? fmtRupee(caseItem.pos) : "—"));
+  rows.push(BOX.row("Status",   visitOutcome));
   if (isPaid) {
-    if (cbcAmount)           contentRows.push(row("CBC",      `Rs.${cbcAmount}`));
-    if (lppAmount)           contentRows.push(row("LPP",      `Rs.${lppAmount}`));
-    if (emiAmount)           contentRows.push(row("EMI",      `Rs.${emiAmount}`));
-    if (rollbackYn === true) contentRows.push(row("Rollback", "Yes"));
+    if (cbcAmount)           rows.push(BOX.row("CBC",      `Rs.${cbcAmount}`));
+    if (lppAmount)           rows.push(BOX.row("LPP",      `Rs.${lppAmount}`));
+    if (emiAmount)           rows.push(BOX.row("EMI",      `Rs.${emiAmount}`));
+    if (rollbackYn === true) rows.push(BOX.row("Rollback", "Yes"));
   }
-  if (visitRemarks) contentRows.push(row("Remarks",  visitRemarks));
-  contentRows.push(row("Time",     time));
-  if (gps) contentRows.push(row("Location", `${gps.lat.toFixed(4)}, ${gps.lng.toFixed(4)}`));
-  if (mapsLink) {
-    const prefix = " Map      : ";
-    const maxVal = W - prefix.length;
-    contentRows.push(mid(prefix + mapsLink.slice(0, maxVal)));
-    if (mapsLink.length > maxVal)
-      contentRows.push(mid(" ".repeat(prefix.length) + mapsLink.slice(maxVal)));
-  }
+  if (visitRemarks) rows.push(BOX.row("Remarks",  visitRemarks));
+  rows.push(BOX.row("Time",     time));
+  if (gps) rows.push(BOX.row("Location", `${gps.lat.toFixed(4)}, ${gps.lng.toFixed(4)}`));
+  if (mapsLink) rows.push(BOX.row("Map",      mapsLink));
 
-  const box: string[] = [TOP, titleLine("FIELD VISIT REPORT")];
-  for (const r of contentRows) { box.push(DIV); box.push(r); }
-  box.push(BOT);
+  const lines: string[] = [BOX.top, BOX.empty, BOX.title("FIELD VISIT REPORT"), BOX.empty];
+  for (const r of rows) { lines.push(BOX.div); lines.push(r); }
+  lines.push(BOX.bot);
 
-  return ["```", ...box, "```", "_Dhanraj Collections App_"].join("\n");
+  return ["```", ...lines, "```", "_Dhanraj Collections App_"].join("\n");
 }
 
 function buildCallLogMsg(
@@ -597,40 +599,29 @@ function buildCallLogMsg(
   emiAmount?: string,
   rollbackYn?: boolean | null,
 ): string {
-  const W   = 33;
-  const TOP = `╔${"═".repeat(W)}╗`;
-  const DIV = `╠${"═".repeat(W)}╣`;
-  const BOT = `╚${"═".repeat(W)}╝`;
-  const mid = (s: string) => `║${s.padEnd(W)}║`;
-  const row = (lbl: string, val: string) => mid(` ${lbl.padEnd(9)}: ${val}`);
-  const titleLine = (t: string) => {
-    const spaces = Math.floor((W - t.length) / 2);
-    return mid(" ".repeat(spaces) + t);
-  };
-
   const isPaid = OUTCOME_TO_STATUS[callOutcome] === "Paid";
   const time   = new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true });
 
-  const contentRows: string[] = [];
-  contentRows.push(row("Customer", caseItem.customer_name ?? "—"));
-  contentRows.push(row("Loan ID",  caseItem.app_id ?? caseItem.loan_no ?? "—"));
-  contentRows.push(row("POS",      caseItem.pos != null ? fmtRupee(caseItem.pos) : "—"));
-  contentRows.push(row("Status",   callOutcome));
+  const rows: string[] = [];
+  rows.push(BOX.row("Customer", caseItem.customer_name ?? "—"));
+  rows.push(BOX.row("Loan ID",  caseItem.app_id ?? caseItem.loan_no ?? "—"));
+  rows.push(BOX.row("POS",      caseItem.pos != null ? fmtRupee(caseItem.pos) : "—"));
+  rows.push(BOX.row("Status",   callOutcome));
   if (isPaid) {
-    if (cbcAmount)           contentRows.push(row("CBC",      `Rs.${cbcAmount}`));
-    if (lppAmount)           contentRows.push(row("LPP",      `Rs.${lppAmount}`));
-    if (emiAmount)           contentRows.push(row("EMI",      `Rs.${emiAmount}`));
-    if (rollbackYn === true) contentRows.push(row("Rollback", "Yes"));
+    if (cbcAmount)           rows.push(BOX.row("CBC",      `Rs.${cbcAmount}`));
+    if (lppAmount)           rows.push(BOX.row("LPP",      `Rs.${lppAmount}`));
+    if (emiAmount)           rows.push(BOX.row("EMI",      `Rs.${emiAmount}`));
+    if (rollbackYn === true) rows.push(BOX.row("Rollback", "Yes"));
   }
-  if (callComments) contentRows.push(row("Remarks",  callComments));
-  if (callPtpDate)  contentRows.push(row("PTP Date", callPtpDate));
-  contentRows.push(row("Time",     time));
+  if (callComments) rows.push(BOX.row("Remarks",  callComments));
+  if (callPtpDate)  rows.push(BOX.row("PTP Date", callPtpDate));
+  rows.push(BOX.row("Time",     time));
 
-  const box: string[] = [TOP, titleLine("CALL LOG REPORT")];
-  for (const r of contentRows) { box.push(DIV); box.push(r); }
-  box.push(BOT);
+  const lines: string[] = [BOX.top, BOX.empty, BOX.title("CALL LOG REPORT"), BOX.empty];
+  for (const r of rows) { lines.push(BOX.div); lines.push(r); }
+  lines.push(BOX.bot);
 
-  return ["```", ...box, "```", "_Dhanraj Collections App_"].join("\n");
+  return ["```", ...lines, "```", "_Dhanraj Collections App_"].join("\n");
 }
 
 async function shareToWhatsApp(
