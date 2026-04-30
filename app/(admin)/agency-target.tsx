@@ -349,7 +349,7 @@ export default function AgencyTargetScreen() {
   const { data, isLoading, refetch } = useQuery({
     queryKey: ["/api/admin/cases", selectedCompany],
     queryFn: () => api.admin.getCases(selectedCompany ? { company: selectedCompany } : undefined),
-    refetchInterval: 15000,
+    refetchInterval: 60000,
   });
 
   const bktData = useMemo(() => {
