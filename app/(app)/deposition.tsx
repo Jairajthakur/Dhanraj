@@ -538,8 +538,6 @@ export default function FosDepositionScreen() {
       const json = JSON.parse(text);
       return Array.isArray(json) ? { depositions: json } : json;
     },
-    staleTime: 0,
-    retry: 2,
   });
 
   const depositions: any[]   = depData?.depositions || [];
