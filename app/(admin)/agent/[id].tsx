@@ -258,7 +258,7 @@ export default function AgentDetailScreen() {
   const [transferCase, setTransferCase] = useState<any>(null);
 
   const { data: agentsData } = useQuery({ queryKey: ["/api/admin/agents"], queryFn: () => api.admin.getAgents() });
-  const { data: casesData, isLoading, refetch } = useQuery({ queryKey: ["/api/admin/cases/agent", id], queryFn: () => api.admin.getCasesByAgent(Number(id)), enabled: !!id, refetchInterval: 20000 });
+  const { data: casesData, isLoading, refetch } = useQuery({ queryKey: ["/api/admin/cases/agent", id], queryFn: () => api.admin.getCasesByAgent(Number(id)), enabled: !!id, refetchInterval: 60000 });
   const { data: statsData } = useQuery({ queryKey: ["/api/admin/agent/stats", id], queryFn: () => api.admin.getAgentStats(Number(id)), enabled: !!id });
 
   const invalidateAll = () => {
