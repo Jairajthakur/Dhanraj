@@ -2343,37 +2343,39 @@ res.json({ imported, updated: 0, skipped, agentsCreated, agentsRemoved, total: r
       `, [company]);
       res.json({ rows: result.rows });
     } else {
-      // Existing aggregated query (unchanged)
+      // Live from loan_cases (all companies) — TW only
       const result = await storage.query(`
-        WITH norm AS (
-          SELECT *,
-            CASE LOWER(REPLACE(bkt,' ',''))
-              WHEN '1' THEN 'bkt1' WHEN '2' THEN 'bkt2' WHEN '3' THEN 'bkt3'
-              WHEN 'bkt1' THEN 'bkt1' WHEN 'bkt2' THEN 'bkt2' WHEN 'bkt3' THEN 'bkt3'
-              ELSE LOWER(REPLACE(bkt,' ',''))
-            END AS bkt_norm
-          FROM bkt_perf_summary
-        ),
-        latest AS (
-          SELECT DISTINCT ON (fos_name, bkt_norm) *
-          FROM norm
-          ORDER BY fos_name, bkt_norm, uploaded_at DESC
-        )
         SELECT
-          fos_name, bkt_norm AS bkt,
-          COALESCE(pos_paid,0)               AS pos_paid,
-          COALESCE(pos_unpaid,0)             AS pos_unpaid,
-          COALESCE(pos_grand_total,0)        AS pos_grand_total,
-          COALESCE(pos_percentage,0)         AS pos_percentage,
-          COALESCE(count_paid,0)             AS count_paid,
-          COALESCE(count_unpaid,0)           AS count_unpaid,
-          COALESCE(count_total,0)            AS count_total,
-          COALESCE(rollback_paid,0)          AS rollback_paid,
-          COALESCE(rollback_unpaid,0)        AS rollback_unpaid,
-          COALESCE(rollback_grand_total,0)   AS rollback_grand_total,
-          COALESCE(rollback_percentage,0)    AS rollback_percentage
-        FROM latest
-        ORDER BY fos_name, bkt_norm
+          fa.name AS fos_name,
+          fa.id   AS agent_id,
+          CASE lc.bkt
+            WHEN 1 THEN 'bkt1'
+            WHEN 2 THEN 'bkt2'
+            WHEN 3 THEN 'bkt3'
+          END AS bkt,
+          COALESCE(SUM(lc.pos::numeric) FILTER (WHERE lc.status='Paid'), 0)  AS pos_paid,
+          COALESCE(SUM(lc.pos::numeric) FILTER (WHERE lc.status!='Paid'), 0) AS pos_unpaid,
+          COALESCE(SUM(lc.pos::numeric), 0)                                   AS pos_grand_total,
+          CASE WHEN COALESCE(SUM(lc.pos::numeric),0) > 0
+               THEN ROUND((COALESCE(SUM(lc.pos::numeric) FILTER (WHERE lc.status='Paid'),0) / SUM(lc.pos::numeric)) * 100, 2)
+               ELSE 0 END                                                      AS pos_percentage,
+          COUNT(*) FILTER (WHERE lc.status='Paid')::int  AS count_paid,
+          COUNT(*) FILTER (WHERE lc.status!='Paid')::int AS count_unpaid,
+          COUNT(*)::int                                   AS count_total,
+          COALESCE(SUM(lc.pos::numeric) FILTER (WHERE lc.rollback_yn=true), 0)                   AS rollback_paid,
+          COALESCE(SUM(lc.pos::numeric) FILTER (WHERE lc.rollback_yn IS DISTINCT FROM true), 0)  AS rollback_unpaid,
+          COALESCE(SUM(lc.pos::numeric), 0)                                                       AS rollback_grand_total,
+          CASE WHEN COALESCE(SUM(lc.pos::numeric),0) > 0
+               THEN ROUND((COALESCE(SUM(lc.pos::numeric) FILTER (WHERE lc.rollback_yn=true),0) / SUM(lc.pos::numeric)) * 100, 2)
+               ELSE 0 END AS rollback_percentage
+        FROM loan_cases lc
+        JOIN fos_agents fa ON fa.id = lc.agent_id
+        WHERE lc.bkt IS NOT NULL
+          AND lc.agent_id IS NOT NULL
+          AND UPPER(COALESCE(lc.pro,'')) = 'TW'
+        GROUP BY fa.id, fa.name, lc.bkt
+        HAVING CASE lc.bkt WHEN 1 THEN 'bkt1' WHEN 2 THEN 'bkt2' WHEN 3 THEN 'bkt3' END IS NOT NULL
+        ORDER BY fa.name, lc.bkt
       `);
       res.json({ rows: result.rows });
     }
@@ -2460,60 +2462,32 @@ app.get("/api/bkt-perf-summary", requireAuth, async (req, res) => {
       return;
     }
  
-    // ── Default: existing full CTE query (unchanged from original routes.ts) ──
+    // ── Default: live from loan_cases — TW only ──
     const result = await storage.query(`
-      WITH imported_norm AS (
-        SELECT *, CASE LOWER(REPLACE(bkt,' ',''))
-          WHEN '1' THEN 'bkt1' WHEN '2' THEN 'bkt2' WHEN '3' THEN 'bkt3'
-          WHEN 'bkt1' THEN 'bkt1' WHEN 'bkt2' THEN 'bkt2' WHEN 'bkt3' THEN 'bkt3'
-          ELSE LOWER(REPLACE(bkt,' ',''))
-        END AS bkt_norm
-        FROM bkt_perf_summary WHERE agent_id=$1
-      ),
-      imported_latest AS (
-        SELECT DISTINCT ON (bkt_norm) * FROM imported_norm ORDER BY bkt_norm, uploaded_at DESC
-      ),
-      covered_bkts AS (SELECT bkt_norm FROM imported_latest WHERE bkt_norm IN ('bkt1','bkt2','bkt3')),
-      live_cases AS (
-        SELECT LOWER(REPLACE(bc.case_category,' ','')) AS bkt, bc.pos::numeric AS pos, bc.status, bc.rollback_yn
-        FROM bkt_cases bc
-        WHERE bc.agent_id=$1 AND LOWER(REPLACE(bc.case_category,' ','')) IN ('bkt1','bkt2','bkt3')
-          AND LOWER(REPLACE(bc.case_category,' ','')) NOT IN (SELECT bkt_norm FROM covered_bkts)
-          AND UPPER(COALESCE(bc.pro,'')) = 'TW'
-        UNION ALL
-        SELECT 'bkt'||lc.bkt::text AS bkt, lc.pos::numeric AS pos, lc.status, lc.rollback_yn
-        FROM loan_cases lc
-        WHERE lc.agent_id=$1 AND lc.bkt IS NOT NULL
-          AND 'bkt'||lc.bkt::text NOT IN (SELECT bkt_norm FROM covered_bkts)
-          AND UPPER(COALESCE(lc.pro,'')) = 'TW'
-      ),
-      live_agg AS (
-        SELECT bkt,
-          COALESCE(SUM(pos) FILTER (WHERE status='Paid'),0)  AS pos_paid,
-          COALESCE(SUM(pos) FILTER (WHERE status<>'Paid'),0) AS pos_unpaid,
-          COALESCE(SUM(pos),0)                               AS pos_grand_total,
-          CASE WHEN COALESCE(SUM(pos),0)>0 THEN ROUND((COALESCE(SUM(pos) FILTER (WHERE status='Paid'),0)/SUM(pos))*100,2) ELSE 0 END AS pos_percentage,
-          COUNT(*) FILTER (WHERE status='Paid')::int  AS count_paid,
-          COUNT(*) FILTER (WHERE status<>'Paid')::int AS count_unpaid,
-          COUNT(*)::int                               AS count_total,
-          COALESCE(SUM(pos) FILTER (WHERE rollback_yn=true),0)                  AS rollback_paid,
-          COALESCE(SUM(pos) FILTER (WHERE rollback_yn IS DISTINCT FROM true),0) AS rollback_unpaid,
-          COALESCE(SUM(pos),0)                                                   AS rollback_grand_total,
-          CASE WHEN COALESCE(SUM(pos),0)>0 THEN ROUND((COALESCE(SUM(pos) FILTER (WHERE rollback_yn=true),0)/SUM(pos))*100,2) ELSE 0 END AS rollback_percentage
-        FROM live_cases GROUP BY bkt
-      ),
-      combined AS (
-        SELECT bkt_norm AS bkt,
-          COALESCE(pos_paid,0) AS pos_paid, COALESCE(pos_unpaid,0) AS pos_unpaid,
-          COALESCE(pos_grand_total,0) AS pos_grand_total, COALESCE(pos_percentage,0) AS pos_percentage,
-          COALESCE(count_paid,0) AS count_paid, COALESCE(count_unpaid,0) AS count_unpaid,
-          COALESCE(count_total,0) AS count_total, COALESCE(rollback_paid,0) AS rollback_paid,
-          COALESCE(rollback_unpaid,0) AS rollback_unpaid, COALESCE(rollback_grand_total,0) AS rollback_grand_total,
-          COALESCE(rollback_percentage,0) AS rollback_percentage
-        FROM imported_latest
-        UNION ALL SELECT * FROM live_agg
-      )
-      SELECT * FROM combined ORDER BY bkt
+      SELECT
+        CASE lc.bkt WHEN 1 THEN 'bkt1' WHEN 2 THEN 'bkt2' WHEN 3 THEN 'bkt3' END AS bkt,
+        COALESCE(SUM(lc.pos::numeric) FILTER (WHERE lc.status='Paid'),  0) AS pos_paid,
+        COALESCE(SUM(lc.pos::numeric) FILTER (WHERE lc.status<>'Paid'), 0) AS pos_unpaid,
+        COALESCE(SUM(lc.pos::numeric), 0)                                  AS pos_grand_total,
+        CASE WHEN COALESCE(SUM(lc.pos::numeric),0) > 0
+             THEN ROUND((COALESCE(SUM(lc.pos::numeric) FILTER (WHERE lc.status='Paid'),0) / SUM(lc.pos::numeric)) * 100, 2)
+             ELSE 0 END                                                    AS pos_percentage,
+        COUNT(*) FILTER (WHERE lc.status='Paid')::int                      AS count_paid,
+        COUNT(*) FILTER (WHERE lc.status<>'Paid')::int                     AS count_unpaid,
+        COUNT(*)::int                                                       AS count_total,
+        COALESCE(SUM(lc.pos::numeric) FILTER (WHERE lc.rollback_yn=true), 0)                  AS rollback_paid,
+        COALESCE(SUM(lc.pos::numeric) FILTER (WHERE lc.rollback_yn IS DISTINCT FROM true), 0) AS rollback_unpaid,
+        COALESCE(SUM(lc.pos::numeric), 0)                                                      AS rollback_grand_total,
+        CASE WHEN COALESCE(SUM(lc.pos::numeric),0) > 0
+             THEN ROUND((COALESCE(SUM(lc.pos::numeric) FILTER (WHERE lc.rollback_yn=true),0) / SUM(lc.pos::numeric)) * 100, 2)
+             ELSE 0 END AS rollback_percentage
+      FROM loan_cases lc
+      WHERE lc.agent_id = $1
+        AND lc.bkt IS NOT NULL
+        AND UPPER(COALESCE(lc.pro,'')) = 'TW'
+      GROUP BY lc.bkt
+      HAVING CASE lc.bkt WHEN 1 THEN 'bkt1' WHEN 2 THEN 'bkt2' WHEN 3 THEN 'bkt3' END IS NOT NULL
+      ORDER BY lc.bkt
     `, [agentId]);
  
     res.json({ rows: result.rows });
@@ -2784,11 +2758,16 @@ app.post("/api/admin/reset-monthly-feedback/case/:caseId", requireAdmin, async (
       for (const agent of agents.rows) {
         try {
           const perfResult = await storage.query(
-            `SELECT bkt,
-                    COALESCE(pos_paid::numeric, 0)        AS pos_paid,
-                    COALESCE(pos_grand_total::numeric, 0) AS pos_grand_total
-             FROM bkt_perf_summary
-             WHERE agent_id = $1 AND bkt IN ('bkt1','bkt2','bkt3')`,
+            `SELECT
+               CASE lc.bkt WHEN 1 THEN 'bkt1' WHEN 2 THEN 'bkt2' WHEN 3 THEN 'bkt3' END AS bkt,
+               COALESCE(SUM(lc.pos::numeric) FILTER (WHERE lc.status='Paid'), 0)  AS pos_paid,
+               COALESCE(SUM(lc.pos::numeric), 0)                                   AS pos_grand_total
+             FROM loan_cases lc
+             WHERE lc.agent_id = $1
+               AND lc.bkt IN (1,2,3)
+               AND UPPER(COALESCE(lc.pro,'')) = 'TW'
+             GROUP BY lc.bkt
+             HAVING CASE lc.bkt WHEN 1 THEN 'bkt1' WHEN 2 THEN 'bkt2' WHEN 3 THEN 'bkt3' END IS NOT NULL`,
             [agent.id]
           );
 
