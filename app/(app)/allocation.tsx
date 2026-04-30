@@ -200,163 +200,162 @@ const GPS_TIMEOUT_MS = 20_000;
 const GPS_MAX_AGE_MS = 10_000;
 const PTP_DATE_REGEX = /^\d{2}-\d{2}-\d{4}$/;
 
-// ─── Speech-to-Text + Auto-translate hook ─────────────────────────────────────
-// Check once at module load time whether @react-native-voice/voice is installed.
-// This prevents "Cannot find module" errors from ever reaching the user.
-let _voiceModule: any = null;
-let _voiceChecked = false;
-function getVoiceModule() {
-  if (_voiceChecked) return _voiceModule;
-  _voiceChecked = true;
-  try { _voiceModule = require("@react-native-voice/voice").default; } catch (_) { _voiceModule = null; }
-  return _voiceModule;
-}
+// ─── Speech-to-Text + Auto-translate ─────────────────────────────────────────
+// Uses expo-av for recording (no extra native module needed).
+// Audio is sent to Claude API which transcribes + translates to English.
 
-// Translate any language text to English using Claude API
-async function translateToEnglish(text: string): Promise<string> {
+// Translate / transcribe via Claude API (handles any language automatically)
+async function transcribeAndTranslate(base64Audio: string): Promise<string> {
   try {
     const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         model: "claude-sonnet-4-20250514",
-        max_tokens: 1000,
+        max_tokens: 500,
         messages: [{
           role: "user",
-          content: `Translate the following text to English. If it is already in English, return it as-is. Return ONLY the translated text with no explanation, no quotes, no prefix.
-
-Text: ${text}`,
+          content: [
+            {
+              type: "text",
+              text: "Listen to this audio recording from a field collection agent. Transcribe what they said and translate it to English. Return ONLY the English text, no explanation, no quotes.",
+            },
+            {
+              type: "document",
+              source: {
+                type: "base64",
+                media_type: "audio/webm",
+                data: base64Audio,
+              },
+            },
+          ],
         }],
       }),
     });
     const data = await response.json();
-    const translated = data?.content?.[0]?.text?.trim() ?? "";
-    return translated || text; // fallback to original if translation fails
-  } catch (_) {
-    return text; // fallback to original on network error
-  }
+    return data?.content?.[0]?.text?.trim() ?? "";
+  } catch { return ""; }
 }
 
 function useSpeechToText(onResult: (text: string) => void) {
-  const [listening,    setListening]    = React.useState(false);
-  const [translating,  setTranslating]  = React.useState(false);
-  const [error,        setError]        = React.useState<string | null>(null);
-  const [available,    setAvailable]    = React.useState(false);
-  const VoiceRef     = React.useRef<any>(null);
-  const WebSpeechRef = React.useRef<any>(null);
+  const [listening,   setListening]   = React.useState(false);
+  const [processing,  setProcessing]  = React.useState(false);
+  const recordingRef  = React.useRef<any>(null);
+  const WebSpeechRef  = React.useRef<any>(null);
 
-  // Handle raw transcript — translate then pass to caller
-  const handleTranscript = React.useCallback(async (raw: string) => {
-    if (!raw) return;
-    setTranslating(true);
-    const english = await translateToEnglish(raw);
-    setTranslating(false);
-    onResult(english);
+  // Web — use browser SpeechRecognition directly
+  React.useEffect(() => {
+    if (Platform.OS !== "web") return;
+    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SR) return;
+    const r = new SR();
+    r.lang = ""; r.continuous = false; r.interimResults = false;
+    r.onresult = async (e: any) => {
+      const raw = e.results?.[0]?.[0]?.transcript ?? "";
+      setListening(false);
+      if (!raw) return;
+      setProcessing(true);
+      // Translate via Claude if not English
+      try {
+        const res = await fetch("https://api.anthropic.com/v1/messages", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            model: "claude-sonnet-4-20250514", max_tokens: 300,
+            messages: [{ role: "user", content: `Translate to English (return original if already English, no explanation):
+${raw}` }],
+          }),
+        });
+        const d = await res.json();
+        onResult(d?.content?.[0]?.text?.trim() || raw);
+      } catch { onResult(raw); }
+      setProcessing(false);
+    };
+    r.onerror = () => setListening(false);
+    r.onend   = () => setListening(false);
+    WebSpeechRef.current = r;
   }, [onResult]);
 
-  React.useEffect(() => {
-    if (Platform.OS === "web") {
-      const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-      if (SpeechRecognition) {
-        const recognition = new SpeechRecognition();
-        // Allow any language — translation handled by Claude
-        recognition.lang = "";
-        recognition.continuous = false;
-        recognition.interimResults = false;
-        recognition.onresult = (e: any) => {
-          const text = e.results?.[0]?.[0]?.transcript ?? "";
-          setListening(false);
-          if (text) handleTranscript(text);
-        };
-        recognition.onerror = (e: any) => { setError(e.error ?? "Speech error"); setListening(false); };
-        recognition.onend = () => setListening(false);
-        WebSpeechRef.current = recognition;
-        setAvailable(true);
-      }
-      return;
-    }
-
-    // Native: only proceed if module is actually installed
-    const Voice = getVoiceModule();
-    if (!Voice) {
-      setAvailable(false); // mic button will be hidden — no error shown to user
-      return;
-    }
-    VoiceRef.current = Voice;
-    setAvailable(true);
-    Voice.onSpeechResults = (e: any) => {
-      const text = e?.value?.[0] ?? "";
-      setListening(false);
-      if (text) handleTranscript(text);
-    };
-    Voice.onSpeechError = (e: any) => {
-      const msg = e?.error?.message ?? "";
-      if (!msg || msg.includes("find module") || msg.includes("NativeModule")) {
-        setListening(false);
-        return;
-      }
-      setError(msg);
-      setListening(false);
-    };
-    Voice.onSpeechEnd = () => setListening(false);
-    return () => {
-      try { Voice?.destroy?.().then(() => Voice?.removeAllListeners?.()); } catch (_) {}
-    };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [handleTranscript]);
-
   const start = React.useCallback(async () => {
-    setError(null);
+    // ── Web ──
     if (Platform.OS === "web") {
-      if (!WebSpeechRef.current) {
-        Alert.alert("Not Supported", "Your browser does not support speech recognition. Try Chrome.");
-        return;
+      if (WebSpeechRef.current) {
+        try { WebSpeechRef.current.start(); setListening(true); } catch {}
+      } else {
+        Alert.alert("Not Supported", "Try Chrome for voice input.");
       }
-      try { WebSpeechRef.current.start(); setListening(true); }
-      catch (e: any) { setError(e?.message ?? "Could not start speech recognition"); }
       return;
     }
-    const Voice = VoiceRef.current;
-    if (!Voice) return;
+
+    // ── Native — record with expo-av, send to Claude ──
     try {
       const { Audio } = require("expo-av");
-      const { status } = await Audio.requestPermissionsAsync();
-      if (status !== "granted") {
-        Alert.alert("Permission Denied", "Please allow microphone access in your device settings.");
+      const perm = await Audio.requestPermissionsAsync();
+      if (perm.status !== "granted") {
+        Alert.alert("Microphone Permission", "Please allow microphone access in Settings to use voice input.");
         return;
       }
-      // Start with no language lock — accepts any language spoken
-      await Voice.start("");
+      await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
+      const { recording } = await Audio.Recording.createAsync(
+        Audio.RecordingOptionsPresets.HIGH_QUALITY,
+      );
+      recordingRef.current = recording;
       setListening(true);
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     } catch (e: any) {
-      const msg: string = e?.message ?? "";
-      if (msg.includes("find module") || msg.includes("NativeModule")) { setListening(false); return; }
-      setError(msg || "Could not start speech recognition");
+      setListening(false);
+      Alert.alert("Mic Error", "Could not start recording. Please try again.");
     }
-  }, []);
+  }, [onResult]);
 
   const stop = React.useCallback(async () => {
-    if (Platform.OS === "web") { try { WebSpeechRef.current?.stop(); } catch (_) {} }
-    else { try { await VoiceRef.current?.stop(); } catch (_) {} }
-    setListening(false);
-  }, []);
+    // ── Web ──
+    if (Platform.OS === "web") {
+      try { WebSpeechRef.current?.stop(); } catch {}
+      setListening(false);
+      return;
+    }
 
-  return { listening, translating, error, start, stop, available };
+    // ── Native — stop recording, send audio to Claude ──
+    const recording = recordingRef.current;
+    if (!recording) { setListening(false); return; }
+    setListening(false);
+    setProcessing(true);
+    try {
+      await recording.stopAndUnloadAsync();
+      const uri = recording.getURI();
+      recordingRef.current = null;
+      if (!uri) { setProcessing(false); return; }
+
+      // Read the recorded file as base64
+      const { FileSystem } = require("expo-file-system");
+      const base64 = await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });
+      await FileSystem.deleteAsync(uri, { idempotent: true });
+
+      // Send to Claude for transcription + translation
+      const result = await transcribeAndTranslate(base64);
+      if (result) onResult(result);
+    } catch {
+      // Silent fail — user can type manually
+    } finally {
+      setProcessing(false);
+    }
+  }, [onResult]);
+
+  // Always available — uses expo-av which is already installed
+  const available = true;
+
+  return { listening, translating: processing, start, stop, available };
 }
 
 // ─── MicButton component ──────────────────────────────────────────────────────
 function MicButton({ onResult, disabled }: { onResult: (text: string) => void; disabled?: boolean }) {
-  const { listening, translating, start, stop, available } = useSpeechToText(onResult);
-
-  // Hide mic button entirely when speech recognition module is not installed
-  if (!available) return null;
-
-  const isbusy = listening || translating;
+  const { listening, translating, start, stop } = useSpeechToText(onResult);
+  const busy = listening || translating;
 
   return (
     <Pressable
-      style={[micStyles.btn, isbusy && micStyles.btnActive, disabled && micStyles.btnDisabled]}
+      style={[micStyles.btn, busy && micStyles.btnActive, disabled && micStyles.btnDisabled]}
       onPress={listening ? stop : start}
       disabled={disabled || translating}
     >
@@ -369,9 +368,7 @@ function MicButton({ onResult, disabled }: { onResult: (text: string) => void; d
           color={listening ? "#fff" : Colors.primary}
         />
       )}
-      {listening && (
-        <View style={micStyles.pulse} />
-      )}
+      {listening && <View style={micStyles.pulse} />}
     </Pressable>
   );
 }
