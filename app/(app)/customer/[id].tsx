@@ -917,7 +917,7 @@ export default function CustomerDetailScreen() {
   const [showVisitModal,   setShowVisitModal]   = useState(false);
   const [showCallModal,    setShowCallModal]    = useState(false);
 
-  const { data: permData } = useQuery({ queryKey: ["/api/receipt-permission"], queryFn: () => api.getReceiptPermission(), staleTime: 0 });
+  const { data: permData } = useQuery({ queryKey: ["/api/receipt-permission"], queryFn: () => api.getReceiptPermission() });
   const canRequestReceipt = permData?.canRequestReceipt === true;
 
   if (!item) {
