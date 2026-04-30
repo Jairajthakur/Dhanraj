@@ -200,200 +200,6 @@ const GPS_TIMEOUT_MS = 20_000;
 const GPS_MAX_AGE_MS = 10_000;
 const PTP_DATE_REGEX = /^\d{2}-\d{2}-\d{4}$/;
 
-// ─── Speech-to-Text + Auto-translate ─────────────────────────────────────────
-// Uses expo-av for recording (no extra native module needed).
-// Audio is sent to Claude API which transcribes + translates to English.
-
-// Translate / transcribe via Claude API (handles any language automatically)
-async function transcribeAndTranslate(base64Audio: string): Promise<string> {
-  try {
-    const response = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: "claude-sonnet-4-20250514",
-        max_tokens: 500,
-        messages: [{
-          role: "user",
-          content: [
-            {
-              type: "text",
-              text: "Listen to this audio recording from a field collection agent. Transcribe what they said and translate it to English. Return ONLY the English text, no explanation, no quotes.",
-            },
-            {
-              type: "document",
-              source: {
-                type: "base64",
-                media_type: "audio/webm",
-                data: base64Audio,
-              },
-            },
-          ],
-        }],
-      }),
-    });
-    const data = await response.json();
-    return data?.content?.[0]?.text?.trim() ?? "";
-  } catch { return ""; }
-}
-
-function useSpeechToText(onResult: (text: string) => void) {
-  const [listening,   setListening]   = React.useState(false);
-  const [processing,  setProcessing]  = React.useState(false);
-  const recordingRef  = React.useRef<any>(null);
-  const WebSpeechRef  = React.useRef<any>(null);
-
-  // Web — use browser SpeechRecognition directly
-  React.useEffect(() => {
-    if (Platform.OS !== "web") return;
-    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SR) return;
-    const r = new SR();
-    r.lang = ""; r.continuous = false; r.interimResults = false;
-    r.onresult = async (e: any) => {
-      const raw = e.results?.[0]?.[0]?.transcript ?? "";
-      setListening(false);
-      if (!raw) return;
-      setProcessing(true);
-      // Translate via Claude if not English
-      try {
-        const res = await fetch("https://api.anthropic.com/v1/messages", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            model: "claude-sonnet-4-20250514", max_tokens: 300,
-            messages: [{ role: "user", content: `Translate to English (return original if already English, no explanation):
-${raw}` }],
-          }),
-        });
-        const d = await res.json();
-        onResult(d?.content?.[0]?.text?.trim() || raw);
-      } catch { onResult(raw); }
-      setProcessing(false);
-    };
-    r.onerror = () => setListening(false);
-    r.onend   = () => setListening(false);
-    WebSpeechRef.current = r;
-  }, [onResult]);
-
-  const start = React.useCallback(async () => {
-    // ── Web ──
-    if (Platform.OS === "web") {
-      if (WebSpeechRef.current) {
-        try { WebSpeechRef.current.start(); setListening(true); } catch {}
-      } else {
-        Alert.alert("Not Supported", "Try Chrome for voice input.");
-      }
-      return;
-    }
-
-    // ── Native — record with expo-av, send to Claude ──
-    try {
-      const { Audio } = require("expo-av");
-      const perm = await Audio.requestPermissionsAsync();
-      if (perm.status !== "granted") {
-        Alert.alert("Microphone Permission", "Please allow microphone access in Settings to use voice input.");
-        return;
-      }
-      await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
-      const { recording } = await Audio.Recording.createAsync(
-        Audio.RecordingOptionsPresets.HIGH_QUALITY,
-      );
-      recordingRef.current = recording;
-      setListening(true);
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    } catch (e: any) {
-      setListening(false);
-      Alert.alert("Mic Error", "Could not start recording. Please try again.");
-    }
-  }, [onResult]);
-
-  const stop = React.useCallback(async () => {
-    // ── Web ──
-    if (Platform.OS === "web") {
-      try { WebSpeechRef.current?.stop(); } catch {}
-      setListening(false);
-      return;
-    }
-
-    // ── Native — stop recording, send audio to Claude ──
-    const recording = recordingRef.current;
-    if (!recording) { setListening(false); return; }
-    setListening(false);
-    setProcessing(true);
-    try {
-      await recording.stopAndUnloadAsync();
-      const uri = recording.getURI();
-      recordingRef.current = null;
-      if (!uri) { setProcessing(false); return; }
-
-      // Read the recorded file as base64
-      const { FileSystem } = require("expo-file-system");
-      const base64 = await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });
-      await FileSystem.deleteAsync(uri, { idempotent: true });
-
-      // Send to Claude for transcription + translation
-      const result = await transcribeAndTranslate(base64);
-      if (result) onResult(result);
-    } catch {
-      // Silent fail — user can type manually
-    } finally {
-      setProcessing(false);
-    }
-  }, [onResult]);
-
-  // Always available — uses expo-av which is already installed
-  const available = true;
-
-  return { listening, translating: processing, start, stop, available };
-}
-
-// ─── MicButton component ──────────────────────────────────────────────────────
-function MicButton({ onResult, disabled }: { onResult: (text: string) => void; disabled?: boolean }) {
-  const { listening, translating, start, stop } = useSpeechToText(onResult);
-  const busy = listening || translating;
-
-  return (
-    <Pressable
-      style={[micStyles.btn, busy && micStyles.btnActive, disabled && micStyles.btnDisabled]}
-      onPress={listening ? stop : start}
-      disabled={disabled || translating}
-    >
-      {translating ? (
-        <ActivityIndicator size={14} color="#fff" />
-      ) : (
-        <Ionicons
-          name={listening ? "stop-circle" : "mic"}
-          size={18}
-          color={listening ? "#fff" : Colors.primary}
-        />
-      )}
-      {listening && <View style={micStyles.pulse} />}
-    </Pressable>
-  );
-}
-
-const micStyles = StyleSheet.create({
-  btn: {
-    width: 38, height: 38, borderRadius: 19,
-    backgroundColor: Colors.primary + "14",
-    borderWidth: 1.5, borderColor: Colors.primary + "50",
-    alignItems: "center", justifyContent: "center",
-    position: "relative",
-  },
-  btnActive: {
-    backgroundColor: Colors.danger,
-    borderColor: Colors.danger,
-  },
-  btnDisabled: {
-    opacity: 0.4,
-  },
-  pulse: {
-    position: "absolute",
-    width: 46, height: 46, borderRadius: 23,
-    borderWidth: 2, borderColor: Colors.danger + "60",
-  },
-});
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function fmt(v: unknown, prefix = ""): string {
@@ -1417,13 +1223,9 @@ function FeedbackModal({
                 )}
                 <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
                   <Text style={fbStyles.sectionLabel}>Comments (Optional)</Text>
-                  <MicButton
-                    onResult={(text) => setCallComments((prev) => prev ? prev + " " + text : text)}
-                    disabled={loading}
-                  />
                 </View>
                 <TextInput
-                  style={fbStyles.textInput} placeholder="What happened on this call... (or tap mic to speak)"
+                  style={fbStyles.textInput} placeholder="What happened on this call..."
                   placeholderTextColor={Colors.textMuted} value={callComments}
                   onChangeText={setCallComments} multiline numberOfLines={3}
                 />
@@ -1674,14 +1476,10 @@ function FeedbackModal({
                     <Text style={fvStyles.sectionLabel}>Visit Remarks</Text>
                     <View style={fvStyles.requiredBadge}><Text style={fvStyles.requiredText}>Optional</Text></View>
                   </View>
-                  <MicButton
-                    onResult={(text) => setVisitRemarks((prev) => prev ? prev + " " + text : text)}
-                    disabled={loading}
-                  />
                 </View>
                 <TextInput
                   style={[fvStyles.input, { minHeight: 90, textAlignVertical: "top" }]}
-                  placeholder="Describe what happened — or tap mic to speak..."
+                  placeholder="Describe what happened..."
                   placeholderTextColor={Colors.textMuted} value={visitRemarks} onChangeText={setVisitRemarks}
                   multiline numberOfLines={4} editable={!loading}
                 />
