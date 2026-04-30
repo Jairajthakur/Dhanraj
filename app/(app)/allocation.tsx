@@ -543,32 +543,48 @@ function buildFieldVisitMsg(
   emiAmount?: string,
   rollbackYn?: boolean | null,
 ): string {
+  const W   = 33;
+  const TOP = `╔${"═".repeat(W)}╗`;
+  const DIV = `╠${"═".repeat(W)}╣`;
+  const BOT = `╚${"═".repeat(W)}╝`;
+  const mid = (s: string) => `║${s.padEnd(W)}║`;
+  const row = (lbl: string, val: string) => mid(` ${lbl.padEnd(9)}: ${val}`);
+  const titleLine = (t: string) => {
+    const spaces = Math.floor((W - t.length) / 2);
+    return mid(" ".repeat(spaces) + t);
+  };
+
   const mapsLink = gps ? `https://maps.google.com/?q=${gps.lat},${gps.lng}` : null;
-  const isPaid = visitOutcome === "Paid" || visitOutcome === "Part Payment";
-  const time = new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true });
-  const lines = [
-    `\`\`\``,
-    `Field Visit Report`,
-    ``,
-    `Customer  : ${caseItem.customer_name ?? "—"}`,
-    `Loan ID   : ${caseItem.app_id ?? caseItem.loan_no ?? "—"}`,
-    `POS       : ${caseItem.pos != null ? fmtRupee(caseItem.pos) : "—"}`,
-    `Status    : ${visitOutcome}`,
-    ...(isPaid ? [
-      cbcAmount           ? `CBC       : ₹${cbcAmount}`  : "",
-      lppAmount           ? `LPP       : ₹${lppAmount}`  : "",
-      emiAmount           ? `EMI       : ₹${emiAmount}`  : "",
-      rollbackYn === true ? `Rollback  : Yes`            : "",
-    ] : []),
-    visitRemarks          ? `Remarks   : ${visitRemarks}` : "",
-    `Time      : ${time}`,
-    gps ? `Location  : ${gps.lat.toFixed(4)}, ${gps.lng.toFixed(4)}` : "",
-    mapsLink ?? "",
-    ``,
-    `Dhanraj Collections App`,
-    `\`\`\``,
-  ];
-  return lines.filter(Boolean).join("\n");
+  const isPaid   = visitOutcome === "Paid" || visitOutcome === "Part Payment";
+  const time     = new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true });
+
+  const contentRows: string[] = [];
+  contentRows.push(row("Customer", caseItem.customer_name ?? "—"));
+  contentRows.push(row("Loan ID",  caseItem.app_id ?? caseItem.loan_no ?? "—"));
+  contentRows.push(row("POS",      caseItem.pos != null ? fmtRupee(caseItem.pos) : "—"));
+  contentRows.push(row("Status",   visitOutcome));
+  if (isPaid) {
+    if (cbcAmount)           contentRows.push(row("CBC",      `Rs.${cbcAmount}`));
+    if (lppAmount)           contentRows.push(row("LPP",      `Rs.${lppAmount}`));
+    if (emiAmount)           contentRows.push(row("EMI",      `Rs.${emiAmount}`));
+    if (rollbackYn === true) contentRows.push(row("Rollback", "Yes"));
+  }
+  if (visitRemarks) contentRows.push(row("Remarks",  visitRemarks));
+  contentRows.push(row("Time",     time));
+  if (gps) contentRows.push(row("Location", `${gps.lat.toFixed(4)}, ${gps.lng.toFixed(4)}`));
+  if (mapsLink) {
+    const prefix = " Map      : ";
+    const maxVal = W - prefix.length;
+    contentRows.push(mid(prefix + mapsLink.slice(0, maxVal)));
+    if (mapsLink.length > maxVal)
+      contentRows.push(mid(" ".repeat(prefix.length) + mapsLink.slice(maxVal)));
+  }
+
+  const box: string[] = [TOP, titleLine("FIELD VISIT REPORT")];
+  for (const r of contentRows) { box.push(DIV); box.push(r); }
+  box.push(BOT);
+
+  return ["```", ...box, "```", "_Dhanraj Collections App_"].join("\n");
 }
 
 function buildCallLogMsg(
@@ -581,30 +597,40 @@ function buildCallLogMsg(
   emiAmount?: string,
   rollbackYn?: boolean | null,
 ): string {
+  const W   = 33;
+  const TOP = `╔${"═".repeat(W)}╗`;
+  const DIV = `╠${"═".repeat(W)}╣`;
+  const BOT = `╚${"═".repeat(W)}╝`;
+  const mid = (s: string) => `║${s.padEnd(W)}║`;
+  const row = (lbl: string, val: string) => mid(` ${lbl.padEnd(9)}: ${val}`);
+  const titleLine = (t: string) => {
+    const spaces = Math.floor((W - t.length) / 2);
+    return mid(" ".repeat(spaces) + t);
+  };
+
   const isPaid = OUTCOME_TO_STATUS[callOutcome] === "Paid";
-  const time = new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true });
-  const lines = [
-    `\`\`\``,
-    `Call Log`,
-    ``,
-    `Customer  : ${caseItem.customer_name ?? "—"}`,
-    `Loan ID   : ${caseItem.app_id ?? caseItem.loan_no ?? "—"}`,
-    `POS       : ${caseItem.pos != null ? fmtRupee(caseItem.pos) : "—"}`,
-    `Status    : ${callOutcome}`,
-    ...(isPaid ? [
-      cbcAmount           ? `CBC       : ₹${cbcAmount}`  : "",
-      lppAmount           ? `LPP       : ₹${lppAmount}`  : "",
-      emiAmount           ? `EMI       : ₹${emiAmount}`  : "",
-      rollbackYn === true ? `Rollback  : Yes`            : "",
-    ] : []),
-    callComments          ? `Remarks   : ${callComments}` : "",
-    callPtpDate           ? `PTP Date  : ${callPtpDate}`  : "",
-    `Time      : ${time}`,
-    ``,
-    `Dhanraj Collections App`,
-    `\`\`\``,
-  ];
-  return lines.filter(Boolean).join("\n");
+  const time   = new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true });
+
+  const contentRows: string[] = [];
+  contentRows.push(row("Customer", caseItem.customer_name ?? "—"));
+  contentRows.push(row("Loan ID",  caseItem.app_id ?? caseItem.loan_no ?? "—"));
+  contentRows.push(row("POS",      caseItem.pos != null ? fmtRupee(caseItem.pos) : "—"));
+  contentRows.push(row("Status",   callOutcome));
+  if (isPaid) {
+    if (cbcAmount)           contentRows.push(row("CBC",      `Rs.${cbcAmount}`));
+    if (lppAmount)           contentRows.push(row("LPP",      `Rs.${lppAmount}`));
+    if (emiAmount)           contentRows.push(row("EMI",      `Rs.${emiAmount}`));
+    if (rollbackYn === true) contentRows.push(row("Rollback", "Yes"));
+  }
+  if (callComments) contentRows.push(row("Remarks",  callComments));
+  if (callPtpDate)  contentRows.push(row("PTP Date", callPtpDate));
+  contentRows.push(row("Time",     time));
+
+  const box: string[] = [TOP, titleLine("CALL LOG REPORT")];
+  for (const r of contentRows) { box.push(DIV); box.push(r); }
+  box.push(BOT);
+
+  return ["```", ...box, "```", "_Dhanraj Collections App_"].join("\n");
 }
 
 async function shareToWhatsApp(
