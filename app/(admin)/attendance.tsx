@@ -56,7 +56,6 @@ export default function AdminAttendanceScreen() {
     queryKey: ["/api/admin/attendance"],
     queryFn: () => api.admin.getAttendance(),
     refetchInterval: 30000,
-    retry: 2,
   });
 
   // Debug: log errors to console in development
