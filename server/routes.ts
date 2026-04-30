@@ -348,7 +348,7 @@ async function recalcBktPerfFromAllocation(): Promise<void> {
       COALESCE(SUM(lc.pos::numeric) FILTER (WHERE lc.rollback_yn IS DISTINCT FROM true),0) AS rollback_unpaid,
       COALESCE(SUM(lc.pos::numeric),0) AS rollback_grand_total
     FROM loan_cases lc JOIN fos_agents fa ON fa.id=lc.agent_id
-    WHERE lc.bkt IS NOT NULL AND lc.agent_id IS NOT NULL AND UPPER(COALESCE(lc.pro,'')) NOT IN ('UC','RUC')
+    WHERE lc.bkt IS NOT NULL AND lc.agent_id IS NOT NULL AND UPPER(COALESCE(lc.pro,'')) = 'TW'
     GROUP BY lc.agent_id, fa.name, lc.bkt
   `);
   let updated = 0;
@@ -854,7 +854,7 @@ app.get("/api/companies", requireAuth, async (req, res) => {
       } catch (logErr: any) {
         console.error("[call_log] loan insert failed:", logErr.message);
       }
-      if (old && old.bkt && old.agent_id && !["UC","RUC"].includes((old.pro || "").toUpperCase())) {
+      if (old && old.bkt && old.agent_id && (old.pro || "").toUpperCase() === 'TW') {
         const pos = parseFloat(old.pos) || 0;
         const bktKey = `bkt${old.bkt}`;
         const wasPaid = old.status === "Paid"; const nowPaid = status === "Paid";
@@ -1723,7 +1723,7 @@ app.put("/api/fos-depositions/:id/pay-both", requireAuth, screenshotUpload.singl
       } catch (logErr: any) {
         console.error("[call_log] bkt insert failed:", logErr.message);
       }
-      if (old && old.case_category && old.agent_id && !["UC","RUC"].includes((old.pro || "").toUpperCase())) {
+      if (old && old.case_category && old.agent_id && (old.pro || "").toUpperCase() === 'TW') {
         const pos = parseFloat(old.pos) || 0;
         const bktKey = (old.case_category as string).toLowerCase().replace(/\s+/g, "");
         const wasPaid = old.status === "Paid"; const nowPaid = status === "Paid";
@@ -2336,7 +2336,7 @@ res.json({ imported, updated: 0, skipped, agentsCreated, agentsRemoved, total: r
         JOIN fos_agents fa ON fa.id = lc.agent_id
         WHERE lc.bkt IS NOT NULL
           AND lc.company_name = $1
-          AND UPPER(COALESCE(lc.pro, '')) NOT IN ('UC', 'RUC')
+          AND UPPER(COALESCE(lc.pro, '')) = 'TW'
         GROUP BY fa.id, fa.name, lc.bkt
         HAVING CASE lc.bkt WHEN 1 THEN 'bkt1' WHEN 2 THEN 'bkt2' WHEN 3 THEN 'bkt3' END IS NOT NULL
         ORDER BY fa.name, lc.bkt
@@ -2405,11 +2405,13 @@ app.get("/api/bkt-tw-collection-summary", requireAuth, async (req, res) => {
        FROM (
          SELECT 'bkt' || bkt::text AS bkt_key, pos, status, coll_amount
          FROM loan_cases
-         WHERE agent_id = $1 AND bkt IN (1, 2, 3) AND pos IS NOT NULL ${companyFilter}
+         WHERE agent_id = $1 AND bkt IN (1, 2, 3) AND pos IS NOT NULL
+           AND UPPER(COALESCE(pro,'')) = 'TW' ${companyFilter}
          UNION ALL
          SELECT case_category AS bkt_key, pos, status, NULL::numeric AS coll_amount
          FROM bkt_cases
          WHERE agent_id = $1 AND case_category IN ('bkt1','bkt2','bkt3') AND pos IS NOT NULL
+           AND UPPER(COALESCE(pro,'')) = 'TW'
        ) combined
        GROUP BY bkt_key
        ORDER BY bkt_key`,
@@ -2448,7 +2450,7 @@ app.get("/api/bkt-perf-summary", requireAuth, async (req, res) => {
         WHERE lc.agent_id = $1
           AND lc.bkt IS NOT NULL
           AND lc.company_name = $2
-          AND UPPER(COALESCE(lc.pro,'')) NOT IN ('UC','RUC')
+          AND UPPER(COALESCE(lc.pro,'')) = 'TW'
         GROUP BY lc.bkt
         HAVING CASE lc.bkt WHEN 1 THEN 'bkt1' WHEN 2 THEN 'bkt2' WHEN 3 THEN 'bkt3' END IS NOT NULL
         ORDER BY lc.bkt
@@ -2477,13 +2479,13 @@ app.get("/api/bkt-perf-summary", requireAuth, async (req, res) => {
         FROM bkt_cases bc
         WHERE bc.agent_id=$1 AND LOWER(REPLACE(bc.case_category,' ','')) IN ('bkt1','bkt2','bkt3')
           AND LOWER(REPLACE(bc.case_category,' ','')) NOT IN (SELECT bkt_norm FROM covered_bkts)
-          AND UPPER(COALESCE(bc.pro,''))<>'UC'
+          AND UPPER(COALESCE(bc.pro,'')) = 'TW'
         UNION ALL
         SELECT 'bkt'||lc.bkt::text AS bkt, lc.pos::numeric AS pos, lc.status, lc.rollback_yn
         FROM loan_cases lc
         WHERE lc.agent_id=$1 AND lc.bkt IS NOT NULL
           AND 'bkt'||lc.bkt::text NOT IN (SELECT bkt_norm FROM covered_bkts)
-          AND UPPER(COALESCE(lc.pro,''))<>'UC'
+          AND UPPER(COALESCE(lc.pro,'')) = 'TW'
       ),
       live_agg AS (
         SELECT bkt,
@@ -2570,7 +2572,7 @@ app.post("/api/admin/reset-monthly-feedback/case/:caseId", requireAdmin, async (
       if (!old) return res.status(404).json({ message: "Case not found" });
       const ynVal = rollback_yn === true || rollback_yn === "true" ? true : rollback_yn === false || rollback_yn === "false" ? false : null;
       await storage.query(`UPDATE ${tbl} SET status=$1, rollback_yn=$2, updated_at=NOW() WHERE id=$3`, [status, ynVal, caseId]);
-      if (old.bkt_key && old.agent_id && !["UC","RUC"].includes((old.pro || "").toUpperCase())) {
+      if (old.bkt_key && old.agent_id && (old.pro || "").toUpperCase() === 'TW') {
         const pos = parseFloat(old.pos) || 0;
         const bktKey = table === "bkt" ? old.bkt_key.toLowerCase().replace(/\s+/g, "") : `bkt${old.bkt_key}`;
         const wasPaid = old.status === "Paid"; const nowPaid = status === "Paid";
