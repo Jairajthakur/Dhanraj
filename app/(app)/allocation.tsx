@@ -532,24 +532,7 @@ function fmtRupee(n?: number) {
   return n != null ? `₹${n.toLocaleString("en-IN")}` : "—";
 }
 
-// Shared box-drawing config used by both Field Visit and Call Log builders
-const BOX_W = 34;  // inner content width between ║ borders
-const BOX = {
-  top  : `╔${"═".repeat(BOX_W)}╗`,
-  div  : `╠${"═".repeat(BOX_W)}╣`,
-  bot  : `╚${"═".repeat(BOX_W)}╝`,
-  empty: `║${" ".repeat(BOX_W)}║`,
-  // 1-space padding each side; truncate so value never overflows the border
-  row(lbl: string, val: string) {
-    const maxVal = BOX_W - 2 - lbl.length - 2; // 2 for padding, 2 for ": "
-    const safe   = val.length > maxVal ? val.slice(0, maxVal - 1) + "…" : val;
-    return `║ ${(lbl + ": " + safe).padEnd(BOX_W - 2)} ║`;
-  },
-  title(t: string) {
-    const sp = Math.floor((BOX_W - t.length) / 2);
-    return `║${" ".repeat(sp)}${t}${" ".repeat(BOX_W - sp - t.length)}║`;
-  },
-};
+
 
 function buildFieldVisitMsg(
   caseItem: CaseItem,
@@ -566,27 +549,29 @@ function buildFieldVisitMsg(
   const isPaid   = visitOutcome === "Paid" || visitOutcome === "Part Payment";
   const time     = new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true });
 
-  const rows: string[] = [];
-  rows.push(BOX.row("Customer", caseItem.customer_name ?? "—"));
-  rows.push(BOX.row("Loan ID",  caseItem.app_id ?? caseItem.loan_no ?? "—"));
-  rows.push(BOX.row("POS",      caseItem.pos != null ? fmtRupee(caseItem.pos) : "—"));
-  rows.push(BOX.row("Status",   visitOutcome));
+  const lines: string[] = [
+    `*FIELD VISIT REPORT*`,
+    `──────────────────────`,
+    `Customer : ${caseItem.customer_name ?? "—"}`,
+    `Loan ID  : ${caseItem.app_id ?? caseItem.loan_no ?? "—"}`,
+    `POS      : ${caseItem.pos != null ? fmtRupee(caseItem.pos) : "—"}`,
+    `Status   : ${visitOutcome}`,
+  ];
+
   if (isPaid) {
-    if (cbcAmount)           rows.push(BOX.row("CBC",      `Rs.${cbcAmount}`));
-    if (lppAmount)           rows.push(BOX.row("LPP",      `Rs.${lppAmount}`));
-    if (emiAmount)           rows.push(BOX.row("EMI",      `Rs.${emiAmount}`));
-    if (rollbackYn === true) rows.push(BOX.row("Rollback", "Yes"));
+    if (cbcAmount)           lines.push(`CBC      : Rs.${cbcAmount}`);
+    if (lppAmount)           lines.push(`LPP      : Rs.${lppAmount}`);
+    if (emiAmount)           lines.push(`EMI      : Rs.${emiAmount}`);
+    if (rollbackYn === true) lines.push(`Rollback : Yes`);
   }
-  if (visitRemarks) rows.push(BOX.row("Remarks",  visitRemarks));
-  rows.push(BOX.row("Time",     time));
-  if (gps) rows.push(BOX.row("Location", `${gps.lat.toFixed(4)}, ${gps.lng.toFixed(4)}`));
-  if (mapsLink) rows.push(BOX.row("Map",      mapsLink));
+  if (visitRemarks) lines.push(`Remarks  : ${visitRemarks}`);
+  lines.push(`Time     : ${time}`);
+  if (gps)      lines.push(`Location : ${gps.lat.toFixed(4)}, ${gps.lng.toFixed(4)}`);
+  if (mapsLink) lines.push(`Map      : ${mapsLink}`);
+  lines.push(`──────────────────────`);
+  lines.push(`_Dhanraj Collections App_`);
 
-  const lines: string[] = [BOX.top, BOX.empty, BOX.title("FIELD VISIT REPORT"), BOX.empty];
-  for (const r of rows) { lines.push(BOX.div); lines.push(r); }
-  lines.push(BOX.bot);
-
-  return ["```", ...lines, "```", "_Dhanraj Collections App_"].join("\n");
+  return lines.join("\n");
 }
 
 function buildCallLogMsg(
@@ -602,26 +587,28 @@ function buildCallLogMsg(
   const isPaid = OUTCOME_TO_STATUS[callOutcome] === "Paid";
   const time   = new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true });
 
-  const rows: string[] = [];
-  rows.push(BOX.row("Customer", caseItem.customer_name ?? "—"));
-  rows.push(BOX.row("Loan ID",  caseItem.app_id ?? caseItem.loan_no ?? "—"));
-  rows.push(BOX.row("POS",      caseItem.pos != null ? fmtRupee(caseItem.pos) : "—"));
-  rows.push(BOX.row("Status",   callOutcome));
+  const lines: string[] = [
+    `*CALL LOG REPORT*`,
+    `──────────────────────`,
+    `Customer : ${caseItem.customer_name ?? "—"}`,
+    `Loan ID  : ${caseItem.app_id ?? caseItem.loan_no ?? "—"}`,
+    `POS      : ${caseItem.pos != null ? fmtRupee(caseItem.pos) : "—"}`,
+    `Status   : ${callOutcome}`,
+  ];
+
   if (isPaid) {
-    if (cbcAmount)           rows.push(BOX.row("CBC",      `Rs.${cbcAmount}`));
-    if (lppAmount)           rows.push(BOX.row("LPP",      `Rs.${lppAmount}`));
-    if (emiAmount)           rows.push(BOX.row("EMI",      `Rs.${emiAmount}`));
-    if (rollbackYn === true) rows.push(BOX.row("Rollback", "Yes"));
+    if (cbcAmount)           lines.push(`CBC      : Rs.${cbcAmount}`);
+    if (lppAmount)           lines.push(`LPP      : Rs.${lppAmount}`);
+    if (emiAmount)           lines.push(`EMI      : Rs.${emiAmount}`);
+    if (rollbackYn === true) lines.push(`Rollback : Yes`);
   }
-  if (callComments) rows.push(BOX.row("Remarks",  callComments));
-  if (callPtpDate)  rows.push(BOX.row("PTP Date", callPtpDate));
-  rows.push(BOX.row("Time",     time));
+  if (callComments) lines.push(`Remarks  : ${callComments}`);
+  if (callPtpDate)  lines.push(`PTP Date : ${callPtpDate}`);
+  lines.push(`Time     : ${time}`);
+  lines.push(`──────────────────────`);
+  lines.push(`_Dhanraj Collections App_`);
 
-  const lines: string[] = [BOX.top, BOX.empty, BOX.title("CALL LOG REPORT"), BOX.empty];
-  for (const r of rows) { lines.push(BOX.div); lines.push(r); }
-  lines.push(BOX.bot);
-
-  return ["```", ...lines, "```", "_Dhanraj Collections App_"].join("\n");
+  return lines.join("\n");
 }
 
 async function shareToWhatsApp(
