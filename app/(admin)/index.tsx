@@ -312,9 +312,7 @@ export default function AdminDashboard() {
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["/api/admin/stats", selectedCompany],
     queryFn: () => api.admin.getStats(selectedCompany ?? undefined),
-    staleTime: 0,
     refetchOnMount: true,
-    retry: 2,
   });
 
   const stats = (() => {
