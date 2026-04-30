@@ -208,7 +208,7 @@ export default function PerformanceScreen() {
   const { data: summaryData, isLoading, refetch } = useQuery({
     queryKey: ["/api/bkt-perf-summary", selectedCompany],
     queryFn:  () => api.getBktPerfSummary({ company: selectedCompany }),
-    refetchInterval: 15000,
+    refetchInterval: 60000,
     refetchOnWindowFocus: true,
   });
 
