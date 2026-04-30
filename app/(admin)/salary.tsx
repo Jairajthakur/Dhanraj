@@ -283,13 +283,11 @@ export default function AdminSalaryScreen() {
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["/api/admin/salary"],
     queryFn: () => api.admin.getSalary(),
-    retry: 2,
   });
 
   const { data: agentsData, isError: agentsError } = useQuery({
     queryKey: ["/api/admin/agents"],
     queryFn: () => api.admin.getAgents(),
-    retry: 2,
   });
 
   // Debug logging in development
