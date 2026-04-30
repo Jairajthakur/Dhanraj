@@ -53,18 +53,39 @@ function buildUrl(route: string, base: string): string {
   catch { return `${base}${route}`; }
 }
 
+// In-flight request deduplication — prevents duplicate GET calls
+const _inflight: Map<string, Promise<any>> = new Map();
+
 async function apiRequest(method: string, route: string, data?: any) {
   const baseUrl = getApiUrl();
   const url     = buildUrl(route, baseUrl);
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   const token = await tokenStore.get();
   if (token) headers["Authorization"] = `Bearer ${token}`;
+
+  // Deduplicate identical GET requests in flight
+  if (method === "GET" && !data) {
+    const key = url;
+    if (_inflight.has(key)) return _inflight.get(key)!;
+    const promise = _doApiRequest(url, method, headers, data);
+    _inflight.set(key, promise);
+    promise.finally(() => _inflight.delete(key));
+    return promise;
+  }
+  return _doApiRequest(url, method, headers, data);
+}
+
+async function _doApiRequest(url: string, method: string, headers: Record<string, string>, data?: any) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 10000); // 10s timeout
   const res = await fetch(url, {
     method,
     headers,
     credentials: "include",
     body: data ? JSON.stringify(data) : undefined,
+    signal: controller.signal,
   });
+  clearTimeout(timer);
   if (res.status === 401) throw new Error("Unauthorized");
   if (!res.ok) {
     const text = await res.text().catch(() => "");
