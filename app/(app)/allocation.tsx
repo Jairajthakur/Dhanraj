@@ -39,24 +39,17 @@ const CALL_LOG_OPTIONS = [
   "NO RESPONSE",
   // Promise / intent
   "PTP",
-  "WILL PAY",
-  "CALL BACK REQUESTED",
   // Payment
   "PAID",
-  "SETTLED",
   // Negative
   "REFUSED TO PAY",
   // Other
   "WRONG NUMBER",
-  "NUMBER DOES NOT EXIST",
 ] as const;
 
 const OUTCOME_TO_STATUS: Record<string, string> = {
-  "PAID":                "Paid",
-  "SETTLED":             "Paid",
-  "PTP":                 "PTP",
-  "WILL PAY":            "PTP",
-  "CALL BACK REQUESTED": "PTP",
+  "PAID": "Paid",
+  "PTP":  "PTP",
 };
 
 // ── Full feedback codes with descriptions & colours ───────────────────────────
@@ -172,27 +165,19 @@ const PROJECTION_OPTIONS = ["ST", "RF", "RB"] as const;
 // Field Visit
 const VISIT_OUTCOMES = [
   "Paid",
-  "Part Payment",
   "PTP",
   "Refused to Pay",
   "Customer Absent",
   "Address Not Found",
-  "Skip / Not Found",
-  "Third Party Response",
-  "Door Locked",
 ] as const;
 type VisitOutcome = typeof VISIT_OUTCOMES[number];
 
 const VISIT_OUTCOME_COLORS: Record<VisitOutcome, string> = {
-  "Paid":                 Colors.success,
-  "Part Payment":         Colors.success,
-  "PTP":                  Colors.statusPTP,
-  "Refused to Pay":       Colors.danger,
-  "Customer Absent":      Colors.warning,
-  "Address Not Found":    Colors.textMuted,
-  "Skip / Not Found":     Colors.textSecondary,
-  "Third Party Response": Colors.primary,
-  "Door Locked":          Colors.warning,
+  "Paid":              Colors.success,
+  "PTP":               Colors.statusPTP,
+  "Refused to Pay":    Colors.danger,
+  "Customer Absent":   Colors.warning,
+  "Address Not Found": Colors.textMuted,
 };
 
 const MAX_PHOTOS     = 4;
@@ -546,7 +531,7 @@ function buildFieldVisitMsg(
   rollbackYn?: boolean | null,
 ): string {
   const mapsLink = gps ? `https://maps.google.com/?q=${gps.lat},${gps.lng}` : null;
-  const isPaid   = visitOutcome === "Paid" || visitOutcome === "Part Payment";
+  const isPaid   = visitOutcome === "Paid";
   const time     = new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true });
 
   const lines: string[] = [
@@ -687,6 +672,7 @@ function FeedbackModal({
   visible, caseItem, onClose, isMonthlyLocked = false, initialTab = "Call Log", onMonthlyFeedbackRequest,
 }: FeedbackModalProps) {
 
+  const insets = useSafeAreaInsets();
   const [activeTab, setActiveTab] = useState<FeedbackTab>(initialTab);
 
   useEffect(() => { if (visible) setActiveTab(initialTab); }, [visible, initialTab]);
@@ -877,9 +863,8 @@ function FeedbackModal({
         };
       } else if (activeTab === "Field Visit") {
         const newStatus =
-          visitOutcome === "Paid"         ? "Paid"
-          : visitOutcome === "Part Payment" ? "Paid"
-          : visitOutcome === "PTP"          ? "PTP"
+          visitOutcome === "Paid" ? "Paid"
+          : visitOutcome === "PTP"  ? "PTP"
           : caseItem.status;
 
         const visitResult = await api.recordFieldVisit(caseItem.id, {
@@ -1565,7 +1550,7 @@ function FeedbackModal({
               </Pressable>
             )}
           </View>
-          <View style={{ height: 24 }} />
+          <View style={{ height: Math.max(insets.bottom, 16) }} />
         </View>
       </View>
       </KeyboardAvoidingView>
@@ -1926,7 +1911,7 @@ const styles = StyleSheet.create({
 
 const fbStyles = StyleSheet.create({
   overlay:             { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" },
-  sheet:               { backgroundColor: Colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 16, paddingTop: 20, maxHeight: "94%", flex: 1, flexDirection: "column", flexShrink: 1 },
+  sheet:               { backgroundColor: Colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 16, paddingTop: 20, maxHeight: "94%", flex: 1, flexDirection: "column", flexShrink: 1, paddingBottom: 0 },
   handle:              { width: 40, height: 4, backgroundColor: Colors.border, borderRadius: 2, alignSelf: "center", marginBottom: 12 },
   title:               { fontSize: 18, fontWeight: "700", color: Colors.text, marginBottom: 2 },
   customerName:        { fontSize: 12, color: Colors.textSecondary, marginBottom: 6, textTransform: "uppercase" },
