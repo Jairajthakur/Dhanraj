@@ -41,25 +41,22 @@ const MONTHLY_FEEDBACK_OPTIONS = [
 const FEEDBACK_CODES     = ["PAID", "RTP", "SKIP", "PTP", "CAVNA", "ANF", "EXP", "SFT", "VSL"];
 const PROJECTION_OPTIONS = ["ST", "RF", "RB"];
 
-const VISIT_OUTCOMES = ["PTP", "Paid", "Refused to Pay", "Customer Absent", "Skip / Not Found"] as const;
+const VISIT_OUTCOMES = ["PTP", "Paid", "Refused to Pay", "Customer Absent"] as const;
 type VisitOutcome = typeof VISIT_OUTCOMES[number];
 const VISIT_OUTCOME_COLORS: Record<VisitOutcome, string> = {
   "PTP":              Colors.statusPTP    ?? "#F59E0B",
   "Paid":             Colors.success      ?? "#22C55E",
   "Refused to Pay":   Colors.danger       ?? "#EF4444",
   "Customer Absent":  (Colors as any).warning ?? "#F59E0B",
-  "Skip / Not Found": Colors.textSecondary,
 };
 
 const CALL_OUTCOMES = [
-  "Call Connected - Will Pay",
   "Call Connected - PTP Set",
   "Call Connected - Refused to Pay",
   "Call Connected - Already Paid",
   "Switch Off",
   "Not Reachable",
   "No Answer",
-  "Call Back Later",
   "Wrong Number",
   "Disconnected",
 ];
