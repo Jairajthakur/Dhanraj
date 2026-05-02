@@ -11,6 +11,7 @@ import { useAuth } from "@/context/AuthContext";
 import { CompanyProvider, useCompany } from "@/context/CompanyContext";
 import BlockingActionModal, { BlockingItem } from "@/components/BlockingActionModal";
 import { useBlocking } from "@/context/BlockingContext";
+import { api } from "@/lib/api"
 
 // ─── Menu Items ───────────────────────────────────────────────────────────────
 const MENU_ITEMS = [
