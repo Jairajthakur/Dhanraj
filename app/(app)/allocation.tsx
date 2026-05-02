@@ -517,6 +517,12 @@ function fmtRupee(n?: number) {
   return n != null ? `₹${n.toLocaleString("en-IN")}` : "—";
 }
 
+function parseBkt(bkt?: string | number | null): string {
+  if (bkt == null) return "—";
+  // Strip leading "B" or "b" so "B2" → "2", "B10" → "10"; plain numbers pass through
+  return String(bkt).trim().replace(/^[Bb]/, "") || "—";
+}
+
 
 
 function buildFieldVisitMsg(
@@ -529,20 +535,24 @@ function buildFieldVisitMsg(
   lppAmount?: string,
   emiAmount?: string,
   rollbackYn?: boolean | null,
+  ptpDate?: string,
 ): string {
   const mapsLink = gps ? `https://maps.google.com/?q=${gps.lat},${gps.lng}` : null;
   const isPaid   = visitOutcome === "Paid";
+  const isPTP    = visitOutcome === "PTP";
   const time     = new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true });
 
   const lines: string[] = [
     `*FIELD VISIT REPORT*`,
     `──────────────────────`,
     `Customer : ${caseItem.customer_name ?? "—"}`,
-    `Loan ID  : ${caseItem.app_id ?? caseItem.loan_no ?? "—"}`,
+    `App ID   : ${caseItem.app_id ?? "—"}`,
+    `BKT      : ${parseBkt((caseItem as any).bkt)}`,
     `POS      : ${caseItem.pos != null ? fmtRupee(caseItem.pos) : "—"}`,
     `Status   : ${visitOutcome}`,
   ];
 
+  if (isPTP && ptpDate)    lines.push(`PTP Date : ${ptpDate}`);
   if (isPaid) {
     if (cbcAmount)           lines.push(`CBC      : Rs.${cbcAmount}`);
     if (lppAmount)           lines.push(`LPP      : Rs.${lppAmount}`);
@@ -576,7 +586,8 @@ function buildCallLogMsg(
     `*CALL LOG REPORT*`,
     `──────────────────────`,
     `Customer : ${caseItem.customer_name ?? "—"}`,
-    `Loan ID  : ${caseItem.app_id ?? caseItem.loan_no ?? "—"}`,
+    `App ID   : ${caseItem.app_id ?? "—"}`,
+    `BKT      : ${parseBkt((caseItem as any).bkt)}`,
     `POS      : ${caseItem.pos != null ? fmtRupee(caseItem.pos) : "—"}`,
     `Status   : ${callOutcome}`,
   ];
@@ -911,7 +922,7 @@ function FeedbackModal({
       const shareTab = activeTab;
       const shareMsg =
         shareTab === "Field Visit"
-          ? buildFieldVisitMsg(caseItem, visitOutcome, visitRemarks, gps, visitPhotoUrl, visitCbcAmount, visitLppAmount, visitEmiAmount, visitRollbackYn)
+          ? buildFieldVisitMsg(caseItem, visitOutcome, visitRemarks, gps, visitPhotoUrl, visitCbcAmount, visitLppAmount, visitEmiAmount, visitRollbackYn, visitPtpDate)
           : shareTab === "Call Log"
           ? buildCallLogMsg(caseItem, callOutcome, callComments, callPtpDate, callCbcAmount, callLppAmount, callEmiAmount, callRollbackYn)
           : null;
@@ -1070,7 +1081,7 @@ function FeedbackModal({
           <View style={fbStyles.handle} />
           <Text style={fbStyles.title}>Update Feedback</Text>
           <Text style={fbStyles.customerName}>
-            {caseItem?.customer_name} · {caseItem?.loan_no}
+            {caseItem?.customer_name} · {caseItem?.app_id ?? (caseItem as any)?.loan_no}
           </Text>
 
           {/* Contact chips */}
@@ -1550,7 +1561,7 @@ function FeedbackModal({
               </Pressable>
             )}
           </View>
-          <View style={{ height: Math.max(insets.bottom, 16) }} />
+          <View style={{ height: Math.max(insets.bottom, 16), backgroundColor: Colors.surface }} />
         </View>
       </View>
       </KeyboardAvoidingView>
