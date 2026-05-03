@@ -1,5 +1,6 @@
 import { Platform } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import * as FileSystem from "expo-file-system";
 import { getApiUrl } from "./query-client";
 
 const SESSION_KEY = "session_agent";
@@ -271,41 +272,46 @@ export const api = {
       visit_outcome?: string; visit_remarks?: string;
     },
   ) => {
-    if (data.photo) {
-      const baseUrl = getApiUrl();
-      const url     = buildUrl(`/api/cases/${caseId}/visit`, baseUrl);
-      const token   = await tokenStore.get();
-      const form    = new FormData();
-      form.append("lat",  String(data.lat));
-      form.append("lng",  String(data.lng));
-      if (data.accuracy     != null) form.append("accuracy",       String(data.accuracy));
-      if (data.case_type)            form.append("case_type",       data.case_type);
-      if (data.visit_outcome)        form.append("visit_outcome",   data.visit_outcome);
-      if (data.visit_remarks)        form.append("visit_remarks",   data.visit_remarks);
-      if (Platform.OS === "web") {
-        const fetchRes = await fetch(data.photo.uri);
-        const blob = await fetchRes.blob();
-        form.append("photo", blob, data.photo.name || "visit.jpg");
-      } else {
-        form.append("photo", {
-          uri:  data.photo.uri,
-          name: data.photo.name || "visit.jpg",
-          type: data.photo.mimeType || "image/jpeg",
-        } as any);
+    // ✅ RELIABLE PHOTO UPLOAD: Read the file as base64 using expo-file-system
+    //    and send everything as JSON. React Native's FormData multipart upload
+    //    silently drops photos on Android (content:// URIs) and some iOS builds.
+    let photoBase64: string | null = null;
+    let photoMime  : string | null = null;
+
+    if (data.photo?.uri) {
+      try {
+        if (Platform.OS === "web") {
+          // Web: fetch the blob and convert to base64
+          const fetchRes = await fetch(data.photo.uri);
+          const blob     = await fetchRes.blob();
+          photoBase64 = await new Promise<string>((res, rej) => {
+            const reader = new FileReader();
+            reader.onload  = () => res((reader.result as string).split(",")[1]);
+            reader.onerror = rej;
+            reader.readAsDataURL(blob);
+          });
+        } else {
+          // Native (Android / iOS): use FileSystem — handles file:// and content:// URIs
+          photoBase64 = await FileSystem.readAsStringAsync(data.photo.uri, {
+            encoding: FileSystem.EncodingType.Base64,
+          });
+        }
+        photoMime = data.photo.mimeType || "image/jpeg";
+      } catch (err) {
+        console.warn("[recordFieldVisit] could not read photo:", err);
+        // Continue without photo rather than blocking the visit save
       }
-      const r = await fetch(url, {
-        method:      "POST",
-        credentials: "include",
-        headers:     { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-        body:        form,
-      });
-      const json = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(json.message || `HTTP ${r.status}`);
-      return json;
     }
+
     return apiRequest("POST", `/api/cases/${caseId}/visit`, {
-      lat: data.lat, lng: data.lng, accuracy: data.accuracy,
-      case_type: data.case_type, visit_outcome: data.visit_outcome, visit_remarks: data.visit_remarks,
+      lat:           data.lat,
+      lng:           data.lng,
+      accuracy:      data.accuracy,
+      case_type:     data.case_type,
+      visit_outcome: data.visit_outcome,
+      visit_remarks: data.visit_remarks,
+      photo_base64:  photoBase64,
+      photo_mime:    photoMime,
     });
   },
 
