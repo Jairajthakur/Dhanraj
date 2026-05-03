@@ -36,6 +36,8 @@ import * as FileSystem from "expo-file-system";
 import * as Sharing from "expo-sharing";
 import Constants from "expo-constants";
 import { tokenStore } from "@/lib/api";
+import { useGpsStamper } from "@/lib/stampGps";
+import type { StampInfo } from "@/lib/stampGps";
 
 // ─── Theme ────────────────────────────────────────────────────────────────────
 const C = {
@@ -315,6 +317,9 @@ function VisitCard({ visit }: { visit: FieldVisit }) {
   const [sharing,    setSharing]    = useState(false);
   const [photoToken, setPhotoToken] = useState<string | null>(null);
 
+  // GPS stamper hook — renders a hidden WebView to composite the overlay
+  const { stampPhoto, StamperView } = useGpsStamper();
+
   // Build HTTP photo URL using the dedicated photo endpoint (avoids base64 data: issues)
   const photoHttpUrl = photoToken != null
     ? `${API}/api/field-visits/${visit.id}/photo?token=${encodeURIComponent(photoToken)}`
@@ -338,7 +343,64 @@ function VisitCard({ visit }: { visit: FieldVisit }) {
   const handleShareWhatsApp = async () => {
     setSharing(true);
     try {
-      await shareVisitToWhatsApp(visit);
+      const msg = buildVisitWhatsAppMsg(visit);
+      const hasLocation = visit.latitude != null && visit.longitude != null;
+
+      if (hasPhoto && Platform.OS !== "web") {
+        // ── Download photo from server ────────────────────────────────────
+        const token = await tokenStore.get().catch(() => null);
+        const photoUrl = `${API}/api/field-visits/${visit.id}/photo${token ? `?token=${encodeURIComponent(token)}` : ""}`;
+        const rawPath  = `${FileSystem.cacheDirectory}visit_raw_${visit.id}.jpg`;
+
+        const dl = await FileSystem.downloadAsync(photoUrl, rawPath, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        });
+
+        if (dl.status === 200) {
+          let sharePath = rawPath;
+
+          // ── Stamp GPS overlay if location is available ───────────────────
+          if (hasLocation) {
+            try {
+              const stampInfo: StampInfo = {
+                lat:       visit.latitude!,
+                lng:       visit.longitude!,
+                accuracy:  visit.accuracy,
+                agentName: visit.agent_name,
+                visitedAt: visit.visited_at,
+              };
+              sharePath = await stampPhoto(rawPath, stampInfo);
+            } catch (stampErr) {
+              // Stamping failed — fall back to raw photo without overlay
+              console.warn("GPS stamp failed, sharing raw photo:", stampErr);
+            }
+          }
+
+          const canShare = await Sharing.isAvailableAsync();
+          if (canShare) {
+            // Step 1 — open WhatsApp with text caption pre-filled
+            const waUrl = `whatsapp://send?text=${encodeURIComponent(msg)}`;
+            const canWA = await Linking.canOpenURL(waUrl).catch(() => false);
+            if (canWA) await Linking.openURL(waUrl);
+            // Step 2 — share the stamped image (GPS baked in)
+            await Sharing.shareAsync(sharePath, {
+              mimeType:    "image/jpeg",
+              dialogTitle: "Share visit photo to WhatsApp",
+              UTI:         "public.jpeg",
+            });
+            return;
+          }
+        }
+      }
+
+      // ── Text-only fallback ────────────────────────────────────────────────
+      const waUrl = `whatsapp://send?text=${encodeURIComponent(msg)}`;
+      const canWA = await Linking.canOpenURL(waUrl).catch(() => false);
+      if (canWA) {
+        await Linking.openURL(waUrl);
+      } else {
+        await Share.share({ message: msg, title: "Field Visit Report" });
+      }
     } catch (err: any) {
       Alert.alert("Share Failed", err?.message ?? "Could not share this visit.");
     } finally {
@@ -449,6 +511,9 @@ function VisitCard({ visit }: { visit: FieldVisit }) {
       {photoOpen && hasPhoto ? (
         <PhotoViewer uri={photoHttpUrl} onClose={() => setPhotoOpen(false)} />
       ) : null}
+
+      {/* Hidden GPS stamper WebView — renders only while stamping */}
+      {StamperView}
     </View>
   );
 }
