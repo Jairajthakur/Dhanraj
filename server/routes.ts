@@ -810,8 +810,7 @@ app.get("/api/companies", requireAuth, async (req, res) => {
       const ynVal = rollback_yn === true || rollback_yn === "true" ? true : rollback_yn === false || rollback_yn === "false" ? false : null;
       const toBool = (v: any) => v === true || v === "true" ? true : v === false || v === "false" ? false : null;
       const caseId = Number(req.params.id);
-      // ✅ ONE SELECT fetches everything needed (was previously fetched twice)
-      const oldRow = await storage.query(`SELECT status, rollback_yn, pos::numeric AS pos, agent_id, bkt, pro, loan_no, customer_name FROM loan_cases WHERE id = $1`, [caseId]);
+      const oldRow = await storage.query(`SELECT status, rollback_yn, pos::numeric AS pos, agent_id, bkt, pro FROM loan_cases WHERE id = $1`, [caseId]);
       const old = oldRow.rows[0];
       const extraFields = {
         ...(customer_available !== undefined && { customerAvailable: toBool(customer_available) }),
@@ -831,22 +830,30 @@ app.get("/api/companies", requireAuth, async (req, res) => {
         ...(emi_paid !== undefined && { emiPaid: emi_paid != null ? parseFloat(emi_paid) : null }),
         monthlyFeedback: monthly_feedback || null,
       };
-      // ✅ Single UPDATE now also resets broken_ptp (no separate second UPDATE needed)
       await storage.updateLoanCaseFeedback(caseId, status, feedback, comments, ptp_date, ynVal, extraFields);
-
-      // ✅ Respond immediately — call log and BKT perf run in background
-      res.json({ success: true });
-
-      // ── Background: call log (never blocks agent) ─────────────────────────
-      if (feedback && old) {
-        storage.insertCallLogBackground({
-          caseId, caseType: "loan", agentId: old.agent_id,
-          loanNo: old.loan_no, customerName: old.customer_name,
-          outcome: feedback, comments: comments || null,
-          ptpDate: ptp_date || null, status,
-        });
+      await storage.query(
+        `UPDATE loan_cases SET broken_ptp = false, broken_ptp_date = NULL WHERE id = $1`,
+        [caseId]
+      );
+      // ✅ Record call log history (wrapped so it never breaks feedback saving)
+      try {
+        if (feedback) {
+          const caseRow = await storage.query(
+            `SELECT loan_no, customer_name, agent_id FROM loan_cases WHERE id = $1`, [caseId]
+          );
+          const cr = caseRow.rows[0];
+          if (cr) {
+            await storage.insertCallLog({
+              caseId, caseType: "loan", agentId: cr.agent_id,
+              loanNo: cr.loan_no, customerName: cr.customer_name,
+              outcome: feedback, comments: comments || null,
+              ptpDate: ptp_date || null, status,
+            });
+          }
+        }
+      } catch (logErr: any) {
+        console.error("[call_log] loan insert failed:", logErr.message);
       }
-      // ── Background: BKT perf delta (TW pro cases only) ───────────────────
       if (old && old.bkt && old.agent_id && (old.pro || "").toUpperCase() === 'TW') {
         const pos = parseFloat(old.pos) || 0;
         const bktKey = `bkt${old.bkt}`;
@@ -855,10 +862,9 @@ app.get("/api/companies", requireAuth, async (req, res) => {
         const dPos = !wasPaid && nowPaid ? pos : wasPaid && !nowPaid ? -pos : 0;
         const dCount = !wasPaid && nowPaid ? 1 : wasPaid && !nowPaid ? -1 : 0;
         const dRb = !wasRb && nowRb ? pos : wasRb && !nowRb ? -pos : 0;
-        storage.applyBktPerfDelta(old.agent_id, bktKey, dPos, -dPos, dCount, -dCount, dRb, -dRb).catch(
-          (e: any) => console.error("[bkt_perf_delta] loan:", e.message)
-        );
+        await storage.applyBktPerfDelta(old.agent_id, bktKey, dPos, -dPos, dCount, -dCount, dRb, -dRb);
       }
+      res.json({ success: true });
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
@@ -1673,8 +1679,7 @@ app.put("/api/fos-depositions/:id/pay-both", requireAuth, screenshotUpload.singl
       const ynVal = rollback_yn === true || rollback_yn === "true" ? true : rollback_yn === false || rollback_yn === "false" ? false : null;
       const toBool = (v: any) => v === true || v === "true" ? true : v === false || v === "false" ? false : null;
       const caseId = Number(req.params.id);
-      // ✅ ONE SELECT fetches everything needed (was previously fetched twice)
-      const oldRow = await storage.query(`SELECT status, rollback_yn, pos::numeric AS pos, agent_id, case_category, pro, loan_no, customer_name FROM bkt_cases WHERE id=$1`, [caseId]);
+      const oldRow = await storage.query(`SELECT status, rollback_yn, pos::numeric AS pos, agent_id, case_category, pro FROM bkt_cases WHERE id=$1`, [caseId]);
       const old = oldRow.rows[0];
       const bktExtraFields = {
         ...(customer_available !== undefined && { customerAvailable: toBool(customer_available) }),
@@ -1694,22 +1699,30 @@ app.put("/api/fos-depositions/:id/pay-both", requireAuth, screenshotUpload.singl
         ...(emi_paid !== undefined && { emiPaid: emi_paid != null ? parseFloat(emi_paid) : null }),
         monthlyFeedback: monthly_feedback || null,
       };
-      // ✅ Single UPDATE now also resets broken_ptp (no separate second UPDATE needed)
       await storage.updateBktCaseFeedback(caseId, status, feedback, comments, ptp_date, ynVal, bktExtraFields);
-
-      // ✅ Respond immediately — call log and BKT perf run in background
-      res.json({ success: true });
-
-      // ── Background: call log (never blocks agent) ─────────────────────────
-      if (feedback && old) {
-        storage.insertCallLogBackground({
-          caseId, caseType: "bkt", agentId: old.agent_id,
-          loanNo: old.loan_no, customerName: old.customer_name,
-          outcome: feedback, comments: comments || null,
-          ptpDate: ptp_date || null, status,
-        });
+      await storage.query(
+        `UPDATE bkt_cases SET broken_ptp = false, broken_ptp_date = NULL WHERE id = $1`,
+        [caseId]
+      );
+      // ✅ Record call log history (wrapped so it never breaks feedback saving)
+      try {
+        if (feedback) {
+          const caseRow = await storage.query(
+            `SELECT loan_no, customer_name, agent_id FROM bkt_cases WHERE id = $1`, [caseId]
+          );
+          const cr = caseRow.rows[0];
+          if (cr) {
+            await storage.insertCallLog({
+              caseId, caseType: "bkt", agentId: cr.agent_id,
+              loanNo: cr.loan_no, customerName: cr.customer_name,
+              outcome: feedback, comments: comments || null,
+              ptpDate: ptp_date || null, status,
+            });
+          }
+        }
+      } catch (logErr: any) {
+        console.error("[call_log] bkt insert failed:", logErr.message);
       }
-      // ── Background: BKT perf delta (TW pro cases only) ───────────────────
       if (old && old.case_category && old.agent_id && (old.pro || "").toUpperCase() === 'TW') {
         const pos = parseFloat(old.pos) || 0;
         const bktKey = (old.case_category as string).toLowerCase().replace(/\s+/g, "");
@@ -1718,10 +1731,9 @@ app.put("/api/fos-depositions/:id/pay-both", requireAuth, screenshotUpload.singl
         const dPos = !wasPaid && nowPaid ? pos : wasPaid && !nowPaid ? -pos : 0;
         const dCount = !wasPaid && nowPaid ? 1 : wasPaid && !nowPaid ? -1 : 0;
         const dRb = !wasRb && nowRb ? pos : wasRb && !nowRb ? -pos : 0;
-        storage.applyBktPerfDelta(old.agent_id, bktKey, dPos, -dPos, dCount, -dCount, dRb, -dRb).catch(
-          (e: any) => console.error("[bkt_perf_delta] bkt:", e.message)
-        );
+        await storage.applyBktPerfDelta(old.agent_id, bktKey, dPos, -dPos, dCount, -dCount, dRb, -dRb);
       }
+      res.json({ success: true });
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
@@ -3719,10 +3731,11 @@ app.get("/api/receipt-requests", requireAuth, async (req, res) => {
 
 // ── POST /api/cases/:id/visit — agent records a geo check-in ────────────────
 
+ 
 app.post(
   "/api/cases/:id/visit",
   requireAuth,
-  // ✅ No multer — photo arrives as base64 JSON (more reliable across Android/iOS)
+  upload.single("photo"),   // memory storage — buffer stored as base64 in DB, survives Railway restarts
   async (req: Request, res: Response) => {
     try {
       const caseId  = Number(req.params.id);
@@ -3737,14 +3750,12 @@ app.post(
         return res.status(400).json({ message: "lat and lng are required" });
       }
 
-      // ✅ Photo arrives as base64 string — no multipart parsing needed.
-      //    React Native FormData drops photos on some Android/iOS builds;
-      //    reading via expo-file-system + sending as base64 JSON is 100% reliable.
+      // Store photo as base64 data URL directly in PostgreSQL so it is never
+      // lost when the Railway container restarts (ephemeral filesystem).
       let photoUrl: string | null = null;
-      const b64  = req.body.photo_base64 as string | undefined;
-      const mime = (req.body.photo_mime as string | undefined) || "image/jpeg";
-      if (b64 && b64.length > 0) {
-        photoUrl = `data:${mime};base64,${b64}`;
+      if (req.file) {
+        const mime = req.file.mimetype || "image/jpeg";
+        photoUrl = `data:${mime};base64,${req.file.buffer.toString("base64")}`;
       }
 
       const visit_outcome = req.body.visit_outcome ? String(req.body.visit_outcome) : null;
@@ -3753,7 +3764,7 @@ app.post(
       const result = await storage.query(
         `INSERT INTO field_visits (case_id, case_type, agent_id, lat, lng, accuracy, photo_url, visit_outcome, visit_remarks)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-         RETURNING id, case_id, case_type, agent_id, lat, lng, accuracy, visited_at, visit_outcome, visit_remarks`,
+         RETURNING *`,
         [caseId, case_type, agentId, lat, lng, accuracy, photoUrl, visit_outcome, visit_remarks]
       );
 
