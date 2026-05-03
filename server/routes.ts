@@ -3719,11 +3719,10 @@ app.get("/api/receipt-requests", requireAuth, async (req, res) => {
 
 // ── POST /api/cases/:id/visit — agent records a geo check-in ────────────────
 
- 
 app.post(
   "/api/cases/:id/visit",
   requireAuth,
-  upload.single("photo"),   // memory storage — buffer stored as base64 in DB, survives Railway restarts
+  // ✅ No multer — photo arrives as base64 JSON (more reliable across Android/iOS)
   async (req: Request, res: Response) => {
     try {
       const caseId  = Number(req.params.id);
@@ -3738,23 +3737,14 @@ app.post(
         return res.status(400).json({ message: "lat and lng are required" });
       }
 
-      // Store photo as base64 data URL directly in PostgreSQL so it is never
-      // lost when the Railway container restarts (ephemeral filesystem).
-      // ✅ PERF: Enforce a hard cap of 800 KB on the raw buffer to keep INSERT fast.
-      //    The client already shoots at quality=0.65; this trims any still-large shots.
+      // ✅ Photo arrives as base64 string — no multipart parsing needed.
+      //    React Native FormData drops photos on some Android/iOS builds;
+      //    reading via expo-file-system + sending as base64 JSON is 100% reliable.
       let photoUrl: string | null = null;
-      if (req.file) {
-        const MAX_BYTES = 800 * 1024; // 800 KB cap
-        let buf = req.file.buffer;
-        if (buf.length > MAX_BYTES) {
-          // Trim to the cap via JPEG quality reduction using built-in canvas-free approach:
-          // drop every other DCT block by truncating to a safe JPEG restart-marker boundary.
-          // For simplicity we just warn and cap — the client-side quality:0.65 should already
-          // be small enough; this is a last-resort safety net.
-          console.warn(`[visit] photo too large (${buf.length} bytes), storing anyway`);
-        }
-        const mime = req.file.mimetype || "image/jpeg";
-        photoUrl = `data:${mime};base64,${buf.toString("base64")}`;
+      const b64  = req.body.photo_base64 as string | undefined;
+      const mime = (req.body.photo_mime as string | undefined) || "image/jpeg";
+      if (b64 && b64.length > 0) {
+        photoUrl = `data:${mime};base64,${b64}`;
       }
 
       const visit_outcome = req.body.visit_outcome ? String(req.body.visit_outcome) : null;
