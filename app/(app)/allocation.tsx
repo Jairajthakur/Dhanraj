@@ -17,7 +17,8 @@ import { api, tokenStore } from "@/lib/api";
 import { getApiUrl } from "@/lib/query-client";
 import { caseStore } from "@/lib/caseStore";
 import { useAuth } from "@/context/AuthContext";
-import { useGpsStamper, StampInfo } from "@/lib/stampGps";
+import { useGpsStamper } from "@/lib/stampGps";
+import type { StampInfo } from "@/lib/stampGps";
 import MonthlyFeedbackStepper from "@/components/MonthlyFeedbackStepper";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
