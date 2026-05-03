@@ -16,6 +16,8 @@ import Colors from "@/constants/colors";
 import { api, tokenStore } from "@/lib/api";
 import { getApiUrl } from "@/lib/query-client";
 import { caseStore } from "@/lib/caseStore";
+import { useAuth } from "@/context/AuthContext";
+import { useGpsStamper, StampInfo } from "@/lib/stampGps";
 import MonthlyFeedbackStepper from "@/components/MonthlyFeedbackStepper";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -685,6 +687,8 @@ function FeedbackModal({
 
   const insets = useSafeAreaInsets();
   const [activeTab, setActiveTab] = useState<FeedbackTab>(initialTab);
+  const { agent } = useAuth();
+  const { stampPhoto, StamperView } = useGpsStamper();
 
   useEffect(() => { if (visible) setActiveTab(initialTab); }, [visible, initialTab]);
 
@@ -927,14 +931,32 @@ function FeedbackModal({
           ? buildCallLogMsg(caseItem, callOutcome, callComments, callPtpDate, callCbcAmount, callLppAmount, callEmiAmount, callRollbackYn)
           : null;
 
-      // For field visit photo: download server URL to a stable local cache file
-      // so the URI stays valid after the modal closes and state is cleared.
+      // For field visit photo: download server URL to a stable local cache file,
+      // then stamp GPS overlay onto it before sharing.
       let sharePhotoUri: string | null = null;
       if (shareTab === "Field Visit" && visitPhotoUrl) {
         try {
           const dest = `${FileSystem.cacheDirectory}fv_share_photo.jpg`;
           const dl = await FileSystem.downloadAsync(visitPhotoUrl, dest);
-          if (dl.status === 200) sharePhotoUri = dl.uri;
+          if (dl.status === 200) {
+            let stamped = dl.uri;
+            // Stamp GPS banner if location was captured
+            if (gps) {
+              try {
+                const stampInfo: StampInfo = {
+                  lat:       gps.lat,
+                  lng:       gps.lng,
+                  accuracy:  gps.accuracy,
+                  agentName: agent?.name,
+                  visitedAt: new Date().toISOString(),
+                };
+                stamped = await stampPhoto(dl.uri, stampInfo);
+              } catch (stampErr) {
+                console.warn("[share] GPS stamp failed, using raw photo:", stampErr);
+              }
+            }
+            sharePhotoUri = stamped;
+          }
         } catch (e) {
           console.warn("[share] photo download failed:", e);
         }
@@ -1565,6 +1587,8 @@ function FeedbackModal({
         </View>
       </View>
       </KeyboardAvoidingView>
+      {/* Hidden GPS stamper WebView — renders only while stamping */}
+      {StamperView}
     </Modal>
   );
 }
