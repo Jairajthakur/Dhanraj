@@ -440,7 +440,7 @@ function FieldVisitModal({ visible, item, onClose }: { visible: boolean; item: a
     if (photos.length >= MAX_PHOTOS) { Alert.alert(`Maximum ${MAX_PHOTOS} photos allowed.`); return; }
     const { status } = await ImagePicker.requestCameraPermissionsAsync();
     if (status !== "granted") { Alert.alert("Camera Permission Denied", "Please enable camera access."); return; }
-    const result = await ImagePicker.launchCameraAsync({ quality: 0.65, base64: false, allowsEditing: false, mediaTypes: ImagePicker.MediaTypeOptions.Images });
+    const result = await ImagePicker.launchCameraAsync({ quality: 0.45, base64: false, allowsEditing: false, mediaTypes: ImagePicker.MediaTypeOptions.Images, exif: false });
     if (!result.canceled && result.assets[0]) {
       const asset = result.assets[0];
       const ext = (asset.uri.split(".").pop() ?? "jpg").toLowerCase();
@@ -460,17 +460,9 @@ function FieldVisitModal({ visible, item, onClose }: { visible: boolean; item: a
     setSaving(true);
     const caseType = (item as any).case_type === "bkt" ? "bkt" : "loan";
     try {
-      await api.recordFieldVisit(item.id, {
-        lat: gps!.lat,
-        lng: gps!.lng,
-        accuracy: gps!.accuracy,
-        case_type: caseType,
-        photo: photos.length > 0
-          ? { uri: photos[0].uri, name: photos[0].fileName, mimeType: photos[0].mimeType }
-          : null,
-        visit_outcome: outcome,
-        visit_remarks: remarks.trim(),
-      });
+      // ✅ PERF: Build feedback payload upfront then fire BOTH requests in parallel.
+      //    Previously they ran sequentially (recordFieldVisit finished, then updateFeedback).
+      //    Parallel cuts perceived save time roughly in half.
       const feedbackPayload: Record<string, unknown> = {
         visit_outcome: outcome, visit_remarks: remarks.trim(),
         visit_location: `${gps!.lat.toFixed(6)},${gps!.lng.toFixed(6)}`,
@@ -478,8 +470,24 @@ function FieldVisitModal({ visible, item, onClose }: { visible: boolean; item: a
       };
       if (outcome === "PTP")  { feedbackPayload.ptp_date = toIsoDate(ptpDate.trim()); feedbackPayload.status = "PTP"; }
       if (outcome === "Paid") { feedbackPayload.status = "Paid"; }
-      if (caseType === "bkt") await api.updateBktFeedback(item.id, feedbackPayload);
-      else await api.updateFeedback(item.id, feedbackPayload);
+
+      await Promise.all([
+        api.recordFieldVisit(item.id, {
+          lat: gps!.lat,
+          lng: gps!.lng,
+          accuracy: gps!.accuracy,
+          case_type: caseType,
+          photo: photos.length > 0
+            ? { uri: photos[0].uri, name: photos[0].fileName, mimeType: photos[0].mimeType }
+            : null,
+          visit_outcome: outcome,
+          visit_remarks: remarks.trim(),
+        }),
+        caseType === "bkt"
+          ? api.updateBktFeedback(item.id, feedbackPayload)
+          : api.updateFeedback(item.id, feedbackPayload),
+      ]);
+
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       qc.invalidateQueries({ queryKey: ["/api/cases"] });
       qc.invalidateQueries({ queryKey: ["/api/bkt-cases"] });
