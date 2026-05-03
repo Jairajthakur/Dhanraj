@@ -422,56 +422,25 @@ function FieldVisitModal({ visible, item, onClose }: { visible: boolean; item: a
 
   const handleClose = useCallback(() => { if (saving) return; reset(); onClose(); }, [saving, reset, onClose]);
 
-  // ✅ PERF: captureGps now uses Balanced accuracy (fast ~1-3s) instead of High (10-30s).
-  //    A 6-second timeout falls back to the last known position so the agent is
-  //    never stuck waiting. GPS capture also fires automatically when the modal opens.
-  const captureGps = useCallback(async (silent = false) => {
+  const captureGps = useCallback(async () => {
     if (locLoading) return;
     setLocLoading(true);
     try {
       const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== "granted") {
-        if (!silent) Alert.alert("Location Permission Denied", "Please enable location access in device settings.");
-        return;
-      }
-
-      // Race: Balanced fix vs 6-second timeout fallback to lastKnownPosition
-      const loc = await Promise.race([
-        Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced } as any),
-        new Promise<null>((resolve) => setTimeout(() => resolve(null), 6000)),
-      ]);
-
-      if (loc) {
-        setGps({ lat: loc.coords.latitude, lng: loc.coords.longitude, accuracy: Math.round(loc.coords.accuracy ?? 0) });
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      } else {
-        // Fallback: use last cached position — still better than nothing
-        const last = await Location.getLastKnownPositionAsync({});
-        if (last) {
-          setGps({ lat: last.coords.latitude, lng: last.coords.longitude, accuracy: Math.round(last.coords.accuracy ?? 999) });
-          if (!silent) Alert.alert("Using Cached GPS", "Live GPS timed out — using last known location. You can re-tap to retry.");
-        } else if (!silent) {
-          Alert.alert("GPS Error", "Could not obtain location. Please try again.");
-        }
-      }
+      if (status !== "granted") { Alert.alert("Location Permission Denied", "Please enable location access in device settings."); return; }
+      const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High } as any);
+      setGps({ lat: loc.coords.latitude, lng: loc.coords.longitude, accuracy: Math.round(loc.coords.accuracy ?? 0) });
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (err: unknown) {
-      if (!silent) Alert.alert("GPS Error", err instanceof Error ? err.message : "Could not capture GPS.");
+      Alert.alert("GPS Error", err instanceof Error ? err.message : "Could not capture GPS.");
     } finally { setLocLoading(false); }
   }, [locLoading]);
-
-  // ✅ Auto-start GPS as soon as the modal becomes visible — user doesn't need to tap
-  useEffect(() => {
-    if (visible && !gps && !locLoading) {
-      captureGps(true);
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visible]);
 
   const pickPhoto = useCallback(async () => {
     if (photos.length >= MAX_PHOTOS) { Alert.alert(`Maximum ${MAX_PHOTOS} photos allowed.`); return; }
     const { status } = await ImagePicker.requestCameraPermissionsAsync();
     if (status !== "granted") { Alert.alert("Camera Permission Denied", "Please enable camera access."); return; }
-    const result = await ImagePicker.launchCameraAsync({ quality: 0.45, base64: false, allowsEditing: false, mediaTypes: ImagePicker.MediaTypeOptions.Images, exif: false });
+    const result = await ImagePicker.launchCameraAsync({ quality: 0.65, base64: false, allowsEditing: false, mediaTypes: ImagePicker.MediaTypeOptions.Images });
     if (!result.canceled && result.assets[0]) {
       const asset = result.assets[0];
       const ext = (asset.uri.split(".").pop() ?? "jpg").toLowerCase();
@@ -491,9 +460,17 @@ function FieldVisitModal({ visible, item, onClose }: { visible: boolean; item: a
     setSaving(true);
     const caseType = (item as any).case_type === "bkt" ? "bkt" : "loan";
     try {
-      // ✅ PERF: Build feedback payload upfront then fire BOTH requests in parallel.
-      //    Previously they ran sequentially (recordFieldVisit finished, then updateFeedback).
-      //    Parallel cuts perceived save time roughly in half.
+      await api.recordFieldVisit(item.id, {
+        lat: gps!.lat,
+        lng: gps!.lng,
+        accuracy: gps!.accuracy,
+        case_type: caseType,
+        photo: photos.length > 0
+          ? { uri: photos[0].uri, name: photos[0].fileName, mimeType: photos[0].mimeType }
+          : null,
+        visit_outcome: outcome,
+        visit_remarks: remarks.trim(),
+      });
       const feedbackPayload: Record<string, unknown> = {
         visit_outcome: outcome, visit_remarks: remarks.trim(),
         visit_location: `${gps!.lat.toFixed(6)},${gps!.lng.toFixed(6)}`,
@@ -501,24 +478,8 @@ function FieldVisitModal({ visible, item, onClose }: { visible: boolean; item: a
       };
       if (outcome === "PTP")  { feedbackPayload.ptp_date = toIsoDate(ptpDate.trim()); feedbackPayload.status = "PTP"; }
       if (outcome === "Paid") { feedbackPayload.status = "Paid"; }
-
-      await Promise.all([
-        api.recordFieldVisit(item.id, {
-          lat: gps!.lat,
-          lng: gps!.lng,
-          accuracy: gps!.accuracy,
-          case_type: caseType,
-          photo: photos.length > 0
-            ? { uri: photos[0].uri, name: photos[0].fileName, mimeType: photos[0].mimeType }
-            : null,
-          visit_outcome: outcome,
-          visit_remarks: remarks.trim(),
-        }),
-        caseType === "bkt"
-          ? api.updateBktFeedback(item.id, feedbackPayload)
-          : api.updateFeedback(item.id, feedbackPayload),
-      ]);
-
+      if (caseType === "bkt") await api.updateBktFeedback(item.id, feedbackPayload);
+      else await api.updateFeedback(item.id, feedbackPayload);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       qc.invalidateQueries({ queryKey: ["/api/cases"] });
       qc.invalidateQueries({ queryKey: ["/api/bkt-cases"] });
@@ -607,7 +568,7 @@ function FieldVisitModal({ visible, item, onClose }: { visible: boolean; item: a
             </View>
             <Pressable
               style={[fvStyles.locationBtn, gps && fvStyles.locationBtnCaptured, locLoading && fvStyles.locationBtnLoading]}
-              onPress={() => captureGps(false)}
+              onPress={captureGps}
               disabled={locLoading || saving}
             >
               <View style={fvStyles.locationIconWrap}>
@@ -1058,6 +1019,10 @@ export default function CustomerDetailScreen() {
 
         {/* ── 3 Action Buttons ── */}
         <View style={styles.actionRow}>
+          <Pressable style={[styles.actionBtn, { backgroundColor: Colors.primary }]} onPress={() => setShowFeedbackModal(true)}>
+            <Ionicons name="chatbubble-ellipses" size={18} color="#fff" />
+            <Text style={styles.actionBtnText}>Feedback</Text>
+          </Pressable>
           <Pressable
             style={[styles.actionBtn, { backgroundColor: isMonthlyLocked ? "#6B7280" : "#7C3AED" }]}
             onPress={() => !isMonthlyLocked && setShowMonthlyFeedbackModal(true)}
