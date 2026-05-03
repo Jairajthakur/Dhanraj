@@ -120,9 +120,7 @@ function setupBodyParsing(app: express.Application) {
     if (req.headers["content-type"]?.includes("multipart/form-data")) {
       return next();
     }
-    // ✅ 10 MB limit — field visit photos arrive as base64 JSON (~1–2 MB after encoding)
     express.json({
-      limit: "10mb",
       verify: (req, _res, buf) => {
         req.rawBody = buf;
       },
@@ -132,7 +130,7 @@ function setupBodyParsing(app: express.Application) {
     if (req.headers["content-type"]?.includes("multipart/form-data")) {
       return next();
     }
-    express.urlencoded({ extended: false, limit: "10mb" })(req, res, next);
+    express.urlencoded({ extended: false })(req, res, next);
   });
 }
 
