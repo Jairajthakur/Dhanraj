@@ -422,19 +422,50 @@ function FieldVisitModal({ visible, item, onClose }: { visible: boolean; item: a
 
   const handleClose = useCallback(() => { if (saving) return; reset(); onClose(); }, [saving, reset, onClose]);
 
-  const captureGps = useCallback(async () => {
+  // ✅ PERF: captureGps now uses Balanced accuracy (fast ~1-3s) instead of High (10-30s).
+  //    A 6-second timeout falls back to the last known position so the agent is
+  //    never stuck waiting. GPS capture also fires automatically when the modal opens.
+  const captureGps = useCallback(async (silent = false) => {
     if (locLoading) return;
     setLocLoading(true);
     try {
       const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== "granted") { Alert.alert("Location Permission Denied", "Please enable location access in device settings."); return; }
-      const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High } as any);
-      setGps({ lat: loc.coords.latitude, lng: loc.coords.longitude, accuracy: Math.round(loc.coords.accuracy ?? 0) });
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      if (status !== "granted") {
+        if (!silent) Alert.alert("Location Permission Denied", "Please enable location access in device settings.");
+        return;
+      }
+
+      // Race: Balanced fix vs 6-second timeout fallback to lastKnownPosition
+      const loc = await Promise.race([
+        Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced } as any),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 6000)),
+      ]);
+
+      if (loc) {
+        setGps({ lat: loc.coords.latitude, lng: loc.coords.longitude, accuracy: Math.round(loc.coords.accuracy ?? 0) });
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      } else {
+        // Fallback: use last cached position — still better than nothing
+        const last = await Location.getLastKnownPositionAsync({});
+        if (last) {
+          setGps({ lat: last.coords.latitude, lng: last.coords.longitude, accuracy: Math.round(last.coords.accuracy ?? 999) });
+          if (!silent) Alert.alert("Using Cached GPS", "Live GPS timed out — using last known location. You can re-tap to retry.");
+        } else if (!silent) {
+          Alert.alert("GPS Error", "Could not obtain location. Please try again.");
+        }
+      }
     } catch (err: unknown) {
-      Alert.alert("GPS Error", err instanceof Error ? err.message : "Could not capture GPS.");
+      if (!silent) Alert.alert("GPS Error", err instanceof Error ? err.message : "Could not capture GPS.");
     } finally { setLocLoading(false); }
   }, [locLoading]);
+
+  // ✅ Auto-start GPS as soon as the modal becomes visible — user doesn't need to tap
+  useEffect(() => {
+    if (visible && !gps && !locLoading) {
+      captureGps(true);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible]);
 
   const pickPhoto = useCallback(async () => {
     if (photos.length >= MAX_PHOTOS) { Alert.alert(`Maximum ${MAX_PHOTOS} photos allowed.`); return; }
@@ -576,7 +607,7 @@ function FieldVisitModal({ visible, item, onClose }: { visible: boolean; item: a
             </View>
             <Pressable
               style={[fvStyles.locationBtn, gps && fvStyles.locationBtnCaptured, locLoading && fvStyles.locationBtnLoading]}
-              onPress={captureGps}
+              onPress={() => captureGps(false)}
               disabled={locLoading || saving}
             >
               <View style={fvStyles.locationIconWrap}>
@@ -1027,10 +1058,6 @@ export default function CustomerDetailScreen() {
 
         {/* ── 3 Action Buttons ── */}
         <View style={styles.actionRow}>
-          <Pressable style={[styles.actionBtn, { backgroundColor: Colors.primary }]} onPress={() => setShowFeedbackModal(true)}>
-            <Ionicons name="chatbubble-ellipses" size={18} color="#fff" />
-            <Text style={styles.actionBtnText}>Feedback</Text>
-          </Pressable>
           <Pressable
             style={[styles.actionBtn, { backgroundColor: isMonthlyLocked ? "#6B7280" : "#7C3AED" }]}
             onPress={() => !isMonthlyLocked && setShowMonthlyFeedbackModal(true)}
