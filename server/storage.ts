@@ -1,15 +1,23 @@
 import { Pool } from "pg";
 
-const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  max: 20,                      // up from default 10 — more parallel queries
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 5000,
+});
 
+// Use pool.query() directly — avoids the manual connect/release overhead
 export async function query(sql: string, params?: any[]) {
-  const client = await pool.connect();
-  try {
-    const result = await client.query(sql, params);
-    return result;
-  } finally {
-    client.release();
-  }
+  return pool.query(sql, params);
+}
+
+// Fire-and-forget helper — runs a DB write after the HTTP response has already
+// been sent so it never adds latency to the user-facing request.
+export function queryBackground(sql: string, params?: any[]): void {
+  pool.query(sql, params).catch((err) =>
+    console.error("[bg-query] failed:", err.message)
+  );
 }
 
 export async function initDatabase() {
@@ -397,7 +405,9 @@ export async function updateLoanCaseFeedback(
        occupation         = COALESCE(NULLIF($20,''), occupation),
        cbc_paid           = COALESCE($21, cbc_paid),
        lpp_paid           = COALESCE($22, lpp_paid),
-       emi_paid           = COALESCE($23, emi_paid)
+       emi_paid           = COALESCE($23, emi_paid),
+       broken_ptp         = false,
+       broken_ptp_date    = NULL
      WHERE id = $4`,
     [
       status, feedback, comments, id,
@@ -770,7 +780,9 @@ export async function updateBktCaseFeedback(
        occupation         = COALESCE(NULLIF($20,''), occupation),
        cbc_paid           = COALESCE($21, cbc_paid),
        lpp_paid           = COALESCE($22, lpp_paid),
-       emi_paid           = COALESCE($23, emi_paid)
+       emi_paid           = COALESCE($23, emi_paid),
+       broken_ptp         = false,
+       broken_ptp_date    = NULL
      WHERE id = $4`,
     [
       status, feedback, comments, id,
@@ -886,6 +898,20 @@ export async function insertCallLog(data: {
   status: string | null;
 }) {
   await query(
+    `INSERT INTO call_logs
+       (case_id, case_type, agent_id, loan_no, customer_name, outcome, comments, ptp_date, status)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+    [
+      data.caseId, data.caseType, data.agentId,
+      data.loanNo, data.customerName,
+      data.outcome, data.comments, data.ptpDate || null, data.status,
+    ]
+  );
+}
+
+// Non-blocking variant — logs a call entry after the HTTP response has been sent
+export function insertCallLogBackground(data: Parameters<typeof insertCallLog>[0]): void {
+  queryBackground(
     `INSERT INTO call_logs
        (case_id, case_type, agent_id, loan_no, customer_name, outcome, comments, ptp_date, status)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
