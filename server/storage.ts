@@ -185,8 +185,6 @@ export async function initDatabase() {
       UNIQUE(fos_name, bkt)
     )`,
     `CREATE INDEX IF NOT EXISTS idx_bkt_perf_agent ON bkt_perf_summary(agent_id)`,
-
-    // ── Column migrations ──
     `ALTER TABLE bkt_perf_summary ADD COLUMN IF NOT EXISTS pos_paid             NUMERIC DEFAULT 0`,
     `ALTER TABLE bkt_perf_summary ADD COLUMN IF NOT EXISTS pos_unpaid           NUMERIC DEFAULT 0`,
     `ALTER TABLE bkt_perf_summary ADD COLUMN IF NOT EXISTS pos_grand_total      NUMERIC DEFAULT 0`,
@@ -223,13 +221,11 @@ export async function initDatabase() {
     `ALTER TABLE fos_agents ADD COLUMN IF NOT EXISTS phone      TEXT`,
     `ALTER TABLE fos_agents ADD COLUMN IF NOT EXISTS photo_url  TEXT`,
     `ALTER TABLE fos_agents ADD COLUMN IF NOT EXISTS push_token TEXT`,
-    // ✅ NEW: monthly_feedback
     `ALTER TABLE loan_cases ADD COLUMN IF NOT EXISTS monthly_feedback TEXT`,
     `ALTER TABLE bkt_cases  ADD COLUMN IF NOT EXISTS monthly_feedback TEXT`,
     `ALTER TABLE loan_cases ADD COLUMN IF NOT EXISTS extra_numbers TEXT[] DEFAULT '{}'`,
     `ALTER TABLE bkt_cases  ADD COLUMN IF NOT EXISTS extra_numbers TEXT[] DEFAULT '{}'`,
     `ALTER TABLE loan_cases ADD COLUMN IF NOT EXISTS coll_amount NUMERIC`,
-    // ✅ NEW: call_logs history table
     `CREATE TABLE IF NOT EXISTS call_logs (
       id           SERIAL PRIMARY KEY,
       case_id      INTEGER NOT NULL,
@@ -246,12 +242,10 @@ export async function initDatabase() {
     `CREATE INDEX IF NOT EXISTS idx_call_logs_case    ON call_logs(case_id, case_type)`,
     `CREATE INDEX IF NOT EXISTS idx_call_logs_agent   ON call_logs(agent_id)`,
     `CREATE INDEX IF NOT EXISTS idx_call_logs_logged  ON call_logs(logged_at DESC)`,
-    // Normalize bkt
     `UPDATE bkt_perf_summary SET bkt = 'bkt1'  WHERE LOWER(REPLACE(bkt,' ','')) IN ('1','bkt1')  AND bkt <> 'bkt1'`,
     `UPDATE bkt_perf_summary SET bkt = 'bkt2'  WHERE LOWER(REPLACE(bkt,' ','')) IN ('2','bkt2')  AND bkt <> 'bkt2'`,
     `UPDATE bkt_perf_summary SET bkt = 'bkt3'  WHERE LOWER(REPLACE(bkt,' ','')) IN ('3','bkt3')  AND bkt <> 'bkt3'`,
     `UPDATE bkt_perf_summary SET bkt = 'penal' WHERE LOWER(bkt) = 'penal'                        AND bkt <> 'penal'`,
-
     `INSERT INTO fos_agents (name, username, password, role)
      VALUES ('Admin', 'admin', 'admin123', 'admin')
      ON CONFLICT (username) DO NOTHING`,
@@ -354,8 +348,8 @@ export interface FeedbackExtra {
   nonStarter?: boolean | null;
   kycPurchase?: boolean | null;
   workable?: boolean | null;
-  monthlyFeedback?: string | null; // ✅ NEW
-   ptpDateMf?: string | null;
+  monthlyFeedback?: string | null;
+  ptpDateMf?: string | null;
   shiftedCity?: string | null;
   occupation?: string | null;
   cbcPaid?: number | null;
@@ -363,15 +357,9 @@ export interface FeedbackExtra {
   emiPaid?: number | null;
 }
 
-// ✅ UPDATED: $17 = monthly_feedback
 export async function updateLoanCaseFeedback(
-  id: number,
-  status: string,
-  feedback: string,
-  comments: string,
-  ptpDate?: string | null,
-  rollbackYn?: boolean | null,
-  extra?: FeedbackExtra
+  id: number, status: string, feedback: string, comments: string,
+  ptpDate?: string | null, rollbackYn?: boolean | null, extra?: FeedbackExtra
 ) {
   await query(
     `UPDATE loan_cases SET
@@ -400,26 +388,15 @@ export async function updateLoanCaseFeedback(
        emi_paid           = COALESCE($23, emi_paid)
      WHERE id = $4`,
     [
-      status, feedback, comments, id,
-      ptpDate || null,
+      status, feedback, comments, id, ptpDate || null,
       rollbackYn != null ? rollbackYn : null,
-      extra?.customerAvailable   ?? null,
-      extra?.vehicleAvailable    ?? null,
-      extra?.thirdParty          ?? null,
-      extra?.thirdPartyName      ?? null,
-      extra?.thirdPartyNumber    ?? null,
-      extra?.feedbackCode        ?? null,
-      extra?.projection          ?? null,
-      extra?.nonStarter          ?? null,
-      extra?.kycPurchase         ?? null,
-      extra?.workable            ?? null,
-      extra?.monthlyFeedback     ?? null,  // $17
-      extra?.ptpDateMf           ?? null,  // $18
-      extra?.shiftedCity         ?? null,  // $19
-      extra?.occupation          ?? null,  // $20
-      extra?.cbcPaid             ?? null,  // $21
-      extra?.lppPaid             ?? null,  // $22
-      extra?.emiPaid             ?? null,  // $23
+      extra?.customerAvailable ?? null, extra?.vehicleAvailable ?? null,
+      extra?.thirdParty ?? null, extra?.thirdPartyName ?? null, extra?.thirdPartyNumber ?? null,
+      extra?.feedbackCode ?? null, extra?.projection ?? null,
+      extra?.nonStarter ?? null, extra?.kycPurchase ?? null, extra?.workable ?? null,
+      extra?.monthlyFeedback ?? null, extra?.ptpDateMf ?? null,
+      extra?.shiftedCity ?? null, extra?.occupation ?? null,
+      extra?.cbcPaid ?? null, extra?.lppPaid ?? null, extra?.emiPaid ?? null,
     ]
   );
 }
@@ -617,8 +594,7 @@ export async function upsertLoanCase(data: {
       data.firstEmiDueDate || null, data.loanMaturityDate || null,
       data.tenor, data.pro, data.status || "Unpaid",
       data.latestFeedback, data.feedbackComments,
-      data.ptpDate || null, data.telecallerPtpDate || null,
-      data.rollbackYn ?? null,
+      data.ptpDate || null, data.telecallerPtpDate || null, data.rollbackYn ?? null,
       data.companyName || null,
       data.collAmount != null ? parseFloat(data.collAmount) || null : null,
     ]
@@ -736,15 +712,9 @@ export async function getBktCasesByAgent(agentId: number, category?: string) {
   return (await query(`SELECT * FROM bkt_cases WHERE agent_id = $1 ORDER BY case_category, customer_name`, [agentId])).rows;
 }
 
-// ✅ UPDATED: $17 = monthly_feedback
 export async function updateBktCaseFeedback(
-  id: number,
-  status: string,
-  feedback: string,
-  comments: string,
-  ptpDate?: string | null,
-  rollbackYn?: boolean | null,
-  extra?: FeedbackExtra
+  id: number, status: string, feedback: string, comments: string,
+  ptpDate?: string | null, rollbackYn?: boolean | null, extra?: FeedbackExtra
 ) {
   await query(
     `UPDATE bkt_cases SET
@@ -773,26 +743,15 @@ export async function updateBktCaseFeedback(
        emi_paid           = COALESCE($23, emi_paid)
      WHERE id = $4`,
     [
-      status, feedback, comments, id,
-      ptpDate || null,
+      status, feedback, comments, id, ptpDate || null,
       rollbackYn != null ? rollbackYn : null,
-      extra?.customerAvailable   ?? null,
-      extra?.vehicleAvailable    ?? null,
-      extra?.thirdParty          ?? null,
-      extra?.thirdPartyName      ?? null,
-      extra?.thirdPartyNumber    ?? null,
-      extra?.feedbackCode        ?? null,
-      extra?.projection          ?? null,
-      extra?.nonStarter          ?? null,
-      extra?.kycPurchase         ?? null,
-      extra?.workable            ?? null,
-      extra?.monthlyFeedback     ?? null,  // $17
-      extra?.ptpDateMf           ?? null,  // $18
-      extra?.shiftedCity         ?? null,  // $19
-      extra?.occupation          ?? null,  // $20
-      extra?.cbcPaid             ?? null,  // $21
-      extra?.lppPaid             ?? null,  // $22
-      extra?.emiPaid             ?? null,  // $23
+      extra?.customerAvailable ?? null, extra?.vehicleAvailable ?? null,
+      extra?.thirdParty ?? null, extra?.thirdPartyName ?? null, extra?.thirdPartyNumber ?? null,
+      extra?.feedbackCode ?? null, extra?.projection ?? null,
+      extra?.nonStarter ?? null, extra?.kycPurchase ?? null, extra?.workable ?? null,
+      extra?.monthlyFeedback ?? null, extra?.ptpDateMf ?? null,
+      extra?.shiftedCity ?? null, extra?.occupation ?? null,
+      extra?.cbcPaid ?? null, extra?.lppPaid ?? null, extra?.emiPaid ?? null,
     ]
   );
 }
@@ -872,35 +831,22 @@ export async function getBktPerfSummaryByAgent(agentId: number) {
   return result.rows;
 }
 
-// ─── Call Logs ────────────────────────────────────────────────────────────────
-
 export async function insertCallLog(data: {
-  caseId: number;
-  caseType: "loan" | "bkt";
-  agentId: number;
-  loanNo: string | null;
-  customerName: string | null;
-  outcome: string | null;
-  comments: string | null;
-  ptpDate: string | null;
-  status: string | null;
+  caseId: number; caseType: "loan" | "bkt"; agentId: number;
+  loanNo: string | null; customerName: string | null;
+  outcome: string | null; comments: string | null; ptpDate: string | null; status: string | null;
 }) {
   await query(
-    `INSERT INTO call_logs
-       (case_id, case_type, agent_id, loan_no, customer_name, outcome, comments, ptp_date, status)
+    `INSERT INTO call_logs (case_id, case_type, agent_id, loan_no, customer_name, outcome, comments, ptp_date, status)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-    [
-      data.caseId, data.caseType, data.agentId,
-      data.loanNo, data.customerName,
-      data.outcome, data.comments, data.ptpDate || null, data.status,
-    ]
+    [data.caseId, data.caseType, data.agentId, data.loanNo, data.customerName,
+     data.outcome, data.comments, data.ptpDate || null, data.status]
   );
 }
 
 export async function getCallLogsByCase(caseId: number, caseType: string) {
   const result = await query(
-    `SELECT cl.*, fa.name AS agent_name
-     FROM call_logs cl
+    `SELECT cl.*, fa.name AS agent_name FROM call_logs cl
      LEFT JOIN fos_agents fa ON fa.id = cl.agent_id
      WHERE cl.case_id = $1 AND cl.case_type = $2
      ORDER BY cl.logged_at DESC`,
@@ -911,12 +857,9 @@ export async function getCallLogsByCase(caseId: number, caseType: string) {
 
 export async function getCallLogsByAgent(agentId: number, limit = 200) {
   const result = await query(
-    `SELECT cl.*, fa.name AS agent_name
-     FROM call_logs cl
+    `SELECT cl.*, fa.name AS agent_name FROM call_logs cl
      LEFT JOIN fos_agents fa ON fa.id = cl.agent_id
-     WHERE cl.agent_id = $1
-     ORDER BY cl.logged_at DESC
-     LIMIT $2`,
+     WHERE cl.agent_id = $1 ORDER BY cl.logged_at DESC LIMIT $2`,
     [agentId, limit]
   );
   return result.rows;
@@ -924,11 +867,9 @@ export async function getCallLogsByAgent(agentId: number, limit = 200) {
 
 export async function getAllCallLogs(limit = 500) {
   const result = await query(
-    `SELECT cl.*, fa.name AS agent_name
-     FROM call_logs cl
+    `SELECT cl.*, fa.name AS agent_name FROM call_logs cl
      LEFT JOIN fos_agents fa ON fa.id = cl.agent_id
-     ORDER BY cl.logged_at DESC
-     LIMIT $1`,
+     ORDER BY cl.logged_at DESC LIMIT $1`,
     [limit]
   );
   return result.rows;
