@@ -429,6 +429,7 @@ function FieldVisitModal({ visible, item, onClose }: { visible: boolean; item: a
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== "granted") { Alert.alert("Location Permission Denied", "Please enable location access in device settings."); return; }
       const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High } as any);
+      if (!loc || !loc.coords) { Alert.alert("GPS Error", "Could not read location coordinates. Please try again."); return; }
       setGps({ lat: loc.coords.latitude, lng: loc.coords.longitude, accuracy: Math.round(loc.coords.accuracy ?? 0) });
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (err: unknown) {
@@ -451,7 +452,8 @@ function FieldVisitModal({ visible, item, onClose }: { visible: boolean; item: a
   const save = useCallback(async () => {
     if (saveGuardRef.current) return;
     if (!outcome)                              { Alert.alert("Validation Error", "Please select a visit outcome."); return; }
-    if (!gps)                                  { Alert.alert("Validation Error", "GPS location is required."); return; }
+    const currentGps = gps;
+    if (!currentGps || currentGps.lat == null || currentGps.lng == null) { Alert.alert("Validation Error", "GPS location is required. Please capture your location first."); return; }
     if (outcome === "PTP" && !ptpDate.trim())  { Alert.alert("Validation Error", "PTP date is required."); return; }
     if (outcome === "PTP" && !PTP_DATE_REGEX.test(ptpDate.trim())) { Alert.alert("Validation Error", "PTP date must be DD-MM-YYYY."); return; }
     if (!remarks.trim() || remarks.trim().length < 10) { Alert.alert("Validation Error", "Remarks must be at least 10 characters."); return; }
@@ -461,9 +463,9 @@ function FieldVisitModal({ visible, item, onClose }: { visible: boolean; item: a
     const caseType = (item as any).case_type === "bkt" ? "bkt" : "loan";
     try {
       await api.recordFieldVisit(item.id, {
-        lat: gps!.lat,
-        lng: gps!.lng,
-        accuracy: gps!.accuracy,
+        lat: currentGps.lat,
+        lng: currentGps.lng,
+        accuracy: currentGps.accuracy,
         case_type: caseType,
         photo: photos.length > 0
           ? { uri: photos[0].uri, name: photos[0].fileName, mimeType: photos[0].mimeType }
@@ -473,7 +475,7 @@ function FieldVisitModal({ visible, item, onClose }: { visible: boolean; item: a
       });
       const feedbackPayload: Record<string, unknown> = {
         visit_outcome: outcome, visit_remarks: remarks.trim(),
-        visit_location: `${gps!.lat.toFixed(6)},${gps!.lng.toFixed(6)}`,
+        visit_location: `${currentGps.lat.toFixed(6)},${currentGps.lng.toFixed(6)}`,
         visit_photo_count: photos.length, visited_at: new Date().toISOString(),
       };
       if (outcome === "PTP")  { feedbackPayload.ptp_date = toIsoDate(ptpDate.trim()); feedbackPayload.status = "PTP"; }
@@ -1017,12 +1019,8 @@ export default function CustomerDetailScreen() {
           )}
         </View>
 
-        {/* ── 3 Action Buttons ── */}
+        {/* ── Action Buttons ── */}
         <View style={styles.actionRow}>
-          <Pressable style={[styles.actionBtn, { backgroundColor: Colors.primary }]} onPress={() => setShowFeedbackModal(true)}>
-            <Ionicons name="chatbubble-ellipses" size={18} color="#fff" />
-            <Text style={styles.actionBtnText}>Feedback</Text>
-          </Pressable>
           <Pressable
             style={[styles.actionBtn, { backgroundColor: isMonthlyLocked ? "#6B7280" : "#7C3AED" }]}
             onPress={() => !isMonthlyLocked && setShowMonthlyFeedbackModal(true)}
@@ -1047,10 +1045,6 @@ export default function CustomerDetailScreen() {
             <View style={styles.feedbackCardHeader}>
               <Ionicons name="information-circle" size={15} color={Colors.primary} />
               <Text style={styles.feedbackCardTitle}>Current Feedback</Text>
-              <Pressable onPress={() => setShowFeedbackModal(true)} style={styles.feedbackEditBtn}>
-                <Ionicons name="create-outline" size={14} color={Colors.primary} />
-                <Text style={styles.feedbackEditText}>Edit</Text>
-              </Pressable>
             </View>
             <View style={styles.feedbackCardBody}>
               {(item as any).feedback_code   && <View style={styles.fbTag}><Text style={styles.fbTagText}>{(item as any).feedback_code}</Text></View>}
