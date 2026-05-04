@@ -4288,16 +4288,6 @@ app.get("/api/admin/daily-report", requireAdmin, async (req: Request, res: Respo
   }
 });
 
-const httpServer = createServer(app);
-return httpServer;
+  const httpServer = createServer(app);
+  return httpServer;
 }
-
-// ── Daily Report ─────────────────────────────────────────────────────────────
-// GET /api/admin/daily-report?date=YYYY-MM-DD
-// Returns one row per agent with aggregated day metrics:
-//   attendance (check-in / check-out / duration)
-//   field visits count
-//   PTP count (cases whose ptp_date = selected date)
-//   paid count + paid amount (feedback_date on selected date)
-//   depositions count + amount on selected date
-//   break sessions (not tracked yet → 0, ready for future extension)
