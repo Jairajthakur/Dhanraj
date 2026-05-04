@@ -765,6 +765,7 @@ function FeedbackModal({
         timeInterval: GPS_TIMEOUT_MS,
         maximumAge: GPS_MAX_AGE_MS,
       } as any);
+      if (!loc || !loc.coords) { Alert.alert("GPS Error", "Could not read location coordinates. Please try again."); return; }
       setGps({ lat: loc.coords.latitude, lng: loc.coords.longitude, accuracy: Math.round(loc.coords.accuracy ?? 0) });
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (err: unknown) {
@@ -875,13 +876,20 @@ function FeedbackModal({
           sft_city:           feedbackCode === "SFT" ? sftCity.trim() || null : null,
         };
       } else if (activeTab === "Field Visit") {
+        const currentGps = gps;
+        if (!currentGps || currentGps.lat == null || currentGps.lng == null) {
+          Alert.alert("Validation Error", "GPS location is required. Please capture your location first.");
+          saveGuardRef.current = false;
+          setLoading(false);
+          return;
+        }
         const newStatus =
           visitOutcome === "Paid" ? "Paid"
           : visitOutcome === "PTP"  ? "PTP"
           : caseItem.status;
 
         const visitResult = await api.recordFieldVisit(caseItem.id, {
-          lat: gps!.lat, lng: gps!.lng, accuracy: gps!.accuracy, case_type: "allocation",
+          lat: currentGps.lat, lng: currentGps.lng, accuracy: currentGps.accuracy, case_type: "allocation",
           visit_outcome: visitOutcome || undefined,
           visit_remarks: visitRemarks.trim() || undefined,
           photo: photos.length > 0
@@ -900,7 +908,7 @@ function FeedbackModal({
           status:            newStatus,
           visit_outcome:     visitOutcome,
           visit_remarks:     visitRemarks.trim(),
-          visit_location:    `${gps!.lat.toFixed(6)},${gps!.lng.toFixed(6)}`,
+          visit_location:    `${currentGps.lat.toFixed(6)},${currentGps.lng.toFixed(6)}`,
           visit_photo_count: photos.length,
           visited_at:        new Date().toISOString(),
           ...(visitOutcome === "PTP"  && { ptp_date: toIsoDate(visitPtpDate.trim()) }),
