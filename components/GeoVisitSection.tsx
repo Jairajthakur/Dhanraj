@@ -168,6 +168,11 @@ export function GeoVisitSection({ caseId, caseType }: Props) {
         accuracy: Location.Accuracy.High,
       });
 
+      if (!pos || !pos.coords) {
+        Alert.alert("GPS Error", "Could not read location coordinates. Please try again.");
+        return;
+      }
+
       await api.recordFieldVisit(caseId, {
         case_type: caseType,
         lat:       pos.coords.latitude,
@@ -243,7 +248,9 @@ export function GeoVisitSection({ caseId, caseType }: Props) {
             <View style={[styles.dot, { backgroundColor: hasCheckedInToday ? Colors.success : Colors.textMuted }]} />
             <View style={{ flex: 1 }}>
               <Text style={styles.lastVisitDate}>{fmtVisitDate(visits[0].visited_at)}</Text>
-              <Text style={styles.lastVisitCoords}>{fmtCoords(visits[0].lat, visits[0].lng)}</Text>
+              {visits[0].lat != null && visits[0].lng != null && (
+                <Text style={styles.lastVisitCoords}>{fmtCoords(visits[0].lat, visits[0].lng)}</Text>
+              )}
               {visits[0].accuracy != null && (
                 <Text style={styles.accuracy}>Accuracy ±{Math.round(visits[0].accuracy)}m</Text>
               )}
@@ -341,7 +348,9 @@ export function GeoVisitSection({ caseId, caseType }: Props) {
                 <View style={[styles.dot, { backgroundColor: Colors.textMuted, marginTop: 3 }]} />
                 <View style={{ flex: 1 }}>
                   <Text style={styles.historyDate}>{fmtVisitDate(v.visited_at)}</Text>
-                  <Text style={styles.historyCoords}>{fmtCoords(v.lat, v.lng)}</Text>
+                  {v.lat != null && v.lng != null && (
+                    <Text style={styles.historyCoords}>{fmtCoords(v.lat, v.lng)}</Text>
+                  )}
                   {v.has_photo ? (
                     <Image
                       source={{ uri: photoUrl(v.id) }}
