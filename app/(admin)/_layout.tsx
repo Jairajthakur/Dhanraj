@@ -15,6 +15,7 @@ const ADMIN_MENU = [
   { key: "bkt",          label: "BKT Performance",   icon: "layers"           as const, screen: "/(admin)/bkt-cases"        },
   { key: "drr",          label: "DRR / Targets",     icon: "trending-up"      as const, screen: "/(admin)/drr"              },
   { key: "agency",       label: "Agency Target",     icon: "trophy"           as const, screen: "/(admin)/agency-target"    },
+  { key: "fos-payout",  label: "FOS Payout",         icon: "cash-outline"     as const, screen: "/(admin)/fos-payout"        },
   { key: "salary",       label: "Salary Management", icon: "wallet"           as const, screen: "/(admin)/salary"           },
   { key: "depositions",  label: "Depositions",       icon: "cash"             as const, screen: "/(admin)/depositions"      },
   { key: "attendance",   label: "Attendance",        icon: "checkmark-circle" as const, screen: "/(admin)/attendance"       },
@@ -221,6 +222,7 @@ useEffect(() => {
         <Stack.Screen name="bkt-cases" />
         <Stack.Screen name="drr" options={{ title: "DRR / Targets" }} />
         <Stack.Screen name="agency-target" />
+        <Stack.Screen name="fos-payout" options={{ title: "FOS Payout" }} />
         <Stack.Screen name="salary" />
         <Stack.Screen name="depositions" />
         <Stack.Screen name="attendance" />
