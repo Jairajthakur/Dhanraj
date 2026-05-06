@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useEffect } from "react";
+import React, { useMemo, useState } from "react";
 import {
   View,
   Text,
@@ -13,32 +13,9 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQuery } from "@tanstack/react-query";
 import { Ionicons } from "@expo/vector-icons";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import Colors from "@/constants/colors";
 import { getApiUrl } from "@/lib/query-client";
 import { useCompanyFilter } from "@/context/CompanyFilterContext";
-
-// ─── Agency Targets (shared with agency-target screen) ────────────────────────
-const TARGETS_STORAGE_KEY = "agency_bkt_targets_v1";
-interface BktTargets { resTarget: number; rbTarget: number; }
-type AllTargets = Record<string, BktTargets>;
-const DEFAULT_AGENCY_TARGETS: AllTargets = {
-  "1": { resTarget: 92, rbTarget: 22 },
-  "2": { resTarget: 80, rbTarget: 18 },
-  "3": { resTarget: 75, rbTarget: 17 },
-};
-
-function useAgencyTargets(): AllTargets {
-  const [targets, setTargets] = useState<AllTargets>(DEFAULT_AGENCY_TARGETS);
-  useEffect(() => {
-    AsyncStorage.getItem(TARGETS_STORAGE_KEY).then((raw) => {
-      if (raw) {
-        try { setTargets(JSON.parse(raw)); } catch {}
-      }
-    });
-  }, []);
-  return targets;
-}
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface BktRow {
@@ -138,11 +115,6 @@ interface AgentBktPayout {
   slab: PayoutSlab | null;
   payoutAmt: number;
   ucCases: number;
-  // Target tracking
-  resTarget: number;
-  rbTarget: number;
-  resMetTarget: boolean;
-  rbMetTarget: boolean;
 }
 
 interface AgentPayout {
@@ -152,7 +124,7 @@ interface AgentPayout {
   totalPosPaid: number;
 }
 
-function buildAgentPayouts(rows: BktRow[], agencyTargets: AllTargets): AgentPayout[] {
+function buildAgentPayouts(rows: BktRow[]): AgentPayout[] {
   const map: Record<string, { fosName: string; bktMap: Record<string, BktRow[]> }> = {};
 
   for (const row of rows) {
@@ -187,16 +159,10 @@ function buildAgentPayouts(rows: BktRow[], agencyTargets: AllTargets): AgentPayo
       const slab = getPayoutSlab(bkt, resPct, rbPct, penalPct);
       const payoutAmt = slab ? (slab.payout / 100) * posPaid : 0;
 
-      // Resolve target for this bkt (bkt1 → key "1", bkt2 → "2", bkt3 → "3")
-      const bktNum = bkt.replace("bkt", "");
-      const tgt = agencyTargets[bktNum] ?? DEFAULT_AGENCY_TARGETS[bktNum] ?? { resTarget: 0, rbTarget: 0 };
-      const resMetTarget = resPct >= tgt.resTarget;
-      const rbMetTarget  = rbPct  >= tgt.rbTarget;
-
       totalPayout  += payoutAmt;
       totalPosPaid += posPaid;
 
-      bkts.push({ bkt, resPct, rbPct, penalPct, posPaid, posTotal, rbPaid, rbTotal, slab, payoutAmt, ucCases: 0, resTarget: tgt.resTarget, rbTarget: tgt.rbTarget, resMetTarget, rbMetTarget });
+      bkts.push({ bkt, resPct, rbPct, penalPct, posPaid, posTotal, rbPaid, rbTotal, slab, payoutAmt, ucCases: 0 });
     }
 
     bkts.sort((a, b) => {
@@ -326,13 +292,12 @@ function AgentPayoutCard({ agent }: { agent: AgentPayout }) {
         {agent.bkts.map((b) => {
           const color = BKT_COLORS[b.bkt] || Colors.primary;
           const label = b.bkt.replace("bkt", "B");
-          const allMet = b.resMetTarget && b.rbMetTarget;
           return (
-            <View key={b.bkt} style={[ac.bktChip, { borderColor: allMet ? Colors.success + "70" : color + "50" }]}>
+            <View key={b.bkt} style={[ac.bktChip, { borderColor: color + "50" }]}>
               <Text style={[ac.bktChipLabel, { color }]}>{label}</Text>
-              <Text style={[ac.bktChipPct, { color: allMet ? Colors.success : color }]}>{fmtPct(b.resPct)}</Text>
-              <View style={[ac.bktSlabBadge, { backgroundColor: (allMet ? Colors.success : color) + "20" }]}>
-                <Text style={[ac.bktSlabBadgeText, { color: allMet ? Colors.success : color }]}>{b.slab?.payout ?? 0}%</Text>
+              <Text style={[ac.bktChipPct, { color }]}>{fmtPct(b.resPct)}</Text>
+              <View style={[ac.bktSlabBadge, { backgroundColor: color + "20" }]}>
+                <Text style={[ac.bktSlabBadgeText, { color }]}>{b.slab?.payout ?? 0}%</Text>
               </View>
             </View>
           );
@@ -358,18 +323,6 @@ function AgentPayoutCard({ agent }: { agent: AgentPayout }) {
                       <Text style={[ac.slabBadgeText, { color }]}>Slab: {slab.label}</Text>
                     </View>
                   )}
-                  {/* Target status badge */}
-                  {(b.resMetTarget && b.rbMetTarget) ? (
-                    <View style={[ac.targetBadge, { backgroundColor: Colors.success + "20" }]}>
-                      <Ionicons name="checkmark-circle" size={11} color={Colors.success} />
-                      <Text style={[ac.targetBadgeText, { color: Colors.success }]}>Target Met</Text>
-                    </View>
-                  ) : (
-                    <View style={[ac.targetBadge, { backgroundColor: Colors.warning + "20" }]}>
-                      <Ionicons name="alert-circle" size={11} color={Colors.warning} />
-                      <Text style={[ac.targetBadgeText, { color: Colors.warning }]}>Below Target</Text>
-                    </View>
-                  )}
                   <View style={[ac.payoutSlabChip, { backgroundColor: color + "20" }]}>
                     <Text style={[ac.payoutSlabChipText, { color }]}>{slab?.payout ?? 0}%</Text>
                   </View>
@@ -379,31 +332,18 @@ function AgentPayoutCard({ agent }: { agent: AgentPayout }) {
                 <View style={ac.metricRow}>
                   <Text style={ac.metricLabel}>POS Reso</Text>
                   <View style={ac.barWrap}>
-                    <View style={[ac.barFill, { width: `${resFill}%` as any, backgroundColor: b.resMetTarget ? Colors.success : color }]} />
-                    {/* Target marker */}
-                    <View style={[ac.targetMarker, { left: `${Math.min(b.resTarget, 100)}%` as any }]} />
+                    <View style={[ac.barFill, { width: `${resFill}%` as any, backgroundColor: color }]} />
                   </View>
-                  <View style={ac.metricPctWrap}>
-                    <Text style={[ac.metricPct, { color: b.resMetTarget ? Colors.success : color }]}>{fmtPct(b.resPct)}</Text>
-                    {b.resMetTarget
-                      ? <Ionicons name="checkmark-circle" size={11} color={Colors.success} />
-                      : <Text style={ac.targetHint}>/{b.resTarget}%</Text>}
-                  </View>
+                  <Text style={[ac.metricPct, { color }]}>{fmtPct(b.resPct)}</Text>
                 </View>
 
                 {/* RB/NM % bar */}
                 <View style={ac.metricRow}>
                   <Text style={ac.metricLabel}>RB/NM</Text>
                   <View style={ac.barWrap}>
-                    <View style={[ac.barFill, { width: `${rbFill}%` as any, backgroundColor: b.rbMetTarget ? Colors.success : Colors.info }]} />
-                    <View style={[ac.targetMarker, { left: `${Math.min(b.rbTarget, 100)}%` as any }]} />
+                    <View style={[ac.barFill, { width: `${rbFill}%` as any, backgroundColor: Colors.info }]} />
                   </View>
-                  <View style={ac.metricPctWrap}>
-                    <Text style={[ac.metricPct, { color: b.rbMetTarget ? Colors.success : Colors.info }]}>{fmtPct(b.rbPct)}</Text>
-                    {b.rbMetTarget
-                      ? <Ionicons name="checkmark-circle" size={11} color={Colors.success} />
-                      : <Text style={ac.targetHint}>/{b.rbTarget}%</Text>}
-                  </View>
+                  <Text style={[ac.metricPct, { color: Colors.info }]}>{fmtPct(b.rbPct)}</Text>
                 </View>
 
                 {/* Stats row */}
@@ -468,11 +408,6 @@ const ac = StyleSheet.create({
   barWrap:           { flex: 1, height: 7, backgroundColor: Colors.border, borderRadius: 4, overflow: "hidden" },
   barFill:           { height: "100%", borderRadius: 4 },
   metricPct:         { fontSize: 12, fontWeight: "800", width: 46, textAlign: "right" },
-  metricPctWrap:     { width: 58, alignItems: "flex-end", flexDirection: "row", justifyContent: "flex-end", gap: 2 },
-  targetMarker:      { position: "absolute", top: -3, width: 2, height: 13, backgroundColor: Colors.primary + "90", borderRadius: 1 },
-  targetHint:        { fontSize: 9, fontWeight: "700", color: Colors.textMuted },
-  targetBadge:       { flexDirection: "row", alignItems: "center", gap: 3, borderRadius: 5, paddingHorizontal: 6, paddingVertical: 2 },
-  targetBadgeText:   { fontSize: 10, fontWeight: "700" },
   statsRow:          { flexDirection: "row", marginTop: 4 },
   statCell:          { flex: 1, gap: 2 },
   statLabel:         { fontSize: 9, fontWeight: "700", color: Colors.textMuted, textTransform: "uppercase", letterSpacing: 0.3 },
@@ -528,7 +463,6 @@ export default function FosPayoutScreen() {
   const insets = useSafeAreaInsets();
   const { selectedCompany } = useCompanyFilter();
   const [refModalVisible, setRefModalVisible] = useState(false);
-  const agencyTargets = useAgencyTargets();
 
   const { data: rawRows, isLoading, isError, refetch, isRefetching } = useQuery<BktRow[]>({
     queryKey: ["/api/admin/bkt-perf-summary", selectedCompany],
@@ -538,15 +472,15 @@ export default function FosPayoutScreen() {
       const res = await fetch(url.toString(), { headers: { "Content-Type": "application/json" } });
       if (!res.ok) throw new Error("Failed to load performance data");
       const json = await res.json();
-      return Array.isArray(json) ? json : json.data ?? [];
+      return Array.isArray(json) ? json : json.rows ?? json.data ?? [];
     },
     staleTime: 5 * 60_000,
   });
 
   const agents = useMemo(() => {
     if (!rawRows?.length) return [];
-    return buildAgentPayouts(rawRows, agencyTargets);
-  }, [rawRows, agencyTargets]);
+    return buildAgentPayouts(rawRows);
+  }, [rawRows]);
 
   if (isLoading) {
     return (
