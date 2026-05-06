@@ -2305,7 +2305,7 @@ res.json({ imported, updated: 0, skipped, agentsCreated, agentsRemoved, total: r
   app.get("/api/admin/bkt-perf-summary", requireAdmin, async (req, res) => {
   try {
     const company = (req.query.company as string) || null;
- 
+
     if (company) {
       // Calculate live from loan_cases for the selected company
       const result = await storage.query(`
@@ -2341,7 +2341,17 @@ res.json({ imported, updated: 0, skipped, agentsCreated, agentsRemoved, total: r
         HAVING CASE lc.bkt WHEN 1 THEN 'bkt1' WHEN 2 THEN 'bkt2' WHEN 3 THEN 'bkt3' END IS NOT NULL
         ORDER BY fa.name, lc.bkt
       `, [company]);
-      res.json({ rows: result.rows });
+      // Append penal rows from bkt_perf_summary (not present in loan_cases)
+      const penalResult = await storage.query(`
+        SELECT s.fos_name, s.agent_id, s.bkt,
+               s.pos_paid, s.pos_unpaid, s.pos_grand_total, s.pos_percentage,
+               s.count_paid, s.count_unpaid, s.count_total,
+               s.rollback_paid, s.rollback_unpaid, s.rollback_grand_total, s.rollback_percentage
+        FROM bkt_perf_summary s
+        WHERE s.bkt = 'penal'
+        ORDER BY s.fos_name
+      `);
+      res.json({ rows: [...result.rows, ...penalResult.rows] });
     } else {
       // Live from loan_cases (all companies) — TW only
       const result = await storage.query(`
@@ -2377,7 +2387,17 @@ res.json({ imported, updated: 0, skipped, agentsCreated, agentsRemoved, total: r
         HAVING CASE lc.bkt WHEN 1 THEN 'bkt1' WHEN 2 THEN 'bkt2' WHEN 3 THEN 'bkt3' END IS NOT NULL
         ORDER BY fa.name, lc.bkt
       `);
-      res.json({ rows: result.rows });
+      // Append penal rows from bkt_perf_summary (not present in loan_cases)
+      const penalResult = await storage.query(`
+        SELECT s.fos_name, s.agent_id, s.bkt,
+               s.pos_paid, s.pos_unpaid, s.pos_grand_total, s.pos_percentage,
+               s.count_paid, s.count_unpaid, s.count_total,
+               s.rollback_paid, s.rollback_unpaid, s.rollback_grand_total, s.rollback_percentage
+        FROM bkt_perf_summary s
+        WHERE s.bkt = 'penal'
+        ORDER BY s.fos_name
+      `);
+      res.json({ rows: [...result.rows, ...penalResult.rows] });
     }
   } catch (e: any) {
     res.status(500).json({ message: e.message });
@@ -2427,7 +2447,7 @@ app.get("/api/bkt-perf-summary", requireAuth, async (req, res) => {
   try {
     const agentId = req.session.agentId!;
     const company = (req.query.company as string) || null;
- 
+
     if (company) {
       // Live calculation from loan_cases for the selected company
       const result = await storage.query(`
@@ -2457,11 +2477,20 @@ app.get("/api/bkt-perf-summary", requireAuth, async (req, res) => {
         HAVING CASE lc.bkt WHEN 1 THEN 'bkt1' WHEN 2 THEN 'bkt2' WHEN 3 THEN 'bkt3' END IS NOT NULL
         ORDER BY lc.bkt
       `, [agentId, company]);
- 
-      res.json({ rows: result.rows });
+
+      // Append penal row for this agent from bkt_perf_summary
+      const penalResult = await storage.query(`
+        SELECT bkt, pos_paid, pos_unpaid, pos_grand_total, pos_percentage,
+               count_paid, count_unpaid, count_total,
+               rollback_paid, rollback_unpaid, rollback_grand_total, rollback_percentage
+        FROM bkt_perf_summary
+        WHERE agent_id = $1 AND bkt = 'penal'
+      `, [agentId]);
+
+      res.json({ rows: [...result.rows, ...penalResult.rows] });
       return;
     }
- 
+
     // ── Default: live from loan_cases — TW only ──
     const result = await storage.query(`
       SELECT
@@ -2489,8 +2518,17 @@ app.get("/api/bkt-perf-summary", requireAuth, async (req, res) => {
       HAVING CASE lc.bkt WHEN 1 THEN 'bkt1' WHEN 2 THEN 'bkt2' WHEN 3 THEN 'bkt3' END IS NOT NULL
       ORDER BY lc.bkt
     `, [agentId]);
- 
-    res.json({ rows: result.rows });
+
+    // Append penal row for this agent from bkt_perf_summary
+    const penalResult = await storage.query(`
+      SELECT bkt, pos_paid, pos_unpaid, pos_grand_total, pos_percentage,
+             count_paid, count_unpaid, count_total,
+             rollback_paid, rollback_unpaid, rollback_grand_total, rollback_percentage
+      FROM bkt_perf_summary
+      WHERE agent_id = $1 AND bkt = 'penal'
+    `, [agentId]);
+
+    res.json({ rows: [...result.rows, ...penalResult.rows] });
   } catch (e: any) { res.status(500).json({ message: e.message }); }
 });
 
