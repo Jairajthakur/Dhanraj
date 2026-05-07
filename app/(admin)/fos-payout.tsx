@@ -180,12 +180,12 @@ function buildAgentPayouts(rows: BktRow[]): AgentPayout[] {
       const rbPaid     = bktRows.reduce((s, r) => s + n(r.rollback_paid), 0);
       const rbTotal    = bktRows.reduce((s, r) => s + n(r.rollback_grand_total), 0);
 
-      // Actual cash collected — use collected_amount from API when available,
-      // fall back to pos_paid (POS of paid cases) if not.
+      // Actual cash collected — used ONLY for final payout multiplication.
+      // Falls back to pos_paid if coll_amount not available.
       const collectedRaw = bktRows.reduce((s, r) => s + n(r.collected_amount ?? 0), 0);
       const amtCollected = collectedRaw > 0 ? collectedRaw : posPaid;
 
-      // POS Resolution % uses pos_paid / pos_grand_total (for slab determination)
+      // ─ Slab determination uses POS resolution % (pos_paid / pos_grand_total) ─
       const resPct = posTotal > 0 ? (posPaid / posTotal) * 100 : 0;
       // RB/NM % = rollback paid / rollback total × 100
       const rbPct  = rbTotal  > 0 ? (rbPaid  / rbTotal)  * 100 : 0;
@@ -198,7 +198,7 @@ function buildAgentPayouts(rows: BktRow[]): AgentPayout[] {
 
       const slab = getPayoutSlab(bkt, resPct, rbPct, penalPct);
 
-      // ─ Core payout: slab% applied ON actual amount collected ─
+      // ─ Payout: slab% applied ON actual collected amount (NOT on POS) ─
       const payoutAmt = slab ? (slab.payout / 100) * amtCollected : 0;
 
       if (bkt === "bkt1") bkt1Slab = slab;
@@ -208,10 +208,10 @@ function buildAgentPayouts(rows: BktRow[]): AgentPayout[] {
 
       bkts.push({
         bkt, resPct, rbPct, penalPct,
-        posPaid: amtCollected,  // posPaid field now carries actual collected amount
+        posPaid: amtCollected,  // carries actual collected amount for display
         posTotal, rbPaid, rbTotal,
         slab, payoutAmt,
-        penalCollected: 0,  // assigned to BKT1 row below
+        penalCollected: 0,
         penalPayoutAmt: 0,
         penalPayoutPct: 0,
       });
