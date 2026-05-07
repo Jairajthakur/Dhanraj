@@ -1897,10 +1897,11 @@ for (let i = 0; i < rawRows.slice(headerRowIdx + 1).length; i++) {
   } else {
     penalByAgent[agId].unpaid += cbcLppVal;
   }
-  // Accumulate Penal column value for paid rows → Paid (Col CBC)
-  if (isPenalPaid && penalCbc > 0) {
-    penalByAgent[agId].cbcPaid += penalCbc;
-  }
+  // Sum ALL values in the Penal column — regardless of paid/unpaid status
+  if (penalCbc > 0) { penalByAgent[agId].cbcPaid += penalCbc; }
+
+
+
 }
 for (const [agIdStr, d] of Object.entries(penalByAgent)) {
   const total = d.paid + d.unpaid;
