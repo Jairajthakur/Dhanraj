@@ -2331,7 +2331,13 @@ res.json({ imported, updated: 0, skipped, agentsCreated, agentsRemoved, total: r
           COALESCE(SUM(lc.pos::numeric), 0)                                                       AS rollback_grand_total,
           CASE WHEN COALESCE(SUM(lc.pos::numeric),0) > 0
                THEN ROUND((COALESCE(SUM(lc.pos::numeric) FILTER (WHERE lc.rollback_yn=true),0) / SUM(lc.pos::numeric)) * 100, 2)
-               ELSE 0 END AS rollback_percentage
+               ELSE 0 END AS rollback_percentage,
+          -- Actual cash collected: prefer coll_amount when available, else POS of paid cases
+          CASE
+            WHEN COALESCE(SUM(lc.coll_amount::numeric) FILTER (WHERE lc.status='Paid'), 0) > 0
+            THEN COALESCE(SUM(lc.coll_amount::numeric) FILTER (WHERE lc.status='Paid'), 0)
+            ELSE COALESCE(SUM(lc.pos::numeric) FILTER (WHERE lc.status='Paid'), 0)
+          END AS collected_amount
         FROM loan_cases lc
         JOIN fos_agents fa ON fa.id = lc.agent_id
         WHERE lc.bkt IS NOT NULL
@@ -2377,7 +2383,13 @@ res.json({ imported, updated: 0, skipped, agentsCreated, agentsRemoved, total: r
           COALESCE(SUM(lc.pos::numeric), 0)                                                       AS rollback_grand_total,
           CASE WHEN COALESCE(SUM(lc.pos::numeric),0) > 0
                THEN ROUND((COALESCE(SUM(lc.pos::numeric) FILTER (WHERE lc.rollback_yn=true),0) / SUM(lc.pos::numeric)) * 100, 2)
-               ELSE 0 END AS rollback_percentage
+               ELSE 0 END AS rollback_percentage,
+          -- Actual cash collected: prefer coll_amount when available, else POS of paid cases
+          CASE
+            WHEN COALESCE(SUM(lc.coll_amount::numeric) FILTER (WHERE lc.status='Paid'), 0) > 0
+            THEN COALESCE(SUM(lc.coll_amount::numeric) FILTER (WHERE lc.status='Paid'), 0)
+            ELSE COALESCE(SUM(lc.pos::numeric) FILTER (WHERE lc.status='Paid'), 0)
+          END AS collected_amount
         FROM loan_cases lc
         JOIN fos_agents fa ON fa.id = lc.agent_id
         WHERE lc.bkt IS NOT NULL
