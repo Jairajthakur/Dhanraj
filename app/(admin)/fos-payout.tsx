@@ -27,6 +27,7 @@ interface BktRow {
   rollback_paid: string | number;
   rollback_grand_total: string | number;
   count_paid: string | number;
+  collected_amount?: string | number; // actual cash collected; falls back to pos_paid
   company?: string;
 }
 
@@ -174,12 +175,17 @@ function buildAgentPayouts(rows: BktRow[]): AgentPayout[] {
     let bkt1Slab: PayoutSlab | null = null; // stored to use for penal rate
 
     for (const [bkt, bktRows] of Object.entries(agent.bktMap)) {
-      const posPaid  = bktRows.reduce((s, r) => s + n(r.pos_paid), 0);
-      const posTotal = bktRows.reduce((s, r) => s + n(r.pos_grand_total), 0);
-      const rbPaid   = bktRows.reduce((s, r) => s + n(r.rollback_paid), 0);
-      const rbTotal  = bktRows.reduce((s, r) => s + n(r.rollback_grand_total), 0);
+      const posPaid    = bktRows.reduce((s, r) => s + n(r.pos_paid), 0);
+      const posTotal   = bktRows.reduce((s, r) => s + n(r.pos_grand_total), 0);
+      const rbPaid     = bktRows.reduce((s, r) => s + n(r.rollback_paid), 0);
+      const rbTotal    = bktRows.reduce((s, r) => s + n(r.rollback_grand_total), 0);
 
-      // POS Resolution % = amount collected / total POS × 100
+      // Actual cash collected — use collected_amount from API when available,
+      // fall back to pos_paid (POS of paid cases) if not.
+      const collectedRaw = bktRows.reduce((s, r) => s + n(r.collected_amount ?? 0), 0);
+      const amtCollected = collectedRaw > 0 ? collectedRaw : posPaid;
+
+      // POS Resolution % uses pos_paid / pos_grand_total (for slab determination)
       const resPct = posTotal > 0 ? (posPaid / posTotal) * 100 : 0;
       // RB/NM % = rollback paid / rollback total × 100
       const rbPct  = rbTotal  > 0 ? (rbPaid  / rbTotal)  * 100 : 0;
@@ -192,17 +198,18 @@ function buildAgentPayouts(rows: BktRow[]): AgentPayout[] {
 
       const slab = getPayoutSlab(bkt, resPct, rbPct, penalPct);
 
-      // ─ Core payout: slab% applied ON amount collected (posPaid) ─
-      const payoutAmt = slab ? (slab.payout / 100) * posPaid : 0;
+      // ─ Core payout: slab% applied ON actual amount collected ─
+      const payoutAmt = slab ? (slab.payout / 100) * amtCollected : 0;
 
       if (bkt === "bkt1") bkt1Slab = slab;
 
       totalPayout  += payoutAmt;
-      totalPosPaid += posPaid;
+      totalPosPaid += amtCollected;
 
       bkts.push({
         bkt, resPct, rbPct, penalPct,
-        posPaid, posTotal, rbPaid, rbTotal,
+        posPaid: amtCollected,  // posPaid field now carries actual collected amount
+        posTotal, rbPaid, rbTotal,
         slab, payoutAmt,
         penalCollected: 0,  // assigned to BKT1 row below
         penalPayoutAmt: 0,
