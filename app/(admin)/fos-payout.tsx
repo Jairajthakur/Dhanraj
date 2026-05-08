@@ -147,11 +147,11 @@ function buildAgentPayouts(rows: BktRow[]): AgentPayout[] {
   const regularRows = rows.filter(r => ["bkt1", "bkt2", "bkt3"].includes(normBkt(r.bkt)));
   const penalRows   = rows.filter(r => normBkt(r.bkt) === "penal");
 
-  // Index penal rows by agent name (lower-case) → pos_paid is the penal collected amount
+  // count_paid = actual penal column values; pos_paid = CBC+LPP base (NOT penal collected)
   const penalByAgent: Record<string, number> = {};
   for (const r of penalRows) {
     const key = (r.fos_name || "Unknown").toLowerCase();
-    penalByAgent[key] = (penalByAgent[key] || 0) + n(r.pos_paid);
+    penalByAgent[key] = (penalByAgent[key] || 0) + n(r.count_paid);
   }
 
   // Group regular rows by agent → bucket
