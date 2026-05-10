@@ -806,7 +806,7 @@ app.get("/api/companies", requireAuth, async (req, res) => {
 
   app.put("/api/cases/:id/feedback", requireAuth, async (req, res) => {
     try {
-      const { status, feedback, comments, ptp_date, rollback_yn, customer_available, vehicle_available, third_party, third_party_name, third_party_number, feedback_code, projection, non_starter, kyc_purchase, workable, monthly_feedback, occupation, shifted_to, cbc_paid, lpp_paid, emi_paid } = req.body;
+      const { status, feedback, comments, ptp_date, rollback_yn, customer_available, vehicle_available, third_party, third_party_name, third_party_number, feedback_code, projection, non_starter, kyc_purchase, workable, monthly_feedback, occupation, shifted_to, cbc_paid, lpp_paid, emi_paid, call_outcome, call_comments } = req.body;
       const ynVal = rollback_yn === true || rollback_yn === "true" ? true : rollback_yn === false || rollback_yn === "false" ? false : null;
       const toBool = (v: any) => v === true || v === "true" ? true : v === false || v === "false" ? false : null;
       const caseId = Number(req.params.id);
@@ -836,8 +836,11 @@ app.get("/api/companies", requireAuth, async (req, res) => {
         [caseId]
       );
       // ✅ Record call log history (wrapped so it never breaks feedback saving)
+      // call_outcome comes from the "Call Log" tab; feedback from "Monthly Feedback" tab
       try {
-        if (feedback) {
+        const logOutcome  = call_outcome  || feedback  || null;
+        const logComments = call_comments || comments  || null;
+        if (logOutcome) {
           const caseRow = await storage.query(
             `SELECT loan_no, customer_name, agent_id FROM loan_cases WHERE id = $1`, [caseId]
           );
@@ -846,7 +849,7 @@ app.get("/api/companies", requireAuth, async (req, res) => {
             await storage.insertCallLog({
               caseId, caseType: "loan", agentId: cr.agent_id,
               loanNo: cr.loan_no, customerName: cr.customer_name,
-              outcome: feedback, comments: comments || null,
+              outcome: logOutcome, comments: logComments,
               ptpDate: ptp_date || null, status,
             });
           }
@@ -1675,7 +1678,7 @@ app.put("/api/fos-depositions/:id/pay-both", requireAuth, screenshotUpload.singl
 
   app.put("/api/bkt-cases/:id/feedback", requireAuth, async (req, res) => {
     try {
-      const { status, feedback, comments, ptp_date, rollback_yn, customer_available, vehicle_available, third_party, third_party_name, third_party_number, feedback_code, projection, non_starter, kyc_purchase, workable, monthly_feedback, occupation, shifted_to, cbc_paid, lpp_paid, emi_paid } = req.body;
+      const { status, feedback, comments, ptp_date, rollback_yn, customer_available, vehicle_available, third_party, third_party_name, third_party_number, feedback_code, projection, non_starter, kyc_purchase, workable, monthly_feedback, occupation, shifted_to, cbc_paid, lpp_paid, emi_paid, call_outcome, call_comments } = req.body;
       const ynVal = rollback_yn === true || rollback_yn === "true" ? true : rollback_yn === false || rollback_yn === "false" ? false : null;
       const toBool = (v: any) => v === true || v === "true" ? true : v === false || v === "false" ? false : null;
       const caseId = Number(req.params.id);
@@ -1705,8 +1708,11 @@ app.put("/api/fos-depositions/:id/pay-both", requireAuth, screenshotUpload.singl
         [caseId]
       );
       // ✅ Record call log history (wrapped so it never breaks feedback saving)
+      // call_outcome comes from the "Call Log" tab; feedback from "Monthly Feedback" tab
       try {
-        if (feedback) {
+        const logOutcome  = call_outcome  || feedback  || null;
+        const logComments = call_comments || comments  || null;
+        if (logOutcome) {
           const caseRow = await storage.query(
             `SELECT loan_no, customer_name, agent_id FROM bkt_cases WHERE id = $1`, [caseId]
           );
@@ -1715,7 +1721,7 @@ app.put("/api/fos-depositions/:id/pay-both", requireAuth, screenshotUpload.singl
             await storage.insertCallLog({
               caseId, caseType: "bkt", agentId: cr.agent_id,
               loanNo: cr.loan_no, customerName: cr.customer_name,
-              outcome: feedback, comments: comments || null,
+              outcome: logOutcome, comments: logComments,
               ptpDate: ptp_date || null, status,
             });
           }
