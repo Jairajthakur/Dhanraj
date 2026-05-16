@@ -1757,8 +1757,6 @@ app.put("/api/fos-depositions/:id/pay-both", requireAuth, screenshotUpload.singl
       if (headerRowIdx === -1) return res.status(400).json({ message: "Could not find header row." });
       const fosNamesInExcel = new Set<string>();
       for (const row of rawRows.slice(headerRowIdx + 1)) { const mapped: Record<string, any> = {}; for (const [colIdx, dbField] of Object.entries(colIdxMap)) { const val = row[Number(colIdx)]; mapped[dbField] = val !== undefined && val !== "" ? String(val).trim() : null; } if (mapped.fos_name && !isRepeatHeaderRow(mapped)) fosNamesInExcel.add(mapped.fos_name.toLowerCase().trim()); }
-      const ptpLoanSave = await storage.query(`SELECT loan_no, ptp_date, telecaller_ptp_date FROM loan_cases WHERE status='PTP'`);
-      const ptpLoanMap = new Map(ptpLoanSave.rows.map((r: any) => [r.loan_no, { ptpDate: r.ptp_date, telecallerPtpDate: r.telecaller_ptp_date }]));
      await storage.query(`UPDATE depositions SET loan_case_id=NULL WHERE loan_case_id IS NOT NULL`);
 
 const savedExtras = await storage.query(
@@ -1792,7 +1790,7 @@ await storage.deleteAllLoanCases();
       const { rows: existingAgents } = await storage.query(`SELECT id, name FROM fos_agents WHERE name IS NOT NULL`);
       const agentByName: Record<string, number> = {};
       for (const a of existingAgents) { if (a.name) agentByName[a.name.toLowerCase().trim()] = a.id; }
-      let imported = 0, skipped = 0, agentsCreated = 0; const errors: string[] = [];
+      let imported = 0, updated = 0, skipped = 0, agentsCreated = 0; const errors: string[] = [];
       for (let i = 0; i < rawRows.slice(headerRowIdx + 1).length; i++) {
         const row = rawRows.slice(headerRowIdx + 1)[i]; const mapped: Record<string, any> = {};
         for (const [colIdx, dbField] of Object.entries(colIdxMap)) { const val = row[Number(colIdx)]; mapped[dbField] = val !== undefined && val !== "" ? String(val).trim() : null; }
@@ -1804,9 +1802,8 @@ await storage.deleteAllLoanCases();
           else { try { const username = fosLower.replace(/\s+/g, ".").replace(/[^a-z0-9.]/g, ""); const newAgent = await storage.createFosAgent({ name: mapped.fos_name, username, password: randomBytes(16).toString("hex") }); agentByName[fosLower] = newAgent.id; agentId = newAgent.id; agentsCreated++; } catch { const found = await storage.getAgentByUsername(mapped.fos_name.toLowerCase().trim().replace(/\s+/g, ".").replace(/[^a-z0-9.]/g, "")); if (found) { agentByName[mapped.fos_name.toLowerCase().trim()] = found.id; agentId = found.id; } } }
         }
         try {
-          // ── upsertLoanCase now receives company_name ────────────────────────
-          await storage.upsertLoanCase({
-            agentId,
+          // ── Force-update: all allocation fields overwritten from file ──────
+          const upsertResult = await storage.upsertLoanCase({
             fosName: mapped.fos_name || null,
             loanNo: mapped.loan_no,
             customerName: mapped.customer_name,
@@ -1839,7 +1836,7 @@ await storage.deleteAllLoanCases();
             companyName: mapped.company_name || null,  // ← NEW
             collAmount: mapped.coll_amount || null,    // ← NEW: from Coll Amount column
           });
-          imported++;
+          if (upsertResult === "inserted") { imported++; } else { updated++; }
         } catch (e: any) { errors.push(`Row ${i + headerRowIdx + 2}: ${e.message}`); skipped++; }
       }
 
@@ -1862,13 +1859,6 @@ if (monthlyFeedbackMap.size > 0) {
     );
   }
   console.log(`[import] ✅ Restored monthly_feedback for ${monthlyFeedbackMap.size} loan(s)`);
-}
-
-for (const [loanNo, ptpData] of ptpLoanMap) {
-  await storage.query(
-    `UPDATE loan_cases SET status='PTP', ptp_date=$1, telecaller_ptp_date=$2 WHERE loan_no=$3`,
-    [ptpData.ptpDate, ptpData.telecallerPtpDate, loanNo]
-  );
 }
 
       // ── Aggregate penal per agent — BKT 1 rows only ──────────────────────────
@@ -1923,7 +1913,7 @@ for (const [agIdStr, d] of Object.entries(penalByAgent)) {
 }
 console.log(`[import] ✅ Penal perf upserted for ${Object.keys(penalByAgent).length} agents from allocation`);
 try { await recalcBktPerfFromAllocation(); } catch (e: any) { console.warn("[import] BKT recalc warning:", e.message); }
-res.json({ imported, updated: 0, skipped, agentsCreated, agentsRemoved, total: rawRows.slice(headerRowIdx + 1).length, errors: errors.slice(0, 20) });
+res.json({ imported, updated, skipped, agentsCreated, agentsRemoved, total: rawRows.slice(headerRowIdx + 1).length, errors: errors.slice(0, 20) });
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
      
