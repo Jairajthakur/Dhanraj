@@ -1757,33 +1757,37 @@ app.put("/api/fos-depositions/:id/pay-both", requireAuth, screenshotUpload.singl
       if (headerRowIdx === -1) return res.status(400).json({ message: "Could not find header row." });
       const fosNamesInExcel = new Set<string>();
       for (const row of rawRows.slice(headerRowIdx + 1)) { const mapped: Record<string, any> = {}; for (const [colIdx, dbField] of Object.entries(colIdxMap)) { const val = row[Number(colIdx)]; mapped[dbField] = val !== undefined && val !== "" ? String(val).trim() : null; } if (mapped.fos_name && !isRepeatHeaderRow(mapped)) fosNamesInExcel.add(mapped.fos_name.toLowerCase().trim()); }
-     await storage.query(`UPDATE depositions SET loan_case_id=NULL WHERE loan_case_id IS NOT NULL`);
+      // ── Save user-entered data that must survive the re-import ────────────
+      const savedExtras = await storage.query(
+        `SELECT loan_no, extra_numbers FROM loan_cases WHERE extra_numbers IS NOT NULL AND array_length(extra_numbers, 1) > 0`
+      );
+      const extrasMap = new Map<string, string[]>();
+      for (const row of savedExtras.rows) { if (row.extra_numbers?.length) extrasMap.set(row.loan_no, row.extra_numbers); }
+      console.log(`[import] 💾 Saved extra_numbers for ${extrasMap.size} loan(s)`);
 
-const savedExtras = await storage.query(
-  `SELECT loan_no, extra_numbers FROM loan_cases 
-  WHERE extra_numbers IS NOT NULL 
-  AND array_length(extra_numbers, 1) > 0`
-);
-const extrasMap = new Map<string, string[]>();
-for (const row of savedExtras.rows) {
-  if (row.extra_numbers?.length) extrasMap.set(row.loan_no, row.extra_numbers);
-}
-console.log(`[import] 💾 Saved extra_numbers for ${extrasMap.size} loan(s) before wipe`);
+      const savedMonthlyFb = await storage.query(
+        `SELECT loan_no, monthly_feedback FROM loan_cases WHERE monthly_feedback IS NOT NULL AND monthly_feedback != ''`
+      );
+      const monthlyFeedbackMap = new Map<string, string>();
+      for (const row of savedMonthlyFb.rows) { if (row.monthly_feedback) monthlyFeedbackMap.set(row.loan_no, row.monthly_feedback); }
+      console.log(`[import] 💾 Saved monthly_feedback for ${monthlyFeedbackMap.size} loan(s)`);
 
-// ── Save monthly_feedback before wipe ─────────────────────────
-const savedMonthlyFb = await storage.query(`
-  SELECT loan_no, monthly_feedback 
-  FROM loan_cases 
-  WHERE monthly_feedback IS NOT NULL AND monthly_feedback != ''
-`);
-const monthlyFeedbackMap = new Map<string, string>();
-for (const row of savedMonthlyFb.rows) {
-  if (row.monthly_feedback) monthlyFeedbackMap.set(row.loan_no, row.monthly_feedback);
-}
-console.log(`[import] 💾 Saved monthly_feedback for ${monthlyFeedbackMap.size} loan(s) before wipe`);
+      // ── Collect loan_nos present in the new file ───────────────────────────
+      const loanNosInExcel = new Set<string>();
+      for (const row of rawRows.slice(headerRowIdx + 1)) {
+        const mapped: Record<string, any> = {};
+        for (const [colIdx, dbField] of Object.entries(colIdxMap)) { const val = row[Number(colIdx)]; mapped[dbField] = val !== undefined && val !== "" ? String(val).trim() : null; }
+        if (mapped.loan_no && !isRepeatHeaderRow(mapped)) loanNosInExcel.add(mapped.loan_no.trim());
+      }
 
-await storage.deleteAllLoanCases();
+      // ── Remove cases no longer in allocation (stale cases) ────────────────
+      if (loanNosInExcel.size > 0) {
+        await storage.query(`UPDATE depositions SET loan_case_id=NULL WHERE loan_case_id IN (SELECT id FROM loan_cases WHERE loan_no != ALL($1::text[]))`, [Array.from(loanNosInExcel)]);
+        await storage.query(`DELETE FROM loan_cases WHERE loan_no != ALL($1::text[])`, [Array.from(loanNosInExcel)]);
+        console.log(`[import] 🗑️ Removed stale cases not in new allocation file`);
+      }
 
+      // ── Remove FOS agents no longer in allocation ──────────────────────────
       const existingFosAgents = await storage.query(`SELECT id, name FROM fos_agents WHERE role='fos'`);
       let agentsRemoved = 0;
       for (const agent of existingFosAgents.rows) { if (!fosNamesInExcel.has((agent.name || "").toLowerCase().trim())) { await safeDeleteAgent(agent.id, "import"); agentsRemoved++; } }
