@@ -516,7 +516,16 @@ export async function getAllAgentStats() {
      LEFT JOIN loan_cases lc ON lc.agent_id = fa.id
      WHERE fa.role = 'fos'
      GROUP BY fa.id, fa.name, fa.username, fa.role
-     ORDER BY fa.name`
+     UNION ALL
+     SELECT 0 AS id, 'Unassigned' AS name, '' AS username, 'fos' AS role,
+       COUNT(*)::int                                          AS total,
+       COUNT(*) FILTER (WHERE status='Paid')::int            AS paid,
+       COUNT(*) FILTER (WHERE status='Unpaid')::int          AS "notProcess",
+       COUNT(*) FILTER (WHERE status='PTP')::int             AS ptp
+     FROM loan_cases
+     WHERE agent_id IS NULL
+     HAVING COUNT(*) > 0
+     ORDER BY name`
   );
   return result.rows;
 }
