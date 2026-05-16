@@ -1061,24 +1061,46 @@ app.get("/api/today-ptp", requireAuth, async (req, res) => {
   try {
     const company = (req.query.company as string) || null;
     if (company) {
-      // Return per-agent stats filtered by company
-      const result = await storage.query(`
-        SELECT
-          fa.id,
-          fa.name,
-          COUNT(lc.id)::int                                     AS total,
-          COUNT(lc.id) FILTER (WHERE lc.status='Paid')::int     AS paid,
-          COUNT(lc.id) FILTER (WHERE lc.status='PTP')::int      AS ptp,
-          COUNT(lc.id) FILTER (WHERE lc.status NOT IN ('Paid','PTP'))::int AS "notProcess"
-        FROM fos_agents fa
-        LEFT JOIN loan_cases lc ON lc.agent_id = fa.id AND lc.company_name = $1
-        WHERE fa.role = 'fos'
-        GROUP BY fa.id, fa.name
-        ORDER BY fa.name
-      `, [company]);
-      res.json({ stats: result.rows });
+      // Return per-agent stats filtered by company + direct summary for that company
+      const [agentResult, summaryResult] = await Promise.all([
+        storage.query(`
+          SELECT
+            fa.id,
+            fa.name,
+            COUNT(lc.id)::int                                     AS total,
+            COUNT(lc.id) FILTER (WHERE lc.status='Paid')::int     AS paid,
+            COUNT(lc.id) FILTER (WHERE lc.status='PTP')::int      AS ptp,
+            COUNT(lc.id) FILTER (WHERE lc.status NOT IN ('Paid','PTP'))::int AS "notProcess"
+          FROM fos_agents fa
+          LEFT JOIN loan_cases lc ON lc.agent_id = fa.id AND lc.company_name = $1
+          WHERE fa.role = 'fos'
+          GROUP BY fa.id, fa.name
+          ORDER BY fa.name
+        `, [company]),
+        storage.query(`
+          SELECT
+            COUNT(*)::int                                    AS total,
+            COUNT(*) FILTER (WHERE status='Paid')::int      AS paid,
+            COUNT(*) FILTER (WHERE status='PTP')::int       AS ptp,
+            COUNT(*) FILTER (WHERE status NOT IN ('Paid','PTP'))::int AS "notProcess"
+          FROM loan_cases WHERE company_name = $1
+        `, [company]),
+      ]);
+      res.json({ stats: agentResult.rows, summary: summaryResult.rows[0] });
     } else {
-      res.json({ stats: await storage.getAllAgentStats() });
+      // Per-agent stats + direct global summary (includes unassigned cases)
+      const [agentStats, summaryResult] = await Promise.all([
+        storage.getAllAgentStats(),
+        storage.query(`
+          SELECT
+            COUNT(*)::int                                    AS total,
+            COUNT(*) FILTER (WHERE status='Paid')::int      AS paid,
+            COUNT(*) FILTER (WHERE status='PTP')::int       AS ptp,
+            COUNT(*) FILTER (WHERE status NOT IN ('Paid','PTP'))::int AS "notProcess"
+          FROM loan_cases
+        `),
+      ]);
+      res.json({ stats: agentStats, summary: summaryResult.rows[0] });
     }
   } catch (e: any) {
     res.status(500).json({ message: e.message });
