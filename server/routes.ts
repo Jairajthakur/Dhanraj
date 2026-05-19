@@ -1749,7 +1749,10 @@ app.put("/api/fos-depositions/:id/pay-both", requireAuth, screenshotUpload.singl
     try {
       if (!req.file) return res.status(400).json({ message: "No file uploaded" });
       const ejWorkbook1 = new ExcelJS.Workbook(); await ejWorkbook1.xlsx.load(req.file.buffer);
-      const worksheet1 = ejWorkbook1.worksheets[0]; const rawRows: any[][] = worksheetToRows(worksheet1, true);
+      const worksheet1 = ejWorkbook1.worksheets.find((ws) => ws.name.toUpperCase() === "ALLU") || ejWorkbook1.worksheets[0];
+      // Only read first 37 cols (A-AK) — AL onwards are formula-only summary cols that must not be imported
+      const MAX_IMPORT_COLS = 37;
+      const rawRows: any[][] = worksheetToRows(worksheet1, true).map((row) => row.slice(0, MAX_IMPORT_COLS));
       if (rawRows.length === 0) return res.json({ imported: 0, updated: 0, skipped: 0, agentsCreated: 0, agentsRemoved: 0, errors: [] });
       let headerRowIdx = -1; let colIdxMap: Record<number, string> = {};
       for (let r = 0; r < Math.min(rawRows.length, 15); r++) { const row = rawRows[r]; const tempMap: Record<number, string> = {}; let matched = 0; for (let c = 0; c < row.length; c++) { const norm = normalizeHeader(String(row[c] || "")); if (COLUMN_MAP[norm]) { tempMap[c] = COLUMN_MAP[norm]; matched++; } } if (matched >= 3) { headerRowIdx = r; colIdxMap = tempMap; break; } }
