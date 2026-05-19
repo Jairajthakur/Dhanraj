@@ -2,7 +2,7 @@ import React, { useState, useMemo, useCallback, useEffect, useRef } from "react"
 import {
   View, Text, StyleSheet, FlatList, Pressable, TextInput, Linking,
   Alert, ActivityIndicator, Modal, ScrollView, Platform, Image, Share,
-  KeyboardAvoidingView,
+  KeyboardAvoidingView, InteractionManager,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -212,7 +212,7 @@ async function downloadAllocationExcel(cases: CaseItem[], filename: string): Pro
   // eslint-disable-next-line @typescript-eslint/no-var-requires
   const ExcelJS = require("exceljs");
   const wb = new ExcelJS.Workbook();
-  wb.creator = "Dhanraj Collections App";
+  wb.creator = "Dhanraj Enterprises";
   wb.created = new Date();
 
   const ws = wb.addWorksheet("Allocation");
@@ -565,7 +565,6 @@ function buildFieldVisitMsg(
   if (gps)      lines.push(`Location : ${gps.lat.toFixed(4)}, ${gps.lng.toFixed(4)}`);
   if (mapsLink) lines.push(`Map      : ${mapsLink}`);
   lines.push(`──────────────────────`);
-  lines.push(`_Dhanraj Collections App_`);
 
   return lines.join("\n");
 }
@@ -603,7 +602,6 @@ function buildCallLogMsg(
   if (callPtpDate)  lines.push(`PTP Date : ${callPtpDate}`);
   lines.push(`Time     : ${time}`);
   lines.push(`──────────────────────`);
-  lines.push(`_Dhanraj Collections App_`);
 
   return lines.join("\n");
 }
@@ -1826,6 +1824,11 @@ export default function AllocationScreen() {
             </View>
           }
           scrollEnabled={filtered.length > 0}
+          initialNumToRender={8}
+          maxToRenderPerBatch={6}
+          updateCellsBatchingPeriod={80}
+          windowSize={7}
+          removeClippedSubviews={true}
         />
       )}
 
