@@ -84,7 +84,7 @@ module.exports = ({ config }) => {
     ],
     experiments: {
       typedRoutes: true,
-      reactCompiler: true,
+      reactCompiler: false,
     },
     extra: {
       apiUrl: "https://dhanraj-production.up.railway.app",
