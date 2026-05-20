@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from "react";
 import {
   View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator,
-  Platform, Alert, useWindowDimensions,
+  Platform, Alert
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -14,17 +14,7 @@ import { fetch as expoFetch } from "expo/fetch";
 import { ImportModal } from "@/components/ImportModals";
 import { useCompanyFilter } from "@/context/CompanyFilterContext";
 
-const isWeb = Platform.OS === "web";
-
-// ─── Responsive helpers ───────────────────────────────────────────────────────
-function useColumns() {
-  const { width } = useWindowDimensions();
-  if (width >= 1024) return 3;
-  if (width >= 640) return 2;
-  return 1;
-}
-
-// ─── Company Stats Card ───────────────────────────────────────────────────────
+// ─── Company stats card (shown when a company is selected) ───────────────────
 function CompanyStatsCard({ cases, companyName }: { cases: any[]; companyName: string }) {
   const filtered = cases.filter((c) => c.company_name === companyName);
   const total  = filtered.length;
@@ -91,31 +81,25 @@ const csc = StyleSheet.create({
   statLabel: { fontSize: 9, fontWeight: "600", color: Colors.textSecondary },
 });
 
-// ─── Agent Card ───────────────────────────────────────────────────────────────
+// ─── Agent card (filtered by company) ────────────────────────────────────────
 function AgentCard({ agent }: { agent: any }) {
   const rate = agent.total > 0 ? ((agent.paid / agent.total) * 100).toFixed(0) : "0";
   return (
-    <Pressable
-      style={({ pressed, hovered }: any) => [
-        styles.agentCard,
-        (pressed || hovered) && styles.agentCardHover,
-      ]}
-      onPress={() => router.push({ pathname: "/(admin)/agent/[id]", params: { id: agent.id } })}
-    >
+    <Pressable style={styles.agentCard} onPress={() => router.push({ pathname: "/(admin)/agent/[id]", params: { id: agent.id } })}>
       <View style={styles.agentCardTop}>
-        <View style={styles.agentAvatar}><Ionicons name="person" size={20} color="#fff" /></View>
+        <View style={styles.agentAvatar}><Ionicons name="person" size={22} color="#fff" /></View>
         <View style={styles.agentInfo}><Text style={styles.agentName} numberOfLines={1}>{agent.name}</Text></View>
         <View style={[styles.rateCircle, { backgroundColor: parseInt(rate) >= 50 ? Colors.success + "20" : Colors.danger + "20" }]}>
           <Text style={[styles.rateText, { color: parseInt(rate) >= 50 ? Colors.success : Colors.danger }]}>{rate}%</Text>
         </View>
-        <Ionicons name="chevron-forward" size={16} color={Colors.textMuted} />
+        <Ionicons name="chevron-forward" size={18} color={Colors.textMuted} />
       </View>
       <View style={styles.statsRow}>
         {[
-          { label: "Total",  val: agent.total      || 0, color: Colors.text    },
+          { label: "Total",  val: agent.total      || 0, color: Colors.text },
           { label: "Paid",   val: agent.paid        || 0, color: Colors.success },
-          { label: "PTP",    val: agent.ptp         || 0, color: Colors.info    },
-          { label: "Unpaid", val: agent.notProcess  || 0, color: Colors.danger  },
+          { label: "PTP",    val: agent.ptp         || 0, color: Colors.info },
+          { label: "Unpaid", val: agent.notProcess  || 0, color: Colors.danger },
         ].map((s) => (
           <View key={s.label} style={styles.statPill}>
             <Text style={[styles.statPillNum, { color: s.color }]}>{s.val}</Text>
@@ -127,7 +111,7 @@ function AgentCard({ agent }: { agent: any }) {
   );
 }
 
-// ─── Company Breakdown Strip ──────────────────────────────────────────────────
+// ─── Company breakdown strip ──────────────────────────────────────────────────
 function CompanyBreakdownStrip({ cases }: { cases: any[] }) {
   const byCompany = useMemo(() => {
     const map: Record<string, { total: number; paid: number; pos: number }> = {};
@@ -142,6 +126,7 @@ function CompanyBreakdownStrip({ cases }: { cases: any[] }) {
   }, [cases]);
 
   if (byCompany.length === 0) return null;
+
   const fmtAmt = (n: number) => `₹${Math.round(n).toLocaleString("en-IN")}`;
 
   return (
@@ -174,7 +159,7 @@ const cb = StyleSheet.create({
   header:      { flexDirection: "row", alignItems: "center", gap: 6 },
   title:       { fontSize: 13, fontWeight: "700", color: Colors.text },
   row:         { flexDirection: "row", alignItems: "center", gap: 8 },
-  nameWrap:    { width: 130 },
+  nameWrap:    { width: 120 },
   companyName: { fontSize: 12, fontWeight: "600", color: Colors.text },
   companyMeta: { fontSize: 10, color: Colors.textMuted },
   barWrap:     { flex: 1, height: 6, backgroundColor: Colors.border, borderRadius: 3, overflow: "hidden" },
@@ -182,54 +167,10 @@ const cb = StyleSheet.create({
   rate:        { width: 36, fontSize: 11, fontWeight: "800", textAlign: "right" },
 });
 
-// ─── Action Banner ────────────────────────────────────────────────────────────
-function ActionBanner({
-  title, subtitle, icon, color, loading: busy, onPress, disabled,
-}: {
-  title: string; subtitle: string;
-  icon: React.ComponentProps<typeof Ionicons>["name"];
-  color: string; loading?: boolean; onPress: () => void; disabled?: boolean;
-}) {
-  return (
-    <Pressable
-      style={({ pressed, hovered }: any) => [
-        ab.wrap,
-        { backgroundColor: color },
-        (pressed || busy) && { opacity: 0.78 },
-        hovered && { opacity: 0.88 },
-      ]}
-      onPress={onPress}
-      disabled={disabled || busy}
-    >
-      <View style={ab.left}>
-        {busy
-          ? <ActivityIndicator color="#fff" size="small" style={ab.icon} />
-          : <Ionicons name={icon} size={26} color="#fff" style={ab.icon} />
-        }
-        <View style={ab.text}>
-          <Text style={ab.title}>{title}</Text>
-          <Text style={ab.sub}>{busy ? "Please wait…" : subtitle}</Text>
-        </View>
-      </View>
-      {!busy && <Ionicons name="chevron-forward" size={20} color="rgba(255,255,255,0.65)" />}
-    </Pressable>
-  );
-}
-
-const ab = StyleSheet.create({
-  wrap:  { borderRadius: 16, padding: 18, flexDirection: "row", alignItems: "center", justifyContent: "space-between", cursor: isWeb ? "pointer" : "default" } as any,
-  left:  { flexDirection: "row", alignItems: "center", flex: 1 },
-  icon:  { marginRight: 14 },
-  text:  { flex: 1 },
-  title: { color: "#fff", fontSize: 15, fontWeight: "700" },
-  sub:   { color: "rgba(255,255,255,0.8)", fontSize: 12, marginTop: 2, flexShrink: 1 },
-});
-
 // ─── Main Dashboard ───────────────────────────────────────────────────────────
 export default function AdminDashboard() {
   const insets = useSafeAreaInsets();
   const qc = useQueryClient();
-  const { width } = useWindowDimensions();
   const [importVisible, setImportVisible] = useState(false);
   const [feedbackDownloading, setFeedbackDownloading] = useState(false);
   const [ptpClearing, setPtpClearing] = useState(false);
@@ -237,9 +178,6 @@ export default function AdminDashboard() {
   const [pushTesting, setPushTesting] = useState(false);
   const [pushExpanded, setPushExpanded] = useState(false);
   const { selectedCompany } = useCompanyFilter();
-
-  // Responsive: 2-col actions on wide screens
-  const isWide = width >= 768;
 
   const { data: pushStatusData } = useQuery({
     queryKey: ["/api/admin/push-status"],
@@ -250,6 +188,7 @@ export default function AdminDashboard() {
     },
   });
 
+  // All cases (for company breakdown)
   const { data: allCasesData } = useQuery({
     queryKey: ["/api/admin/cases"],
     queryFn: () => api.admin.getCases(),
@@ -332,18 +271,23 @@ export default function AdminDashboard() {
       "This will send a loud sound notification to all agents who currently have broken PTPs. Continue?",
       [
         { text: "Cancel", style: "cancel" },
-        { text: "Send Alert", onPress: async () => {
-          setPtpAlertSending(true);
-          try {
-            const url = new URL("/api/admin/trigger-ptp-alert", getApiUrl()).toString();
-            const res = await expoFetch(url, { method: "POST", credentials: "include" });
-            const json: any = await res.json();
-            if (!res.ok) throw new Error(json.error || "Failed to send alert");
-            if (json.sent === 0) Alert.alert("No Broken PTPs", "There are currently no agents with broken PTP cases.");
-            else Alert.alert("Alert Sent!", `Sound notification sent to ${json.sent} agent${json.sent !== 1 ? "s" : ""} with broken PTPs.`);
-          } catch (e: any) { Alert.alert("Error", e.message || "Could not send PTP alert"); }
-          finally { setPtpAlertSending(false); }
-        }},
+        {
+          text: "Send Alert", onPress: async () => {
+            setPtpAlertSending(true);
+            try {
+              const url = new URL("/api/admin/trigger-ptp-alert", getApiUrl()).toString();
+              const res = await expoFetch(url, { method: "POST", credentials: "include" });
+              const json: any = await res.json();
+              if (!res.ok) throw new Error(json.error || "Failed to send alert");
+              if (json.sent === 0) {
+                Alert.alert("No Broken PTPs", "There are currently no agents with broken PTP cases.");
+              } else {
+                Alert.alert("Alert Sent!", `Sound notification sent to ${json.sent} agent${json.sent !== 1 ? "s" : ""} with broken PTPs.`);
+              }
+            } catch (e: any) { Alert.alert("Error", e.message || "Could not send PTP alert"); }
+            finally { setPtpAlertSending(false); }
+          },
+        },
       ]
     );
   };
@@ -387,205 +331,180 @@ export default function AdminDashboard() {
   const totalPTP    = stats.reduce((s: number, a: any) => s + (a.ptp        || 0), 0);
   const totalUnpaid = stats.reduce((s: number, a: any) => s + (a.notProcess || 0), 0);
 
-  if (isLoading) return (
-    <View style={styles.centerScreen}>
-      <ActivityIndicator color={Colors.primary} size="large" />
-      <Text style={[styles.emptyText, { marginTop: 12 }]}>Loading dashboard…</Text>
-    </View>
-  );
-
+  if (isLoading) return (<View style={styles.centerScreen}><ActivityIndicator color={Colors.primary} size="large" /></View>);
   if (isError) return (
     <View style={styles.centerScreen}>
       <Ionicons name="alert-circle-outline" size={48} color={Colors.danger} />
       <Text style={[styles.emptyText, { color: Colors.danger, marginTop: 12 }]}>Failed to load dashboard</Text>
-      <Pressable onPress={() => refetch()} style={styles.retryBtn}>
-        <Text style={styles.retryBtnText}>Retry</Text>
-      </Pressable>
+      <Text style={[styles.emptyText, { fontSize: 12, marginTop: 4 }]}>{String(error)}</Text>
+      <Pressable onPress={() => refetch()} style={styles.retryBtn}><Text style={styles.retryBtnText}>Retry</Text></Pressable>
     </View>
   );
-
-  const allAgents = pushStatusData?.agents || [];
-  const tokenCount = allAgents.filter(a => a.has_token).length;
 
   return (
     <View style={styles.outerWrap}>
       <ScrollView
         style={styles.scroll}
-        contentContainerStyle={[
-          styles.container,
-          { paddingBottom: insets.bottom + 32 },
-          isWide && styles.containerWide,
-        ]}
+        contentContainerStyle={[styles.container, { paddingBottom: insets.bottom + 24, paddingTop: Platform.OS === "web" ? 16 : 0 }]}
       >
-        {/* Max-width wrapper for web */}
-        <View style={isWide ? styles.webContent : undefined}>
-
-          {/* Company filter banner */}
-          {selectedCompany && (
-            <View style={styles.companyBanner}>
-              <Ionicons name="business" size={15} color="#fff" />
-              <Text style={styles.companyBannerText}>
-                Filtered: <Text style={{ fontWeight: "800" }}>{selectedCompany}</Text>
-              </Text>
-              <Text style={styles.companyBannerSub}>Open sidebar to change</Text>
-            </View>
-          )}
-
-          {selectedCompany && allCases.length > 0 && (
-            <CompanyStatsCard cases={allCases} companyName={selectedCompany} />
-          )}
-
-          {/* Action banners — 2 col on wide */}
-          <View style={[styles.actionsGrid, isWide && styles.actionsGridWide]}>
-            <ActionBanner
-              title="Import Allocation Data"
-              subtitle="Upload Excel to sync cases & create FOS users"
-              icon="cloud-upload"
-              color={Colors.primary}
-              onPress={() => setImportVisible(true)}
-            />
-            <ActionBanner
-              title="Download Feedback Report"
-              subtitle="Export all FOS feedback as Excel"
-              icon="chatbox-outline"
-              color={Colors.info}
-              loading={feedbackDownloading}
-              onPress={handleDownloadFeedback}
-              disabled={feedbackDownloading}
-            />
-            <ActionBanner
-              title="Clear All PTP Dates"
-              subtitle="Reset all PTP statuses and dates"
-              icon="trash-outline"
-              color={Colors.danger}
-              loading={ptpClearing}
-              onPress={handleClearPTP}
-              disabled={ptpClearing}
-            />
-            <ActionBanner
-              title="Send PTP Break Alert"
-              subtitle="Trigger sound notification for broken PTPs"
-              icon="notifications"
-              color="#7C3AED"
-              loading={ptpAlertSending}
-              onPress={handleTriggerPtpAlert}
-              disabled={ptpAlertSending}
-            />
+        {/* Company filter indicator */}
+        {selectedCompany && (
+          <View style={styles.companyActiveBanner}>
+            <Ionicons name="business" size={16} color="#fff" />
+            <Text style={styles.companyActiveBannerText}>
+              Filtered: <Text style={{ fontWeight: "800" }}>{selectedCompany}</Text>
+            </Text>
+            <Text style={styles.companyActiveBannerSub}>Open drawer to change</Text>
           </View>
+        )}
 
-          {/* Push Notifications Panel */}
-          <View style={styles.pushPanel}>
-            <Pressable style={styles.pushPanelHeader} onPress={() => setPushExpanded(v => !v)}>
-              <View style={styles.pushLeft}>
-                <View style={styles.pushIconWrap}>
-                  <Ionicons name="notifications" size={18} color={Colors.primary} />
-                </View>
-                <View>
-                  <Text style={styles.pushTitle}>Push Notifications</Text>
-                  <Text style={styles.pushSub}>
-                    {allAgents.length === 0 ? "Loading…" : `${tokenCount}/${allAgents.length} agents registered`}
-                  </Text>
-                </View>
-              </View>
-              <View style={styles.pushRight}>
-                <Pressable
-                  style={({ hovered }: any) => [styles.testAllBtn, hovered && styles.testAllBtnHover, pushTesting && { opacity: 0.6 }]}
-                  onPress={handleTestPushAll}
-                  disabled={pushTesting}
-                >
-                  {pushTesting
-                    ? <ActivityIndicator size="small" color="#fff" />
-                    : <Text style={styles.testAllBtnText}>Test All</Text>
-                  }
-                </Pressable>
-                <Ionicons name={pushExpanded ? "chevron-up" : "chevron-down"} size={15} color={Colors.textMuted} />
-              </View>
-            </Pressable>
-            {pushExpanded && (
-              <View style={styles.pushAgentList}>
-                {allAgents.length === 0 && <Text style={styles.pushEmpty}>No FOS agents found.</Text>}
-                {allAgents.map(agent => (
-                  <View key={agent.id} style={styles.pushAgentRow}>
-                    <View style={[styles.pushDot, { backgroundColor: agent.has_token ? Colors.success : Colors.danger }]} />
-                    <Text style={styles.pushAgentName} numberOfLines={1}>{agent.name}</Text>
-                    <Text style={styles.pushAgentStatus}>{agent.has_token ? "Registered" : "No token"}</Text>
-                    {agent.has_token && (
-                      <Pressable
-                        style={({ hovered }: any) => [styles.testOneBtn, hovered && styles.testOneBtnHover]}
-                        onPress={() => handleTestPushOne(agent.id, agent.name)}
-                        disabled={pushTesting}
-                      >
-                        <Ionicons name="send" size={13} color={Colors.primary} />
-                      </Pressable>
-                    )}
+        {/* Company stats when filtered */}
+        {selectedCompany && allCases.length > 0 && (
+          <CompanyStatsCard cases={allCases} companyName={selectedCompany} />
+        )}
+
+        {/* Import Allocation */}
+        <Pressable style={styles.importBanner} onPress={() => setImportVisible(true)}>
+          <View style={styles.importBannerLeft}>
+            <Ionicons name="cloud-upload" size={28} color="#fff" />
+            <View style={styles.importBannerText}>
+              <Text style={styles.importBannerTitle}>Import Allocation Data</Text>
+              <Text style={styles.importBannerSub}>Upload allocation file to sync cases & create FOS users. Company name auto-detected from Excel.</Text>
+            </View>
+          </View>
+          <Ionicons name="chevron-forward" size={22} color="rgba(255,255,255,0.7)" />
+        </Pressable>
+
+        {/* Download Feedback */}
+        <Pressable style={[styles.importBanner, { backgroundColor: Colors.info }, feedbackDownloading && { opacity: 0.7 }]} onPress={handleDownloadFeedback} disabled={feedbackDownloading}>
+          <View style={styles.importBannerLeft}>
+            {feedbackDownloading ? <ActivityIndicator color="#fff" size="small" style={{ marginRight: 4 }} /> : <Ionicons name="chatbox-outline" size={28} color="#fff" />}
+            <View style={styles.importBannerText}>
+              <Text style={styles.importBannerTitle}>Download Feedback Report</Text>
+              <Text style={styles.importBannerSub}>{feedbackDownloading ? "Preparing file…" : "Export all FOS feedback with full details as Excel"}</Text>
+            </View>
+          </View>
+          {!feedbackDownloading && <Ionicons name="chevron-forward" size={22} color="rgba(255,255,255,0.7)" />}
+        </Pressable>
+
+        {/* Clear PTP */}
+        <Pressable style={[styles.importBanner, { backgroundColor: Colors.danger }, ptpClearing && { opacity: 0.7 }]} onPress={handleClearPTP} disabled={ptpClearing}>
+          <View style={styles.importBannerLeft}>
+            {ptpClearing ? <ActivityIndicator color="#fff" size="small" style={{ marginRight: 4 }} /> : <Ionicons name="trash-outline" size={28} color="#fff" />}
+            <View style={styles.importBannerText}>
+              <Text style={styles.importBannerTitle}>Clear All PTP Dates</Text>
+              <Text style={styles.importBannerSub}>{ptpClearing ? "Clearing…" : "Reset all PTP statuses and dates from the database"}</Text>
+            </View>
+          </View>
+          {!ptpClearing && <Ionicons name="chevron-forward" size={22} color="rgba(255,255,255,0.7)" />}
+        </Pressable>
+
+        {/* Trigger PTP Break Alert */}
+        <Pressable style={[styles.importBanner, { backgroundColor: "#7C3AED" }, ptpAlertSending && { opacity: 0.7 }]} onPress={handleTriggerPtpAlert} disabled={ptpAlertSending}>
+          <View style={styles.importBannerLeft}>
+            {ptpAlertSending ? <ActivityIndicator color="#fff" size="small" style={{ marginRight: 4 }} /> : <Ionicons name="notifications" size={28} color="#fff" />}
+            <View style={styles.importBannerText}>
+              <Text style={styles.importBannerTitle}>Send PTP Break Alert</Text>
+              <Text style={styles.importBannerSub}>{ptpAlertSending ? "Sending alerts…" : "Manually trigger sound notification for all broken PTPs"}</Text>
+            </View>
+          </View>
+          {!ptpAlertSending && <Ionicons name="chevron-forward" size={22} color="rgba(255,255,255,0.7)" />}
+        </Pressable>
+
+        {/* Push Panel */}
+        {(() => {
+          const allAgents = pushStatusData?.agents || [];
+          const tokenCount = allAgents.filter(a => a.has_token).length;
+          return (
+            <View style={styles.pushPanel}>
+              <Pressable style={styles.pushPanelHeader} onPress={() => setPushExpanded(v => !v)}>
+                <View style={styles.pushPanelLeft}>
+                  <Ionicons name="notifications" size={20} color={Colors.primary} />
+                  <View>
+                    <Text style={styles.pushPanelTitle}>Push Notifications</Text>
+                    <Text style={styles.pushPanelSub}>{allAgents.length === 0 ? "Loading agent status…" : `${tokenCount}/${allAgents.length} agents registered`}</Text>
                   </View>
-                ))}
-              </View>
-            )}
-          </View>
-
-          {/* Summary Stats */}
-          <View style={styles.summaryGrid}>
-            {[
-              { icon: "people"            as const, num: totalAgents, label: "FOS Agents",  color: Colors.primary },
-              { icon: "document-text"     as const, num: totalCases,  label: "Total Cases", color: Colors.info    },
-              { icon: "checkmark-circle"  as const, num: totalPaid,   label: "Paid",        color: Colors.success },
-              { icon: "close-circle"      as const, num: totalUnpaid, label: "Unpaid",      color: Colors.danger  },
-              { icon: "calendar"          as const, num: totalPTP,    label: "PTP",         color: Colors.statusPTP },
-            ].map((s) => (
-              <View key={s.label} style={[styles.summaryCard, { borderTopColor: s.color }]}>
-                <Ionicons name={s.icon} size={22} color={s.color} />
-                <Text style={styles.summaryNum}>{s.num}</Text>
-                <Text style={styles.summaryLabel}>{s.label}</Text>
-              </View>
-            ))}
-          </View>
-
-          {/* Company breakdown */}
-          {!selectedCompany && allCases.length > 0 && <CompanyBreakdownStrip cases={allCases} />}
-
-          {/* Quick Links */}
-          <View style={styles.quickLinks}>
-            {[
-              { label: "All Cases",     icon: "list"             as const, screen: "/(admin)/all-cases"     },
-              { label: "BKT Perf.",     icon: "layers"           as const, screen: "/(admin)/bkt-cases"     },
-              { label: "Agency Target", icon: "trophy"           as const, screen: "/(admin)/agency-target" },
-              { label: "Salary",        icon: "wallet"           as const, screen: "/(admin)/salary"        },
-              { label: "Depositions",   icon: "cash"             as const, screen: "/(admin)/depositions"   },
-              { label: "Attendance",    icon: "checkmark-circle" as const, screen: "/(admin)/attendance"    },
-              { label: "Field Visits",  icon: "location"         as const, screen: "/(admin)/field-visits"  },
-            ].map((item) => (
-              <Pressable
-                key={item.label}
-                style={({ pressed, hovered }: any) => [styles.quickLink, (pressed || hovered) && styles.quickLinkHover]}
-                onPress={() => router.push(item.screen as any)}
-              >
-                <View style={styles.quickLinkIcon}>
-                  <Ionicons name={item.icon} size={20} color={Colors.primary} />
                 </View>
-                <Text style={styles.quickLinkText}>{item.label}</Text>
+                <View style={styles.pushPanelRight}>
+                  <Pressable style={[styles.testAllBtn, pushTesting && { opacity: 0.6 }]} onPress={handleTestPushAll} disabled={pushTesting}>
+                    {pushTesting ? <ActivityIndicator size="small" color="#fff" /> : <Text style={styles.testAllBtnText}>Test All</Text>}
+                  </Pressable>
+                  <Ionicons name={pushExpanded ? "chevron-up" : "chevron-down"} size={16} color={Colors.textMuted} />
+                </View>
               </Pressable>
-            ))}
-          </View>
-
-          {/* Agents list */}
-          <Text style={styles.sectionTitle}>
-            FOS Agents{selectedCompany ? ` — ${selectedCompany}` : ""}
-          </Text>
-
-          <View style={isWide ? styles.agentGrid : undefined}>
-            {stats.map((agent: any) => <AgentCard key={agent.id} agent={agent} />)}
-          </View>
-
-          {stats.length === 0 && (
-            <View style={styles.empty}>
-              <Ionicons name="people-outline" size={48} color={Colors.textMuted} />
-              <Text style={styles.emptyText}>
-                {selectedCompany ? `No agents found for ${selectedCompany}.` : "No agents found. Import Excel to get started."}
-              </Text>
+              {pushExpanded && (
+                <View style={styles.pushAgentList}>
+                  {allAgents.length === 0 && <Text style={styles.pushAgentEmpty}>No FOS agents found.</Text>}
+                  {allAgents.map(agent => (
+                    <View key={agent.id} style={styles.pushAgentRow}>
+                      <View style={[styles.pushDot, { backgroundColor: agent.has_token ? Colors.success : Colors.danger }]} />
+                      <Text style={styles.pushAgentName} numberOfLines={1}>{agent.name}</Text>
+                      <Text style={styles.pushAgentStatus}>{agent.has_token ? "Registered" : "No token"}</Text>
+                      {agent.has_token && (
+                        <Pressable style={styles.testOneBtn} onPress={() => handleTestPushOne(agent.id, agent.name)} disabled={pushTesting}>
+                          <Ionicons name="send" size={14} color={Colors.primary} />
+                        </Pressable>
+                      )}
+                    </View>
+                  ))}
+                </View>
+              )}
             </View>
-          )}
+          );
+        })()}
+
+        {/* Summary Grid */}
+        <View style={styles.summaryGrid}>
+          {[
+            { icon: "people"           as const, num: totalAgents, label: "FOS Agents",  color: Colors.primary },
+            { icon: "document-text"    as const, num: totalCases,  label: "Total Cases", color: Colors.info },
+            { icon: "checkmark-circle" as const, num: totalPaid,   label: "Paid",        color: Colors.success },
+            { icon: "close-circle"     as const, num: totalUnpaid, label: "Unpaid",      color: Colors.danger },
+            { icon: "calendar"         as const, num: totalPTP,    label: "PTP",         color: Colors.statusPTP },
+          ].map((s) => (
+            <View key={s.label} style={[styles.summaryCard, { borderTopColor: s.color }]}>
+              <Ionicons name={s.icon} size={24} color={s.color} />
+              <Text style={styles.summaryNum}>{s.num}</Text>
+              <Text style={styles.summaryLabel}>{s.label}</Text>
+            </View>
+          ))}
         </View>
+
+        {/* Company breakdown (only when no company filter active) */}
+        {!selectedCompany && allCases.length > 0 && <CompanyBreakdownStrip cases={allCases} />}
+
+        {/* Quick Links */}
+        <View style={styles.quickLinks}>
+          {[
+            { label: "All Cases",     icon: "list"             as const, screen: "/(admin)/all-cases"     },
+            { label: "BKT Perf.",     icon: "layers"           as const, screen: "/(admin)/bkt-cases"     },
+            { label: "Agency Target", icon: "trophy"           as const, screen: "/(admin)/agency-target" },
+            { label: "Salary",        icon: "wallet"           as const, screen: "/(admin)/salary"        },
+            { label: "Depositions",   icon: "cash"             as const, screen: "/(admin)/depositions"   },
+            { label: "Attendance",    icon: "checkmark-circle" as const, screen: "/(admin)/attendance"    },
+            { label: "Field Visits",  icon: "location"         as const, screen: "/(admin)/field-visits"  },
+          ].map((item) => (
+            <Pressable key={item.label} style={({ pressed }) => [styles.quickLink, pressed && { opacity: 0.8 }]} onPress={() => router.push(item.screen as any)}>
+              <Ionicons name={item.icon} size={22} color={Colors.primary} />
+              <Text style={styles.quickLinkText}>{item.label}</Text>
+            </Pressable>
+          ))}
+        </View>
+
+        <Text style={styles.sectionTitle}>
+          FOS Agents Performance{selectedCompany ? ` — ${selectedCompany}` : ""}
+        </Text>
+
+        {stats.map((agent: any) => <AgentCard key={agent.id} agent={agent} />)}
+
+        {stats.length === 0 && (
+          <View style={styles.empty}>
+            <Ionicons name="people-outline" size={48} color={Colors.textMuted} />
+            <Text style={styles.emptyText}>
+              {selectedCompany ? `No agents found for ${selectedCompany}.` : "No agents found. Import Excel to get started."}
+            </Text>
+          </View>
+        )}
       </ScrollView>
 
       <ImportModal
@@ -600,6 +519,10 @@ export default function AdminDashboard() {
           qc.invalidateQueries({ queryKey: ["/api/admin/agents"] });
           qc.invalidateQueries({ queryKey: ["/api/cases"] });
           qc.invalidateQueries({ queryKey: ["/api/stats"] });
+          qc.invalidateQueries({ queryKey: ["/api/admin/bkt-cases"] });
+          qc.invalidateQueries({ queryKey: ["/api/bkt-cases"] });
+          qc.invalidateQueries({ queryKey: ["/api/admin/bkt-perf-summary"] });
+          qc.invalidateQueries({ queryKey: ["/api/bkt-perf-summary"] });
           refetch();
         }}
       />
@@ -608,70 +531,54 @@ export default function AdminDashboard() {
 }
 
 const styles = StyleSheet.create({
-  outerWrap:       { flex: 1, backgroundColor: Colors.background },
-  scroll:          { flex: 1 },
-  centerScreen:    { flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: Colors.background, padding: 24 },
-  retryBtn:        { marginTop: 16, backgroundColor: Colors.primary, borderRadius: 10, paddingHorizontal: 24, paddingVertical: 10 },
-  retryBtnText:    { color: "#fff", fontWeight: "700", fontSize: 14 },
-  container:       { padding: 16, gap: 16 },
-  containerWide:   { paddingHorizontal: 24, paddingTop: 20 },
-  webContent:      { maxWidth: 1100, width: "100%", alignSelf: "center" as any },
-  companyBanner:   { backgroundColor: Colors.primary, borderRadius: 12, padding: 14, flexDirection: "row", alignItems: "center", gap: 10 },
-  companyBannerText:{ flex: 1, color: "#fff", fontSize: 14 },
-  companyBannerSub:{ color: "rgba(255,255,255,0.7)", fontSize: 11 },
-
-  // Actions
-  actionsGrid:     { gap: 10 },
-  actionsGridWide: { flexDirection: "row", flexWrap: "wrap" },
-
-  // Push panel
-  pushPanel:       { backgroundColor: Colors.surface, borderRadius: 16, borderWidth: 1, borderColor: Colors.border, overflow: "hidden" },
-  pushPanelHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", padding: 14, gap: 10 },
-  pushLeft:        { flexDirection: "row", alignItems: "center", gap: 10, flex: 1 },
-  pushRight:       { flexDirection: "row", alignItems: "center", gap: 8 },
-  pushIconWrap:    { width: 32, height: 32, borderRadius: 9, backgroundColor: Colors.primary + "18", alignItems: "center", justifyContent: "center" },
-  pushTitle:       { fontSize: 14, fontWeight: "700", color: Colors.text },
-  pushSub:         { fontSize: 11, color: Colors.textSecondary, marginTop: 1 },
-  testAllBtn:      { backgroundColor: Colors.primary, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 6, minWidth: 70, alignItems: "center" },
-  testAllBtnHover: { backgroundColor: Colors.primaryLight },
-  testAllBtnText:  { color: "#fff", fontSize: 12, fontWeight: "700" },
-  pushAgentList:   { borderTopWidth: 1, borderTopColor: Colors.border },
-  pushAgentRow:    { flexDirection: "row", alignItems: "center", paddingHorizontal: 14, paddingVertical: 10, gap: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: Colors.border },
-  pushDot:         { width: 8, height: 8, borderRadius: 4 },
-  pushAgentName:   { flex: 1, fontSize: 13, color: Colors.text, fontWeight: "600" },
-  pushAgentStatus: { fontSize: 11, color: Colors.textSecondary },
-  pushEmpty:       { padding: 16, color: Colors.textMuted, fontSize: 13, textAlign: "center" },
-  testOneBtn:      { width: 28, height: 28, borderRadius: 7, backgroundColor: Colors.primary + "15", alignItems: "center", justifyContent: "center" },
-  testOneBtnHover: { backgroundColor: Colors.primary + "28" },
-
-  // Summary grid
-  summaryGrid:     { flexDirection: "row", flexWrap: "wrap", gap: 10 },
-  summaryCard:     { flex: 1, minWidth: "28%", backgroundColor: Colors.surface, borderRadius: 14, padding: 14, alignItems: "center", gap: 6, borderTopWidth: 3, borderWidth: 1, borderColor: Colors.border },
-  summaryNum:      { fontSize: 24, fontWeight: "800", color: Colors.text },
-  summaryLabel:    { fontSize: 11, color: Colors.textSecondary, fontWeight: "600", textAlign: "center" },
-
-  // Quick links
-  quickLinks:      { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  quickLink:       { minWidth: "30%", flex: 1, backgroundColor: Colors.surface, borderRadius: 12, padding: 14, alignItems: "center", gap: 6, borderWidth: 1, borderColor: Colors.border, cursor: isWeb ? "pointer" : "default" } as any,
-  quickLinkHover:  { backgroundColor: Colors.surfaceAlt, borderColor: Colors.primary + "40" },
-  quickLinkIcon:   { width: 36, height: 36, borderRadius: 10, backgroundColor: Colors.primary + "12", alignItems: "center", justifyContent: "center" },
-  quickLinkText:   { fontSize: 11, fontWeight: "600", color: Colors.textSecondary, textAlign: "center" },
-
-  // Section + agents
-  sectionTitle:    { fontSize: 17, fontWeight: "800", color: Colors.text },
-  agentGrid:       { flexDirection: "row", flexWrap: "wrap", gap: 12 },
-  agentCard:       { flex: 1, minWidth: 280, backgroundColor: Colors.surface, borderRadius: 16, padding: 14, gap: 10, borderWidth: 1, borderColor: Colors.border, cursor: isWeb ? "pointer" : "default" } as any,
-  agentCardHover:  { borderColor: Colors.primary + "50", backgroundColor: Colors.surfaceAlt },
-  agentCardTop:    { flexDirection: "row", alignItems: "center", gap: 10 },
-  agentAvatar:     { width: 40, height: 40, borderRadius: 20, backgroundColor: Colors.primary, alignItems: "center", justifyContent: "center" },
-  agentInfo:       { flex: 1 },
-  agentName:       { fontSize: 14, fontWeight: "700", color: Colors.text },
-  rateCircle:      { width: 42, height: 42, borderRadius: 21, alignItems: "center", justifyContent: "center" },
-  rateText:        { fontSize: 11, fontWeight: "800" },
-  statsRow:        { flexDirection: "row", gap: 6 },
-  statPill:        { flex: 1, backgroundColor: Colors.surfaceAlt, borderRadius: 9, padding: 8, alignItems: "center", gap: 2 },
-  statPillNum:     { fontSize: 15, fontWeight: "800" },
-  statPillLabel:   { fontSize: 9, fontWeight: "600", color: Colors.textSecondary },
-  empty:           { flex: 1, justifyContent: "center", alignItems: "center", gap: 12, paddingVertical: 60 },
-  emptyText:       { fontSize: 14, color: Colors.textMuted, textAlign: "center" },
+  outerWrap:              { flex: 1, backgroundColor: Colors.background },
+  scroll:                 { flex: 1, backgroundColor: Colors.background },
+  centerScreen:           { flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: Colors.background, padding: 24 },
+  retryBtn:               { marginTop: 16, backgroundColor: Colors.primary, borderRadius: 10, paddingHorizontal: 24, paddingVertical: 10 },
+  retryBtnText:           { color: "#fff", fontWeight: "700", fontSize: 14 },
+  container:              { padding: 16, gap: 16 },
+  companyActiveBanner:    { backgroundColor: Colors.primary, borderRadius: 12, padding: 14, flexDirection: "row", alignItems: "center", gap: 10 },
+  companyActiveBannerText:{ flex: 1, color: "#fff", fontSize: 14 },
+  companyActiveBannerSub: { color: "rgba(255,255,255,0.7)", fontSize: 11 },
+  importBanner:           { backgroundColor: Colors.primary, borderRadius: 16, padding: 18, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  importBannerLeft:       { flexDirection: "row", alignItems: "center", gap: 14, flex: 1 },
+  importBannerText:       { flex: 1 },
+  importBannerTitle:      { color: "#fff", fontSize: 16, fontWeight: "700" },
+  importBannerSub:        { color: "rgba(255,255,255,0.8)", fontSize: 12, marginTop: 2, flexShrink: 1 },
+  summaryGrid:            { flexDirection: "row", flexWrap: "wrap", gap: 10 },
+  summaryCard:            { flex: 1, minWidth: "28%", backgroundColor: Colors.surface, borderRadius: 14, padding: 14, alignItems: "center", gap: 6, borderTopWidth: 3, borderWidth: 1, borderColor: Colors.border, shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 4 },
+  summaryNum:             { fontSize: 26, fontWeight: "800", color: Colors.text },
+  summaryLabel:           { fontSize: 11, color: Colors.textSecondary, fontWeight: "600", textAlign: "center" },
+  quickLinks:             { flexDirection: "row", flexWrap: "wrap", gap: 10 },
+  quickLink:              { minWidth: "30%", flex: 1, backgroundColor: Colors.surface, borderRadius: 14, padding: 14, alignItems: "center", gap: 6, borderWidth: 1, borderColor: Colors.border },
+  quickLinkText:          { fontSize: 11, fontWeight: "600", color: Colors.textSecondary, textAlign: "center" },
+  sectionTitle:           { fontSize: 18, fontWeight: "700", color: Colors.text },
+  agentCard:              { backgroundColor: Colors.surface, borderRadius: 16, padding: 16, gap: 12, borderWidth: 1, borderColor: Colors.border, shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 4 },
+  agentCardTop:           { flexDirection: "row", alignItems: "center", gap: 12 },
+  agentAvatar:            { width: 44, height: 44, borderRadius: 22, backgroundColor: Colors.primary, alignItems: "center", justifyContent: "center" },
+  agentInfo:              { flex: 1 },
+  agentName:              { fontSize: 15, fontWeight: "700", color: Colors.text },
+  rateCircle:             { width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center" },
+  rateText:               { fontSize: 12, fontWeight: "800" },
+  statsRow:               { flexDirection: "row", gap: 6 },
+  statPill:               { flex: 1, backgroundColor: Colors.surfaceAlt, borderRadius: 10, padding: 8, alignItems: "center", gap: 2 },
+  statPillNum:            { fontSize: 16, fontWeight: "800", color: Colors.text },
+  statPillLabel:          { fontSize: 9, fontWeight: "600", color: Colors.textSecondary },
+  empty:                  { flex: 1, justifyContent: "center", alignItems: "center", gap: 12, paddingVertical: 60 },
+  emptyText:              { fontSize: 14, color: Colors.textMuted, textAlign: "center" },
+  pushPanel:              { backgroundColor: Colors.surface, borderRadius: 16, borderWidth: 1, borderColor: Colors.border, overflow: "hidden", shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.15, shadowRadius: 4, elevation: 2 },
+  pushPanelHeader:        { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 16, paddingVertical: 14, gap: 10 },
+  pushPanelLeft:          { flexDirection: "row", alignItems: "center", gap: 10, flex: 1 },
+  pushPanelRight:         { flexDirection: "row", alignItems: "center", gap: 10 },
+  pushPanelTitle:         { fontSize: 14, fontWeight: "700", color: Colors.text },
+  pushPanelSub:           { fontSize: 11, color: Colors.textSecondary, marginTop: 1 },
+  testAllBtn:             { backgroundColor: Colors.primary, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 6, minWidth: 70, alignItems: "center" },
+  testAllBtnText:         { color: "#fff", fontSize: 12, fontWeight: "700" },
+  pushAgentList:          { borderTopWidth: 1, borderTopColor: Colors.border },
+  pushAgentRow:           { flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingVertical: 10, gap: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: Colors.border },
+  pushDot:                { width: 8, height: 8, borderRadius: 4 },
+  pushAgentName:          { flex: 1, fontSize: 13, color: Colors.text, fontWeight: "600" },
+  pushAgentStatus:        { fontSize: 11, color: Colors.textSecondary, fontWeight: "600" },
+  pushAgentEmpty:         { padding: 16, color: Colors.textMuted, fontSize: 13, textAlign: "center" },
+  testOneBtn:             { width: 30, height: 30, borderRadius: 8, backgroundColor: Colors.primary + "18", alignItems: "center", justifyContent: "center" },
 });
