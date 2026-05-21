@@ -168,7 +168,7 @@ const VISIT_OUTCOMES = [
   "Paid",
   "PTP",
   "Refused to Pay",
-  "Customer Absent",
+  "Customer Skip",
   "Address Not Found",
 ] as const;
 type VisitOutcome = typeof VISIT_OUTCOMES[number];
@@ -177,7 +177,7 @@ const VISIT_OUTCOME_COLORS: Record<VisitOutcome, string> = {
   "Paid":              Colors.success,
   "PTP":               Colors.statusPTP,
   "Refused to Pay":    Colors.danger,
-  "Customer Absent":   Colors.warning,
+  "Customer Skip":   Colors.warning,
   "Address Not Found": Colors.textMuted,
 };
 
