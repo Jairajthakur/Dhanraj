@@ -34,7 +34,23 @@ const LoginScreen = memo(function LoginScreen() {
     try {
       await login(username.trim(), password.trim());
     } catch (e: any) {
-      Alert.alert("Login Failed", e.message || "Invalid credentials");
+      const msg: string = e.message || "";
+      const isNetworkError =
+        msg.includes("Network request failed") ||
+        msg.includes("Failed to fetch") ||
+        msg.includes("Cannot reach server") ||
+        msg.includes("took too long") ||
+        msg.includes("network");
+
+      if (isNetworkError) {
+        Alert.alert(
+          "Connection Error",
+          "Could not reach the server. Please check:\n\n• Your internet connection (try switching between WiFi and mobile data)\n• That you have a stable connection\n\nThen try again.",
+          [{ text: "Retry", onPress: handleLogin }, { text: "Cancel", style: "cancel" }]
+        );
+      } else {
+        Alert.alert("Login Failed", msg || "Invalid username or password");
+      }
     } finally {
       setLoading(false);
     }
