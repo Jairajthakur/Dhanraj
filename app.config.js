@@ -26,6 +26,9 @@ module.exports = ({ config }) => {
     android: {
       package: "com.dhanraj.app",
 
+      // ✅ Fix 1: Allow HTTPS traffic on all Android versions (required for Railway)
+      usesCleartextTraffic: false,
+
       permissions: [
         "INTERNET",
         "ACCESS_NETWORK_STATE",
@@ -56,7 +59,8 @@ module.exports = ({ config }) => {
     },
 
     extra: {
-      apiUrl: "https://dhanraj-production.up.railway.app",
+      // ✅ Fix 2: Read from EAS env var first, fallback to hardcoded URL
+      apiUrl: process.env.EXPO_PUBLIC_API_URL || "https://dhanraj-production.up.railway.app",
     },
   };
 };
