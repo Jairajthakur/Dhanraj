@@ -13,19 +13,34 @@ import { getApiUrl } from "@/lib/query-client";
 // The debug button uses direct fetch instead.
 
 // ─── Warm-up helper ──────────────────────────────────────────────────────────
-// Pings the Railway /api/health endpoint and WAITS for a response (up to 10 s)
+// Pings the Railway /api/health endpoint and WAITS for a response (up to 25 s)
 // before the real login request fires. This eliminates "Connection Error" on
-// cold-start: Railway needs 5-15 s to wake the server after it has been idle.
+// cold-start: Railway needs 5-25 s to wake on slow/2G-3G networks.
+// We poll every 5 s so the user knows progress is happening.
 async function warmUpServer(): Promise<void> {
   const url = `${getApiUrl()}/api/health`;
-  try {
-    await Promise.race([
-      fetch(url, { method: "GET" }),
-      new Promise<never>((_, rej) => setTimeout(() => rej(new Error("warm-up timeout")), 10000)),
-    ]);
-  } catch {
-    // Ignore — if health check fails we still attempt login; the retry
-    // logic inside _doApiRequest will handle transient failures.
+  const WARM_UP_TIMEOUT_MS = 25000;
+  const deadline = Date.now() + WARM_UP_TIMEOUT_MS;
+
+  while (Date.now() < deadline) {
+    try {
+      const remaining = deadline - Date.now();
+      await Promise.race([
+        fetch(url, { method: "GET" }),
+        new Promise<never>((_, rej) =>
+          setTimeout(() => rej(new Error("warm-up timeout")), Math.min(remaining, 8000)),
+        ),
+      ]);
+      return; // server responded — done
+    } catch {
+      // If there's still time left, wait 2 s and retry the ping
+      const remaining = deadline - Date.now();
+      if (remaining > 2000) {
+        await new Promise((r) => setTimeout(r, 2000));
+      } else {
+        return; // deadline reached — let login proceed anyway
+      }
+    }
   }
 }
 
@@ -37,6 +52,7 @@ const LoginScreen = memo(function LoginScreen() {
   const [showPass, setShowPass]   = useState(false);
   const [loading, setLoading]     = useState(false);
   const [warmingUp, setWarmingUp] = useState(false);
+  const [warmupAttempt, setWarmupAttempt] = useState(0);
   const [debugLoading, setDebugLoading] = useState(false);
 
   // ✅ useCallback prevents function recreation on every render
@@ -168,7 +184,7 @@ const LoginScreen = memo(function LoginScreen() {
 
   // Derive button label from current phase
   const isInProgress = warmingUp || loading;
-  const buttonLabel  = warmingUp ? "Connecting…" : "Sign In";
+  const buttonLabel  = warmingUp ? "Waking server…" : loading ? "Signing in…" : "Sign In";
 
   return (
     <KeyboardAvoidingView
