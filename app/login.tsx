@@ -32,6 +32,9 @@ const LoginScreen = memo(function LoginScreen() {
     }
     setLoading(true);
     try {
+      // Warm up the Railway server before login — cold starts can take 5-15s
+      // Fire-and-forget: don't await, don't throw, just kick the server awake
+      fetch(`${getApiUrl()}/api/health`, { method: "GET" }).catch(() => {});
       await login(username.trim(), password.trim());
     } catch (e: any) {
       const msg: string = e.message || "";
