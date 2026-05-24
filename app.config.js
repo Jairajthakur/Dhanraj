@@ -61,6 +61,10 @@ module.exports = ({ config }) => {
     extra: {
       // ✅ Fix 2: Read from EAS env var first, fallback to hardcoded URL
       apiUrl: process.env.EXPO_PUBLIC_API_URL || "https://dhanraj-production.up.railway.app",
+      // ✅ Fix 3: EAS project ID required for eas update --non-interactive
+      eas: {
+        projectId: "1b09251a-4423-4759-a22b-fc2f0a44fd8e",
+      },
     },
   };
 };
