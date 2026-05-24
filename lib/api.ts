@@ -85,12 +85,13 @@ async function _doApiRequest(
   data?: any,
   _retryCount: number = 0,
 ): Promise<any> {
-  // Login route gets a longer timeout (60 s) to survive Railway cold-starts.
-  // All other routes keep the previous 30 s timeout.
+  // Login route gets a longer timeout (90 s) to survive Railway cold-starts on
+  // 2G/3G networks. All other routes keep 30 s.
   const isLoginRoute = url.includes("/api/auth/login");
-  const TIMEOUT_MS   = isLoginRoute ? 60000 : 30000;
-  // Allow up to 2 automatic retries on transient errors (3 attempts total).
-  const MAX_RETRIES  = 2;
+  const TIMEOUT_MS   = isLoginRoute ? 90000 : 30000;
+  // Allow up to 3 automatic retries on transient errors (4 attempts total).
+  // Longer delays help on 2G/3G where the server may still be waking up.
+  const MAX_RETRIES  = isLoginRoute ? 3 : 2;
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
@@ -127,9 +128,10 @@ async function _doApiRequest(
       err?.message?.includes("Cannot reach");
     const isRetryable = isTimeout || isNetworkError;
 
-    // Retry with exponential back-off before surfacing the error
+    // Retry with exponential back-off before surfacing the error.
+    // Longer delays (4 s, 8 s, 12 s) give Railway more time to wake on slow networks.
     if (isRetryable && _retryCount < MAX_RETRIES) {
-      const delay = ((_retryCount + 1) * 2000); // 2 s, 4 s
+      const delay = ((_retryCount + 1) * 4000); // 4 s, 8 s, 12 s
       console.warn(`[API] Retrying ${method} ${url} in ${delay}ms (attempt ${_retryCount + 1}/${MAX_RETRIES})…`);
       await new Promise(r => setTimeout(r, delay));
       return _doApiRequest(url, method, headers, data, _retryCount + 1);
