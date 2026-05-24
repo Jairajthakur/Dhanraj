@@ -77,26 +77,42 @@ async function apiRequest(method: string, route: string, data?: any) {
 
 async function _doApiRequest(url: string, method: string, headers: Record<string, string>, data?: any) {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 10000); // 10s timeout
-  const res = await fetch(url, {
-    method,
-    headers,
-    credentials: "include",
-    body: data ? JSON.stringify(data) : undefined,
-    signal: controller.signal,
-  });
-  clearTimeout(timer);
-  if (res.status === 401) throw new Error("Unauthorized");
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    let msg = `HTTP ${res.status}`;
-    try { const json = JSON.parse(text); msg = json.message || json.error || msg; } catch { if (text) msg = text; }
-    console.error(`[API] ${method} ${route} → ${res.status}:`, msg);
-    throw new Error(msg);
+  const timer = setTimeout(() => controller.abort(), 30000); // 30s — matches query-client.ts; handles slow mobile/Railway latency
+  try {
+    const res = await fetch(url, {
+      method,
+      headers,
+      credentials: "include",
+      body: data ? JSON.stringify(data) : undefined,
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+    if (res.status === 401) throw new Error("Unauthorized");
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      let msg = `HTTP ${res.status}`;
+      try { const json = JSON.parse(text); msg = json.message || json.error || msg; } catch { if (text) msg = text; }
+      console.error(`[API] ${method} ${url} → ${res.status}:`, msg);
+      throw new Error(msg);
+    }
+    const text = await res.text();
+    if (!text) return {};
+    try { return JSON.parse(text); } catch { return {}; }
+  } catch (err: any) {
+    clearTimeout(timer);
+    if (err?.name === "AbortError") {
+      throw new Error("Server took too long to respond. Please check your internet connection and try again.");
+    }
+    if (
+      err?.message?.includes("Network request failed") ||
+      err?.message?.includes("Failed to fetch") ||
+      err?.message?.includes("network") ||
+      err?.message?.includes("Cannot reach")
+    ) {
+      throw new Error("Cannot reach server. Please check your internet connection and try again.");
+    }
+    throw err;
   }
-  const text = await res.text();
-  if (!text) return {};
-  try { return JSON.parse(text); } catch { return {}; }
 }
 
 async function apiUpload(route: string, form: FormData) {
