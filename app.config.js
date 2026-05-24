@@ -12,6 +12,16 @@ module.exports = ({ config }) => {
 
     userInterfaceStyle: "automatic",
 
+    // ✅ Required for EAS Update (eas update --channel production)
+    updates: {
+      url: "https://u.expo.dev/1b09251a-4423-4759-a22b-fc2f0a44fd8e",
+    },
+
+    // ✅ Ties OTA updates to the app binary version — prevents mismatched JS bundles
+    runtimeVersion: {
+      policy: "appVersion",
+    },
+
     splash: {
       image: "./assets/images/splash-icon.png",
       resizeMode: "contain",
@@ -26,7 +36,6 @@ module.exports = ({ config }) => {
     android: {
       package: "com.dhanraj.app",
 
-      // ✅ Fix 1: Allow HTTPS traffic on all Android versions (required for Railway)
       usesCleartextTraffic: false,
 
       permissions: [
@@ -59,9 +68,7 @@ module.exports = ({ config }) => {
     },
 
     extra: {
-      // ✅ Fix 2: Read from EAS env var first, fallback to hardcoded URL
       apiUrl: process.env.EXPO_PUBLIC_API_URL || "https://dhanraj-production.up.railway.app",
-      // ✅ Fix 3: EAS project ID required for eas update --non-interactive
       eas: {
         projectId: "1b09251a-4423-4759-a22b-fc2f0a44fd8e",
       },
