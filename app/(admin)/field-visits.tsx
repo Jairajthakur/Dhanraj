@@ -29,11 +29,15 @@ import {
   Share,
   Pressable,
   RefreshControl,
+  TextInput,
+  KeyboardAvoidingView,
 } from "react-native";
 import { Stack } from "expo-router";
 import { Ionicons, MaterialCommunityIcons, MaterialIcons } from "@expo/vector-icons";
 import * as FileSystem from "expo-file-system";
 import * as Sharing from "expo-sharing";
+import * as Location from "expo-location";
+import * as ImagePicker from "expo-image-picker";
 import Constants from "expo-constants";
 import { tokenStore } from "@/lib/api";
 
@@ -632,6 +636,267 @@ const dl = StyleSheet.create({
 });
 
 // ─── Main Screen ──────────────────────────────────────────────────────────────
+
+// ─── Admin Log Visit Modal ────────────────────────────────────────────────────
+const VISIT_OUTCOMES_ADMIN = [
+  "Paid", "PTP", "Refused to Pay", "Customer Skip", "Address Not Found",
+] as const;
+
+function LogVisitModal({
+  visible,
+  onClose,
+  onDone,
+}: {
+  visible: boolean;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const [loanNo,       setLoanNo]       = useState("");
+  const [outcome,      setOutcome]      = useState<string>("");
+  const [remarks,      setRemarks]      = useState("");
+  const [gpsLoading,   setGpsLoading]   = useState(false);
+  const [gps,          setGps]          = useState<{ lat: number; lng: number; accuracy: number | null } | null>(null);
+  const [photo,        setPhoto]        = useState<{ uri: string; name: string; type: string } | null>(null);
+  const [submitting,   setSubmitting]   = useState(false);
+
+  const reset = () => {
+    setLoanNo(""); setOutcome(""); setRemarks("");
+    setGps(null); setPhoto(null); setGpsLoading(false); setSubmitting(false);
+  };
+
+  const handleClose = () => { reset(); onClose(); };
+
+  const captureGPS = async () => {
+    setGpsLoading(true);
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== "granted") { Alert.alert("Permission Denied", "Location permission is required."); return; }
+      const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+      setGps({ lat: loc.coords.latitude, lng: loc.coords.longitude, accuracy: loc.coords.accuracy ?? null });
+    } catch (e: any) {
+      Alert.alert("GPS Error", e.message ?? "Could not get location.");
+    } finally {
+      setGpsLoading(false);
+    }
+  };
+
+  const pickPhoto = async () => {
+    const { status } = await ImagePicker.requestCameraPermissionsAsync();
+    if (status !== "granted") { Alert.alert("Permission Denied", "Camera permission is required."); return; }
+    const result = await ImagePicker.launchCameraAsync({ mediaTypes: "images", quality: 0.7 });
+    if (!result.canceled && result.assets?.[0]) {
+      const asset = result.assets[0];
+      setPhoto({ uri: asset.uri, name: `visit_${Date.now()}.jpg`, type: "image/jpeg" });
+    }
+  };
+
+  const handleSubmit = async () => {
+    if (!loanNo.trim()) { Alert.alert("Missing Info", "Please enter a Loan / Case ID."); return; }
+    if (!gps)           { Alert.alert("Missing GPS", "Please capture your current GPS location."); return; }
+    if (!outcome)       { Alert.alert("Missing Outcome", "Please select a visit outcome."); return; }
+
+    setSubmitting(true);
+    try {
+      const token = await tokenStore.get().catch(() => null);
+      const headers: Record<string, string> = {};
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+
+      // First resolve the case_id from the loan_no
+      const searchRes = await fetch(`${API}/api/admin/cases?search=${encodeURIComponent(loanNo.trim())}`, {
+        credentials: "include", headers: { ...headers, "Content-Type": "application/json" },
+      });
+      const searchJson = await searchRes.json();
+      const cases: any[] = Array.isArray(searchJson) ? searchJson : (searchJson.cases ?? []);
+      const match = cases.find((c: any) =>
+        (c.loan_no ?? "").toLowerCase().trim() === loanNo.toLowerCase().trim()
+      );
+      if (!match) {
+        Alert.alert("Not Found", `No case found with Loan/Case ID: ${loanNo.trim()}`);
+        setSubmitting(false);
+        return;
+      }
+
+      const formData = new FormData();
+      formData.append("lat", String(gps.lat));
+      formData.append("lng", String(gps.lng));
+      if (gps.accuracy != null) formData.append("accuracy", String(gps.accuracy));
+      formData.append("visit_outcome", outcome);
+      formData.append("visit_remarks", remarks.trim());
+      formData.append("case_type", "loan");
+      if (photo) {
+        formData.append("photo", { uri: photo.uri, name: photo.name, type: photo.type } as any);
+      }
+
+      const res = await fetch(`${API}/api/cases/${match.id}/visit`, {
+        method: "POST",
+        credentials: "include",
+        headers,
+        body: formData,
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.message || `Server error ${res.status}`);
+      }
+      Alert.alert("Visit Logged ✅", `Field visit recorded for ${match.customer_name ?? loanNo.trim()}.`);
+      reset();
+      onDone();
+    } catch (e: any) {
+      Alert.alert("Failed", e.message ?? "Could not log visit.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={handleClose}>
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+        <View style={lv.overlay}>
+          <View style={lv.sheet}>
+            <View style={lv.handle} />
+            <View style={lv.header}>
+              <Ionicons name="location" size={20} color={C.primary} />
+              <Text style={lv.title}>Log Admin Field Visit</Text>
+              <TouchableOpacity onPress={handleClose} style={lv.closeBtn}>
+                <Ionicons name="close" size={20} color={C.textMuted} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: 14 }}>
+              {/* Loan No */}
+              <View style={lv.group}>
+                <Text style={lv.label}>Loan / Case ID *</Text>
+                <TextInput
+                  style={lv.input}
+                  value={loanNo}
+                  onChangeText={setLoanNo}
+                  placeholder="Enter loan number"
+                  placeholderTextColor={C.textMuted}
+                  autoCapitalize="characters"
+                />
+              </View>
+
+              {/* GPS */}
+              <View style={lv.group}>
+                <Text style={lv.label}>GPS Location *</Text>
+                {gps ? (
+                  <View style={lv.gpsRow}>
+                    <Ionicons name="location" size={14} color={C.success} />
+                    <Text style={lv.gpsText}>
+                      {gps.lat.toFixed(5)}, {gps.lng.toFixed(5)}
+                      {gps.accuracy != null ? `  ±${Math.round(gps.accuracy)} m` : ""}
+                    </Text>
+                    <TouchableOpacity onPress={captureGPS} disabled={gpsLoading}>
+                      <Ionicons name="refresh" size={16} color={C.primary} />
+                    </TouchableOpacity>
+                  </View>
+                ) : (
+                  <TouchableOpacity style={lv.gpsBtn} onPress={captureGPS} disabled={gpsLoading}>
+                    {gpsLoading ? (
+                      <ActivityIndicator size={15} color={C.primary} />
+                    ) : (
+                      <Ionicons name="navigate-outline" size={18} color={C.primary} />
+                    )}
+                    <Text style={lv.gpsBtnText}>{gpsLoading ? "Getting location…" : "Capture Current Location"}</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+
+              {/* Outcome */}
+              <View style={lv.group}>
+                <Text style={lv.label}>Outcome *</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+                  {VISIT_OUTCOMES_ADMIN.map(o => (
+                    <TouchableOpacity
+                      key={o}
+                      style={[lv.chip, outcome === o && lv.chipActive]}
+                      onPress={() => setOutcome(o)}
+                    >
+                      <Text style={[lv.chipText, outcome === o && lv.chipTextActive]}>{o}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </View>
+
+              {/* Remarks */}
+              <View style={lv.group}>
+                <Text style={lv.label}>Remarks</Text>
+                <TextInput
+                  style={[lv.input, lv.inputMulti]}
+                  value={remarks}
+                  onChangeText={setRemarks}
+                  placeholder="Add any remarks (optional)"
+                  placeholderTextColor={C.textMuted}
+                  multiline
+                  numberOfLines={3}
+                />
+              </View>
+
+              {/* Photo */}
+              <View style={lv.group}>
+                <Text style={lv.label}>Photo (optional)</Text>
+                {photo ? (
+                  <View style={lv.photoPreview}>
+                    <Image source={{ uri: photo.uri }} style={lv.photoImg} resizeMode="cover" />
+                    <TouchableOpacity style={lv.removePhoto} onPress={() => setPhoto(null)}>
+                      <Ionicons name="close-circle" size={22} color={C.danger} />
+                    </TouchableOpacity>
+                  </View>
+                ) : (
+                  <TouchableOpacity style={lv.photoBtn} onPress={pickPhoto}>
+                    <Ionicons name="camera-outline" size={20} color={C.primary} />
+                    <Text style={lv.photoBtnText}>Take Photo</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            </ScrollView>
+
+            {/* Submit */}
+            <TouchableOpacity
+              style={[lv.submitBtn, submitting && { opacity: 0.6 }]}
+              onPress={handleSubmit}
+              disabled={submitting}
+              activeOpacity={0.85}
+            >
+              {submitting
+                ? <ActivityIndicator color="#fff" size="small" />
+                : <><Ionicons name="checkmark-circle" size={18} color="#fff" /><Text style={lv.submitText}>Log Visit</Text></>
+              }
+            </TouchableOpacity>
+          </View>
+        </View>
+      </KeyboardAvoidingView>
+    </Modal>
+  );
+}
+
+const lv = StyleSheet.create({
+  overlay:       { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" },
+  sheet:         { backgroundColor: C.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 20, gap: 14, maxHeight: "92%" },
+  handle:        { width: 40, height: 4, backgroundColor: C.border, borderRadius: 2, alignSelf: "center", marginBottom: 4 },
+  header:        { flexDirection: "row", alignItems: "center", gap: 8 },
+  title:         { flex: 1, fontSize: 18, fontWeight: "700", color: C.text },
+  closeBtn:      { padding: 4 },
+  group:         { gap: 6 },
+  label:         { fontSize: 12, fontWeight: "700", color: C.textSec, textTransform: "uppercase", letterSpacing: 0.4 },
+  input:         { backgroundColor: C.surfaceAlt, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 10, fontSize: 14, color: C.text, borderWidth: 1, borderColor: C.border },
+  inputMulti:    { minHeight: 72, textAlignVertical: "top" },
+  gpsBtn:        { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: C.primary + "15", borderRadius: 10, padding: 12, borderWidth: 1, borderColor: C.primary + "40" },
+  gpsBtnText:    { fontSize: 14, fontWeight: "600", color: C.primary },
+  gpsRow:        { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: C.success + "12", borderRadius: 10, padding: 10 },
+  gpsText:       { flex: 1, fontSize: 12, color: C.text, fontVariant: ["tabular-nums"] },
+  chip:          { paddingHorizontal: 14, paddingVertical: 7, borderRadius: 20, backgroundColor: C.surfaceAlt, borderWidth: 1, borderColor: C.border },
+  chipActive:    { backgroundColor: C.primaryDeep, borderColor: C.primaryDeep },
+  chipText:      { fontSize: 12, fontWeight: "600", color: C.textSec },
+  chipTextActive:{ color: "#fff" },
+  photoBtn:      { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: C.surfaceAlt, borderRadius: 10, padding: 12, borderWidth: 1, borderColor: C.border },
+  photoBtnText:  { fontSize: 14, fontWeight: "600", color: C.primary },
+  photoPreview:  { position: "relative", width: "100%", height: 140, borderRadius: 10, overflow: "hidden" },
+  photoImg:      { width: "100%", height: "100%" },
+  removePhoto:   { position: "absolute", top: 6, right: 6 },
+  submitBtn:     { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, backgroundColor: C.primary, borderRadius: 14, paddingVertical: 14, marginTop: 4 },
+  submitText:    { fontSize: 15, fontWeight: "700", color: "#fff" },
+});
+
 export default function FieldVisitsScreen() {
   const [dateStr,       setDateStr]       = useState(toDateStr(new Date()));
   const [visits,        setVisits]        = useState<FieldVisit[]>([]);
@@ -640,6 +905,7 @@ export default function FieldVisitsScreen() {
   const [selectedAgent, setSelectedAgent] = useState<string | null>(null);
   const [downloading,   setDownloading]   = useState(false);
   const [error,         setError]         = useState<string | null>(null);
+  const [logVisitOpen,  setLogVisitOpen]  = useState(false);
 
   // ── Fetch ────────────────────────────────────────────────────────────────
   const fetchVisits = useCallback(async (date: string, isRefresh = false) => {
@@ -770,6 +1036,21 @@ export default function FieldVisitsScreen() {
           />
         )}
       </View>
+
+      {/* Admin Log Visit FAB */}
+      <TouchableOpacity
+        style={s.fab}
+        onPress={() => setLogVisitOpen(true)}
+        activeOpacity={0.85}
+      >
+        <Ionicons name="add" size={26} color="#fff" />
+      </TouchableOpacity>
+
+      <LogVisitModal
+        visible={logVisitOpen}
+        onClose={() => setLogVisitOpen(false)}
+        onDone={() => { setLogVisitOpen(false); fetchVisits(dateStr, true); }}
+      />
     </>
   );
 }
@@ -783,4 +1064,5 @@ const s = StyleSheet.create({
   retryText:   { color: "#fff", fontWeight: "700", fontSize: 14 },
   emptyTitle:  { fontSize: 18, fontWeight: "700", color: C.text },
   emptyText:   { fontSize: 13, color: C.textSec, textAlign: "center", lineHeight: 20 },
+  fab:         { position: "absolute", bottom: 28, right: 20, width: 56, height: 56, borderRadius: 28, backgroundColor: C.primary, alignItems: "center", justifyContent: "center", shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.20, shadowRadius: 8, elevation: 8 },
 });
