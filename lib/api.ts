@@ -75,9 +75,26 @@ async function apiRequest(method: string, route: string, data?: any) {
   return _doApiRequest(url, method, headers, data);
 }
 
-async function _doApiRequest(url: string, method: string, headers: Record<string, string>, data?: any) {
+// ─── Retry helper ────────────────────────────────────────────────────────────
+// Retries on transient network failures with exponential back-off.
+// Login gets extra retries because Railway cold-starts can be slow.
+async function _doApiRequest(
+  url: string,
+  method: string,
+  headers: Record<string, string>,
+  data?: any,
+  _retryCount: number = 0,
+): Promise<any> {
+  // Login route gets a longer timeout (60 s) to survive Railway cold-starts.
+  // All other routes keep the previous 30 s timeout.
+  const isLoginRoute = url.includes("/api/auth/login");
+  const TIMEOUT_MS   = isLoginRoute ? 60000 : 30000;
+  // Allow up to 2 automatic retries on transient errors (3 attempts total).
+  const MAX_RETRIES  = 2;
+
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 30000); // 30s — matches query-client.ts; handles slow mobile/Railway latency
+  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+
   try {
     const res = await fetch(url, {
       method,
@@ -98,18 +115,35 @@ async function _doApiRequest(url: string, method: string, headers: Record<string
     const text = await res.text();
     if (!text) return {};
     try { return JSON.parse(text); } catch { return {}; }
+
   } catch (err: any) {
     clearTimeout(timer);
-    if (err?.name === "AbortError") {
-      throw new Error("Server took too long to respond. Please check your internet connection and try again.");
-    }
-    if (
+
+    const isTimeout      = err?.name === "AbortError";
+    const isNetworkError =
       err?.message?.includes("Network request failed") ||
       err?.message?.includes("Failed to fetch") ||
       err?.message?.includes("network") ||
-      err?.message?.includes("Cannot reach")
-    ) {
-      throw new Error("Cannot reach server. Please check your internet connection and try again.");
+      err?.message?.includes("Cannot reach");
+    const isRetryable = isTimeout || isNetworkError;
+
+    // Retry with exponential back-off before surfacing the error
+    if (isRetryable && _retryCount < MAX_RETRIES) {
+      const delay = ((_retryCount + 1) * 2000); // 2 s, 4 s
+      console.warn(`[API] Retrying ${method} ${url} in ${delay}ms (attempt ${_retryCount + 1}/${MAX_RETRIES})…`);
+      await new Promise(r => setTimeout(r, delay));
+      return _doApiRequest(url, method, headers, data, _retryCount + 1);
+    }
+
+    if (isTimeout) {
+      throw new Error(
+        "The server is taking longer than usual to respond. This can happen after a period of inactivity. Please wait a moment and try again.",
+      );
+    }
+    if (isNetworkError) {
+      throw new Error(
+        "Cannot reach the server. Please check your internet connection and try again.",
+      );
     }
     throw err;
   }
@@ -245,18 +279,13 @@ export const api = {
     apiRequest("GET", `/api/today-ptp${qs({ company: params?.company })}`),
 
   // ── Broken PTPs / Blocking ────────────────────────────────────────────────
-  // Safe wrapper — never throws, always returns an array.
-  // This prevents the allocation screen from going black if the
-  // endpoint doesn't exist yet or returns a non-2xx response.
   getBrokenPtps: async (): Promise<import("@/components/BlockingActionModal").BlockingItem[]> => {
     try {
       const result = await apiRequest("GET", "/api/broken-ptps");
-      // Server might return { items: [...] } or a bare array
       if (Array.isArray(result)) return result;
       if (result && Array.isArray(result.items)) return result.items;
       return [];
     } catch (err) {
-      // Log but don't crash — missing endpoint should not block the UI
       console.warn("[api.getBrokenPtps] failed silently:", err);
       return [];
     }
