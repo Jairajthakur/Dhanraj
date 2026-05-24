@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useCallback, useRef } from "react";
 import {
   View,
   Text,
@@ -13,16 +13,140 @@ import {
   Platform,
   Alert,
   KeyboardAvoidingView,
+  Image,
+  Share,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Ionicons } from "@expo/vector-icons";
+import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import Colors from "@/constants/colors";
 import { api, tokenStore } from "@/lib/api";
 import { getApiUrl } from "@/lib/query-client";
 import { ReassignCaseModal } from "@/components/ReassignCaseModal";
 import * as FileSystem from "expo-file-system";
 import * as Sharing from "expo-sharing";
+import * as Location from "expo-location";
+import * as ImagePicker from "expo-image-picker";
+
+// ─── Field Visit constants ────────────────────────────────────────────────────
+const VISIT_OUTCOMES = [
+  "Paid",
+  "PTP",
+  "Refused to Pay",
+  "Customer Skip",
+  "Address Not Found",
+] as const;
+type VisitOutcome = typeof VISIT_OUTCOMES[number];
+
+const VISIT_OUTCOME_COLORS: Record<VisitOutcome, string> = {
+  "Paid":             Colors.success ?? "#22c55e",
+  "PTP":              "#f59e0b",
+  "Refused to Pay":   Colors.danger  ?? "#ef4444",
+  "Customer Skip":    "#64748b",
+  "Address Not Found":"#8b5cf6",
+};
+
+const PTP_DATE_REGEX = /^\d{2}-\d{2}-\d{4}$/;
+const MAX_PHOTOS     = 4;
+const GPS_TIMEOUT_MS = 15000;
+const GPS_MAX_AGE_MS = 5000;
+
+interface GpsCoords { lat: number; lng: number; accuracy: number; }
+interface PhotoAsset { uri: string; fileName: string; mimeType: string; }
+
+// ─── WhatsApp helpers (admin field visit) ────────────────────────────────────
+function fmtRupeeAdmin(n?: number | null) {
+  return n != null ? `₹${n.toLocaleString("en-IN")}` : "—";
+}
+
+function buildAdminFieldVisitMsg(
+  caseItem: any,
+  visitOutcome: string,
+  visitRemarks: string,
+  gps: GpsCoords | null,
+  photoUrl?: string | null,
+  cbcAmount?: string,
+  lppAmount?: string,
+  emiAmount?: string,
+  rollbackYn?: boolean | null,
+  ptpDate?: string,
+): string {
+  const mapsLink = gps ? `https://maps.google.com/?q=${gps.lat},${gps.lng}` : null;
+  const isPaid   = visitOutcome === "Paid";
+  const isPTP    = visitOutcome === "PTP";
+  const time     = new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true });
+
+  const lines: string[] = [
+    `*FIELD VISIT REPORT (ADMIN)*`,
+    `──────────────────────`,
+    `Customer : ${caseItem.customer_name ?? "—"}`,
+    `App ID   : ${caseItem.app_id ?? "—"}`,
+    `BKT      : ${caseItem.bkt ?? "—"}`,
+    `POS      : ${caseItem.pos != null ? fmtRupeeAdmin(caseItem.pos) : "—"}`,
+    `Status   : ${visitOutcome}`,
+    `Agent    : ${caseItem.agent_name ?? "—"}`,
+  ];
+
+  if (isPTP && ptpDate)    lines.push(`PTP Date : ${ptpDate}`);
+  if (isPaid) {
+    if (cbcAmount)           lines.push(`CBC      : Rs.${cbcAmount}`);
+    if (lppAmount)           lines.push(`LPP      : Rs.${lppAmount}`);
+    if (emiAmount)           lines.push(`EMI      : Rs.${emiAmount}`);
+    if (rollbackYn === true) lines.push(`Rollback : Yes`);
+  }
+  if (visitRemarks) lines.push(`Remarks  : ${visitRemarks}`);
+  lines.push(`Time     : ${time}`);
+  if (gps)      lines.push(`Location : ${gps.lat.toFixed(4)}, ${gps.lng.toFixed(4)}`);
+  if (mapsLink) lines.push(`Map      : ${mapsLink}`);
+  lines.push(`──────────────────────`);
+
+  return lines.join("\n");
+}
+
+async function shareAdminFieldVisitToWhatsApp(
+  msg: string,
+  photoUri: string | null,
+): Promise<void> {
+  if (photoUri && Platform.OS !== "web") {
+    try {
+      let fileUri = photoUri;
+      if (photoUri.startsWith("data:")) {
+        const base64Data = photoUri.split(",")[1];
+        const dest = `${FileSystem.cacheDirectory}admin_fv_share_photo.jpg`;
+        await FileSystem.writeAsStringAsync(dest, base64Data, { encoding: FileSystem.EncodingType.Base64 });
+        fileUri = dest;
+      } else if (Platform.OS === "android" && photoUri.startsWith("content://")) {
+        const dest = `${FileSystem.cacheDirectory}admin_fv_share_photo.jpg`;
+        await FileSystem.copyAsync({ from: photoUri, to: dest });
+        fileUri = dest;
+      }
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const RNShare = require("react-native-share").default;
+      await RNShare.shareSingle({
+        social:  RNShare.Social.WHATSAPP,
+        url:     fileUri,
+        message: msg,
+        type:    "image/jpeg",
+        title:   "Field Visit Report",
+      });
+      return;
+    } catch (e: any) {
+      if (e?.error === "ECANCELLED" || e?.message?.includes("cancel")) return;
+    }
+  }
+  const waUrl = `whatsapp://send?text=${encodeURIComponent(msg)}`;
+  const canWA = await Linking.canOpenURL(waUrl).catch(() => false);
+  if (canWA) { await Linking.openURL(waUrl); return; }
+  const webWaUrl = `https://wa.me/?text=${encodeURIComponent(msg)}`;
+  const canWeb = await Linking.canOpenURL(webWaUrl).catch(() => false);
+  if (canWeb) { await Linking.openURL(webWaUrl); return; }
+  await Share.share({ message: msg, title: "Field Visit Report" });
+}
+
+function toIsoDateAdmin(ddmmyyyy: string): string {
+  const [d, m, y] = ddmmyyyy.split("-");
+  return `${y}-${m}-${d}`;
+}
 // WebView is native-only; on web we use an iframe instead
 const HtmlPreview = ({ html }: { html: string }) => {
   if (Platform.OS === "web") {
@@ -544,6 +668,356 @@ function PostIntimationModal({ item, onClose }: { item: any; onClose: () => void
 }
 
 // ── Status Action Bar ──────────────────────────────────────────────────────
+// ── Admin Field Visit Modal ────────────────────────────────────────────────
+function AdminFieldVisitModal({
+  visible,
+  caseItem,
+  tableType,
+  onClose,
+  onSaved,
+}: {
+  visible: boolean;
+  caseItem: any;
+  tableType: "loan" | "bkt";
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const insets = useSafeAreaInsets();
+  const saveGuardRef = React.useRef(false);
+
+  const [visitOutcome, setVisitOutcome]     = useState<VisitOutcome | "">("");
+  const [visitRemarks, setVisitRemarks]     = useState("");
+  const [visitPtpDate, setVisitPtpDate]     = useState("");
+  const [visitCbcAmount, setVisitCbcAmount] = useState("");
+  const [visitLppAmount, setVisitLppAmount] = useState("");
+  const [visitEmiAmount, setVisitEmiAmount] = useState("");
+  const [visitRollbackYn, setVisitRollbackYn] = useState<boolean | null>(null);
+  const [photos, setPhotos]                 = useState<PhotoAsset[]>([]);
+  const [photoError, setPhotoError]         = useState("");
+  const [gps, setGps]                       = useState<GpsCoords | null>(null);
+  const [locLoading, setLocLoading]         = useState(false);
+  const [loading, setLoading]               = useState(false);
+
+  const resetState = () => {
+    setVisitOutcome(""); setVisitRemarks(""); setVisitPtpDate("");
+    setVisitCbcAmount(""); setVisitLppAmount(""); setVisitEmiAmount("");
+    setVisitRollbackYn(null); setPhotos([]); setPhotoError("");
+    setGps(null); setLocLoading(false); setLoading(false);
+    saveGuardRef.current = false;
+  };
+
+  const handleClose = () => { resetState(); onClose(); };
+
+  const captureGps = React.useCallback(async () => {
+    if (locLoading) return;
+    setLocLoading(true);
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== "granted") { Alert.alert("Location Permission Denied", "Please enable location access in your device settings."); return; }
+      const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High, timeInterval: GPS_TIMEOUT_MS, maximumAge: GPS_MAX_AGE_MS } as any);
+      if (!loc || !loc.coords) { Alert.alert("GPS Error", "Could not read location coordinates. Please try again."); return; }
+      setGps({ lat: loc.coords.latitude, lng: loc.coords.longitude, accuracy: Math.round(loc.coords.accuracy ?? 0) });
+    } catch (err: unknown) {
+      Alert.alert("GPS Error", err instanceof Error ? err.message : "Could not capture GPS. Try again.");
+    } finally { setLocLoading(false); }
+  }, [locLoading]);
+
+  const pickPhoto = React.useCallback(async () => {
+    setPhotoError("");
+    if (photos.length >= MAX_PHOTOS) { setPhotoError(`Maximum ${MAX_PHOTOS} photos allowed.`); return; }
+    const { status } = await ImagePicker.requestCameraPermissionsAsync();
+    if (status !== "granted") { Alert.alert("Camera Permission Denied", "Please enable camera access in your device settings."); return; }
+    const result = await ImagePicker.launchCameraAsync({ quality: 0.65, base64: false, allowsEditing: false, mediaTypes: ImagePicker.MediaTypeOptions.Images });
+    if (!result.canceled && result.assets[0]) {
+      const asset = result.assets[0];
+      const ext = (asset.uri.split(".").pop() ?? "jpg").toLowerCase();
+      setPhotos((prev) => [...prev, { uri: asset.uri, fileName: `visit_${Date.now()}_${prev.length}.${ext}`, mimeType: ext === "png" ? "image/png" : "image/jpeg" }]);
+    }
+  }, [photos.length]);
+
+  const removePhoto = React.useCallback((index: number) => {
+    setPhotoError(""); setPhotos((prev) => prev.filter((_, i) => i !== index));
+  }, []);
+
+  const visitCanSave = !!visitOutcome && !!gps
+    && (visitOutcome !== "PTP" || PTP_DATE_REGEX.test(visitPtpDate.trim()));
+
+  const save = async () => {
+    if (saveGuardRef.current || !caseItem) return;
+    if (!visitOutcome) { Alert.alert("Validation Error", "Please select a visit outcome."); return; }
+    if (!gps) { Alert.alert("Validation Error", "GPS location is required. Tap \'Capture GPS\' before saving."); return; }
+    if (visitOutcome === "PTP" && !visitPtpDate.trim()) { Alert.alert("Validation Error", "PTP date is required when outcome is PTP."); return; }
+    if (visitOutcome === "PTP" && !PTP_DATE_REGEX.test(visitPtpDate.trim())) { Alert.alert("Validation Error", "PTP date must be DD-MM-YYYY."); return; }
+
+    saveGuardRef.current = true;
+    setLoading(true);
+    try {
+      const currentGps = gps;
+      const newStatus =
+        visitOutcome === "Paid" ? "Paid"
+        : visitOutcome === "PTP"  ? "PTP"
+        : caseItem.status;
+
+      const visitResult = await api.recordFieldVisit(caseItem.id, {
+        lat: currentGps.lat, lng: currentGps.lng, accuracy: currentGps.accuracy,
+        case_type: tableType === "bkt" ? "bkt" : "allocation",
+        visit_outcome: visitOutcome || undefined,
+        visit_remarks: visitRemarks.trim() || undefined,
+        photo: photos.length > 0 ? { uri: photos[0].uri, name: photos[0].fileName, mimeType: photos[0].mimeType } : undefined,
+      });
+
+      const savedVisitId = visitResult?.visit?.id ?? visitResult?.id ?? null;
+      const savedToken   = savedVisitId ? await tokenStore.get().catch(() => null) : null;
+      const visitPhotoUrl = savedVisitId
+        ? `${getApiUrl()}/api/field-visits/${savedVisitId}/photo${savedToken ? `?token=${encodeURIComponent(savedToken)}` : ""}`
+        : null;
+
+      const payload: Record<string, unknown> = {
+        status:            newStatus,
+        visit_outcome:     visitOutcome,
+        visit_remarks:     visitRemarks.trim(),
+        visit_location:    `${currentGps.lat.toFixed(6)},${currentGps.lng.toFixed(6)}`,
+        visit_photo_count: photos.length,
+        visited_at:        new Date().toISOString(),
+        ...(visitOutcome === "PTP"  && { ptp_date: toIsoDateAdmin(visitPtpDate.trim()) }),
+        ...(visitOutcome === "Paid" && {
+          cbc_paid: visitCbcAmount ? parseFloat(visitCbcAmount) : null,
+          lpp_paid: visitLppAmount ? parseFloat(visitLppAmount) : null,
+          emi_paid: visitEmiAmount ? parseFloat(visitEmiAmount) : null,
+          rollback_yn: visitRollbackYn,
+        }),
+        table: tableType,
+      };
+
+      await api.admin.updateCaseStatus(caseItem.id, payload as any);
+
+      const shareMsg = buildAdminFieldVisitMsg(caseItem, visitOutcome, visitRemarks, currentGps, visitPhotoUrl, visitCbcAmount, visitLppAmount, visitEmiAmount, visitRollbackYn, visitPtpDate);
+
+      let sharePhotoUri: string | null = null;
+      if (visitPhotoUrl) {
+        try {
+          const dest = `${FileSystem.cacheDirectory}admin_fv_share_photo.jpg`;
+          const dl = await FileSystem.downloadAsync(visitPhotoUrl, dest);
+          if (dl.status === 200) sharePhotoUri = dl.uri;
+        } catch (e) { console.warn("[admin fv share] photo download failed:", e); }
+      }
+
+      onSaved();
+      resetState();
+      onClose();
+
+      setTimeout(() => shareAdminFieldVisitToWhatsApp(shareMsg, sharePhotoUri), 300);
+    } catch (e: unknown) {
+      Alert.alert("Error", e instanceof Error ? e.message : "Something went wrong");
+    } finally { setLoading(false); saveGuardRef.current = false; }
+  };
+
+  if (!caseItem) return null;
+  const outcomeColor = visitOutcome ? (VISIT_OUTCOME_COLORS[visitOutcome as VisitOutcome] ?? Colors.primary) : Colors.border;
+
+  return (
+    <Modal visible={visible} transparent={false} animationType="slide" onRequestClose={handleClose}>
+      <KeyboardAvoidingView style={{ flex: 1, backgroundColor: Colors.background }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+        <View style={[fvModalStyles.header, { paddingTop: insets.top + 8 }]}>
+          <Pressable onPress={handleClose} style={{ padding: 4 }}>
+            <Ionicons name="arrow-back" size={22} color="#fff" />
+          </Pressable>
+          <View style={{ flex: 1 }}>
+            <Text style={fvModalStyles.headerTitle} numberOfLines={1}>Field Visit</Text>
+            <Text style={fvModalStyles.headerSub} numberOfLines={1}>{caseItem.customer_name}</Text>
+          </View>
+          <View style={fvModalStyles.headerBadge}>
+            <Ionicons name="location" size={14} color="#fff" />
+            <Text style={fvModalStyles.headerBadgeText}>Admin</Text>
+          </View>
+        </View>
+
+        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16, paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
+          <View style={fvModalStyles.amountRow}>
+            <View style={fvModalStyles.amountChip}>
+              <Text style={fvModalStyles.amountLabel}>EMI DUE</Text>
+              <Text style={[fvModalStyles.amountValue, { color: Colors.danger }]}>
+                {caseItem.emi_due != null ? `₹${Number(caseItem.emi_due).toLocaleString("en-IN")}` : "—"}
+              </Text>
+            </View>
+            <View style={fvModalStyles.amountChip}>
+              <Text style={fvModalStyles.amountLabel}>POS</Text>
+              <Text style={fvModalStyles.amountValue}>
+                {caseItem.pos != null ? `₹${Number(caseItem.pos).toLocaleString("en-IN")}` : "—"}
+              </Text>
+            </View>
+            <View style={[fvModalStyles.amountChip, { flex: 1.4 }]}>
+              <Text style={fvModalStyles.amountLabel}>ADDRESS</Text>
+              <Text style={[fvModalStyles.amountValue, { fontSize: 11 }]} numberOfLines={2}>
+                {caseItem.address ?? caseItem.city ?? "—"}
+              </Text>
+            </View>
+          </View>
+
+          <View style={fvModalStyles.sectionRow}>
+            <Text style={fvModalStyles.sectionLabel}>GPS Location</Text>
+            <View style={fvModalStyles.requiredBadge}><Text style={fvModalStyles.requiredText}>Required</Text></View>
+          </View>
+          <Pressable
+            style={[fvModalStyles.locationBtn, gps && fvModalStyles.locationBtnCaptured, locLoading && { opacity: 0.6 }]}
+            onPress={captureGps} disabled={locLoading || loading}
+          >
+            {locLoading
+              ? <ActivityIndicator size="small" color={Colors.primary} />
+              : <Ionicons name={gps ? "checkmark-circle" : "locate"} size={20} color={gps ? Colors.success : Colors.primary} />
+            }
+            <View style={{ flex: 1 }}>
+              <Text style={[fvModalStyles.locationBtnText, gps && { color: Colors.success, fontWeight: "700" }]}>
+                {locLoading ? "Acquiring GPS signal…" : gps ? `${gps.lat.toFixed(5)}, ${gps.lng.toFixed(5)}` : "Tap to capture current location"}
+              </Text>
+              {gps && <Text style={fvModalStyles.locationAccuracy}>Accuracy: ±{gps.accuracy}m</Text>}
+            </View>
+            {gps
+              ? (<Pressable style={fvModalStyles.reCaptureBtn} onPress={captureGps} disabled={locLoading || loading}>
+                  <Ionicons name="refresh" size={14} color={Colors.primary} />
+                  <Text style={fvModalStyles.reCaptureText}>Re-capture</Text>
+                </Pressable>)
+              : (!locLoading && <Ionicons name="chevron-forward" size={16} color={Colors.textMuted} />)
+            }
+          </Pressable>
+
+          <View style={fvModalStyles.sectionRow}>
+            <Text style={fvModalStyles.sectionLabel}>Visit Outcome</Text>
+            <View style={fvModalStyles.requiredBadge}><Text style={fvModalStyles.requiredText}>Required</Text></View>
+          </View>
+          <View style={{ gap: 8, marginBottom: 16 }}>
+            {VISIT_OUTCOMES.map((opt) => {
+              const color = VISIT_OUTCOME_COLORS[opt];
+              const isSelected = visitOutcome === opt;
+              return (
+                <Pressable
+                  key={opt}
+                  style={[fvModalStyles.outcomeBtn, isSelected && { backgroundColor: color + "18", borderColor: color, borderWidth: 2 }]}
+                  onPress={() => { setVisitOutcome(isSelected ? "" : opt); setVisitPtpDate(""); }}
+                  disabled={loading}
+                >
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+                    <View style={[fvModalStyles.outcomeDot, { backgroundColor: isSelected ? color : Colors.border }]} />
+                    <Text style={[fvModalStyles.outcomeText, isSelected && { color, fontWeight: "700" }]}>{opt}</Text>
+                  </View>
+                  {isSelected && <Ionicons name="checkmark-circle" size={22} color={color} />}
+                </Pressable>
+              );
+            })}
+          </View>
+
+          {visitOutcome === "PTP" && (
+            <>
+              <View style={fvModalStyles.sectionRow}>
+                <Text style={fvModalStyles.sectionLabel}>PTP Date</Text>
+                <View style={fvModalStyles.requiredBadge}><Text style={fvModalStyles.requiredText}>Required</Text></View>
+              </View>
+              <TextInput
+                style={[fvModalStyles.input, visitPtpDate && !PTP_DATE_REGEX.test(visitPtpDate) && fvModalStyles.inputError]}
+                placeholder="DD-MM-YYYY" placeholderTextColor={Colors.textMuted}
+                value={visitPtpDate} onChangeText={setVisitPtpDate}
+                keyboardType="numeric" maxLength={10} editable={!loading}
+              />
+              {visitPtpDate && !PTP_DATE_REGEX.test(visitPtpDate) && (
+                <Text style={fvModalStyles.fieldError}>Enter date as DD-MM-YYYY</Text>
+              )}
+            </>
+          )}
+
+          {visitOutcome === "Paid" && (
+            <>
+              <Text style={fvModalStyles.sectionLabel}>Payment Amounts (₹)</Text>
+              <View style={{ flexDirection: "row", gap: 8, marginBottom: 12 }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={[fvModalStyles.sectionLabel, { fontSize: 11, marginBottom: 4 }]}>CBC</Text>
+                  <TextInput style={[fvModalStyles.input, { minHeight: 44 }]} placeholder="0" placeholderTextColor={Colors.textMuted} value={visitCbcAmount} onChangeText={setVisitCbcAmount} keyboardType="numeric" editable={!loading} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={[fvModalStyles.sectionLabel, { fontSize: 11, marginBottom: 4 }]}>LPP</Text>
+                  <TextInput style={[fvModalStyles.input, { minHeight: 44 }]} placeholder="0" placeholderTextColor={Colors.textMuted} value={visitLppAmount} onChangeText={setVisitLppAmount} keyboardType="numeric" editable={!loading} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={[fvModalStyles.sectionLabel, { fontSize: 11, marginBottom: 4 }]}>EMI</Text>
+                  <TextInput style={[fvModalStyles.input, { minHeight: 44 }]} placeholder="0" placeholderTextColor={Colors.textMuted} value={visitEmiAmount} onChangeText={setVisitEmiAmount} keyboardType="numeric" editable={!loading} />
+                </View>
+              </View>
+              <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", backgroundColor: Colors.surfaceAlt, borderRadius: 10, padding: 12, marginBottom: 12, borderWidth: 1, borderColor: Colors.border }}>
+                <Text style={{ fontSize: 13, fontWeight: "600", color: Colors.text }}>Rollback Y/N</Text>
+                <View style={{ flexDirection: "row", gap: 8 }}>
+                  {([true, false] as const).map((val) => (
+                    <Pressable
+                      key={String(val)}
+                      onPress={() => setVisitRollbackYn(visitRollbackYn === val ? null : val)}
+                      style={[{ paddingHorizontal: 16, paddingVertical: 7, borderRadius: 8, borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.surface }, visitRollbackYn === val && { backgroundColor: Colors.primary, borderColor: Colors.primary }]}
+                    >
+                      <Text style={[{ fontSize: 13, fontWeight: "700", color: Colors.text }, visitRollbackYn === val && { color: "#fff" }]}>{val ? "Yes" : "No"}</Text>
+                    </Pressable>
+                  ))}
+                </View>
+              </View>
+            </>
+          )}
+
+          <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+            <Text style={fvModalStyles.sectionLabel}>Visit Remarks</Text>
+            <Text style={fvModalStyles.optionalText}>Optional</Text>
+          </View>
+          <TextInput
+            style={[fvModalStyles.input, { minHeight: 90, textAlignVertical: "top" }]}
+            placeholder="Describe what happened..."
+            placeholderTextColor={Colors.textMuted} value={visitRemarks} onChangeText={setVisitRemarks}
+            multiline numberOfLines={4} editable={!loading}
+          />
+
+          <Text style={[fvModalStyles.sectionLabel, { marginTop: 4 }]}>
+            Photo Proof <Text style={fvModalStyles.optionalText}>({photos.length}/{MAX_PHOTOS} · optional)</Text>
+          </Text>
+          {photoError ? <Text style={fvModalStyles.fieldError}>{photoError}</Text> : null}
+          <View style={fvModalStyles.photoGrid}>
+            {photos.map((photo, i) => (
+              <View key={i} style={fvModalStyles.photoThumb}>
+                <Image source={{ uri: photo.uri }} style={fvModalStyles.photoImg} resizeMode="cover" />
+                {!loading && (
+                  <Pressable style={fvModalStyles.photoRemoveBtn} onPress={() => removePhoto(i)}>
+                    <View style={fvModalStyles.photoRemoveBg}><Ionicons name="close" size={12} color="#fff" /></View>
+                  </Pressable>
+                )}
+              </View>
+            ))}
+            {photos.length < MAX_PHOTOS && !loading && (
+              <Pressable style={fvModalStyles.photoAddBtn} onPress={pickPhoto}>
+                <Ionicons name="camera-outline" size={24} color={Colors.textMuted} />
+                <Text style={fvModalStyles.photoAddText}>Add Photo</Text>
+              </Pressable>
+            )}
+          </View>
+        </ScrollView>
+
+        <View style={[fvModalStyles.footer, { paddingBottom: insets.bottom + 12 }]}>
+          <Pressable style={fvModalStyles.cancelBtn} onPress={handleClose} disabled={loading}>
+            <Text style={fvModalStyles.cancelBtnText}>Cancel</Text>
+          </Pressable>
+          <Pressable
+            style={[fvModalStyles.saveBtn, { backgroundColor: visitCanSave ? outcomeColor : Colors.border }, loading && { opacity: 0.7 }]}
+            onPress={save}
+            disabled={!visitCanSave || loading}
+          >
+            {loading
+              ? <ActivityIndicator size="small" color="#fff" />
+              : (
+                <>
+                  <MaterialCommunityIcons name="whatsapp" size={16} color="#fff" />
+                  <Text style={fvModalStyles.saveBtnText}>Save & Share on WhatsApp</Text>
+                </>
+              )
+            }
+          </Pressable>
+        </View>
+      </KeyboardAvoidingView>
+    </Modal>
+  );
+}
+
 function StatusActionBar({ item, tableType, onUpdated, onPreIntimation, onPostIntimation }: { item: any; tableType: "loan" | "bkt"; onUpdated: () => void; onPreIntimation?: (item: any) => void; onPostIntimation?: (item: any) => void; }) {
   const [loading, setLoading] = useState<string | null>(null);
   const handleStatus = async (status: "Paid" | "Unpaid", rollback_yn?: boolean) => {
@@ -591,6 +1065,7 @@ function CaseDetailModal({ item, tableType, onClose, onResetCase, onStatusUpdate
   const insets = useSafeAreaInsets();
   const [resetting, setResetting] = useState(false);
   const [localItem, setLocalItem] = useState(item);
+  const [showFieldVisitModal, setShowFieldVisitModal] = useState(false);
   React.useEffect(() => { if (item) setLocalItem(item); }, [item]);
   const statusColor = localItem ? STATUS_COLORS[localItem.status] || Colors.primary : Colors.primary;
   const companyColor = localItem?.company_name ? getCompanyColor(localItem.company_name) : null;
@@ -690,7 +1165,18 @@ function CaseDetailModal({ item, tableType, onClose, onResetCase, onStatusUpdate
                 <Ionicons name="swap-horizontal-outline" size={15} color="#fff" />
                 <Text style={detailStyles.transferBtnText}>Transfer Case to Another FOS</Text>
               </Pressable>
+              <Pressable style={detailStyles.fieldVisitBtn} onPress={() => setShowFieldVisitModal(true)}>
+                <Ionicons name="location-outline" size={15} color="#fff" />
+                <Text style={detailStyles.fieldVisitBtnText}>Field Visit</Text>
+              </Pressable>
             </View>
+            <AdminFieldVisitModal
+              visible={showFieldVisitModal}
+              caseItem={localItem}
+              tableType={tableType}
+              onClose={() => setShowFieldVisitModal(false)}
+              onSaved={async () => { await onStatusUpdated(); }}
+            />
             {localItem.monthly_feedback ? (
               <Pressable style={[detailStyles.resetCaseBtn, resetting && { opacity: 0.6 }]} onPress={handleResetCase} disabled={resetting}>
                 {resetting ? <ActivityIndicator size="small" color={Colors.danger} /> : <Ionicons name="refresh" size={16} color={Colors.danger} />}
@@ -1172,6 +1658,8 @@ const detailStyles = StyleSheet.create({
   noFeedbackText: { fontSize: 12, color: Colors.textMuted },
   transferBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, marginTop: 10, backgroundColor: "#7c3aed", borderRadius: 10, paddingVertical: 11, paddingHorizontal: 16 },
   transferBtnText: { fontSize: 13, fontWeight: "700", color: "#fff" },
+  fieldVisitBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, marginTop: 8, backgroundColor: Colors.success ?? "#22c55e", borderRadius: 10, paddingVertical: 11, paddingHorizontal: 16 },
+  fieldVisitBtnText: { fontSize: 13, fontWeight: "700", color: "#fff" },
   row: { flexDirection: "row", borderBottomWidth: 1, borderBottomColor: Colors.border, backgroundColor: Colors.surface },
   labelCell: { width: "42%", backgroundColor: Colors.surfaceAlt, padding: 12, justifyContent: "center", borderRightWidth: 1, borderRightColor: Colors.border },
   labelText: { fontSize: 13, fontWeight: "700", color: Colors.primary },
@@ -1198,4 +1686,45 @@ const intimStyles = StyleSheet.create({
   tabTextActive: { color: Colors.primary },
   previewBtn:    { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, backgroundColor: "#92400e", borderRadius: 10, paddingVertical: 12, marginTop: 12 },
   previewBtnText: { fontSize: 14, fontWeight: "700", color: "#fff" },
+});
+
+const fvModalStyles = StyleSheet.create({
+  header: { flexDirection: "row", alignItems: "center", paddingHorizontal: 12, paddingBottom: 14, gap: 10, backgroundColor: Colors.success ?? "#22c55e" },
+  headerTitle: { fontSize: 16, fontWeight: "700", color: "#fff" },
+  headerSub: { fontSize: 12, color: "rgba(255,255,255,0.85)", marginTop: 2 },
+  headerBadge: { flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: "rgba(255,255,255,0.2)", borderRadius: 12, paddingHorizontal: 10, paddingVertical: 4 },
+  headerBadgeText: { fontSize: 12, fontWeight: "700", color: "#fff" },
+  amountRow: { flexDirection: "row", gap: 8, marginBottom: 16 },
+  amountChip: { flex: 1, backgroundColor: Colors.surface, borderRadius: 10, padding: 10, borderWidth: 1, borderColor: Colors.border },
+  amountLabel: { fontSize: 10, fontWeight: "700", color: Colors.textMuted, textTransform: "uppercase", letterSpacing: 0.5 },
+  amountValue: { fontSize: 13, fontWeight: "700", color: Colors.text, marginTop: 2 },
+  sectionRow: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 8 },
+  sectionLabel: { fontSize: 13, fontWeight: "700", color: Colors.text },
+  requiredBadge: { backgroundColor: Colors.danger + "18", borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
+  requiredText: { fontSize: 10, fontWeight: "700", color: Colors.danger, textTransform: "uppercase" },
+  optionalText: { fontSize: 11, color: Colors.textMuted },
+  locationBtn: { flexDirection: "row", alignItems: "center", gap: 10, backgroundColor: Colors.surface, borderRadius: 10, padding: 14, borderWidth: 1.5, borderColor: Colors.border, marginBottom: 16 },
+  locationBtnCaptured: { borderColor: Colors.success ?? "#22c55e", backgroundColor: (Colors.success ?? "#22c55e") + "08" },
+  locationBtnText: { fontSize: 13, color: Colors.text },
+  locationAccuracy: { fontSize: 11, color: Colors.textMuted, marginTop: 2 },
+  reCaptureBtn: { flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: Colors.primary + "15", borderRadius: 6, paddingHorizontal: 8, paddingVertical: 4 },
+  reCaptureText: { fontSize: 11, fontWeight: "700", color: Colors.primary },
+  outcomeBtn: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", backgroundColor: Colors.surface, borderRadius: 10, padding: 14, borderWidth: 1.5, borderColor: Colors.border },
+  outcomeDot: { width: 12, height: 12, borderRadius: 6 },
+  outcomeText: { fontSize: 14, color: Colors.text },
+  input: { backgroundColor: Colors.surface, borderRadius: 10, borderWidth: 1, borderColor: Colors.border, paddingHorizontal: 14, paddingVertical: 12, fontSize: 14, color: Colors.text, marginBottom: 12 },
+  inputError: { borderColor: Colors.danger },
+  fieldError: { fontSize: 12, color: Colors.danger, marginTop: -8, marginBottom: 8 },
+  photoGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 8, marginBottom: 16 },
+  photoThumb: { width: 80, height: 80, borderRadius: 8, overflow: "hidden", borderWidth: 1, borderColor: Colors.border },
+  photoImg: { width: "100%", height: "100%" },
+  photoRemoveBtn: { position: "absolute", top: 4, right: 4 },
+  photoRemoveBg: { backgroundColor: "rgba(0,0,0,0.6)", borderRadius: 10, padding: 2 },
+  photoAddBtn: { width: 80, height: 80, borderRadius: 8, borderWidth: 1.5, borderColor: Colors.border, borderStyle: "dashed", alignItems: "center", justifyContent: "center", gap: 4 },
+  photoAddText: { fontSize: 10, color: Colors.textMuted },
+  footer: { flexDirection: "row", gap: 10, paddingHorizontal: 16, paddingTop: 12, backgroundColor: Colors.surface, borderTopWidth: 1, borderTopColor: Colors.border },
+  cancelBtn: { flex: 1, alignItems: "center", justifyContent: "center", paddingVertical: 14, borderRadius: 10, borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.surfaceAlt },
+  cancelBtnText: { fontSize: 14, fontWeight: "700", color: Colors.textSecondary },
+  saveBtn: { flex: 2.5, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingVertical: 14, borderRadius: 10 },
+  saveBtnText: { fontSize: 14, fontWeight: "700", color: "#fff" },
 });
