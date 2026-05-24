@@ -283,5 +283,17 @@ function setupErrorHandler(app: express.Application) {
   const port = parseInt(process.env.PORT || "5000", 10);
   server.listen(port, "0.0.0.0", () => {
     log(`express server serving on port ${port}`);
+
+    // Keep-alive: ping own health endpoint every 10 minutes so Railway
+    // does not put the server to sleep between user logins.
+    const selfUrl = process.env.RAILWAY_PUBLIC_DOMAIN
+      ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}/api/health`
+      : `http://localhost:${port}/api/health`;
+
+    setInterval(() => {
+      fetch(selfUrl)
+        .then(() => log("[keep-alive] ping ok"))
+        .catch((err: Error) => console.warn("[keep-alive] ping failed:", err.message));
+    }, 10 * 60 * 1000); // every 10 minutes
   });
 })();
