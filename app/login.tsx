@@ -12,52 +12,80 @@ import { getApiUrl } from "@/lib/query-client";
 // from the login screen causes re-renders that dismiss the keyboard.
 // The debug button uses direct fetch instead.
 
+// ─── Warm-up helper ──────────────────────────────────────────────────────────
+// Pings the Railway /api/health endpoint and WAITS for a response (up to 10 s)
+// before the real login request fires. This eliminates "Connection Error" on
+// cold-start: Railway needs 5-15 s to wake the server after it has been idle.
+async function warmUpServer(): Promise<void> {
+  const url = `${getApiUrl()}/api/health`;
+  try {
+    await Promise.race([
+      fetch(url, { method: "GET" }),
+      new Promise<never>((_, rej) => setTimeout(() => rej(new Error("warm-up timeout")), 10000)),
+    ]);
+  } catch {
+    // Ignore — if health check fails we still attempt login; the retry
+    // logic inside _doApiRequest will handle transient failures.
+  }
+}
+
 const LoginScreen = memo(function LoginScreen() {
   const { login } = useAuth();
   const logo = require("@/assets/images/dhanraj-logo.png");
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
-  const [showPass, setShowPass] = useState(false);
-  const [loading, setLoading] = useState(false);
+  const [username, setUsername]   = useState("");
+  const [password, setPassword]   = useState("");
+  const [showPass, setShowPass]   = useState(false);
+  const [loading, setLoading]     = useState(false);
+  const [warmingUp, setWarmingUp] = useState(false);
   const [debugLoading, setDebugLoading] = useState(false);
 
   // ✅ useCallback prevents function recreation on every render
   const handleUsernameChange = useCallback((text: string) => setUsername(text), []);
   const handlePasswordChange = useCallback((text: string) => setPassword(text), []);
 
-  const handleLogin = async () => {
+  const handleLogin = useCallback(async () => {
     if (!username.trim() || !password.trim()) {
       Alert.alert("Error", "Please enter username and password");
       return;
     }
-    setLoading(true);
+
     try {
-      // Warm up the Railway server before login — cold starts can take 5-15s
-      // Fire-and-forget: don't await, don't throw, just kick the server awake
-      fetch(`${getApiUrl()}/api/health`, { method: "GET" }).catch(() => {});
+      // Step 1: Wake the server up and wait — avoids cold-start failures
+      setWarmingUp(true);
+      await warmUpServer();
+      setWarmingUp(false);
+
+      // Step 2: Real login (api.ts will auto-retry on transient errors)
+      setLoading(true);
       await login(username.trim(), password.trim());
     } catch (e: any) {
       const msg: string = e.message || "";
       const isNetworkError =
         msg.includes("Network request failed") ||
-        msg.includes("Failed to fetch") ||
-        msg.includes("Cannot reach server") ||
-        msg.includes("took too long") ||
+        msg.includes("Failed to fetch")        ||
+        msg.includes("Cannot reach")           ||
+        msg.includes("taking longer")          ||
         msg.includes("network");
 
       if (isNetworkError) {
         Alert.alert(
           "Connection Error",
-          "Could not reach the server. Please check:\n\n• Your internet connection (try switching between WiFi and mobile data)\n• That you have a stable connection\n\nThen try again.",
-          [{ text: "Retry", onPress: handleLogin }, { text: "Cancel", style: "cancel" }]
+          "The server is taking longer than usual to respond. " +
+          "This can happen after a period of inactivity.\n\n" +
+          "Please check your internet connection and try again.",
+          [
+            { text: "Retry", onPress: handleLogin },
+            { text: "Cancel", style: "cancel" },
+          ],
         );
       } else {
         Alert.alert("Login Failed", msg || "Invalid username or password");
       }
     } finally {
+      setWarmingUp(false);
       setLoading(false);
     }
-  };
+  }, [username, password, login]);
 
   const debugOneSignal = async () => {
     setDebugLoading(true);
@@ -119,15 +147,9 @@ const LoginScreen = memo(function LoginScreen() {
       } catch (e: any) { steps.push("⚠️ pushToken: " + e.message); }
 
       // 9. ✅ Save using direct fetch — NOT api.savePushToken()
-      // api.savePushToken() triggers component re-renders via its internals
-      // which causes keyboard dismissal. Direct fetch avoids this entirely.
       const tokenToSave = pushToken || onesignalId;
       if (tokenToSave) {
         try {
-          const baseUrl = getApiUrl();
-          // ✅ For debug button on login screen: no auth token available,
-          // so we just verify the token was obtained and report it.
-          // Actual saving happens automatically after login via usePushNotifications hook.
           steps.push("📋 Token obtained: " + tokenToSave.slice(0, 24));
           steps.push("ℹ️ Token will be saved after login automatically");
         } catch (e: any) { steps.push("❌ save: " + e.message); }
@@ -144,6 +166,10 @@ const LoginScreen = memo(function LoginScreen() {
     }
   };
 
+  // Derive button label from current phase
+  const isInProgress = warmingUp || loading;
+  const buttonLabel  = warmingUp ? "Connecting…" : "Sign In";
+
   return (
     <KeyboardAvoidingView
       style={{ flex: 1, backgroundColor: Colors.background }}
@@ -153,7 +179,6 @@ const LoginScreen = memo(function LoginScreen() {
       <ScrollView
         contentContainerStyle={styles.container}
         keyboardShouldPersistTaps="handled"
-        // ✅ Prevents scroll view from re-rendering and dismissing keyboard
         keyboardDismissMode="none"
       >
         <View style={styles.logoSection}>
@@ -182,7 +207,6 @@ const LoginScreen = memo(function LoginScreen() {
                 onChangeText={handleUsernameChange}
                 autoCapitalize="none"
                 autoCorrect={false}
-                // ✅ These prevent keyboard dismissal on Android
                 blurOnSubmit={false}
                 returnKeyType="next"
               />
@@ -199,7 +223,6 @@ const LoginScreen = memo(function LoginScreen() {
                 onChangeText={handlePasswordChange}
                 secureTextEntry={!showPass}
                 autoCapitalize="none"
-                // ✅ These prevent keyboard dismissal on Android
                 blurOnSubmit={false}
                 returnKeyType="done"
                 onSubmitEditing={handleLogin}
@@ -213,13 +236,18 @@ const LoginScreen = memo(function LoginScreen() {
           <Pressable
             style={({ pressed }) => [styles.loginBtn, pressed && { opacity: 0.8 }]}
             onPress={handleLogin}
-            disabled={loading}
+            disabled={isInProgress}
           >
-            {loading ? <ActivityIndicator color="#fff" /> : (
-              <>
+            {isInProgress ? (
+              <View style={styles.loginBtnInner}>
+                <ActivityIndicator color="#fff" size="small" />
+                <Text style={styles.loginBtnText}>{buttonLabel}</Text>
+              </View>
+            ) : (
+              <View style={styles.loginBtnInner}>
                 <Text style={styles.loginBtnText}>Sign In</Text>
                 <Ionicons name="arrow-forward" size={18} color="#fff" />
-              </>
+              </View>
             )}
           </Pressable>
 
@@ -252,24 +280,25 @@ const LoginScreen = memo(function LoginScreen() {
 export default LoginScreen;
 
 const styles = StyleSheet.create({
-  container: { flexGrow: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 24, paddingVertical: 40, gap: 32 },
-  logoSection: { alignItems: "center", gap: 10 },
-  logoGlow: { width: 110, height: 110, borderRadius: 28, borderWidth: 2, borderColor: Colors.primary + "60", shadowColor: Colors.primary, shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.6, shadowRadius: 20, elevation: 12, marginBottom: 4, overflow: "hidden" },
-  logo: { width: 110, height: 110 },
-  appTitle: { fontSize: 26, fontWeight: "800", color: Colors.text, letterSpacing: -0.5, textAlign: "center" },
-  appSubtitle: { fontSize: 12, color: Colors.primary, letterSpacing: 2.5, textTransform: "uppercase", fontWeight: "600" },
-  divider: { width: 40, height: 3, borderRadius: 2, backgroundColor: Colors.primary, marginTop: 6, opacity: 0.6 },
-  card: { width: "100%", backgroundColor: Colors.surface, borderRadius: 24, padding: 28, gap: 18, borderWidth: 1, borderColor: Colors.borderLight, shadowColor: Colors.primary, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.12, shadowRadius: 20, elevation: 8 },
-  cardTitle: { fontSize: 22, fontWeight: "800", color: Colors.text },
-  cardSubtitle: { fontSize: 14, color: Colors.textSecondary, marginTop: -10 },
-  inputGroup: { gap: 12 },
-  inputWrapper: { flexDirection: "row", alignItems: "center", backgroundColor: Colors.surfaceAlt, borderRadius: 14, borderWidth: 1, borderColor: Colors.border, paddingHorizontal: 12, gap: 10 },
-  inputIconWrap: { width: 30, height: 30, borderRadius: 8, backgroundColor: Colors.primary + "18", alignItems: "center", justifyContent: "center" },
-  input: { flex: 1, paddingVertical: 16, fontSize: 15, color: Colors.text },
-  eyeBtn: { padding: 6 },
-  loginBtn: { backgroundColor: Colors.primary, borderRadius: 14, paddingVertical: 16, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 8, marginTop: 4 },
-  loginBtnText: { color: "#fff", fontSize: 17, fontWeight: "800" },
-  debugBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 10, borderRadius: 10, backgroundColor: Colors.surfaceAlt, borderWidth: 1, borderColor: Colors.border, borderStyle: "dashed" },
-  debugBtnText: { fontSize: 12, color: Colors.textMuted, fontWeight: "600" },
-  footer: { fontSize: 12, color: Colors.textMuted, textAlign: "center" },
+  container:      { flexGrow: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 24, paddingVertical: 40, gap: 32 },
+  logoSection:    { alignItems: "center", gap: 10 },
+  logoGlow:       { width: 110, height: 110, borderRadius: 28, borderWidth: 2, borderColor: Colors.primary + "60", shadowColor: Colors.primary, shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.6, shadowRadius: 20, elevation: 12, marginBottom: 4, overflow: "hidden" },
+  logo:           { width: 110, height: 110 },
+  appTitle:       { fontSize: 26, fontWeight: "800", color: Colors.text, letterSpacing: -0.5, textAlign: "center" },
+  appSubtitle:    { fontSize: 12, color: Colors.primary, letterSpacing: 2.5, textTransform: "uppercase", fontWeight: "600" },
+  divider:        { width: 40, height: 3, borderRadius: 2, backgroundColor: Colors.primary, marginTop: 6, opacity: 0.6 },
+  card:           { width: "100%", backgroundColor: Colors.surface, borderRadius: 24, padding: 28, gap: 18, borderWidth: 1, borderColor: Colors.borderLight, shadowColor: Colors.primary, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.12, shadowRadius: 20, elevation: 8 },
+  cardTitle:      { fontSize: 22, fontWeight: "800", color: Colors.text },
+  cardSubtitle:   { fontSize: 14, color: Colors.textSecondary, marginTop: -10 },
+  inputGroup:     { gap: 12 },
+  inputWrapper:   { flexDirection: "row", alignItems: "center", backgroundColor: Colors.surfaceAlt, borderRadius: 14, borderWidth: 1, borderColor: Colors.border, paddingHorizontal: 12, gap: 10 },
+  inputIconWrap:  { width: 30, height: 30, borderRadius: 8, backgroundColor: Colors.primary + "18", alignItems: "center", justifyContent: "center" },
+  input:          { flex: 1, paddingVertical: 16, fontSize: 15, color: Colors.text },
+  eyeBtn:         { padding: 6 },
+  loginBtn:       { backgroundColor: Colors.primary, borderRadius: 14, paddingVertical: 16, alignItems: "center", justifyContent: "center", marginTop: 4 },
+  loginBtnInner:  { flexDirection: "row", alignItems: "center", gap: 8 },
+  loginBtnText:   { color: "#fff", fontSize: 17, fontWeight: "800" },
+  debugBtn:       { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 10, borderRadius: 10, backgroundColor: Colors.surfaceAlt, borderWidth: 1, borderColor: Colors.border, borderStyle: "dashed" },
+  debugBtnText:   { fontSize: 12, color: Colors.textMuted, fontWeight: "600" },
+  footer:         { fontSize: 12, color: Colors.textMuted, textAlign: "center" },
 });
