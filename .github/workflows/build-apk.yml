@@ -1,8 +1,15 @@
 name: Build Android APK
 on:
   workflow_dispatch:
+    inputs:
+      api_url:
+        description: 'API URL (leave blank to use default Railway URL)'
+        required: false
+        default: 'https://dhanraj-production.up.railway.app'
+
 env:
-  EXPO_PUBLIC_API_URL: https://dhanraj-production.up.railway.app
+  EXPO_PUBLIC_API_URL: ${{ github.event.inputs.api_url || 'https://dhanraj-production.up.railway.app' }}
+
 jobs:
   build:
     name: Build APK
@@ -68,10 +75,13 @@ jobs:
           eas-version: latest
           token: ${{ secrets.EXPO_TOKEN }}
 
+      - name: Print baked-in API URL
+        run: echo "Building APK with API_URL=$EXPO_PUBLIC_API_URL"
+
       - name: Expo prebuild
         run: npx expo prebuild --platform android --clean
         env:
-          EXPO_PUBLIC_API_URL: https://dhanraj-production.up.railway.app
+          EXPO_PUBLIC_API_URL: ${{ env.EXPO_PUBLIC_API_URL }}
 
       # Cache Gradle AFTER prebuild so android/ gradle files exist for hashing
       - name: Cache Gradle
@@ -106,6 +116,7 @@ jobs:
             -Pandroid.enableJetifier=true
         env:
           GRADLE_OPTS: "-Xmx6g -XX:MaxMetaspaceSize=1g"
+          EXPO_PUBLIC_API_URL: ${{ env.EXPO_PUBLIC_API_URL }}
 
       - name: Find APK
         run: find android/app/build/outputs/apk -name "*.apk" | head -20
