@@ -40,3 +40,4 @@ jobs:
             --non-interactive
         env:
           EXPO_PUBLIC_API_URL: https://dhanraj-production.up.railway.app
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
