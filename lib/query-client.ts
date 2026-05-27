@@ -59,11 +59,10 @@ export async function apiRequest(
 ): Promise<Response> {
   const controller = new AbortController();
 
-  // ✅ Fix: Increased timeout from 20s to 30s — some mobile networks (4G/5G)
-  // have higher latency to Railway servers, causing premature timeouts
+  // ✅ Fix: Increased timeout to 45s — covers Railway cold-start + 4G latency
   const timeout = setTimeout(() => {
     controller.abort();
-  }, 30000);
+  }, 45000);
 
   try {
     const baseUrl = getApiUrl();
@@ -134,10 +133,10 @@ export const getQueryFn: <T>(options: {
     }
 
     const controller = new AbortController();
-    // ✅ Fix: Consistent 30s timeout
+    // ✅ Fix: Consistent 45s timeout
     const timeout = setTimeout(() => {
       controller.abort();
-    }, 30000);
+    }, 45000);
 
     try {
       const res = await fetch(url, {
