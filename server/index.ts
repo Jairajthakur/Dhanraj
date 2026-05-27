@@ -284,16 +284,22 @@ function setupErrorHandler(app: express.Application) {
   server.listen(port, "0.0.0.0", () => {
     log(`express server serving on port ${port}`);
 
-    // Keep-alive: ping own health endpoint every 10 minutes so Railway
-    // does not put the server to sleep between user logins.
+    // Keep-alive: ping own health endpoint every 4 minutes so Railway
+    // does not put the server to sleep (Railway hobby plan sleeps after ~5 min
+    // of inactivity — staying well under that threshold prevents cold starts).
     const selfUrl = process.env.RAILWAY_PUBLIC_DOMAIN
       ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}/api/health`
       : `http://localhost:${port}/api/health`;
+
+    // Fire once immediately on startup so the URL is confirmed working
+    fetch(selfUrl)
+      .then(() => log("[keep-alive] startup ping ok"))
+      .catch((err: Error) => console.warn("[keep-alive] startup ping failed:", err.message));
 
     setInterval(() => {
       fetch(selfUrl)
         .then(() => log("[keep-alive] ping ok"))
         .catch((err: Error) => console.warn("[keep-alive] ping failed:", err.message));
-    }, 10 * 60 * 1000); // every 10 minutes
+    }, 4 * 60 * 1000); // every 4 minutes — keeps Railway awake
   });
 })();
