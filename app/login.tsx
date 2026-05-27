@@ -19,7 +19,7 @@ import { getApiUrl } from "@/lib/query-client";
 // We poll every 5 s so the user knows progress is happening.
 async function warmUpServer(): Promise<void> {
   const url = `${getApiUrl()}/api/health`;
-  const WARM_UP_TIMEOUT_MS = 25000;
+  const WARM_UP_TIMEOUT_MS = 30000; // 30 s total budget
   const deadline = Date.now() + WARM_UP_TIMEOUT_MS;
 
   while (Date.now() < deadline) {
@@ -33,10 +33,10 @@ async function warmUpServer(): Promise<void> {
       ]);
       return; // server responded — done
     } catch {
-      // If there's still time left, wait 2 s and retry the ping
+      // If there's still time left, wait 3 s and retry the ping
       const remaining = deadline - Date.now();
-      if (remaining > 2000) {
-        await new Promise((r) => setTimeout(r, 2000));
+      if (remaining > 3000) {
+        await new Promise((r) => setTimeout(r, 3000));
       } else {
         return; // deadline reached — let login proceed anyway
       }
