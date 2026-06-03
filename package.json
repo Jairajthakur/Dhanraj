@@ -81,7 +81,8 @@
     "zod-validation-error": "^3.4.0",
     "expo-print": "~14.0.3",
     "expo-file-system": "~18.0.12",
-    "@react-native-voice/voice": "^3.2.4"
+    "@react-native-voice/voice": "^3.2.4",
+    "compression": "^1.7.4"
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",
@@ -97,6 +98,7 @@
     "eslint": "^9.31.0",
     "eslint-config-expo": "~10.0.0",
     "patch-package": "^8.0.0",
-    "typescript": "~5.9.2"
+    "typescript": "~5.9.2",
+    "@types/compression": "^1.7.5"
   }
 }
