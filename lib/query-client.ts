@@ -132,31 +132,60 @@ export const getQueryFn: <T>(options: {
       headers["Authorization"] = `Bearer ${token}`;
     }
 
-    const controller = new AbortController();
-    // ✅ Fix: Consistent 45s timeout
-    const timeout = setTimeout(() => {
-      controller.abort();
-    }, 45000);
+    // ✅ Mobile fix: retry up to 3 times with exponential back-off
+    //    before surfacing a network error to React Query
+    const MAX_RETRIES = 3;
+    let lastError: any;
 
-    try {
-      const res = await fetch(url, {
-        credentials: "include",
-        headers,
-        signal: controller.signal,
-      });
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      const controller = new AbortController();
+      // ✅ Fix: Consistent 45s timeout
+      const timeout = setTimeout(() => {
+        controller.abort();
+      }, 45000);
 
-      clearTimeout(timeout);
+      try {
+        const res = await fetch(url, {
+          credentials: "include",
+          headers,
+          signal: controller.signal,
+        });
 
-      if (unauthorizedBehavior === "returnNull" && res.status === 401) {
-        return null;
+        clearTimeout(timeout);
+
+        if (unauthorizedBehavior === "returnNull" && res.status === 401) {
+          return null;
+        }
+
+        await throwIfResNotOk(res);
+        return await res.json();
+      } catch (err: any) {
+        clearTimeout(timeout);
+        lastError = err;
+
+        const isTimeout = err?.name === "AbortError";
+        const isNetworkError =
+          err?.message?.includes("Network request failed") ||
+          err?.message?.includes("Failed to fetch") ||
+          err?.message?.includes("network") ||
+          err?.message?.includes("Cannot reach");
+        const isRetryable = isTimeout || isNetworkError;
+
+        if (isRetryable && attempt < MAX_RETRIES) {
+          const delay = (attempt + 1) * 3000; // 3s, 6s, 9s
+          console.warn(
+            `[QueryFn] Retrying ${url} in ${delay}ms (attempt ${attempt + 1}/${MAX_RETRIES})…`
+          );
+          await new Promise((r) => setTimeout(r, delay));
+          continue;
+        }
+
+        // Non-retryable or exhausted retries — rethrow
+        throw err;
       }
-
-      await throwIfResNotOk(res);
-      return await res.json();
-    } catch (err) {
-      clearTimeout(timeout);
-      throw err;
     }
+
+    throw lastError;
   };
 
 export const queryClient = new QueryClient({
@@ -165,8 +194,16 @@ export const queryClient = new QueryClient({
       queryFn: getQueryFn({ on401: "throw" }),
       refetchInterval: false,
       refetchOnWindowFocus: false,
-      staleTime: 5 * 60 * 1000,
-      retry: false,
+      // ✅ Mobile fix: data stays fresh for 5 min, but is kept in cache for
+      //    30 min (gcTime). This means navigating back to a screen after a
+      //    brief network drop still shows the last good data instead of
+      //    an error or a full re-fetch over a weak signal.
+      staleTime: 5 * 60 * 1000,   // 5 minutes
+      gcTime:    30 * 60 * 1000,  // 30 minutes — keep cache alive across app-resume
+      // ✅ Mobile fix: React Query will retry failed queries up to 2 times
+      //    with its own built-in exponential back-off before showing an error.
+      retry: 2,
+      retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 15000),
     },
     mutations: {
       retry: false,
