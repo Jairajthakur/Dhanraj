@@ -1,5 +1,6 @@
 import express from "express";
 import type { Request, Response, NextFunction } from "express";
+import compression from "compression"; // ✅ Mobile fix: gzip responses
 import { registerRoutes } from "./routes";
 import * as fs from "fs";
 import * as path from "path";
@@ -263,6 +264,9 @@ function setupErrorHandler(app: express.Application) {
 
 (async () => {
   app.set("trust proxy", true);
+  // ✅ Mobile fix: gzip all API responses — critical on 2G/3G/4G connections.
+  //    Typical JSON payloads compress 70-85%, cutting load times significantly.
+  app.use(compression());
   setupCors(app);
   setupBodyParsing(app);
   setupRequestLogging(app);
