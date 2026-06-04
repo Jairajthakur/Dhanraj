@@ -15,6 +15,7 @@ const ADMIN_MENU = [
   { key: "bkt",          label: "BKT Performance",   icon: "layers"           as const, screen: "/(admin)/bkt-cases"        },
   { key: "drr",          label: "DRR / Targets",     icon: "trending-up"      as const, screen: "/(admin)/drr"              },
   { key: "agency",       label: "Agency Target",     icon: "trophy"           as const, screen: "/(admin)/agency-target"    },
+  { key: "app-logs", label: "App Logs", icon: "document-text" as const, screen: "/(admin)/app-logs" },
   { key: "fos-payout",  label: "FOS Payout",         icon: "cash-outline"     as const, screen: "/(admin)/fos-payout"        },
   { key: "salary",       label: "Salary Management", icon: "wallet"           as const, screen: "/(admin)/salary"           },
   { key: "depositions",  label: "Depositions",       icon: "cash"             as const, screen: "/(admin)/depositions"      },
