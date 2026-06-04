@@ -248,11 +248,11 @@ export async function initDatabase() {
       agent_name  TEXT,
       event_type  TEXT NOT NULL,
       detail      TEXT,
-      ip          TEXT,
-      logged_at   TIMESTAMPTZ DEFAULT NOW()
+      ip_address  TEXT,
+      created_at  TIMESTAMPTZ DEFAULT NOW()
     )`,
     `CREATE INDEX IF NOT EXISTS idx_activity_logs_agent  ON activity_logs(agent_id)`,
-    `CREATE INDEX IF NOT EXISTS idx_activity_logs_logged ON activity_logs(logged_at DESC)`,
+    `CREATE INDEX IF NOT EXISTS idx_activity_logs_logged ON activity_logs(created_at DESC)`,
     `UPDATE bkt_perf_summary SET bkt = 'bkt1'  WHERE LOWER(REPLACE(bkt,' ','')) IN ('1','bkt1')  AND bkt <> 'bkt1'`,
     `UPDATE bkt_perf_summary SET bkt = 'bkt2'  WHERE LOWER(REPLACE(bkt,' ','')) IN ('2','bkt2')  AND bkt <> 'bkt2'`,
     `UPDATE bkt_perf_summary SET bkt = 'bkt3'  WHERE LOWER(REPLACE(bkt,' ','')) IN ('3','bkt3')  AND bkt <> 'bkt3'`,
@@ -909,7 +909,7 @@ export async function insertActivityLog(data: {
   ip?: string | null;
 }) {
   await query(
-    `INSERT INTO activity_logs (agent_id, agent_name, event_type, detail, ip)
+    `INSERT INTO activity_logs (agent_id, agent_name, event_type, detail, ip_address)
      VALUES ($1, $2, $3, $4, $5)`,
     [data.agentId, data.agentName, data.eventType, data.detail ?? null, data.ip ?? null]
   );
@@ -917,10 +917,12 @@ export async function insertActivityLog(data: {
 
 export async function getActivityLogs(limit = 500) {
   const result = await query(
-    `SELECT al.*, fa.name AS agent_name_live
+    `SELECT al.id, al.agent_id, al.event_type, al.detail, al.ip_address, al.created_at,
+            COALESCE(fa.name, al.agent_name) AS agent_name,
+            COALESCE(fa.name, al.agent_name) AS agent_name_live
      FROM activity_logs al
      LEFT JOIN fos_agents fa ON fa.id = al.agent_id
-     ORDER BY al.logged_at DESC LIMIT $1`,
+     ORDER BY al.created_at DESC LIMIT $1`,
     [limit]
   );
   return result.rows;
