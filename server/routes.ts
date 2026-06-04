@@ -687,8 +687,13 @@ app.use("/api/fos-depositions", (req, res, next) => {
   app.use(session({
     store: new PgStore({ conString: process.env.DATABASE_URL, tableName: "user_sessions", createTableIfMissing: true }),
     secret: process.env.SESSION_SECRET || "fos-secret-key-2024",
-    resave: false, saveUninitialized: false,
-cookie: { secure: process.env.NODE_ENV === "production", httpOnly: true, sameSite: "lax", maxAge: 30 * 24 * 60 * 60 * 1000 },
+    resave: true, saveUninitialized: false,
+// ✅ FIX: Mobile internet (React Native on 4G/5G) sends cross-origin requests.
+    // sameSite:"lax" blocks cookies on cross-origin POSTs (including login) →
+    // session is never attached → every request returns 401.
+    // sameSite:"none" + secure:true allows cross-origin cookies over HTTPS.
+    // The app also sends JWT Bearer tokens as a belt-and-suspenders fallback.
+    cookie: { secure: true, httpOnly: true, sameSite: "none", maxAge: 30 * 24 * 60 * 60 * 1000 },
   }));
 
  function requireAuth(req: Request, res: Response, next: any) {
