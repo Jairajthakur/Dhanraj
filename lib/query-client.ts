@@ -42,10 +42,15 @@ function buildUrl(path: string, base: string): string {
 }
 
 async function getStoredToken() {
-  if (Platform.OS === "web") {
-    return null;
-  }
+  // ✅ FIX: Always read token regardless of platform — the native app stores
+  // it in AsyncStorage, web stores it in localStorage via tokenStore in api.ts.
+  // Previously web returned null here, so Bearer auth was never sent on web.
   try {
+    if (Platform.OS === "web") {
+      return typeof localStorage !== "undefined"
+        ? localStorage.getItem("auth_token")
+        : null;
+    }
     return await AsyncStorage.getItem("auth_token");
   } catch {
     return null;
@@ -124,7 +129,11 @@ export const getQueryFn: <T>(options: {
   ({ on401: unauthorizedBehavior }) =>
   async ({ queryKey }) => {
     const baseUrl = getApiUrl();
-    const url = buildUrl(queryKey.join("/") as string, baseUrl);
+    // ✅ FIX: queryKey is often ["/api/route", extraParam]. Only the first
+    // element is the URL path — joining all with "/" produced broken URLs like
+    // "https://host/api/admin/stats/SomeCompany" when company was passed.
+    const path = queryKey[0] as string;
+    const url = buildUrl(path, baseUrl);
 
     const headers: Record<string, string> = {};
     const token = await getStoredToken();
