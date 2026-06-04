@@ -242,6 +242,17 @@ export async function initDatabase() {
     `CREATE INDEX IF NOT EXISTS idx_call_logs_case    ON call_logs(case_id, case_type)`,
     `CREATE INDEX IF NOT EXISTS idx_call_logs_agent   ON call_logs(agent_id)`,
     `CREATE INDEX IF NOT EXISTS idx_call_logs_logged  ON call_logs(logged_at DESC)`,
+    `CREATE TABLE IF NOT EXISTS activity_logs (
+      id          SERIAL PRIMARY KEY,
+      agent_id    INTEGER REFERENCES fos_agents(id) ON DELETE SET NULL,
+      agent_name  TEXT,
+      event_type  TEXT NOT NULL,
+      detail      TEXT,
+      ip          TEXT,
+      logged_at   TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_activity_logs_agent  ON activity_logs(agent_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_activity_logs_logged ON activity_logs(logged_at DESC)`,
     `UPDATE bkt_perf_summary SET bkt = 'bkt1'  WHERE LOWER(REPLACE(bkt,' ','')) IN ('1','bkt1')  AND bkt <> 'bkt1'`,
     `UPDATE bkt_perf_summary SET bkt = 'bkt2'  WHERE LOWER(REPLACE(bkt,' ','')) IN ('2','bkt2')  AND bkt <> 'bkt2'`,
     `UPDATE bkt_perf_summary SET bkt = 'bkt3'  WHERE LOWER(REPLACE(bkt,' ','')) IN ('3','bkt3')  AND bkt <> 'bkt3'`,
@@ -883,6 +894,33 @@ export async function getAllCallLogs(limit = 500) {
     `SELECT cl.*, fa.name AS agent_name FROM call_logs cl
      LEFT JOIN fos_agents fa ON fa.id = cl.agent_id
      ORDER BY cl.logged_at DESC LIMIT $1`,
+    [limit]
+  );
+  return result.rows;
+}
+
+// ── Activity Logs ─────────────────────────────────────────────────────────────
+
+export async function insertActivityLog(data: {
+  agentId: number | null;
+  agentName: string | null;
+  eventType: "login" | "logout" | "app_open";
+  detail?: string | null;
+  ip?: string | null;
+}) {
+  await query(
+    `INSERT INTO activity_logs (agent_id, agent_name, event_type, detail, ip)
+     VALUES ($1, $2, $3, $4, $5)`,
+    [data.agentId, data.agentName, data.eventType, data.detail ?? null, data.ip ?? null]
+  );
+}
+
+export async function getActivityLogs(limit = 500) {
+  const result = await query(
+    `SELECT al.*, fa.name AS agent_name_live
+     FROM activity_logs al
+     LEFT JOIN fos_agents fa ON fa.id = al.agent_id
+     ORDER BY al.logged_at DESC LIMIT $1`,
     [limit]
   );
   return result.rows;
