@@ -1,927 +1,4374 @@
-import { Pool } from "pg";
+import type { Express, Request, Response } from "express";
+import { createServer, type Server } from "node:http";
+import { randomBytes, createHmac } from "node:crypto";
+import session from "express-session";
+import connectPgSimple from "connect-pg-simple";
+import multer from "multer";
+import ExcelJS from "exceljs";
+import * as storage from "./storage";
+import path from "node:path";
+import fs from "node:fs";
+import express from "express";
 
-const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
 
-export async function query(sql: string, params?: any[]) {
-  const client = await pool.connect();
+const JWT_SECRET = process.env.JWT_SECRET || process.env.SESSION_SECRET || "fos-jwt-secret-2024";
+
+function base64url(str: string): string {
+  return Buffer.from(str).toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
+}
+
+function signToken(payload: { agentId: number; role: string }): string {
+  const header = base64url(JSON.stringify({ alg: "HS256", typ: "JWT" }));
+  const body = base64url(JSON.stringify({ ...payload, iat: Math.floor(Date.now() / 1000), exp: Math.floor(Date.now() / 1000) + 30 * 24 * 3600 }));
+  const sig = createHmac("sha256", JWT_SECRET).update(`${header}.${body}`).digest("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
+  return `${header}.${body}.${sig}`;
+}
+
+function verifyToken(token: string): { agentId: number; role: string } | null {
   try {
-    const result = await client.query(sql, params);
-    return result;
-  } finally {
-    client.release();
-  }
+    const [header, body, sig] = token.split(".");
+    const expected = createHmac("sha256", JWT_SECRET)
+      .update(`${header}.${body}`)
+      .digest("base64")
+      .replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
+    if (sig !== expected) return null;
+    const payload = JSON.parse(Buffer.from(body, "base64").toString());
+    const GRACE = 2 * 24 * 3600;
+    if (payload.exp && payload.exp + GRACE < Math.floor(Date.now() / 1000)) return null;
+    return { agentId: payload.agentId, role: payload.role };
+  } catch { return null; }
 }
 
-export async function initDatabase() {
-  const migrations = [
-    `CREATE TABLE IF NOT EXISTS fos_agents (
-      id         SERIAL PRIMARY KEY,
-      name       TEXT NOT NULL,
-      username   TEXT NOT NULL UNIQUE,
-      password   TEXT NOT NULL,
-      role       TEXT NOT NULL DEFAULT 'fos',
-      phone      TEXT,
-      photo_url  TEXT,
-      push_token TEXT,
-      created_at TIMESTAMPTZ DEFAULT NOW()
-    )`,
-    `CREATE TABLE IF NOT EXISTS user_sessions (
-      sid    VARCHAR NOT NULL PRIMARY KEY,
-      sess   JSON NOT NULL,
-      expire TIMESTAMPTZ NOT NULL
-    )`,
-    `CREATE INDEX IF NOT EXISTS idx_user_sessions_expire ON user_sessions(expire)`,
-    `CREATE TABLE IF NOT EXISTS loan_cases (
-      id                  SERIAL PRIMARY KEY,
-      agent_id            INTEGER REFERENCES fos_agents(id),
-      fos_name            TEXT,
-      loan_no             TEXT NOT NULL UNIQUE,
-      customer_name       TEXT NOT NULL,
-      bkt                 INTEGER,
-      app_id              TEXT,
-      address             TEXT,
-      mobile_no           TEXT,
-      reference_address   TEXT,
-      pos                 NUMERIC,
-      asset_make          TEXT,
-      registration_no     TEXT,
-      engine_no           TEXT,
-      chassis_no          TEXT,
-      emi_amount          NUMERIC,
-      emi_due             NUMERIC,
-      cbc                 NUMERIC,
-      lpp                 NUMERIC,
-      cbc_lpp             NUMERIC,
-      rollback            NUMERIC,
-      clearance           NUMERIC,
-      first_emi_due_date  DATE,
-      loan_maturity_date  DATE,
-      tenor               INTEGER,
-      pro                 TEXT,
-      status              TEXT DEFAULT 'Unpaid',
-      latest_feedback     TEXT,
-      feedback_comments   TEXT,
-      feedback_date       TIMESTAMPTZ,
-      ptp_date            DATE,
-      telecaller_ptp_date DATE,
-      rollback_yn         BOOLEAN,
-      created_at          TIMESTAMPTZ DEFAULT NOW()
-    )`,
-    `CREATE INDEX IF NOT EXISTS idx_loan_cases_agent  ON loan_cases(agent_id)`,
-    `CREATE INDEX IF NOT EXISTS idx_loan_cases_status ON loan_cases(status)`,
-    `CREATE TABLE IF NOT EXISTS bkt_cases (
-      id                  SERIAL PRIMARY KEY,
-      case_category       TEXT NOT NULL,
-      agent_id            INTEGER REFERENCES fos_agents(id),
-      fos_name            TEXT,
-      customer_name       TEXT NOT NULL,
-      loan_no             TEXT NOT NULL UNIQUE,
-      bkt                 INTEGER,
-      app_id              TEXT,
-      address             TEXT,
-      mobile_no           TEXT,
-      ref1_name           TEXT,
-      ref1_mobile         TEXT,
-      ref2_name           TEXT,
-      ref2_mobile         TEXT,
-      reference_address   TEXT,
-      pos                 NUMERIC,
-      asset_name          TEXT,
-      asset_make          TEXT,
-      registration_no     TEXT,
-      engine_no           TEXT,
-      chassis_no          TEXT,
-      emi_amount          NUMERIC,
-      emi_due             NUMERIC,
-      cbc                 NUMERIC,
-      lpp                 NUMERIC,
-      cbc_lpp             NUMERIC,
-      rollback            NUMERIC,
-      clearance           NUMERIC,
-      first_emi_due_date  DATE,
-      loan_maturity_date  DATE,
-      tenor               INTEGER,
-      pro                 TEXT,
-      status              TEXT DEFAULT 'Unpaid',
-      latest_feedback     TEXT,
-      feedback_comments   TEXT,
-      feedback_date       TIMESTAMPTZ,
-      ptp_date            DATE,
-      telecaller_ptp_date DATE,
-      rollback_yn         BOOLEAN,
-      created_at          TIMESTAMPTZ DEFAULT NOW()
-    )`,
-    `CREATE INDEX IF NOT EXISTS idx_bkt_cases_agent    ON bkt_cases(agent_id)`,
-    `CREATE INDEX IF NOT EXISTS idx_bkt_cases_category ON bkt_cases(case_category)`,
-    `CREATE TABLE IF NOT EXISTS attendance (
-      id        SERIAL PRIMARY KEY,
-      agent_id  INTEGER NOT NULL REFERENCES fos_agents(id),
-      date      DATE NOT NULL,
-      check_in  TIMESTAMPTZ,
-      check_out TIMESTAMPTZ,
-      UNIQUE(agent_id, date)
-    )`,
-    `CREATE INDEX IF NOT EXISTS idx_attendance_agent ON attendance(agent_id)`,
-    `CREATE INDEX IF NOT EXISTS idx_attendance_date  ON attendance(date)`,
-    `CREATE TABLE IF NOT EXISTS salary_details (
-      id               SERIAL PRIMARY KEY,
-      agent_id         INTEGER NOT NULL REFERENCES fos_agents(id),
-      month            INTEGER NOT NULL,
-      year             INTEGER NOT NULL,
-      present_days     INTEGER DEFAULT 0,
-      payment_amount   NUMERIC DEFAULT 0,
-      incentive_amount NUMERIC DEFAULT 0,
-      petrol_expense   NUMERIC DEFAULT 0,
-      mobile_expense   NUMERIC DEFAULT 0,
-      gross_payment    NUMERIC DEFAULT 0,
-      advance          NUMERIC DEFAULT 0,
-      other_deductions NUMERIC DEFAULT 0,
-      total            NUMERIC DEFAULT 0,
-      net_salary       NUMERIC DEFAULT 0,
-      created_at       TIMESTAMPTZ DEFAULT NOW()
-    )`,
-    `CREATE INDEX IF NOT EXISTS idx_salary_agent ON salary_details(agent_id)`,
-    `CREATE TABLE IF NOT EXISTS depositions (
-      id              SERIAL PRIMARY KEY,
-      agent_id        INTEGER NOT NULL REFERENCES fos_agents(id),
-      loan_case_id    INTEGER REFERENCES loan_cases(id),
-      amount          NUMERIC NOT NULL,
-      deposition_date DATE,
-      receipt_no      TEXT,
-      notes           TEXT,
-      created_at      TIMESTAMPTZ DEFAULT NOW()
-    )`,
-    `CREATE INDEX IF NOT EXISTS idx_depositions_agent ON depositions(agent_id)`,
-    `CREATE TABLE IF NOT EXISTS required_deposits (
-      id                     SERIAL PRIMARY KEY,
-      agent_id               INTEGER NOT NULL REFERENCES fos_agents(id),
-      amount                 NUMERIC NOT NULL,
-      description            TEXT,
-      due_date               DATE,
-      screenshot_url         TEXT,
-      screenshot_uploaded_at TIMESTAMPTZ,
-      alarm_scheduled        BOOLEAN DEFAULT FALSE,
-      reminder_sent          BOOLEAN DEFAULT FALSE,
-      created_at             TIMESTAMPTZ DEFAULT NOW()
-    )`,
-    `CREATE INDEX IF NOT EXISTS idx_required_deposits_agent ON required_deposits(agent_id)`,
-    `CREATE TABLE IF NOT EXISTS bkt_perf_summary (
-      id                   SERIAL PRIMARY KEY,
-      fos_name             TEXT NOT NULL,
-      agent_id             INTEGER REFERENCES fos_agents(id),
-      bkt                  TEXT NOT NULL,
-      pos_paid             NUMERIC DEFAULT 0,
-      pos_unpaid           NUMERIC DEFAULT 0,
-      pos_grand_total      NUMERIC DEFAULT 0,
-      pos_percentage       NUMERIC DEFAULT 0,
-      count_paid           INTEGER DEFAULT 0,
-      count_unpaid         INTEGER DEFAULT 0,
-      count_total          INTEGER DEFAULT 0,
-      rollback_paid        NUMERIC DEFAULT 0,
-      rollback_unpaid      NUMERIC DEFAULT 0,
-      rollback_grand_total NUMERIC DEFAULT 0,
-      rollback_percentage  NUMERIC DEFAULT 0,
-      uploaded_at          TIMESTAMPTZ DEFAULT NOW(),
-      UNIQUE(fos_name, bkt)
-    )`,
-    `CREATE INDEX IF NOT EXISTS idx_bkt_perf_agent ON bkt_perf_summary(agent_id)`,
-    `ALTER TABLE bkt_perf_summary ADD COLUMN IF NOT EXISTS pos_paid             NUMERIC DEFAULT 0`,
-    `ALTER TABLE bkt_perf_summary ADD COLUMN IF NOT EXISTS pos_unpaid           NUMERIC DEFAULT 0`,
-    `ALTER TABLE bkt_perf_summary ADD COLUMN IF NOT EXISTS pos_grand_total      NUMERIC DEFAULT 0`,
-    `ALTER TABLE bkt_perf_summary ADD COLUMN IF NOT EXISTS pos_percentage       NUMERIC DEFAULT 0`,
-    `ALTER TABLE bkt_perf_summary ADD COLUMN IF NOT EXISTS count_paid           INTEGER DEFAULT 0`,
-    `ALTER TABLE bkt_perf_summary ADD COLUMN IF NOT EXISTS count_unpaid         INTEGER DEFAULT 0`,
-    `ALTER TABLE bkt_perf_summary ADD COLUMN IF NOT EXISTS count_total          INTEGER DEFAULT 0`,
-    `ALTER TABLE bkt_perf_summary ADD COLUMN IF NOT EXISTS rollback_paid        NUMERIC DEFAULT 0`,
-    `ALTER TABLE bkt_perf_summary ADD COLUMN IF NOT EXISTS rollback_unpaid      NUMERIC DEFAULT 0`,
-    `ALTER TABLE bkt_perf_summary ADD COLUMN IF NOT EXISTS rollback_grand_total NUMERIC DEFAULT 0`,
-    `ALTER TABLE bkt_perf_summary ADD COLUMN IF NOT EXISTS rollback_percentage  NUMERIC DEFAULT 0`,
-    `ALTER TABLE loan_cases ADD COLUMN IF NOT EXISTS telecaller_ptp_date DATE`,
-    `ALTER TABLE bkt_cases  ADD COLUMN IF NOT EXISTS telecaller_ptp_date DATE`,
-    `ALTER TABLE loan_cases ADD COLUMN IF NOT EXISTS customer_available BOOLEAN`,
-    `ALTER TABLE loan_cases ADD COLUMN IF NOT EXISTS vehicle_available  BOOLEAN`,
-    `ALTER TABLE loan_cases ADD COLUMN IF NOT EXISTS third_party        BOOLEAN`,
-    `ALTER TABLE loan_cases ADD COLUMN IF NOT EXISTS third_party_name   TEXT`,
-    `ALTER TABLE loan_cases ADD COLUMN IF NOT EXISTS third_party_number TEXT`,
-    `ALTER TABLE loan_cases ADD COLUMN IF NOT EXISTS feedback_code      TEXT`,
-    `ALTER TABLE loan_cases ADD COLUMN IF NOT EXISTS projection         TEXT`,
-    `ALTER TABLE loan_cases ADD COLUMN IF NOT EXISTS non_starter        BOOLEAN`,
-    `ALTER TABLE loan_cases ADD COLUMN IF NOT EXISTS kyc_purchase       BOOLEAN`,
-    `ALTER TABLE loan_cases ADD COLUMN IF NOT EXISTS workable           BOOLEAN`,
-    `ALTER TABLE bkt_cases  ADD COLUMN IF NOT EXISTS customer_available BOOLEAN`,
-    `ALTER TABLE bkt_cases  ADD COLUMN IF NOT EXISTS vehicle_available  BOOLEAN`,
-    `ALTER TABLE bkt_cases  ADD COLUMN IF NOT EXISTS third_party        BOOLEAN`,
-    `ALTER TABLE bkt_cases  ADD COLUMN IF NOT EXISTS third_party_name   TEXT`,
-    `ALTER TABLE bkt_cases  ADD COLUMN IF NOT EXISTS third_party_number TEXT`,
-    `ALTER TABLE bkt_cases  ADD COLUMN IF NOT EXISTS feedback_code      TEXT`,
-    `ALTER TABLE bkt_cases  ADD COLUMN IF NOT EXISTS projection         TEXT`,
-    `ALTER TABLE bkt_cases  ADD COLUMN IF NOT EXISTS non_starter        BOOLEAN`,
-    `ALTER TABLE bkt_cases  ADD COLUMN IF NOT EXISTS kyc_purchase       BOOLEAN`,
-    `ALTER TABLE bkt_cases  ADD COLUMN IF NOT EXISTS workable           BOOLEAN`,
-    `ALTER TABLE fos_agents ADD COLUMN IF NOT EXISTS phone      TEXT`,
-    `ALTER TABLE fos_agents ADD COLUMN IF NOT EXISTS photo_url  TEXT`,
-    `ALTER TABLE fos_agents ADD COLUMN IF NOT EXISTS push_token TEXT`,
-    `ALTER TABLE loan_cases ADD COLUMN IF NOT EXISTS monthly_feedback TEXT`,
-    `ALTER TABLE bkt_cases  ADD COLUMN IF NOT EXISTS monthly_feedback TEXT`,
-    `ALTER TABLE loan_cases ADD COLUMN IF NOT EXISTS extra_numbers TEXT[] DEFAULT '{}'`,
-    `ALTER TABLE bkt_cases  ADD COLUMN IF NOT EXISTS extra_numbers TEXT[] DEFAULT '{}'`,
-    `ALTER TABLE loan_cases ADD COLUMN IF NOT EXISTS coll_amount NUMERIC`,
-    `CREATE TABLE IF NOT EXISTS call_logs (
-      id           SERIAL PRIMARY KEY,
-      case_id      INTEGER NOT NULL,
-      case_type    TEXT NOT NULL DEFAULT 'loan',
-      agent_id     INTEGER REFERENCES fos_agents(id),
-      loan_no      TEXT,
-      customer_name TEXT,
-      outcome      TEXT,
-      comments     TEXT,
-      ptp_date     DATE,
-      status       TEXT,
-      logged_at    TIMESTAMPTZ DEFAULT NOW()
-    )`,
-    `CREATE INDEX IF NOT EXISTS idx_call_logs_case    ON call_logs(case_id, case_type)`,
-    `CREATE INDEX IF NOT EXISTS idx_call_logs_agent   ON call_logs(agent_id)`,
-    `CREATE INDEX IF NOT EXISTS idx_call_logs_logged  ON call_logs(logged_at DESC)`,
-    `CREATE TABLE IF NOT EXISTS activity_logs (
-      id          SERIAL PRIMARY KEY,
-      agent_id    INTEGER REFERENCES fos_agents(id) ON DELETE SET NULL,
-      agent_name  TEXT,
-      event_type  TEXT NOT NULL,
-      detail      TEXT,
-      ip          TEXT,
-      logged_at   TIMESTAMPTZ DEFAULT NOW()
-    )`,
-    `CREATE INDEX IF NOT EXISTS idx_activity_logs_agent  ON activity_logs(agent_id)`,
-    `CREATE INDEX IF NOT EXISTS idx_activity_logs_logged ON activity_logs(logged_at DESC)`,
-    `UPDATE bkt_perf_summary SET bkt = 'bkt1'  WHERE LOWER(REPLACE(bkt,' ','')) IN ('1','bkt1')  AND bkt <> 'bkt1'`,
-    `UPDATE bkt_perf_summary SET bkt = 'bkt2'  WHERE LOWER(REPLACE(bkt,' ','')) IN ('2','bkt2')  AND bkt <> 'bkt2'`,
-    `UPDATE bkt_perf_summary SET bkt = 'bkt3'  WHERE LOWER(REPLACE(bkt,' ','')) IN ('3','bkt3')  AND bkt <> 'bkt3'`,
-    `UPDATE bkt_perf_summary SET bkt = 'penal' WHERE LOWER(bkt) = 'penal'                        AND bkt <> 'penal'`,
-    `INSERT INTO fos_agents (name, username, password, role)
-     VALUES ('Admin', 'admin', 'admin123', 'admin')
-     ON CONFLICT (username) DO NOTHING`,
-  ];
 
-  for (const sql of migrations) {
-    try { await query(sql); }
-    catch (e: any) { console.warn(`[migration] skipped: ${e.message?.slice(0, 80)}`); }
-  }
-  console.log("[migration] Database initialized successfully");
-}
-
-export async function initBktPerfSummaryTable() {
-  await initDatabase();
-}
-
-export async function getAgentByUsername(username: string) {
-  const result = await query("SELECT * FROM fos_agents WHERE username = $1", [username]);
-  return result.rows[0] || null;
-}
-
-export async function getAgentById(id: number) {
-  const result = await query("SELECT * FROM fos_agents WHERE id = $1", [id]);
-  return result.rows[0] || null;
-}
-
-export async function getAllAgents() {
-  const result = await query("SELECT * FROM fos_agents WHERE role = 'fos' ORDER BY name");
-  return result.rows;
-}
-
-export async function getAllAgentsWithAdmin() {
-  const result = await query("SELECT * FROM fos_agents ORDER BY name");
-  return result.rows;
-}
-
-export async function createFosAgent(data: { name: string; username: string; password: string }) {
-  const result = await query(
-    `INSERT INTO fos_agents (name, username, password, role)
-     VALUES ($1, $2, $3, 'fos')
-     ON CONFLICT (username) DO UPDATE SET name = EXCLUDED.name
-     RETURNING *`,
-    [data.name, data.username, data.password]
-  );
-  return result.rows[0];
-}
-
-export async function deleteAllLoanCases() { await query("DELETE FROM loan_cases"); }
-export async function deleteAllBktCases() { await query("DELETE FROM bkt_cases"); }
-
-export async function getLoanCasesByAgent(agentId: number, companyName?: string | null) {
-  if (companyName && companyName !== "All") {
-    const result = await query(
-      "SELECT * FROM loan_cases WHERE agent_id = $1 AND company_name = $2 ORDER BY bkt DESC NULLS LAST, customer_name",
-      [agentId, companyName]
-    );
-    return result.rows;
-  }
-  const result = await query(
-    "SELECT * FROM loan_cases WHERE agent_id = $1 ORDER BY bkt DESC NULLS LAST, customer_name",
-    [agentId]
-  );
-  return result.rows;
-}
-
-export async function getDistinctCompaniesByAgent(agentId: number): Promise<string[]> {
-  const result = await query(
-    `SELECT DISTINCT company_name FROM (
-       SELECT company_name FROM loan_cases WHERE agent_id = $1 AND company_name IS NOT NULL AND company_name != ''
-       UNION
-       SELECT company_name FROM bkt_cases WHERE agent_id = $1 AND company_name IS NOT NULL AND company_name != ''
-     ) t ORDER BY company_name`,
-    [agentId]
-  );
-  return result.rows.map((r: any) => r.company_name);
-}
-
-export async function getAllLoanCases() {
-  const result = await query(
-    `SELECT lc.*, fa.name as agent_name FROM loan_cases lc
-     LEFT JOIN fos_agents fa ON lc.agent_id = fa.id
-     ORDER BY fa.name, lc.bkt DESC NULLS LAST`
-  );
-  return result.rows;
-}
-
-export async function getLoanCaseById(id: number) {
-  const result = await query("SELECT * FROM loan_cases WHERE id = $1", [id]);
-  return result.rows[0] || null;
-}
-
-export interface FeedbackExtra {
-  customerAvailable?: boolean | null;
-  vehicleAvailable?: boolean | null;
-  thirdParty?: boolean | null;
-  thirdPartyName?: string | null;
-  thirdPartyNumber?: string | null;
-  feedbackCode?: string | null;
-  projection?: string | null;
-  nonStarter?: boolean | null;
-  kycPurchase?: boolean | null;
-  workable?: boolean | null;
-  monthlyFeedback?: string | null;
-  ptpDateMf?: string | null;
-  shiftedCity?: string | null;
-  occupation?: string | null;
-  cbcPaid?: number | null;
-  lppPaid?: number | null;
-  emiPaid?: number | null;
-}
-
-export async function updateLoanCaseFeedback(
-  id: number, status: string, feedback: string, comments: string,
-  ptpDate?: string | null, rollbackYn?: boolean | null, extra?: FeedbackExtra
-) {
-  await query(
-    `UPDATE loan_cases SET
-       status             = COALESCE($1, status),
-       latest_feedback    = COALESCE($2, latest_feedback),
-       feedback_comments  = COALESCE($3, feedback_comments),
-       feedback_date      = NOW(),
-       ptp_date           = $5,
-       rollback_yn        = COALESCE($6,  rollback_yn),
-       customer_available = COALESCE($7,  customer_available),
-       vehicle_available  = COALESCE($8,  vehicle_available),
-       third_party        = COALESCE($9,  third_party),
-       third_party_name   = COALESCE($10, third_party_name),
-       third_party_number = COALESCE($11, third_party_number),
-       feedback_code      = COALESCE(NULLIF($12,''), feedback_code),
-       projection         = COALESCE(NULLIF($13,''), projection),
-       non_starter        = COALESCE($14, non_starter),
-       kyc_purchase       = COALESCE($15, kyc_purchase),
-       workable           = COALESCE($16, workable),
-       monthly_feedback   = COALESCE(NULLIF($17,''), monthly_feedback),
-       ptp_date_mf        = COALESCE($18, ptp_date_mf),
-       shifted_city       = COALESCE(NULLIF($19,''), shifted_city),
-       occupation         = COALESCE(NULLIF($20,''), occupation),
-       cbc_paid           = COALESCE($21, cbc_paid),
-       lpp_paid           = COALESCE($22, lpp_paid),
-       emi_paid           = COALESCE($23, emi_paid)
-     WHERE id = $4`,
-    [
-      status, feedback, comments, id, ptpDate || null,
-      rollbackYn != null ? rollbackYn : null,
-      extra?.customerAvailable ?? null, extra?.vehicleAvailable ?? null,
-      extra?.thirdParty ?? null, extra?.thirdPartyName ?? null, extra?.thirdPartyNumber ?? null,
-      extra?.feedbackCode ?? null, extra?.projection ?? null,
-      extra?.nonStarter ?? null, extra?.kycPurchase ?? null, extra?.workable ?? null,
-      extra?.monthlyFeedback ?? null, extra?.ptpDateMf ?? null,
-      extra?.shiftedCity ?? null, extra?.occupation ?? null,
-      extra?.cbcPaid ?? null, extra?.lppPaid ?? null, extra?.emiPaid ?? null,
-    ]
-  );
-}
-
-export async function getTodayAttendance(agentId: number) {
-  const result = await query(
-    "SELECT * FROM attendance WHERE agent_id = $1 AND date = CURRENT_DATE", [agentId]
-  );
-  return result.rows[0] || null;
-}
-
-export async function checkIn(agentId: number) {
-  const existing = await getTodayAttendance(agentId);
-  if (existing) {
-    await query("UPDATE attendance SET check_in = NOW() WHERE agent_id = $1 AND date = CURRENT_DATE", [agentId]);
-  } else {
-    await query("INSERT INTO attendance (agent_id, date, check_in) VALUES ($1, CURRENT_DATE, NOW())", [agentId]);
-  }
-}
-
-export async function checkOut(agentId: number) {
-  const existing = await getTodayAttendance(agentId);
-  if (existing) {
-    await query("UPDATE attendance SET check_out = NOW() WHERE agent_id = $1 AND date = CURRENT_DATE", [agentId]);
-  } else {
-    await query("INSERT INTO attendance (agent_id, date, check_out) VALUES ($1, CURRENT_DATE, NOW())", [agentId]);
-  }
-}
-
-export async function getAllAttendance() {
-  const result = await query(
-    `SELECT a.*, fa.name as agent_name FROM attendance a
-     LEFT JOIN fos_agents fa ON a.agent_id = fa.id
-     ORDER BY a.date DESC, fa.name`
-  );
-  return result.rows;
-}
-
-export async function getSalaryDetails(agentId: number) {
-  const result = await query(
-    "SELECT * FROM salary_details WHERE agent_id = $1 ORDER BY year DESC, created_at DESC", [agentId]
-  );
-  return result.rows;
-}
-
-export async function getAllSalaryDetails() {
-  const result = await query(
-    `SELECT sd.*, fa.name as agent_name FROM salary_details sd
-     LEFT JOIN fos_agents fa ON sd.agent_id = fa.id
-     ORDER BY fa.name, sd.year DESC`
-  );
-  return result.rows;
-}
-
-export async function createSalary(data: any) {
-  await query(
-    `INSERT INTO salary_details (agent_id, month, year, present_days, payment_amount, incentive_amount, petrol_expense, mobile_expense, gross_payment, advance, other_deductions, total, net_salary)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
-    [data.agentId, data.month, data.year, data.presentDays, data.paymentAmount, data.incentiveAmount,
-     data.petrolExpense, data.mobileExpense, data.grossPayment, data.advance, data.otherDeductions, data.total, data.netSalary]
-  );
-}
-
-export async function getDepositions(agentId: number) {
-  const result = await query(
-    `SELECT d.*, lc.customer_name, lc.loan_no, lc.bkt FROM depositions d
-     LEFT JOIN loan_cases lc ON d.loan_case_id = lc.id
-     WHERE d.agent_id = $1 ORDER BY d.deposition_date DESC`, [agentId]
-  );
-  return result.rows;
-}
-
-export async function getAllDepositions() {
-  const result = await query(
-    `SELECT d.*, lc.customer_name, lc.loan_no, lc.bkt, fa.name as agent_name
-     FROM depositions d
-     LEFT JOIN loan_cases lc ON d.loan_case_id = lc.id
-     LEFT JOIN fos_agents fa ON d.agent_id = fa.id
-     ORDER BY d.deposition_date DESC`
-  );
-  return result.rows;
-}
-
-export async function createDeposition(data: any) {
-  await query(
-    `INSERT INTO depositions (agent_id, loan_case_id, amount, deposition_date, receipt_no, notes) VALUES ($1,$2,$3,$4,$5,$6)`,
-    [data.agentId, data.loanCaseId, data.amount, data.depositionDate, data.receiptNo, data.notes]
-  );
-}
-
-export async function updateAgentPassword(agentId: number, newPassword: string) {
-  await query("UPDATE fos_agents SET password = $1 WHERE id = $2", [newPassword, agentId]);
-}
-
-export async function getAgentStats(agentId: number) {
-  const cases = await getLoanCasesByAgent(agentId);
-  const total = cases.length;
-  const paid = cases.filter((c: any) => c.status === "Paid").length;
-  const notProcess = cases.filter((c: any) => c.status === "Unpaid").length;
-  const today = new Date().toISOString().split("T")[0];
-  const ptp = cases.filter((c: any) => c.status === "PTP").length;
-  const todayCollections = cases.filter((c: any) => {
-    if (c.status !== "Paid" || !c.feedback_date) return false;
-    return String(c.feedback_date).startsWith(today);
+function worksheetToRows(worksheet: ExcelJS.Worksheet, rawStrings: boolean): any[][] {
+  const rawRows: any[][] = [];
+  worksheet.eachRow({ includeEmpty: true }, (row) => {
+    const rowVals = row.values as any[];
+    const maxCol = rowVals.length - 1;
+    const vals: any[] = [];
+    for (let c = 1; c <= maxCol; c++) {
+      const v = rowVals[c];
+      if (v === null || v === undefined) { vals.push(""); }
+      else if (typeof v === "object") {
+        if (Array.isArray(v.richText)) vals.push(v.richText.map((r: any) => r.text).join(""));
+        else if (v.result !== undefined) vals.push(rawStrings ? String(v.result) : v.result);
+        else if (v.text !== undefined) vals.push(String(v.text));
+        else if (v instanceof Date) vals.push(rawStrings ? v.toISOString().slice(0, 10) : v);
+        else vals.push(rawStrings ? String(v) : v);
+      } else { vals.push(rawStrings ? String(v) : v); }
+    }
+    rawRows.push(vals);
   });
-  return { total, paid, notProcess, ptp, todayCollections };
+  return rawRows;
 }
 
-export async function getAllAgentStats() {
-  const result = await query(
-    `SELECT fa.id, fa.name, fa.username, fa.role,
-       COUNT(lc.id)::int                                      AS total,
-       COUNT(lc.id) FILTER (WHERE lc.status='Paid')::int     AS paid,
-       COUNT(lc.id) FILTER (WHERE lc.status='Unpaid')::int   AS "notProcess",
-       COUNT(lc.id) FILTER (WHERE lc.status='PTP')::int      AS ptp
-     FROM fos_agents fa
-     LEFT JOIN loan_cases lc ON lc.agent_id = fa.id
-     WHERE fa.role = 'fos'
-     GROUP BY fa.id, fa.name, fa.username, fa.role
-     UNION ALL
-     SELECT 0 AS id, 'Unassigned' AS name, '' AS username, 'fos' AS role,
-       COUNT(*)::int                                          AS total,
-       COUNT(*) FILTER (WHERE status='Paid')::int            AS paid,
-       COUNT(*) FILTER (WHERE status='Unpaid')::int          AS "notProcess",
-       COUNT(*) FILTER (WHERE status='PTP')::int             AS ptp
-     FROM loan_cases
-     WHERE agent_id IS NULL
-     HAVING COUNT(*) > 0
-     ORDER BY name`
-  );
-  return result.rows;
+const screenshotDir = path.join(process.cwd(), "server/uploads/screenshots");
+fs.mkdirSync(screenshotDir, { recursive: true });
+const screenshotUpload = multer({
+  storage: multer.diskStorage({
+    destination: (_req, _file, cb) => cb(null, screenshotDir),
+    filename: (_req, file, cb) => cb(null, `${Date.now()}-${Math.random().toString(36).slice(2, 9)}${path.extname(file.originalname)}`),
+  }),
+  limits: { fileSize: 10 * 1024 * 1024 },
+});
+
+function getISTHour(): { hour: number; todayKey: string } {
+  const now = new Date();
+  const ist = new Date(now.getTime() + 5.5 * 60 * 60 * 1000);
+  return { hour: ist.getUTCHours(), todayKey: ist.toISOString().slice(0, 10) };
 }
 
-export async function createLoanCase(data: any) {
-  await query(
-    `INSERT INTO loan_cases (agent_id, customer_name, loan_no, bkt, app_id, address, mobile_no, pos, emi_amount)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
-    [data.agentId, data.customerName, data.loanNo, data.bkt, data.appId, data.address, data.mobileNo, data.pos, data.emiAmount]
-  );
+async function sendPush(playerId: string, title: string, body: string, data: Record<string, any> = {}): Promise<{ ok: boolean; error?: string }> {
+  const appId = process.env.ONESIGNAL_APP_ID;
+  const apiKey = process.env.ONESIGNAL_API_KEY;
+  if (!appId || !apiKey) { console.warn("[push] ⚠️ ONESIGNAL not configured"); return { ok: false, error: "not_configured" }; }
+  if (!playerId?.trim()) { console.warn("[push] ⚠️ No playerId provided for:", title); return { ok: false, error: "no_player_id" }; }
+  try {
+    const res = await fetch("https://onesignal.com/api/v1/notifications", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": `Basic ${apiKey}` },
+      body: JSON.stringify({
+        app_id: appId,
+        target_channel: "push",
+        include_aliases: { onesignal_id: [playerId.trim()] },
+        headings: { en: title },
+        contents: { en: body },
+        data,
+        priority: 10,
+        ttl: 259200,
+        android_visibility: 1,
+        large_icon: "ic_launcher",
+        small_icon: "ic_stat_onesignal_default",
+        android_accent_color: "FFFF6B00",
+      }),
+    });
+    const json: any = await res.json().catch(() => ({}));
+    if (!res.ok || json.errors) {
+      const err = Array.isArray(json.errors) ? json.errors[0] : JSON.stringify(json.errors);
+      console.error("[push] ❌ Failed:", err, "| title:", title, "| player:", playerId.slice(0, 20));
+      return { ok: false, error: err };
+    }
+    console.log(`[push] ✅ Sent "${title}" → ${playerId.slice(0, 20)}... | recipients: ${json.recipients ?? "?"}`);
+    return { ok: true };
+  } catch (e: any) {
+    console.error("[push] ❌ Exception:", e.message);
+    return { ok: false, error: e.message };
+  }
 }
 
-export async function upsertLoanCase(data: {
-  agentId: number | null; fosName?: string | null; loanNo: string; customerName: string;
-  bkt?: number | null; appId?: string | null; address?: string | null; mobileNo?: string | null;
-  referenceAddress?: string | null; pos?: string | null; assetMake?: string | null;
-  registrationNo?: string | null; engineNo?: string | null; chassisNo?: string | null;
-  emiAmount?: string | null; emiDue?: string | null; cbc?: string | null; lpp?: string | null;
-  cbcLpp?: string | null; rollback?: string | null; clearance?: string | null;
-  firstEmiDueDate?: string | null; loanMaturityDate?: string | null; tenor?: number | null;
-  pro?: string | null; status?: string | null; latestFeedback?: string | null;
-  feedbackComments?: string | null; ptpDate?: string | null; telecallerPtpDate?: string | null;
-  rollbackYn?: boolean | null; companyName?: string | null; collAmount?: string | null;
-}): Promise<"inserted" | "updated"> {
-  const result = await query(
-    `INSERT INTO loan_cases (
-      agent_id, fos_name, loan_no, customer_name, bkt, app_id, address, mobile_no,
-      reference_address, pos, asset_make, registration_no, engine_no, chassis_no,
-      emi_amount, emi_due, cbc, lpp, cbc_lpp, rollback, clearance,
-      first_emi_due_date, loan_maturity_date, tenor, pro, status,
-      latest_feedback, feedback_comments, ptp_date, telecaller_ptp_date, rollback_yn,
-      company_name, coll_amount
-    ) VALUES (
-      $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,
-      $15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,
-      $32,$33
+// ─── Urgent Push (PTP Break Alert) ───────────────────────────────────────────
+// Sends a loud, heads-up notification that shows on the lock screen and
+// plays the default alarm sound — identical to PhonePe/BharatPe payment alerts.
+async function sendUrgentPush(
+  playerId: string,
+  agentName: string,
+  brokenCount: number
+): Promise<void> {
+  const appId  = process.env.ONESIGNAL_APP_ID;
+  const apiKey = process.env.ONESIGNAL_API_KEY;
+  if (!appId || !apiKey || !playerId?.trim()) return;
+
+  const title = "🚨 Broken PTP Alert";
+  const body  = brokenCount === 1
+    ? `${agentName}, you have 1 broken PTP. Update it immediately to unlock the app.`
+    : `${agentName}, you have ${brokenCount} broken PTPs. Update them immediately to unlock the app.`;
+
+  try {
+    await fetch("https://onesignal.com/api/v1/notifications", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Basic ${apiKey}`,
+      },
+      body: JSON.stringify({
+        app_id:          appId,
+        target_channel:  "push",
+        include_aliases: { onesignal_id: [playerId.trim()] },
+        headings:        { en: title },
+        contents:        { en: body },
+        data:            { screen: "allocation", type: "broken_ptp" },
+
+        // Maximum urgency — shows as heads-up banner and plays sound like PhonePe/BharatPe.
+        // "ptp_alerts" is registered at app startup (lib/notificationChannels.ts) with
+        // AndroidImportance.MAX, vibration [0,500,200,500], and lockscreen PUBLIC.
+        // Without specifying the channel OneSignal falls back to its default
+        // IMPORTANCE_DEFAULT channel which plays no sound on Android 8+.
+        android_channel_id:        "ptp_alerts",
+        priority:                  10,
+        android_visibility:        1,        // shows on lock screen
+        android_led_color:         "FFFF0000",     // red LED
+        android_accent_color:      "FFE24B4A",
+        android_group:             "broken_ptp",
+        android_group_alert:       "all",
+
+        // Vibration pattern: 500ms on, 200ms off, 500ms on (like payment alert)
+        android_vibration_pattern: [0, 500, 200, 500],
+
+        // Show big text style so full message is readable on lock screen
+        android_big_picture:       null,
+        large_icon:                "ic_launcher",
+        small_icon:                "ic_stat_onesignal_default",
+
+        // Keep for 6 hours — if agent's phone is off it delivers when they turn it on
+        ttl: 6 * 60 * 60,
+      }),
+    });
+    console.log(`[urgent-push] ✅ PTP alert sent to ${agentName}`);
+  } catch (e: any) {
+    console.error(`[urgent-push] ❌ Failed for ${agentName}:`, e.message);
+  }
+}
+
+async function sendPushToMany(playerIds: string[], title: string, body: string, data: Record<string, any> = {}): Promise<{ sent: number; total: number }> {
+  const appId = process.env.ONESIGNAL_APP_ID;
+  const apiKey = process.env.ONESIGNAL_API_KEY;
+  if (!appId || !apiKey || playerIds.length === 0) { console.warn("[push-many] ⚠️ OneSignal not configured or no playerIds for:", title); return { sent: 0, total: 0 }; }
+  const validIds = playerIds.filter((id) => id?.trim());
+  console.log(`[push-many] Sending "${title}" to ${validIds.length} devices`);
+  try {
+    const res = await fetch("https://onesignal.com/api/v1/notifications", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": `Basic ${apiKey}` },
+      body: JSON.stringify({
+        app_id: appId,
+        target_channel: "push",
+        include_aliases: { onesignal_id: validIds },
+        headings: { en: title },
+        contents: { en: body },
+        data,
+        priority: 10,
+        ttl: 259200,
+        android_visibility: 1,
+        large_icon: "ic_launcher",
+        small_icon: "ic_stat_onesignal_default",
+        android_accent_color: "FFFF6B00",
+      }),
+    });
+    const json: any = await res.json().catch(() => ({}));
+    const sent = json.recipients ?? validIds.length;
+    console.log(`[push-many] ✅ Sent to ${sent}/${validIds.length} | errors: ${JSON.stringify(json.errors ?? "none")}`);
+    return { sent, total: validIds.length };
+  } catch (e: any) {
+    console.error("[push-many] ❌ Exception:", e.message);
+    return { sent: 0, total: playerIds.length };
+  }
+}
+
+async function extractAmountFromScreenshot(imagePath: string): Promise<number | null> {
+  try {
+    let Tesseract: any;
+    try { Tesseract = require("tesseract.js"); } catch { console.warn("[ocr] tesseract.js not installed"); return null; }
+    const { data: { text } } = await Tesseract.recognize(imagePath, "eng", { logger: () => {} });
+    const patterns = [
+      /(?:amount|paid|debited|transferred|sent|credited|total)[^\d₹Rs]{0,10}[₹Rs\.]{0,3}\s*([0-9,]+(?:\.[0-9]{1,2})?)/gi,
+      /₹\s*([0-9,]+(?:\.[0-9]{1,2})?)/g,
+      /Rs\.?\s+([0-9,]+(?:\.[0-9]{1,2})?)/gi,
+      /INR\s*([0-9,]+(?:\.[0-9]{1,2})?)/gi,
+      /\b([0-9]{1,3}(?:,[0-9]{2,3})+(?:\.[0-9]{1,2})?)\b/g,
+    ];
+    const candidates: number[] = [];
+    for (const pattern of patterns) {
+      let match: RegExpExecArray | null;
+      const regex = new RegExp(pattern.source, pattern.flags);
+      while ((match = regex.exec(text)) !== null) {
+        const num = parseFloat(match[1].replace(/,/g, ""));
+        if (!isNaN(num) && num > 0 && num < 10_000_000) candidates.push(num);
+      }
+    }
+    if (candidates.length === 0) return null;
+    const freq: Record<string, number> = {};
+    for (const c of candidates) { const key = c.toFixed(2); freq[key] = (freq[key] || 0) + 1; }
+    const sorted = Object.entries(freq).sort((a, b) => b[1] - a[1] || parseFloat(b[0]) - parseFloat(a[0]));
+    return parseFloat(sorted[0][0]);
+  } catch { return null; }
+}
+
+function amountMatches(expected: number, actual: number): boolean { return Math.round(expected) === Math.round(actual); }
+function normalizeHeader(h: string): string { return h.toString().toLowerCase().replace(/[\s_\-\.\/\\+]/g, ""); }
+function parseNum(val: any): string | null {
+  if (val === null || val === undefined || val === "") return null;
+  const s = String(val).trim().replace(/,/g, ""); if (!s) return null;
+  const n = Number(s); if (isNaN(n)) return null; return s;
+}
+function normalizeStatus(val: any): string {
+  const s = String(val || "").trim().toUpperCase();
+  if (s === "TRUE" || s === "PAID" || s === "YES" || s === "1") return "Paid";
+  if (s === "FALSE" || s === "UNPAID" || s === "NO" || s === "0") return "Unpaid";
+  if (s === "PTP") return "PTP";
+  const raw = String(val || "").trim();
+  if (raw === "Paid" || raw === "Unpaid" || raw === "PTP") return raw;
+  if (raw === "Follow Up" || raw === "FOLLOW UP" || raw === "FOLLOWUP") return "Unpaid";
+  return "Unpaid";
+}
+function parseDate(val: any): string | null {
+  if (val === null || val === undefined || val === "") return null;
+  const s = String(val).trim(); if (!s) return null;
+  const ddmmyyyy = s.match(/^(\d{1,2})[-\/](\d{1,2})[-\/](\d{4})$/);
+  if (ddmmyyyy) return `${ddmmyyyy[3]}-${ddmmyyyy[2].padStart(2, "0")}-${ddmmyyyy[1].padStart(2, "0")}`;
+  const d = new Date(s); if (isNaN(d.getTime())) return null; return s;
+}
+function isRollbackText(val: any): boolean {
+  if (val === null || val === undefined || val === "") return false;
+  const s = String(val).trim().toLowerCase().replace(/[\s_\-]/g, "");
+  return s === "rollback" || s === "rb" || s === "yes" || s === "y" || s === "true" || s === "1";
+}
+function parseRollbackYn(val: any): boolean | null {
+  if (val === null || val === undefined || val === "") return null;
+  const s = String(val).trim();
+  if (isNaN(Number(s.replace(/,/g, ""))) || isRollbackText(s)) return isRollbackText(s) ? true : null;
+  const n = parseFloat(s.replace(/,/g, ""));
+  return n > 0 ? true : null;
+}
+
+const HEADER_SENTINEL = new Set(["loan no", "loanno", "loan number", "customer name", "customername", "fos name", "fosname", "fos_name", "rollback", "emi", "pos"]);
+function isRepeatHeaderRow(mapped: Record<string, any>): boolean {
+  const loanNo = String(mapped.loan_no || "").toLowerCase().trim();
+  return HEADER_SENTINEL.has(loanNo) || loanNo === "loan no" || loanNo === "s.no" || /^s\.?\s*no\.?$/i.test(loanNo);
+}
+
+// ─── COLUMN_MAP: added company_name mappings ──────────────────────────────────
+const COLUMN_MAP: Record<string, string> = {
+  loanno: "loan_no", loannumber: "loan_no", appid: "app_id", applicationid: "app_id", appno: "app_id",
+  customername: "customer_name", applicantname: "customer_name", name: "customer_name",
+  emi: "emi_amount", emiamount: "emi_amount", emidue: "emi_due",
+  cbc: "cbc", lpp: "lpp", cbclpp: "cbc_lpp", cbclppamount: "cbc_lpp",
+  pos: "pos", principaloutstanding: "pos", outstanding: "pos",
+  bkt: "bkt", bucket: "bkt", rollback: "rollback", clearance: "clearance",
+  address: "address", customeraddress: "address", custaddress: "address",
+  customeradddress: "address", customeradress: "address", customeaddress: "address",
+  firstemidueda: "first_emi_due_date", firstemiduedate: "first_emi_due_date", firstemidate: "first_emi_due_date",
+  loanmaturitydate: "loan_maturity_date", maturitydate: "loan_maturity_date",
+  assetmake: "asset_make", make: "asset_make",
+  registrationno: "registration_no", regno: "registration_no", regNo: "registration_no",
+  engineno: "engine_no", enginenumber: "engine_no",
+  chassisno: "chassis_no", chassisnumber: "chassis_no",
+  referenceaddress: "reference_address", refaddress: "reference_address",
+  ten: "tenor", tenor: "tenor", tenure: "tenor", number: "mobile_no",
+  pro: "pro", product: "pro",
+  fosname: "fos_name", fos: "fos_name", fosagent: "fos_name", agent: "fos_name",
+  mobileno: "mobile_no", mobile: "mobile_no", phone: "mobile_no", contactno: "mobile_no",
+  status: "status",
+  detailfb: "latest_feedback", fb: "latest_feedback", feedback: "latest_feedback",
+  comments: "feedback_comments",
+  ptpdate: "telecaller_ptp_date", ptp: "telecaller_ptp_date", ptpdt: "telecaller_ptp_date",
+  promisetopaydatdate: "telecaller_ptp_date", promisetopaydate: "telecaller_ptp_date",
+  // ── company_name mappings ──────────────────────────────────────────────────
+  companyname: "company_name", company: "company_name", compname: "company_name",
+  financecompany: "company_name", financeco: "company_name", lender: "company_name",
+  nbfc: "company_name", bankname: "company_name", bank: "company_name",
+  penal: "penal_cbc",
+penalstatus: "penal_yn",
+  collamount: "coll_amount", collamt: "coll_amount", collectionamount: "coll_amount",
+  twcollection: "coll_amount", twcoll: "coll_amount",
+};
+
+const MONTH_NAMES = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+function monthToNumber(val: any): number {
+  if (!val) return new Date().getMonth() + 1;
+  const n = parseInt(String(val));
+  if (!isNaN(n) && n >= 1 && n <= 12) return n;
+  const idx = MONTH_NAMES.findIndex(m => m.toLowerCase() === String(val).toLowerCase().trim());
+  return idx >= 0 ? idx + 1 : new Date().getMonth() + 1;
+}
+
+declare module "express-session" { interface SessionData { agentId?: number; role?: string; } }
+
+async function recalcBktPerfFromAllocation(): Promise<void> {
+  const result = await storage.query(`
+    SELECT lc.agent_id, fa.name AS fos_name,
+      CASE lc.bkt WHEN 1 THEN 'bkt1' WHEN 2 THEN 'bkt2' WHEN 3 THEN 'bkt3' ELSE NULL END AS bkt_key,
+      COALESCE(SUM(lc.pos::numeric) FILTER (WHERE lc.status='Paid' OR (lc.clearance IS NOT NULL AND lc.clearance::numeric>0)),0) AS pos_paid,
+      COALESCE(SUM(lc.pos::numeric) FILTER (WHERE lc.status!='Paid' AND (lc.clearance IS NULL OR lc.clearance::numeric=0)),0) AS pos_unpaid,
+      COALESCE(SUM(lc.pos::numeric),0) AS pos_grand_total,
+      COUNT(*) FILTER (WHERE lc.status='Paid' OR (lc.clearance IS NOT NULL AND lc.clearance::numeric>0))::int AS count_paid,
+      COUNT(*) FILTER (WHERE lc.status!='Paid' AND (lc.clearance IS NULL OR lc.clearance::numeric=0))::int AS count_unpaid,
+      COUNT(*)::int AS count_total,
+      COALESCE(SUM(lc.pos::numeric) FILTER (WHERE lc.rollback_yn=true),0) AS rollback_paid,
+      COALESCE(SUM(lc.pos::numeric) FILTER (WHERE lc.rollback_yn IS DISTINCT FROM true),0) AS rollback_unpaid,
+      COALESCE(SUM(lc.pos::numeric),0) AS rollback_grand_total
+    FROM loan_cases lc JOIN fos_agents fa ON fa.id=lc.agent_id
+    WHERE lc.bkt IS NOT NULL AND lc.agent_id IS NOT NULL AND UPPER(COALESCE(lc.pro,'')) = 'TW'
+    GROUP BY lc.agent_id, fa.name, lc.bkt
+  `);
+  let updated = 0;
+  for (const row of result.rows) {
+    if (!row.bkt_key) continue;
+    const posGrandTotal = parseFloat(row.pos_grand_total) || 0;
+    const posPaid = parseFloat(row.pos_paid) || 0;
+    const posUnpaid = parseFloat(row.pos_unpaid) || 0;
+    const posPercentage = posGrandTotal > 0 ? Math.round((posPaid / posGrandTotal) * 10000) / 100 : 0;
+    const rbGrandTotal = parseFloat(row.rollback_grand_total) || 0;
+    const rbPaid = parseFloat(row.rollback_paid) || 0;
+    const rbUnpaid = parseFloat(row.rollback_unpaid) || 0;
+    const rbPercentage = rbGrandTotal > 0 ? Math.round((rbPaid / rbGrandTotal) * 10000) / 100 : 0;
+    await storage.query(
+      `INSERT INTO bkt_perf_summary (fos_name,agent_id,bkt,pos_paid,pos_unpaid,pos_grand_total,pos_percentage,count_paid,count_unpaid,count_total,rollback_paid,rollback_unpaid,rollback_grand_total,rollback_percentage,uploaded_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,NOW())
+       ON CONFLICT (fos_name,bkt) DO UPDATE SET
+         agent_id=EXCLUDED.agent_id, pos_paid=EXCLUDED.pos_paid, pos_unpaid=EXCLUDED.pos_unpaid,
+         pos_grand_total=EXCLUDED.pos_grand_total, pos_percentage=EXCLUDED.pos_percentage,
+         count_paid=EXCLUDED.count_paid, count_unpaid=EXCLUDED.count_unpaid, count_total=EXCLUDED.count_total,
+         rollback_paid=EXCLUDED.rollback_paid, rollback_unpaid=EXCLUDED.rollback_unpaid,
+         rollback_grand_total=EXCLUDED.rollback_grand_total, rollback_percentage=EXCLUDED.rollback_percentage,
+         uploaded_at=NOW()`,
+      [row.fos_name, row.agent_id, row.bkt_key, posPaid, posUnpaid, posGrandTotal, posPercentage,
+       row.count_paid, row.count_unpaid, row.count_total, rbPaid, rbUnpaid, rbGrandTotal, rbPercentage]
+    );
+    updated++;
+  }
+  console.log(`[recalcBktPerf] ✅ Updated ${updated} agent/bkt combinations`);
+}
+
+async function safeDeleteAgent(agentId: number, context: string): Promise<void> {
+  const tables = [
+    { sql: `DELETE FROM loan_cases WHERE agent_id = $1`, name: "loan_cases" },
+    { sql: `DELETE FROM bkt_cases WHERE agent_id = $1`, name: "bkt_cases" },
+    { sql: `DELETE FROM bkt_perf_summary WHERE agent_id = $1`, name: "bkt_perf_summary" },
+    { sql: `DELETE FROM attendance WHERE agent_id = $1`, name: "attendance" },
+    { sql: `DELETE FROM required_deposits WHERE agent_id = $1`, name: "required_deposits" },
+    { sql: `DELETE FROM fos_depositions WHERE agent_id = $1`, name: "fos_depositions" },
+    { sql: `DELETE FROM salary_details WHERE agent_id = $1`, name: "salary_details" },
+    { sql: `DELETE FROM depositions WHERE agent_id = $1`, name: "depositions" },
+    { sql: `DELETE FROM call_recordings WHERE agent_id = $1`, name: "call_recordings" },
+    { sql: `DELETE FROM user_sessions WHERE sess::text LIKE $1`, name: "user_sessions", param: `%"agentId":${agentId}%` },
+    { sql: `DELETE FROM fos_agents WHERE id = $1`, name: "fos_agents" },
+  ];
+  for (const t of tables) {
+    try {
+      if (t.name === "user_sessions") { await storage.query(t.sql, [t.param]); }
+      else { await storage.query(t.sql, [agentId]); }
+    } catch (e: any) { console.warn(`[${context}] Skipping ${t.name} for agent ${agentId}: ${e.message}`); }
+  }
+}
+
+function buildIntimationParams(body: Record<string, any>, isPost = false) {
+  const today = new Date().toLocaleDateString("en-IN", {
+    day: "2-digit", month: "2-digit", year: "numeric",
+  });
+  return {
+    customer_name:   body.customer_name   || "___________",
+    address:         body.address         || "___________",
+    app_id:          body.app_id          || "___________",
+    loan_no:         body.loan_no         || "___________",
+    registration_no: body.registration_no || "___________",
+    asset_make:      body.asset_make      || "___________",
+    engine_no:       body.engine_no       || "___________",
+    chassis_no:      body.chassis_no      || "___________",
+    date:            body.date            || today,
+    police_station:  body.police_station  || "________________________________",
+    tq:              body.tq              || "_____________",
+    repossession_date:    body.repossession_date    || body.date || today,
+    repossession_address: body.repossession_address || body.address || "___________",
+    reference_no:         body.reference_no         || body.loan_no || "___________",
+  };
+}
+ 
+function buildPreIntimationHtml(p: ReturnType<typeof buildIntimationParams>): string {
+  return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: Arial, sans-serif; font-size: 13px; color: #000; padding: 40px 50px; line-height: 1.6; }
+    .title { text-align: center; font-size: 16px; font-weight: bold; margin-bottom: 6px; }
+    .divider { border: none; border-top: 1px solid #ccc; margin: 10px 0; }
+    .date { font-weight: bold; margin-bottom: 16px; }
+    .to-block { margin-left: 24px; margin-bottom: 14px; }
+    .to-block p { margin-bottom: 2px; }
+    .subject { margin-bottom: 14px; }
+    .body-text { margin-bottom: 10px; text-align: justify; }
+    .details-table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 12px; }
+    .details-table tr:nth-child(even) { background-color: #f8f8f8; }
+    .details-table td { padding: 6px 10px; border: 1px solid #ddd; }
+    .details-table td:first-child { width: 45%; color: #333; }
+    .details-table td:last-child { font-weight: bold; }
+    .footer { margin-top: 20px; text-align: center; font-size: 11px; border-top: 1px solid #ccc; padding-top: 8px; font-weight: bold; }
+    .signature { margin-top: 40px; }
+  </style>
+</head>
+<body>
+  <p class="title">Pre Repossession Intimation to Police Station</p>
+  <hr class="divider">
+  <p class="date">Date :- ${p.date}</p>
+  <div class="to-block">
+    <p>To,</p>
+    <p>The Senior Inspector,</p>
+    <p><strong>${p.police_station},</strong></p>
+    <p>TQ. ${p.tq}&nbsp;&nbsp;&nbsp;Dist. Nanded</p>
+  </div>
+  <div class="subject">
+    <p><strong>Sub :</strong> Pre intimation of repossession of the vehicle from <strong>${p.customer_name}</strong></p>
+    <p>(Borrower) residing <strong>${p.address}</strong></p>
+  </div>
+  <p class="body-text"><strong>Respected Sir,</strong></p>
+  <p class="body-text">The afore mentioned borrower has taken a loan from Hero Fin-Corp Limited ("Company") for the purchase of the Vehicle having the below mentioned details and further the Borrower hypothecated the said vehicle to the Company in terms of loan-cum-hypothecation agreement executed between the borrower and the Company.</p>
+  <table class="details-table">
+    <tr><td>Name of the Borrower</td><td>${p.customer_name}</td></tr>
+    <tr><td>Address of Borrower</td><td>${p.address}</td></tr>
+    <tr><td>App ID</td><td>${p.app_id}</td></tr>
+    <tr><td>Loan cum Hypothecation Agreement No.</td><td>${p.loan_no}</td></tr>
+    <tr><td>Date</td><td>${p.date}</td></tr>
+    <tr><td>Vehicle Registration No.</td><td>${p.registration_no}</td></tr>
+    <tr><td>Model Make</td><td>${p.asset_make}</td></tr>
+    <tr><td>Engine No.</td><td>${p.engine_no}</td></tr>
+    <tr><td>Chassis No.</td><td>${p.chassis_no}</td></tr>
+  </table>
+  <p class="body-text">The Borrower has committed default on the scheduled payment of the Monthly Payments and/or other charges payable on the loan obtained by the Borrower from the Company in terms of the provisions of the aforesaid loan-cum-hypothecation agreement. In spite of Company's requests and reminders, the Borrower has not remitted the outstanding dues; as a result of which the company was left with no option but to enforce the terms and conditions of the said agreement. Under the said agreement, the said Borrower has specifically authorized Company or any of its authorized persons to take charge/repossession of the vehicle, in the event he fails to pay the loan amount when due to the Company. Pursuant to our right therein we are taking steps to recover possession of the said vehicle. This communication is for your record and to prevent confusion that may arise from any complaint that the borrower may lodge with respect to the aforesaid vehicle.</p>
+  <p class="body-text">Thanking you,</p>
+  <p class="body-text">Yours Sincerely,</p>
+  <div class="signature"><p><strong>For, Hero Fin-Corp Limited</strong></p></div>
+  <div class="footer">Hero Fincorp Ltd. Corporate Office: 09, Basant Lok, Vasant Vihar, New Delhi-110057 India</div>
+</body>
+</html>`;
+}
+ 
+function buildPostIntimationHtml(p: ReturnType<typeof buildIntimationParams>): string {
+  return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: Arial, sans-serif; font-size: 13px; color: #000; padding: 40px 50px; line-height: 1.6; }
+    .title { text-align: center; font-size: 16px; font-weight: bold; text-decoration: underline; margin-bottom: 6px; }
+    .divider { border: none; border-top: 1px solid #ccc; margin: 10px 0; }
+    .date { font-weight: bold; margin-bottom: 16px; }
+    .to-block { margin-left: 24px; margin-bottom: 14px; }
+    .to-block p { margin-bottom: 2px; }
+    .subject { margin-bottom: 14px; }
+    .body-text { margin-bottom: 10px; text-align: justify; }
+    .details-table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 12px; }
+    .details-table tr:nth-child(even) { background-color: #f8f8f8; }
+    .details-table td { padding: 6px 10px; border: 1px solid #ddd; }
+    .details-table td:first-child { width: 45%; color: #333; }
+    .details-table td:last-child { font-weight: bold; }
+    .footer { margin-top: 20px; text-align: center; font-size: 11px; border-top: 1px solid #ccc; padding-top: 8px; font-weight: bold; }
+    .signature { margin-top: 40px; }
+  </style>
+</head>
+<body>
+  <p class="title">Post Repossession Intimation to Police Station</p>
+  <hr class="divider">
+  <p class="date">Date: ${p.date}</p>
+  <div class="to-block">
+    <p>To,</p>
+    <p>The Senior Inspector,</p>
+    <p><strong>${p.police_station},</strong></p>
+    <p>TQ. ${p.tq}&nbsp;&nbsp;&nbsp;Dist. Nanded</p>
+  </div>
+  <div class="subject">
+    <p><strong>Sub :</strong> Intimation after repossession of the vehicle No <strong>${p.registration_no}</strong> From Mr. <strong>${p.customer_name}</strong></p>
+    <p>(Borrower) residing <strong>${p.address}</strong></p>
+  </div>
+  <p class="body-text"><strong>Respected Sir,</strong></p>
+  <p class="body-text">This is in furtherance to our letter dated bearing reference number <strong>${p.reference_no}</strong> whereby it was intimated to you that despite our repeated requests, reminders and personal visits the above said borrower has defaulted in repaying the above TW Loan as expressly agreed by him/her under the Loan (cum Hypothecation) Agreement and guarantee entered between the said borrower and the company.</p>
+  <p class="body-text">Pursuant to our right under the said Agreement we have taken peaceful repossession of the said vehicle.</p>
+  <p class="body-text">We have taken peaceful repossession of the said vehicle on <strong>${p.repossession_date}</strong> at from <strong>${p.repossession_address}</strong></p>
+  <p class="body-text"><strong>DETAILS OF THE VEHICLE REPOSSESSED:-</strong></p>
+  <table class="details-table">
+    <tr><td>Name of the Borrower</td><td>${p.customer_name}</td></tr>
+    <tr><td>Address of Borrower</td><td>${p.address}</td></tr>
+    <tr><td>Loan Agreement No.</td><td>${p.loan_no}</td></tr>
+    <tr><td>App ID</td><td>${p.app_id}</td></tr>
+    <tr><td>Vehicle Registration Number</td><td>${p.registration_no}</td></tr>
+    <tr><td>Model Make</td><td>${p.asset_make}</td></tr>
+    <tr><td>Engine No.</td><td>${p.engine_no}</td></tr>
+    <tr><td>Chassis No.</td><td>${p.chassis_no}</td></tr>
+  </table>
+  <p class="body-text">This communication is for your records and to prevent any confusion that may arise for any complaint that the Borrower may lodge with respect to the said vehicle.</p>
+  <p class="body-text">Thanking You,</p>
+  <p class="body-text">Yours Sincerely,</p>
+  <div class="signature"><p><strong>For, Hero Fin Corp Limited</strong></p></div>
+  <div class="footer">Hero Fincorp Ltd. Corporate Office: 09, Basant Lok, Vasant Vihar, New Delhi-110057 India</div>
+</body>
+</html>`;
+}
+
+export async function registerRoutes(app: Express): Promise<Server> {
+  app.get("/api/health", (_req, res) => res.json({ status: "ok" }));
+  await storage.initBktPerfSummaryTable();
+
+  try {
+    await storage.query(`ALTER TABLE required_deposits ADD COLUMN IF NOT EXISTS cash_collected BOOLEAN DEFAULT FALSE, ADD COLUMN IF NOT EXISTS cash_collected_at TIMESTAMP`);
+    console.log("[DB] cash_collected columns ready ✅");
+  } catch (e: any) { console.error("[DB] Migration error:", e.message); }
+
+  try {
+    await storage.query(`ALTER TABLE loan_cases ADD COLUMN IF NOT EXISTS cbc_paid NUMERIC`);
+    await storage.query(`ALTER TABLE loan_cases ADD COLUMN IF NOT EXISTS lpp_paid NUMERIC`);
+    await storage.query(`ALTER TABLE loan_cases ADD COLUMN IF NOT EXISTS emi_paid NUMERIC`);
+    await storage.query(`ALTER TABLE bkt_cases  ADD COLUMN IF NOT EXISTS cbc_paid NUMERIC`);
+    await storage.query(`ALTER TABLE bkt_cases  ADD COLUMN IF NOT EXISTS lpp_paid NUMERIC`);
+    await storage.query(`ALTER TABLE bkt_cases  ADD COLUMN IF NOT EXISTS emi_paid NUMERIC`);
+    console.log("[DB] cbc/lpp/emi_paid columns ready ✅");
+  } catch (e: any) { console.error("[DB] payment_type migration error:", e.message); }
+
+  try {
+    await storage.query(`ALTER TABLE fos_agents ADD COLUMN IF NOT EXISTS phone TEXT`);
+    console.log("[DB] fos_agents.phone column ready ✅");
+  } catch (e: any) { console.error("[DB] fos_agents.phone migration:", e.message); }
+
+  // ── ADD THIS: migrate company_name column onto loan_cases ─────────────────
+  try {
+    await storage.query(`ALTER TABLE loan_cases ADD COLUMN IF NOT EXISTS company_name TEXT`);
+    console.log("[DB] loan_cases.company_name column ready ✅");
+  } catch (e: any) { console.error("[DB] loan_cases.company_name migration:", e.message); }
+
+  try {
+  await storage.query(`ALTER TABLE loan_cases ADD COLUMN IF NOT EXISTS occupation TEXT`);
+  await storage.query(`ALTER TABLE loan_cases ADD COLUMN IF NOT EXISTS sft_city TEXT`);
+  await storage.query(`ALTER TABLE bkt_cases  ADD COLUMN IF NOT EXISTS occupation TEXT`);
+  await storage.query(`ALTER TABLE bkt_cases  ADD COLUMN IF NOT EXISTS sft_city TEXT`);
+  console.log("[DB] occupation/sft_city columns ready ✅");
+} catch (e: any) { console.error("[DB] occupation/sft_city migration:", e.message); }
+  
+  try {
+  await storage.query(`
+    ALTER TABLE loan_cases
+      ADD COLUMN IF NOT EXISTS broken_ptp      BOOLEAN DEFAULT FALSE,
+      ADD COLUMN IF NOT EXISTS broken_ptp_date DATE
+  `);
+  await storage.query(`
+    ALTER TABLE bkt_cases
+      ADD COLUMN IF NOT EXISTS broken_ptp      BOOLEAN DEFAULT FALSE,
+      ADD COLUMN IF NOT EXISTS broken_ptp_date DATE
+  `);
+  console.log("[DB] broken_ptp columns ready ✅");
+} catch (e: any) { console.error("[DB] broken_ptp migration:", e.message); }
+
+try {
+  await storage.query(`
+    CREATE TABLE IF NOT EXISTS ptp_break_notifications (
+      agent_id    INTEGER PRIMARY KEY REFERENCES fos_agents(id) ON DELETE CASCADE,
+      broken_count INTEGER NOT NULL DEFAULT 0,
+      notified_at  TIMESTAMP NOT NULL DEFAULT NOW()
     )
-    ON CONFLICT (loan_no) DO UPDATE SET
-      agent_id            = EXCLUDED.agent_id,
-      fos_name            = EXCLUDED.fos_name,
-      customer_name       = EXCLUDED.customer_name,
-      bkt                 = EXCLUDED.bkt,
-      app_id              = EXCLUDED.app_id,
-      address             = EXCLUDED.address,
-      mobile_no           = EXCLUDED.mobile_no,
-      reference_address   = EXCLUDED.reference_address,
-      pos                 = EXCLUDED.pos,
-      asset_make          = EXCLUDED.asset_make,
-      registration_no     = EXCLUDED.registration_no,
-      engine_no           = EXCLUDED.engine_no,
-      chassis_no          = EXCLUDED.chassis_no,
-      emi_amount          = EXCLUDED.emi_amount,
-      emi_due             = EXCLUDED.emi_due,
-      cbc                 = EXCLUDED.cbc,
-      lpp                 = EXCLUDED.lpp,
-      cbc_lpp             = EXCLUDED.cbc_lpp,
-      rollback            = EXCLUDED.rollback,
-      clearance           = EXCLUDED.clearance,
-      first_emi_due_date  = EXCLUDED.first_emi_due_date,
-      loan_maturity_date  = EXCLUDED.loan_maturity_date,
-      tenor               = EXCLUDED.tenor,
-      pro                 = EXCLUDED.pro,
-      -- Only overwrite status/ptp dates from Excel when the case is now Paid.
-      -- This preserves agent-entered PTP data (PTP status, ptp_date) when the
-      -- Excel file still shows the case as Unpaid/PTP.
-      status              = CASE WHEN EXCLUDED.status = 'Paid' THEN 'Paid' ELSE loan_cases.status END,
-      ptp_date            = CASE WHEN EXCLUDED.status = 'Paid' THEN NULL ELSE loan_cases.ptp_date END,
-      telecaller_ptp_date = CASE WHEN EXCLUDED.status = 'Paid' THEN NULL ELSE loan_cases.telecaller_ptp_date END,
-      rollback_yn         = EXCLUDED.rollback_yn,
-      company_name        = EXCLUDED.company_name,
-      coll_amount         = EXCLUDED.coll_amount
-    RETURNING (xmax = 0) AS is_insert`,
-    [
-      data.agentId, data.fosName, data.loanNo, data.customerName,
-      data.bkt, data.appId, data.address, data.mobileNo,
-      data.referenceAddress, data.pos, data.assetMake, data.registrationNo, data.engineNo, data.chassisNo,
-      data.emiAmount, data.emiDue, data.cbc, data.lpp, data.cbcLpp,
-      data.rollback, data.clearance,
-      data.firstEmiDueDate || null, data.loanMaturityDate || null,
-      data.tenor, data.pro, data.status || "Unpaid",
-      data.latestFeedback, data.feedbackComments,
-      data.ptpDate || null, data.telecallerPtpDate || null, data.rollbackYn ?? null,
-      data.companyName || null,
-      data.collAmount != null ? parseFloat(data.collAmount) || null : null,
-    ]
-  );
-  return result.rows[0]?.is_insert ? "inserted" : "updated";
-}
+  `);
+  console.log("[DB] ptp_break_notifications table ready ✅");
+} catch (e: any) { console.error("[DB] ptp_break_notifications migration:", e.message); }
 
-export async function getRequiredDeposits(agentId: number) {
-  const result = await query(
-    `SELECT rd.*, fa.name as agent_name FROM required_deposits rd
-     JOIN fos_agents fa ON rd.agent_id = fa.id
-     WHERE rd.agent_id = $1 ORDER BY rd.created_at DESC`, [agentId]
-  );
-  return result.rows;
-}
+try {
+  await storage.query(`ALTER TABLE fos_depositions ADD COLUMN IF NOT EXISTS snooze_until TIMESTAMPTZ`);
+  console.log("[DB] fos_depositions.snooze_until column ready ✅");
+} catch (e: any) { console.error("[DB] fos_depositions snooze_until migration:", e.message); }
 
-export async function getAllRequiredDeposits() {
-  const result = await query(
-    `SELECT rd.*, fa.name as agent_name FROM required_deposits rd
-     JOIN fos_agents fa ON rd.agent_id = fa.id
-     ORDER BY fa.name, rd.created_at DESC`
-  );
-  return result.rows;
-}
+// BUG FIX: snooze_until was missing from loan_cases and bkt_cases — the snooze
+// endpoint writes to these columns and the broken-ptps query filters on them.
+try {
+  await storage.query(`ALTER TABLE loan_cases ADD COLUMN IF NOT EXISTS snooze_until TIMESTAMPTZ`);
+  await storage.query(`ALTER TABLE bkt_cases  ADD COLUMN IF NOT EXISTS snooze_until TIMESTAMPTZ`);
+  console.log("[DB] loan_cases/bkt_cases.snooze_until columns ready ✅");
+} catch (e: any) { console.error("[DB] loan/bkt snooze_until migration:", e.message); }
+try {
+    await storage.query(`ALTER TABLE bkt_cases ADD COLUMN IF NOT EXISTS company_name TEXT`);
+    console.log("[DB] bkt_cases.company_name column ready ✅");
+  } catch (e: any) { console.error("[DB] bkt_cases.company_name migration:", e.message); }
+  try {
+    await storage.query(`CREATE TABLE IF NOT EXISTS fos_depositions (
+      id SERIAL PRIMARY KEY, agent_id INTEGER REFERENCES fos_agents(id),
+      loan_no TEXT, customer_name TEXT, bkt TEXT, source TEXT DEFAULT 'loan',
+      amount NUMERIC(12,2) NOT NULL DEFAULT 0, cash_amount NUMERIC(12,2) DEFAULT 0,
+      online_amount NUMERIC(12,2) DEFAULT 0, payment_method TEXT DEFAULT 'pending',
+      screenshot_url TEXT, notes TEXT, deposition_date DATE DEFAULT CURRENT_DATE,
+      created_at TIMESTAMP DEFAULT NOW(), updated_at TIMESTAMP DEFAULT NOW()
+    )`);
+    console.log("[DB] fos_depositions table ready ✅");
+  } catch (e: any) { console.error("[DB] fos_depositions error:", e.message); }
 
-export async function createRequiredDeposit(data: { agentId: number; amount: number; description?: string; dueDate?: string }) {
-  const result = await query(
-    `INSERT INTO required_deposits (agent_id, amount, description, due_date) VALUES ($1,$2,$3,$4) RETURNING *`,
-    [data.agentId, data.amount, data.description || null, data.dueDate || null]
-  );
-  return result.rows[0];
-}
+  try {
+    const salaryDetailAlters = [
+      `ALTER TABLE salary_details ADD COLUMN IF NOT EXISTS present_days INTEGER DEFAULT 0`,
+      `ALTER TABLE salary_details ADD COLUMN IF NOT EXISTS payment_amount NUMERIC DEFAULT 0`,
+      `ALTER TABLE salary_details ADD COLUMN IF NOT EXISTS incentive_amount NUMERIC DEFAULT 0`,
+      `ALTER TABLE salary_details ADD COLUMN IF NOT EXISTS petrol_expense NUMERIC DEFAULT 0`,
+      `ALTER TABLE salary_details ADD COLUMN IF NOT EXISTS mobile_expense NUMERIC DEFAULT 0`,
+      `ALTER TABLE salary_details ADD COLUMN IF NOT EXISTS gross_payment NUMERIC DEFAULT 0`,
+      `ALTER TABLE salary_details ADD COLUMN IF NOT EXISTS advance NUMERIC DEFAULT 0`,
+      `ALTER TABLE salary_details ADD COLUMN IF NOT EXISTS other_deductions NUMERIC DEFAULT 0`,
+      `ALTER TABLE salary_details ADD COLUMN IF NOT EXISTS total NUMERIC DEFAULT 0`,
+      `ALTER TABLE salary_details ADD COLUMN IF NOT EXISTS net_salary NUMERIC DEFAULT 0`,
+    ];
+    for (const sql of salaryDetailAlters) { try { await storage.query(sql); } catch {} }
+    console.log("[DB] salary_details columns ready ✅");
+  } catch (e: any) { console.error("[DB] salary_details migration:", e.message); }
 
-export async function deleteRequiredDeposit(id: number) {
-  await query(`DELETE FROM required_deposits WHERE id = $1`, [id]);
-}
+  try {
+    await storage.query(`CREATE TABLE IF NOT EXISTS call_recordings (
+      id SERIAL PRIMARY KEY, agent_id INTEGER REFERENCES fos_agents(id),
+      case_id INTEGER, loan_no TEXT, recording_sid TEXT UNIQUE, call_sid TEXT,
+      drive_file_id TEXT, drive_link TEXT, duration_seconds INTEGER DEFAULT 0,
+      recorded_at TIMESTAMP DEFAULT NOW()
+    )`);
+    console.log("[DB] call_recordings table ready ✅");
+  } catch (e: any) { console.error("[DB] call_recordings error:", e.message); }
 
-export async function upsertBktCase(data: any) {
-  const result = await query(
-    `INSERT INTO bkt_cases (
-       case_category, agent_id, fos_name, customer_name, loan_no, bkt, app_id,
-       address, mobile_no, ref1_name, ref1_mobile, ref2_name, ref2_mobile, reference_address,
-       pos, asset_name, asset_make, registration_no, engine_no, chassis_no,
-       emi_amount, emi_due, cbc, lpp, cbc_lpp, rollback, clearance,
-       first_emi_due_date, loan_maturity_date, tenor, pro, status, ptp_date, telecaller_ptp_date
-     ) VALUES (
-       $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,
-       $15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34
-     )
-     ON CONFLICT (loan_no) DO UPDATE SET
-       case_category = EXCLUDED.case_category,
-       agent_id = COALESCE(EXCLUDED.agent_id, bkt_cases.agent_id),
-       fos_name = COALESCE(EXCLUDED.fos_name, bkt_cases.fos_name),
-       customer_name = COALESCE(EXCLUDED.customer_name, bkt_cases.customer_name),
-       bkt = COALESCE(EXCLUDED.bkt, bkt_cases.bkt),
-       app_id = COALESCE(EXCLUDED.app_id, bkt_cases.app_id),
-       address = COALESCE(EXCLUDED.address, bkt_cases.address),
-       mobile_no = COALESCE(EXCLUDED.mobile_no, bkt_cases.mobile_no),
-       ref1_name = COALESCE(EXCLUDED.ref1_name, bkt_cases.ref1_name),
-       ref1_mobile = COALESCE(EXCLUDED.ref1_mobile, bkt_cases.ref1_mobile),
-       ref2_name = COALESCE(EXCLUDED.ref2_name, bkt_cases.ref2_name),
-       ref2_mobile = COALESCE(EXCLUDED.ref2_mobile, bkt_cases.ref2_mobile),
-       reference_address = COALESCE(EXCLUDED.reference_address, bkt_cases.reference_address),
-       pos = COALESCE(EXCLUDED.pos, bkt_cases.pos),
-       asset_name = COALESCE(EXCLUDED.asset_name, bkt_cases.asset_name),
-       asset_make = COALESCE(EXCLUDED.asset_make, bkt_cases.asset_make),
-       registration_no = COALESCE(EXCLUDED.registration_no, bkt_cases.registration_no),
-       engine_no = COALESCE(EXCLUDED.engine_no, bkt_cases.engine_no),
-       chassis_no = COALESCE(EXCLUDED.chassis_no, bkt_cases.chassis_no),
-       emi_amount = COALESCE(EXCLUDED.emi_amount, bkt_cases.emi_amount),
-       emi_due = COALESCE(EXCLUDED.emi_due, bkt_cases.emi_due),
-       cbc = COALESCE(EXCLUDED.cbc, bkt_cases.cbc),
-       lpp = COALESCE(EXCLUDED.lpp, bkt_cases.lpp),
-       cbc_lpp = COALESCE(EXCLUDED.cbc_lpp, bkt_cases.cbc_lpp),
-       rollback = COALESCE(EXCLUDED.rollback, bkt_cases.rollback),
-       clearance = COALESCE(EXCLUDED.clearance, bkt_cases.clearance),
-       first_emi_due_date = COALESCE(EXCLUDED.first_emi_due_date, bkt_cases.first_emi_due_date),
-       loan_maturity_date = COALESCE(EXCLUDED.loan_maturity_date, bkt_cases.loan_maturity_date),
-       tenor = COALESCE(EXCLUDED.tenor, bkt_cases.tenor),
-       pro = COALESCE(EXCLUDED.pro, bkt_cases.pro),
-       status = COALESCE(EXCLUDED.status, bkt_cases.status),
-       ptp_date = COALESCE(EXCLUDED.ptp_date, bkt_cases.ptp_date),
-       telecaller_ptp_date = EXCLUDED.telecaller_ptp_date
-     RETURNING id, (xmax = 0) as is_new`,
-    [
-      data.caseCategory, data.agentId, data.fosName, data.customerName, data.loanNo,
-      data.bkt, data.appId, data.address, data.mobileNo,
-      data.ref1Name, data.ref1Mobile, data.ref2Name, data.ref2Mobile, data.referenceAddress,
-      data.pos, data.assetName, data.assetMake, data.registrationNo, data.engineNo, data.chassisNo,
-      data.emiAmount, data.emiDue, data.cbc, data.lpp, data.cbcLpp,
-      data.rollback, data.clearance, data.firstEmiDueDate, data.loanMaturityDate,
-      data.tenor, data.pro, data.status, data.ptpDate || null, data.telecallerPtpDate || null,
-    ]
-  );
-  return result.rows[0]?.is_new ? "inserted" : "updated";
-}
+  try {
+  await storage.query(`ALTER TABLE loan_cases ADD COLUMN IF NOT EXISTS extra_numbers TEXT[] DEFAULT '{}'`);
+  await storage.query(`ALTER TABLE bkt_cases ADD COLUMN IF NOT EXISTS extra_numbers TEXT[] DEFAULT '{}'`);
+  console.log("[DB] extra_numbers columns ready ✅");
+} catch (e: any) { console.error("[DB] extra_numbers migration:", e.message); }
 
-export async function getAllBktCases(category?: string) {
-  if (category === "penal") {
-    return (await query(`SELECT bc.*, fa.name as agent_name FROM bkt_cases bc LEFT JOIN fos_agents fa ON bc.agent_id = fa.id WHERE bc.cbc IS NOT NULL AND bc.cbc::numeric > 0 ORDER BY fa.name NULLS LAST, bc.customer_name`)).rows;
+app.use("/api/fos-depositions", (req, res, next) => {
+  if (req.headers["content-type"]?.includes("multipart/form-data")) {
+    return next();
   }
-  if (category) {
-    return (await query(`SELECT bc.*, fa.name as agent_name FROM bkt_cases bc LEFT JOIN fos_agents fa ON bc.agent_id = fa.id WHERE bc.case_category = $1 ORDER BY fa.name NULLS LAST, bc.customer_name`, [category])).rows;
+  express.json()(req, res, next);
+});
+
+  app.use("/api/cases", (req, res, next) => {
+  if (req.headers["content-type"]?.includes("multipart/form-data")) {
+    return next(); // skip json parser, let multer handle it
   }
-  return (await query(`SELECT bc.*, fa.name as agent_name FROM bkt_cases bc LEFT JOIN fos_agents fa ON bc.agent_id = fa.id ORDER BY bc.case_category, bc.customer_name`)).rows;
+  next();
+});
+  const PgStore = connectPgSimple(session);
+  app.use(session({
+    store: new PgStore({ conString: process.env.DATABASE_URL, tableName: "user_sessions", createTableIfMissing: true }),
+    secret: process.env.SESSION_SECRET || "fos-secret-key-2024",
+    resave: true, saveUninitialized: false,
+// ✅ FIX: Mobile internet (React Native on 4G/5G) sends cross-origin requests.
+    // sameSite:"lax" blocks cookies on cross-origin POSTs (including login) →
+    // session is never attached → every request returns 401.
+    // sameSite:"none" + secure:true allows cross-origin cookies over HTTPS.
+    // The app also sends JWT Bearer tokens as a belt-and-suspenders fallback.
+    cookie: { secure: true, httpOnly: true, sameSite: "none", maxAge: 30 * 24 * 60 * 60 * 1000 },
+  }));
+
+ function requireAuth(req: Request, res: Response, next: any) {
+    // ADD THESE 2 LINES:
+    console.log("[auth] session agentId:", req.session.agentId);
+    console.log("[auth] auth header:", req.headers.authorization?.slice(0, 30));
+    
+    if (req.session.agentId) return next();
+    const authHeader = req.headers.authorization;
+    if (authHeader?.startsWith("Bearer ")) {
+      const payload = verifyToken(authHeader.slice(7));
+      if (payload) { req.session.agentId = payload.agentId; req.session.role = payload.role; return next(); }
+    }
+    return res.status(401).json({ message: "Unauthorized" });
+  }
+
+  function requireAdmin(req: Request, res: Response, next: any) {
+    if (req.session.agentId && req.session.role === "admin") return next();
+    const authHeader = req.headers.authorization;
+    if (authHeader?.startsWith("Bearer ")) {
+      const payload = verifyToken(authHeader.slice(7));
+      if (payload?.role === "admin") { req.session.agentId = payload.agentId; req.session.role = payload.role; return next(); }
+    }
+    return res.status(403).json({ message: "Forbidden" });
+  }
+
+  function requireRepo(req: Request, res: Response, next: any) {
+    if (req.session.agentId && req.session.role === "repo") return next();
+    const authHeader = req.headers.authorization;
+    if (authHeader?.startsWith("Bearer ")) {
+      const payload = verifyToken(authHeader.slice(7));
+      if (payload?.role === "repo") { req.session.agentId = payload.agentId; req.session.role = payload.role; return next(); }
+    }
+    return res.status(403).json({ message: "Forbidden" });
+  }
+
+  app.get("/api/repo/cases", requireRepo, async (req, res) => {
+    try { res.json({ cases: await storage.getAllLoanCases() }); }
+    catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  app.post("/api/auth/login", async (req, res) => {
+    try {
+      const { username, password } = req.body;
+      const agent = await storage.getAgentByUsername(username);
+      if (!agent || agent.password !== password) return res.status(401).json({ message: "Invalid credentials" });
+      req.session.agentId = agent.id; req.session.role = agent.role;
+      const { password: _, ...safeAgent } = agent;
+      const token = signToken({ agentId: agent.id, role: agent.role });
+      // ── Log the login event ──
+      const ip = (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || req.socket?.remoteAddress || null;
+      storage.insertActivityLog({ agentId: agent.id, agentName: agent.name, eventType: "login", ip }).catch(() => {});
+      res.json({ agent: safeAgent, token });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  app.post("/api/auth/logout", async (req, res) => {
+    try {
+      const agentId = req.session.agentId ?? null;
+      if (agentId) {
+        const agent = await storage.getAgentById(agentId).catch(() => null);
+        const ip = (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || req.socket?.remoteAddress || null;
+        storage.insertActivityLog({ agentId, agentName: agent?.name ?? null, eventType: "logout", ip }).catch(() => {});
+      }
+    } catch (_) {}
+    req.session.destroy(() => res.json({ success: true }));
+  });
+
+  app.get("/api/auth/me", requireAuth, async (req, res) => {
+    try {
+      const agent = await storage.getAgentById(req.session.agentId!);
+      if (!agent) return res.status(404).json({ message: "Not found" });
+      const { password: _, ...safeAgent } = agent;
+      const token = signToken({ agentId: agent.id, role: agent.role });
+      res.json({ agent: safeAgent, token });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  app.post("/api/auth/refresh", requireAuth, async (req, res) => {
+   try {
+     const agent = await storage.getAgentById(req.session.agentId!);
+     if (!agent) return res.status(404).json({ message: "Not found" });
+     const { password: _, ...safeAgent } = agent;
+     const token = signToken({ agentId: agent.id, role: agent.role });
+     res.json({ agent: safeAgent, token });
+   } catch (e: any) { res.status(500).json({ message: e.message }); }
+ });
+
+  app.get("/api/cases", requireAuth, async (req, res) => {
+    try {
+      const company = (req.query.company as string) || null;
+      res.json({ cases: await storage.getLoanCasesByAgent(req.session.agentId!, company) });
+    }
+    catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+app.get("/api/companies", requireAuth, async (req, res) => {
+  try {
+    const isAdmin = req.session.role === "admin";
+    const agentId = req.session.agentId!;
+    const result = await storage.query(
+      isAdmin
+        ? `SELECT DISTINCT company_name FROM (
+             SELECT company_name FROM loan_cases WHERE company_name IS NOT NULL AND company_name <> ''
+             UNION
+             SELECT company_name FROM bkt_cases WHERE company_name IS NOT NULL AND company_name <> ''
+           ) t ORDER BY company_name`
+        : `SELECT DISTINCT company_name FROM (
+             SELECT company_name FROM loan_cases WHERE agent_id=$1 AND company_name IS NOT NULL AND company_name <> ''
+             UNION
+             SELECT company_name FROM bkt_cases WHERE agent_id=$1 AND company_name IS NOT NULL AND company_name <> ''
+           ) t ORDER BY company_name`,
+      isAdmin ? [] : [agentId]
+    );
+    res.json({ companies: result.rows.map((r: any) => r.company_name) });
+  } catch (e: any) {
+    res.status(500).json({ message: e.message });
+  }
+});
+
+  app.get("/api/cases/:id", requireAuth, async (req, res) => {
+    try {
+      const c = await storage.getLoanCaseById(Number(req.params.id));
+      if (!c) return res.status(404).json({ message: "Not found" });
+      res.json({ case: c });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  app.put("/api/cases/:id/feedback", requireAuth, async (req, res) => {
+    try {
+      const { status, feedback, comments, ptp_date, rollback_yn, customer_available, vehicle_available, third_party, third_party_name, third_party_number, feedback_code, projection, non_starter, kyc_purchase, workable, monthly_feedback, occupation, shifted_to, cbc_paid, lpp_paid, emi_paid, call_outcome, call_comments } = req.body;
+      const ynVal = rollback_yn === true || rollback_yn === "true" ? true : rollback_yn === false || rollback_yn === "false" ? false : null;
+      const toBool = (v: any) => v === true || v === "true" ? true : v === false || v === "false" ? false : null;
+      const caseId = Number(req.params.id);
+      const oldRow = await storage.query(`SELECT status, rollback_yn, pos::numeric AS pos, agent_id, bkt, pro FROM loan_cases WHERE id = $1`, [caseId]);
+      const old = oldRow.rows[0];
+      const extraFields = {
+        ...(customer_available !== undefined && { customerAvailable: toBool(customer_available) }),
+        ...(vehicle_available !== undefined && { vehicleAvailable: toBool(vehicle_available) }),
+        ...(third_party !== undefined && { thirdParty: toBool(third_party) }),
+        ...(third_party_name !== undefined && { thirdPartyName: third_party_name || null }),
+        ...(third_party_number !== undefined && { thirdPartyNumber: third_party_number || null }),
+        ...(feedback_code !== undefined && { feedbackCode: feedback_code || null }),
+        ...(projection !== undefined && { projection: projection || null }),
+        ...(non_starter !== undefined && { nonStarter: toBool(non_starter) }),
+        ...(kyc_purchase !== undefined && { kycPurchase: toBool(kyc_purchase) }),
+        ...(workable !== undefined && { workable: toBool(workable) }),
+        ...(occupation !== undefined && { occupation: occupation || null }),
+        ...(shifted_to !== undefined && { shiftedCity: shifted_to || null }),
+        ...(cbc_paid !== undefined && { cbcPaid: cbc_paid != null ? parseFloat(cbc_paid) : null }),
+        ...(lpp_paid !== undefined && { lppPaid: lpp_paid != null ? parseFloat(lpp_paid) : null }),
+        ...(emi_paid !== undefined && { emiPaid: emi_paid != null ? parseFloat(emi_paid) : null }),
+        monthlyFeedback: monthly_feedback || null,
+      };
+      await storage.updateLoanCaseFeedback(caseId, status, feedback, comments, ptp_date, ynVal, extraFields);
+      await storage.query(
+        `UPDATE loan_cases SET broken_ptp = false, broken_ptp_date = NULL WHERE id = $1`,
+        [caseId]
+      );
+      // ✅ Record call log history (wrapped so it never breaks feedback saving)
+      // call_outcome comes from the "Call Log" tab; feedback from "Monthly Feedback" tab
+      try {
+        const logOutcome  = call_outcome  || feedback  || null;
+        const logComments = call_comments || comments  || null;
+        if (logOutcome) {
+          const caseRow = await storage.query(
+            `SELECT loan_no, customer_name, agent_id FROM loan_cases WHERE id = $1`, [caseId]
+          );
+          const cr = caseRow.rows[0];
+          if (cr) {
+            await storage.insertCallLog({
+              caseId, caseType: "loan", agentId: cr.agent_id,
+              loanNo: cr.loan_no, customerName: cr.customer_name,
+              outcome: logOutcome, comments: logComments,
+              ptpDate: ptp_date || null, status,
+            });
+          }
+        }
+      } catch (logErr: any) {
+        console.error("[call_log] loan insert failed:", logErr.message);
+      }
+      if (old && old.bkt && old.agent_id && (old.pro || "").toUpperCase() === 'TW') {
+        const pos = parseFloat(old.pos) || 0;
+        const bktKey = `bkt${old.bkt}`;
+        const wasPaid = old.status === "Paid"; const nowPaid = status === "Paid";
+        const wasRb = old.rollback_yn === true; const nowRb = ynVal === true;
+        const dPos = !wasPaid && nowPaid ? pos : wasPaid && !nowPaid ? -pos : 0;
+        const dCount = !wasPaid && nowPaid ? 1 : wasPaid && !nowPaid ? -1 : 0;
+        const dRb = !wasRb && nowRb ? pos : wasRb && !nowRb ? -pos : 0;
+        await storage.applyBktPerfDelta(old.agent_id, bktKey, dPos, -dPos, dCount, -dCount, dRb, -dRb);
+      }
+      res.json({ success: true });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+ app.get("/api/stats", requireAuth, async (req, res) => {
+  try {
+    const company  = (req.query.company as string) || null;
+    const agentId  = req.session.agentId!;
+ 
+    if (!company) {
+      res.json(await storage.getAgentStats(agentId));
+      return;
+    }
+ 
+    // Company-filtered stats (loan_cases only — bkt_cases usually have no company)
+    const result = await storage.query(
+      `SELECT
+         COUNT(*)::int                                           AS total,
+         COUNT(*) FILTER (WHERE status = 'Paid')::int           AS paid,
+         COUNT(*) FILTER (WHERE status = 'PTP')::int            AS ptp,
+         COUNT(*) FILTER (WHERE status NOT IN ('Paid','PTP'))::int AS "notProcess"
+       FROM loan_cases
+       WHERE agent_id = $1 AND company_name = $2`,
+      [agentId, company],
+    );
+    res.json(result.rows[0] ?? { total: 0, paid: 0, ptp: 0, notProcess: 0 });
+  } catch (e: any) { res.status(500).json({ message: e.message }); }
+});
+app.get("/api/broken-ptps", requireAuth, async (req, res) => {
+  try {
+    const agentId = req.session.agentId!;
+
+    // ── BUG FIX: Auto-mark past-due PTPs as broken before querying ────────
+    // The background job (runPtpBreakJob) runs every 10 min, so a freshly
+    // overdue PTP might not be flagged yet. Doing it here on every poll
+    // (every 30 s) ensures the blocking modal appears immediately.
+    await storage.query(`
+      UPDATE loan_cases
+      SET broken_ptp = true, broken_ptp_date = ptp_date
+      WHERE agent_id = $1
+        AND status = 'PTP'
+        AND ptp_date IS NOT NULL
+        AND ptp_date < CURRENT_DATE
+        AND broken_ptp IS DISTINCT FROM true
+    `, [agentId]);
+
+    await storage.query(`
+      UPDATE bkt_cases
+      SET broken_ptp = true, broken_ptp_date = ptp_date
+      WHERE agent_id = $1
+        AND status = 'PTP'
+        AND ptp_date IS NOT NULL
+        AND ptp_date < CURRENT_DATE
+        AND broken_ptp IS DISTINCT FROM true
+    `, [agentId]);
+
+    // ── Broken PTPs (loan + bkt) ──────────────────────────────────────────
+    const ptpResult = await storage.query(`
+      SELECT 'broken_ptp' AS type, 'loan' AS source, id, customer_name, loan_no,
+             NULLIF(REGEXP_REPLACE(COALESCE(pos::text, ''), '[^0-9.]', '', 'g'), '')::numeric AS amount,
+             broken_ptp_date AS ptp_date,
+             NULL::text AS assigned_at, NULL::numeric AS hours_overdue
+      FROM loan_cases
+      WHERE agent_id = $1
+        AND broken_ptp = true
+        AND (snooze_until IS NULL OR snooze_until < NOW())
+      UNION ALL
+      SELECT 'broken_ptp' AS type, 'bkt' AS source, id, customer_name, loan_no,
+             NULLIF(REGEXP_REPLACE(COALESCE(pos::text, ''), '[^0-9.]', '', 'g'), '')::numeric AS amount,
+             broken_ptp_date AS ptp_date,
+             NULL::text AS assigned_at, NULL::numeric AS hours_overdue
+      FROM bkt_cases
+      WHERE agent_id = $1
+        AND broken_ptp = true
+        AND (snooze_until IS NULL OR snooze_until < NOW())
+      ORDER BY ptp_date
+    `, [agentId]);
+
+    // ── Overdue depositions (pending > 7 hours) ───────────────────────────
+    const depoResult = await storage.query(`
+      SELECT 'overdue_deposition' AS type, 'loan' AS source, id, customer_name, loan_no,
+             amount, NULL::date AS ptp_date,
+             created_at::text AS assigned_at,
+             ROUND(EXTRACT(EPOCH FROM (NOW() - created_at)) / 3600, 1) AS hours_overdue
+      FROM fos_depositions
+      WHERE agent_id = $1
+        AND payment_method = 'pending'
+        AND created_at < NOW() - INTERVAL '7 hours'
+        AND (snooze_until IS NULL OR snooze_until < NOW())
+      ORDER BY created_at
+    `, [agentId]);
+
+    res.json([...ptpResult.rows, ...depoResult.rows]);
+  } catch (e: any) { res.status(500).json({ message: e.message }); }
+});
+
+  app.post("/api/broken-ptps/snooze", requireAuth, async (req, res) => {
+  try {
+    const agentId = req.session.agentId!;
+    const snoozeUntil = new Date(Date.now() + 60 * 60 * 1000).toISOString(); // 1 hour
+
+    await storage.query(
+      `UPDATE loan_cases SET snooze_until = $1 WHERE agent_id = $2 AND broken_ptp = true`,
+      [snoozeUntil, agentId]
+    );
+    await storage.query(
+      `UPDATE bkt_cases SET snooze_until = $1 WHERE agent_id = $2 AND broken_ptp = true`,
+      [snoozeUntil, agentId]
+    );
+    await storage.query(
+      `UPDATE fos_depositions SET snooze_until = $1 WHERE agent_id = $2 AND payment_method = 'pending'`,
+      [snoozeUntil, agentId]
+    );
+
+    res.json({ success: true });
+  } catch (e: any) { res.status(500).json({ message: e.message }); }
+});
+app.get("/api/today-ptp", requireAuth, async (req, res) => {
+  try {
+    const agentId = req.session.agentId!;
+    const company = (req.query.company as string) || null;
+ 
+    const companyClause = company ? `AND lc.company_name = '${company.replace(/'/g, "''")}'` : "";
+ 
+    const result = await storage.query(`
+      SELECT 'loan' AS source, id, customer_name, loan_no, pos::numeric AS pos,
+             ptp_date, telecaller_ptp_date
+      FROM loan_cases lc
+      WHERE agent_id = $1
+        AND (
+          (status = 'PTP' AND ptp_date = CURRENT_DATE)
+          OR (status = 'PTP' AND telecaller_ptp_date = CURRENT_DATE)
+        )
+        ${companyClause}
+      UNION ALL
+      SELECT 'bkt' AS source, id, customer_name, loan_no, pos::numeric AS pos,
+             ptp_date, telecaller_ptp_date
+      FROM bkt_cases
+      WHERE agent_id = $1
+        AND (
+          (status = 'PTP' AND ptp_date = CURRENT_DATE)
+          OR (status = 'PTP' AND telecaller_ptp_date = CURRENT_DATE)
+        )
+      ORDER BY customer_name
+    `, [agentId]);
+ 
+    res.json({ count: result.rows.length, cases: result.rows });
+  } catch (e: any) { res.status(500).json({ message: e.message }); }
+});
+
+  app.get("/api/attendance/today", requireAuth, async (req, res) => {
+    try { res.json({ attendance: await storage.getTodayAttendance(req.session.agentId!) }); }
+    catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+  app.post("/api/attendance/checkin", requireAuth, async (req, res) => {
+    try { await storage.checkIn(req.session.agentId!); res.json({ success: true }); }
+    catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+  app.post("/api/attendance/checkout", requireAuth, async (req, res) => {
+    try { await storage.checkOut(req.session.agentId!); res.json({ success: true }); }
+    catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  app.get("/api/salary", requireAuth, async (req, res) => {
+    try { res.json({ salary: await storage.getSalaryDetails(req.session.agentId!) }); }
+    catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+  app.get("/api/depositions", requireAuth, async (req, res) => {
+    try { res.json({ depositions: await storage.getDepositions(req.session.agentId!) }); }
+    catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+  app.post("/api/depositions", requireAuth, async (req, res) => {
+    try { await storage.createDeposition({ agentId: req.session.agentId!, ...req.body }); res.json({ success: true }); }
+    catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  app.put("/api/auth/password", requireAuth, async (req, res) => {
+    try {
+      const { currentPassword, newPassword } = req.body;
+      const agent = await storage.getAgentById(req.session.agentId!);
+      if (!agent || agent.password !== currentPassword) return res.status(400).json({ message: "Current password is incorrect" });
+      await storage.updateAgentPassword(req.session.agentId!, newPassword);
+      res.json({ success: true });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  app.get("/api/admin/agents", requireAdmin, async (req, res) => {
+    try { res.json({ agents: await storage.getAllAgents() }); }
+    catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+  app.get("/api/admin/stats", requireAdmin, async (req, res) => {
+  try {
+    const company = (req.query.company as string) || null;
+    if (company) {
+      const result = await storage.query(`
+        SELECT
+          fa.id,
+          fa.name,
+          COUNT(lc.id)::int                                     AS total,
+          COUNT(lc.id) FILTER (WHERE lc.status='Paid')::int     AS paid,
+          COUNT(lc.id) FILTER (WHERE lc.status='PTP')::int      AS ptp,
+          COUNT(lc.id) FILTER (WHERE lc.status NOT IN ('Paid','PTP'))::int AS "notProcess"
+        FROM fos_agents fa
+        LEFT JOIN loan_cases lc ON lc.agent_id = fa.id AND lc.company_name = $1
+        WHERE fa.role = 'fos'
+        GROUP BY fa.id, fa.name
+        ORDER BY fa.name
+      `, [company]);
+      res.json({ stats: result.rows });
+    } else {
+      res.json({ stats: await storage.getAllAgentStats() });
+    }
+  } catch (e: any) {
+    res.status(500).json({ message: e.message });
+  }
+});
+ app.get("/api/admin/cases", requireAdmin, async (req, res) => {
+  try {
+    const company = (req.query.company as string) || null;
+    if (company) {
+      const result = await storage.query(
+        `SELECT lc.*, fa.name AS agent_name
+         FROM loan_cases lc
+         LEFT JOIN fos_agents fa ON lc.agent_id = fa.id
+         WHERE lc.company_name = $1
+         ORDER BY lc.customer_name`,
+        [company]
+      );
+      res.json({ cases: result.rows });
+    } else {
+      res.json({ cases: await storage.getAllLoanCases() });
+    }
+  } catch (e: any) {
+    res.status(500).json({ message: e.message });
+  }
+});
+
+app.get("/api/admin/companies", requireAuth, async (req, res) => {
+  try {
+   const result = await storage.query(`
+  SELECT DISTINCT company_name FROM loan_cases 
+  WHERE company_name IS NOT NULL AND company_name <> ''
+  ORDER BY company_name
+`);
+    res.json({ companies: result.rows.map((r: any) => r.company_name) });
+  } catch (e: any) {
+    res.status(500).json({ message: e.message });
+  }
+});
+
+  app.get("/api/admin/cases/agent/:agentId", requireAdmin, async (req, res) => {
+  try {
+    const agentId = Number(req.params.agentId);
+    const result = await storage.query(
+      `SELECT
+        lc.id, lc.loan_no, lc.app_id, lc.customer_name, lc.status,
+        lc.pos::numeric AS pos, lc.bkt::text AS bkt,
+        lc.mobile_no, lc.address, lc.reference_address,
+        lc.latest_feedback, lc.feedback_code, lc.feedback_comments,
+        lc.feedback_date, lc.monthly_feedback,
+        lc.customer_available, lc.vehicle_available,
+        lc.third_party, lc.third_party_name, lc.third_party_number,
+        lc.projection, lc.non_starter, lc.kyc_purchase, lc.workable,
+        lc.ptp_date, lc.telecaller_ptp_date, lc.rollback_yn,
+        lc.agent_id, lc.registration_no, lc.pro,
+        lc.emi_amount, lc.emi_due, lc.cbc, lc.lpp, lc.cbc_lpp,
+        lc.rollback, lc.clearance,
+        lc.asset_name, lc.asset_make, lc.engine_no, lc.chassis_no,
+        lc.tenor, lc.first_emi_due_date, lc.loan_maturity_date,
+        lc.ref1_name, lc.ref1_mobile, lc.ref2_name, lc.ref2_mobile,
+        lc.extra_numbers,
+        lc.company_name,
+        fa.name AS agent_name,
+        'loan' AS case_type
+       FROM loan_cases lc
+       LEFT JOIN fos_agents fa ON fa.id = lc.agent_id
+       WHERE lc.agent_id = $1
+
+       UNION ALL
+
+       SELECT
+        bc.id, bc.loan_no, bc.app_id, bc.customer_name, bc.status,
+        bc.pos::numeric AS pos, bc.case_category AS bkt,
+        bc.mobile_no, bc.address, bc.reference_address,
+        bc.latest_feedback, bc.feedback_code, bc.feedback_comments,
+        bc.feedback_date, bc.monthly_feedback,
+        bc.customer_available, bc.vehicle_available,
+        bc.third_party, bc.third_party_name, bc.third_party_number,
+        bc.projection, bc.non_starter, bc.kyc_purchase, bc.workable,
+        bc.ptp_date, bc.telecaller_ptp_date, bc.rollback_yn,
+        bc.agent_id, bc.registration_no, bc.pro,
+        bc.emi_amount, bc.emi_due, bc.cbc, bc.lpp, bc.cbc_lpp,
+        bc.rollback, bc.clearance,
+        bc.asset_name, bc.asset_make, bc.engine_no, bc.chassis_no,
+        bc.tenor, bc.first_emi_due_date, bc.loan_maturity_date,
+        bc.ref1_name, bc.ref1_mobile, bc.ref2_name, bc.ref2_mobile,
+        bc.extra_numbers,
+        NULL AS company_name,
+        fa.name AS agent_name,
+        'bkt' AS case_type
+       FROM bkt_cases bc
+       LEFT JOIN fos_agents fa ON fa.id = bc.agent_id
+       WHERE bc.agent_id = $1
+
+       ORDER BY customer_name`,
+      [agentId]
+    );
+    res.json({ cases: result.rows });
+  } catch (e: any) { res.status(500).json({ message: e.message }); }
+});
+
+  app.get("/api/admin/salary", requireAdmin, async (req, res) => {
+    try {
+      const result = await storage.query(
+        `SELECT sd.*, fa.name AS agent_name FROM salary_details sd LEFT JOIN fos_agents fa ON fa.id = sd.agent_id ORDER BY sd.year DESC, sd.month DESC, fa.name`
+      );
+      res.json({ salary: result.rows });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+ app.post("/api/admin/salary", requireAdmin, async (req, res) => {
+    try {
+      const { agentId, month, year, presentDays, paymentAmount, incentiveAmount, petrolExpense, mobileExpense, grossPayment, advance, otherDeductions, netSalary } = req.body;
+      if (!agentId) return res.status(400).json({ message: "agentId is required" });
+      const gross = parseFloat(grossPayment ?? 0);
+      const adv   = parseFloat(advance ?? 0);
+      const other = parseFloat(otherDeductions ?? 0);
+      const net   = parseFloat(netSalary ?? (gross - adv - other).toString());
+      const total = gross - adv - other;
+      const monthNum = monthToNumber(month);
+      await storage.query(
+        `INSERT INTO salary_details (agent_id, month, year, present_days, payment_amount, incentive_amount, petrol_expense, mobile_expense, gross_payment, advance, other_deductions, total, net_salary) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+        [agentId, monthNum, year ?? new Date().getFullYear(), presentDays ?? 0, paymentAmount ?? 0, incentiveAmount ?? 0, petrolExpense ?? 0, mobileExpense ?? 0, gross, adv, other, total, net]
+      );
+
+      try {
+        const agentRow = await storage.query(
+          "SELECT id, name, push_token FROM fos_agents WHERE id = $1",
+          [Number(agentId)]
+        );
+        const agent = agentRow.rows[0];
+        const monthName = typeof month === "string" ? month : (MONTH_NAMES[monthNum - 1] ?? String(month));
+        const yearVal   = year ?? new Date().getFullYear();
+        const netStr    = net.toLocaleString("en-IN", { maximumFractionDigits: 0 });
+
+        console.log(`[salary] agent=${agent?.name} token=${agent?.push_token?.slice(0, 20) ?? "NONE"}`);
+
+        if (agent?.push_token?.trim()) {
+          const pushResult = await sendPush(
+            agent.push_token.trim(),
+            "💰 Salary Credited",
+            `Your salary of ₹${netStr} for ${monthName} ${yearVal} has been processed. Open app to view details.`,
+            { screen: "salary", type: "salary_credited" }
+          );
+          console.log("[salary] push result:", JSON.stringify(pushResult));
+        } else {
+          console.warn(`[salary] ⚠️  No push token for agentId=${agentId}`);
+        }
+      } catch (pushErr: any) {
+        console.error("[salary] Push notification failed:", pushErr.message);
+      }
+
+      res.json({ success: true });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  app.delete("/api/admin/salary/:id", requireAdmin, async (req, res) => {
+    try {
+      await storage.query(`DELETE FROM salary_details WHERE id = $1`, [Number(req.params.id)]);
+      res.json({ success: true });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  app.get("/api/admin/depositions", requireAdmin, async (req, res) => {
+    try { res.json({ depositions: await storage.getAllDepositions() }); }
+    catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  app.get("/api/admin/attendance", requireAdmin, async (req, res) => {
+    try {
+      const result = await storage.query(`SELECT a.*, fa.name AS agent_name FROM attendance a LEFT JOIN fos_agents fa ON fa.id = a.agent_id ORDER BY a.check_in DESC NULLS LAST, fa.name`);
+      res.json({ attendance: result.rows });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  app.get("/api/admin/required-deposits", requireAdmin, async (req, res) => {
+    try { res.json({ deposits: await storage.getAllRequiredDeposits() }); }
+    catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  app.post("/api/admin/required-deposits", requireAdmin, async (req, res) => {
+    try {
+      const { agentId, amount, description, dueDate } = req.body;
+      if (!agentId || !amount) return res.status(400).json({ message: "agentId and amount are required" });
+      const deposit = await storage.createRequiredDeposit({ agentId: Number(agentId), amount: Number(amount), description, dueDate });
+      const agentRow = await storage.query("SELECT id, name, push_token FROM fos_agents WHERE id = $1", [Number(agentId)]);
+      const agent = agentRow.rows[0];
+      console.log(`[deposit-assign] agent=${agent?.name} token=${agent?.push_token?.slice(0, 20) ?? "NONE"}`);
+      if (agent?.push_token?.trim()) {
+        const pushResult = await sendPush(
+          agent.push_token.trim(),
+          "💰 Deposit Assigned",
+          `Admin assigned you a deposit of ₹${Number(amount).toLocaleString("en-IN")}. Upload screenshot within 2 hours.`,
+          { screen: "deposition" }
+        );
+        console.log("[deposit-assign] push result:", JSON.stringify(pushResult));
+      } else {
+        console.warn(`[deposit-assign] ⚠️  No push token for agentId=${agentId}`);
+      }
+      res.json({ deposit });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  app.delete("/api/admin/required-deposits/:id", requireAdmin, async (req, res) => {
+    try { await storage.deleteRequiredDeposit(Number(req.params.id)); res.json({ success: true }); }
+    catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+  app.put("/api/admin/required-deposits/:id/cash-collected", requireAdmin, async (req, res) => {
+    try {
+      const depositId = Number(req.params.id);
+      await storage.query(`UPDATE required_deposits SET cash_collected=TRUE, cash_collected_at=NOW() WHERE id=$1`, [depositId]);
+      const depositRow = await storage.query(`SELECT rd.agent_id, rd.amount, fa.push_token FROM required_deposits rd JOIN fos_agents fa ON fa.id=rd.agent_id WHERE rd.id=$1`, [depositId]);
+      const deposit = depositRow.rows[0];
+      if (deposit?.push_token) await sendPush(deposit.push_token, "✅ Cash Collection Verified", `Admin verified cash collection of ₹${parseFloat(deposit.amount).toLocaleString("en-IN")}.`, { type: "cash_collected" });
+      res.json({ success: true });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+  app.get("/api/required-deposits", requireAuth, async (req, res) => {
+    try { res.json({ deposits: await storage.getRequiredDeposits(req.session.agentId!) }); }
+    catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+app.get("/api/admin/fos-depositions", requireAdmin, async (req, res) => {
+    try {
+      const result = await storage.query(`SELECT fd.*, fa.name AS agent_name, fa.id AS fos_id FROM fos_depositions fd LEFT JOIN fos_agents fa ON fa.id=fd.agent_id WHERE DATE_TRUNC('month', fd.deposition_date) = DATE_TRUNC('month', CURRENT_DATE) ORDER BY fd.deposition_date DESC, fa.name, fd.created_at DESC`);
+      const grouped: Record<string, any> = {};
+      for (const row of result.rows) {
+        const key = String(row.fos_id || row.agent_name || "unknown");
+        if (!grouped[key]) grouped[key] = { agentId: row.fos_id, agentName: row.agent_name, depositions: [], totalCash: 0, totalOnline: 0, totalAmount: 0 };
+        grouped[key].depositions.push(row);
+        grouped[key].totalCash += parseFloat(row.cash_amount || 0);
+        grouped[key].totalOnline += parseFloat(row.online_amount || 0);
+        grouped[key].totalAmount += parseFloat(row.amount || 0);
+      }
+      res.json({ depositions: result.rows, grouped: Object.values(grouped) });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+  app.get("/api/admin/fos-depositions/:agentId", requireAdmin, async (req, res) => {
+    try {
+      const agentId = Number(req.params.agentId);
+      const result = await storage.query(`SELECT fd.*, fa.name AS agent_name FROM fos_depositions fd LEFT JOIN fos_agents fa ON fa.id=fd.agent_id WHERE fd.agent_id=$1 AND DATE_TRUNC('month', fd.deposition_date) = DATE_TRUNC('month', CURRENT_DATE) ORDER BY fd.deposition_date DESC, fd.created_at DESC`, [agentId]);
+      res.json({ depositions: result.rows });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+  app.post("/api/admin/fos-depositions", requireAdmin, async (req, res) => {
+    try {
+      const { agentId, loanNo, customerName, bkt, source, amount, cashAmount, onlineAmount, paymentMethod, notes, depositionDate } = req.body;
+      if (!agentId || !amount) return res.status(400).json({ message: "agentId and amount required" });
+      const cashAmt = parseFloat(cashAmount || 0); const onlineAmt = parseFloat(onlineAmount || 0); const totalAmt = parseFloat(amount);
+      let method = paymentMethod || "pending";
+      if (!paymentMethod) { if (cashAmt > 0 && onlineAmt > 0) method = "both"; else if (cashAmt > 0) method = "cash"; else if (onlineAmt > 0) method = "online"; }
+      const result = await storage.query(`INSERT INTO fos_depositions (agent_id,loan_no,customer_name,bkt,source,amount,cash_amount,online_amount,payment_method,notes,deposition_date) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
+        [agentId, loanNo || null, customerName || null, bkt || null, source || "loan", totalAmt, cashAmt, onlineAmt, method, notes || null, depositionDate || new Date().toISOString().slice(0, 10)]);
+      try {
+        const agentRow = await storage.query("SELECT id, name, push_token FROM fos_agents WHERE id=$1", [agentId]);
+        const agent = agentRow.rows[0];
+        console.log(`[fos-dep-assign] agent=${agent?.name} token=${agent?.push_token?.slice(0, 20) ?? "NONE"}`);
+        if (agent?.push_token?.trim()) {
+          const pushResult = await sendPush(
+            agent.push_token.trim(),
+            "💰 New Deposition Assigned",
+            `Admin assigned you ₹${totalAmt.toLocaleString("en-IN")}${customerName ? ` for ${customerName}` : ""}. Mark as paid.`,
+            { screen: "fos-depositions" }
+          );
+          console.log("[fos-dep-assign] push result:", JSON.stringify(pushResult));
+        } else {
+          console.warn(`[fos-dep-assign] ⚠️  No push token for agentId=${agentId}`);
+        }
+      } catch (pushErr: any) { console.error("[fos-dep-assign] push error:", pushErr.message); }
+      res.json({ deposition: result.rows[0] });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+  app.put("/api/admin/fos-depositions/:id/payment", requireAdmin, async (req, res) => {
+    try {
+      const id = Number(req.params.id); const { paymentMethod, cashAmount, onlineAmount, screenshotUrl } = req.body;
+      const cashAmt = parseFloat(cashAmount || 0); const onlineAmt = parseFloat(onlineAmount || 0); const totalAmt = cashAmt + onlineAmt;
+      await storage.query(`UPDATE fos_depositions SET payment_method=$1,cash_amount=$2,online_amount=$3,amount=CASE WHEN $4>0 THEN $4 ELSE amount END,screenshot_url=COALESCE($5,screenshot_url),updated_at=NOW() WHERE id=$6`, [paymentMethod, cashAmt, onlineAmt, totalAmt, screenshotUrl || null, id]);
+      res.json({ success: true });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+  app.delete("/api/admin/fos-depositions/:id", requireAdmin, async (req, res) => {
+    try { await storage.query(`DELETE FROM fos_depositions WHERE id=$1`, [Number(req.params.id)]); res.json({ success: true }); }
+    catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+  app.get("/api/fos-depositions", requireAuth, async (req, res) => {
+    try {
+const result = await storage.query(`SELECT * FROM fos_depositions WHERE agent_id=$1 AND DATE_TRUNC('month', deposition_date) = DATE_TRUNC('month', CURRENT_DATE) ORDER BY deposition_date DESC, created_at DESC`, [req.session.agentId!]);
+      res.json({ depositions: result.rows });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+ app.post("/api/fos-depositions/:id/pay-cash", requireAuth, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const agentId = req.session.agentId!;
+    const { cashAmount } = req.body;
+    if (!cashAmount || isNaN(parseFloat(cashAmount))) return res.status(400).json({ message: "Valid cash amount required" });
+
+    const cashAmt = parseFloat(cashAmount);
+    const depRow  = await storage.query(
+      `SELECT amount, cash_amount, online_amount FROM fos_depositions WHERE id=$1 AND agent_id=$2`,
+      [id, agentId]
+    );
+    if (!depRow.rows[0]) return res.status(404).json({ message: "Deposition not found" });
+
+    const totalAssigned  = parseFloat(depRow.rows[0].amount        || 0);
+    const existingCash   = parseFloat(depRow.rows[0].cash_amount   || 0);
+    const existingOnline = parseFloat(depRow.rows[0].online_amount || 0);
+
+    const newCashTotal  = existingCash + cashAmt;
+    const totalPaidNow  = newCashTotal + existingOnline;
+    const fullyPaid     = Math.round(totalPaidNow) >= Math.round(totalAssigned);
+    const paymentMethod = existingOnline > 0 ? "both" : "cash";
+    const finalMethod   = fullyPaid ? paymentMethod : "pending";
+
+    await storage.query(
+      `UPDATE fos_depositions SET payment_method=$1, cash_amount=$2, updated_at=NOW() WHERE id=$3 AND agent_id=$4`,
+      [finalMethod, newCashTotal, id, agentId]
+    );
+
+    try {
+      const agentNameRow = await storage.query(`SELECT name FROM fos_agents WHERE id=$1`, [agentId]);
+      const adminRows    = await storage.query(`SELECT push_token FROM fos_agents WHERE role='admin' AND push_token IS NOT NULL AND push_token<>''`);
+      for (const admin of adminRows.rows) {
+        await sendPush(
+          admin.push_token,
+          fullyPaid ? "💵 Cash Payment Complete" : "💵 Partial Cash Payment",
+          `${agentNameRow.rows[0]?.name || "FOS"} paid ₹${cashAmt.toLocaleString("en-IN")} cash${fullyPaid ? "" : ` (₹${(totalAssigned - totalPaidNow).toLocaleString("en-IN")} still pending)`}.`,
+          { type: "fos_dep_cash" }
+        );
+      }
+    } catch {}
+
+    res.json({ success: true, amountApplied: cashAmt, remaining: Math.max(0, totalAssigned - totalPaidNow) });
+  } catch (e: any) { res.status(500).json({ message: e.message }); }
+});
+app.post("/api/fos-depositions/:id/pay-online", requireAuth, screenshotUpload.single("screenshot"), async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const agentId = req.session.agentId!;
+
+    if (!req.file) return res.status(400).json({ message: "No screenshot uploaded" });
+
+    const requestedOnline = parseFloat(req.body.onlineAmount || "0");
+    const filename = req.file.filename;
+    const baseUrl = process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : "";
+    const screenshotUrl = `${baseUrl}/uploads/screenshots/${filename}`;
+
+    const depRow = await storage.query(
+      `SELECT amount, cash_amount, online_amount FROM fos_depositions WHERE id=$1 AND agent_id=$2`,
+      [id, agentId]
+    );
+    if (!depRow.rows[0]) {
+      fs.unlinkSync(req.file.path);
+      return res.status(404).json({ message: "Deposition not found" });
+    }
+
+    const totalAssigned  = parseFloat(depRow.rows[0].amount        || 0);
+    const existingCash   = parseFloat(depRow.rows[0].cash_amount   || 0);
+    const existingOnline = parseFloat(depRow.rows[0].online_amount || 0);
+
+    const newOnlineAmt  = requestedOnline > 0
+      ? requestedOnline
+      : Math.max(0, totalAssigned - existingCash - existingOnline);
+    const totalOnlineNow = existingOnline + newOnlineAmt;
+    const totalPaidNow   = existingCash + totalOnlineNow;
+    const fullyPaid      = Math.round(totalPaidNow) >= Math.round(totalAssigned);
+
+    const paymentMethod  = existingCash > 0 ? "both" : "online";
+    const finalMethod    = fullyPaid ? paymentMethod : "pending";
+
+    await storage.query(
+      `UPDATE fos_depositions SET payment_method=$1, online_amount=$2, screenshot_url=$3, updated_at=NOW() WHERE id=$4 AND agent_id=$5`,
+      [finalMethod, totalOnlineNow, screenshotUrl, id, agentId]
+    );
+
+    const adminRows = await storage.query(`SELECT push_token FROM fos_agents WHERE role='admin' AND push_token IS NOT NULL AND push_token<>''`);
+    const agentRow  = await storage.query(`SELECT name FROM fos_agents WHERE id=$1`, [agentId]);
+    for (const admin of adminRows.rows) {
+      await sendPush(
+        admin.push_token,
+        fullyPaid ? "📸 Online Payment Complete" : "📸 Partial Online Payment",
+        `${agentRow.rows[0]?.name || "FOS"} paid ₹${newOnlineAmt.toLocaleString("en-IN")} online${fullyPaid ? "" : ` (₹${(totalAssigned - totalPaidNow).toLocaleString("en-IN")} still pending)`}.`,
+        { type: "fos_dep_screenshot" }
+      );
+    }
+
+    res.json({ success: true, screenshotUrl, amountApplied: newOnlineAmt, remaining: Math.max(0, totalAssigned - totalPaidNow) });
+  } catch (e: any) { res.status(500).json({ message: e.message }); }
+});
+app.put("/api/fos-depositions/:id/pay-both", requireAuth, screenshotUpload.single("screenshot"), async (req, res) => {
+  try {
+    const id = Number(req.params.id); 
+    const agentId = req.session.agentId!;
+    const { cashAmount, onlineAmount } = req.body;
+
+    const cashAmt = parseFloat(cashAmount || "0") || 0;
+    const onlineAmt = parseFloat(onlineAmount || "0") || 0;
+    if (cashAmt <= 0) return res.status(400).json({ message: "Cash amount must be > 0" });
+    if (onlineAmt <= 0) return res.status(400).json({ message: "Online amount must be > 0" });
+    if (!req.file) return res.status(400).json({ message: "No screenshot uploaded" });
+
+    const filename = req.file.filename;
+    const baseUrl = process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : "";
+    const screenshotUrl = `${baseUrl}/uploads/screenshots/${filename}`;
+
+    await storage.query(
+      `UPDATE fos_depositions SET payment_method='both', cash_amount=$1, online_amount=$2, amount=GREATEST(amount,$3), screenshot_url=$4, updated_at=NOW() WHERE id=$5 AND agent_id=$6`,
+      [cashAmt, onlineAmt, cashAmt + onlineAmt, screenshotUrl, id, agentId]
+    );
+
+    try {
+      const agentRow = await storage.query(`SELECT name FROM fos_agents WHERE id=$1`, [agentId]);
+      const adminRows = await storage.query(`SELECT push_token FROM fos_agents WHERE role='admin' AND push_token IS NOT NULL AND push_token<>''`);
+      for (const admin of adminRows.rows) {
+        await sendPush(admin.push_token, "🔀 Split Payment", `${agentRow.rows[0]?.name || "FOS"} paid ₹${cashAmt.toLocaleString("en-IN")} cash + ₹${onlineAmt.toLocaleString("en-IN")} online.`, { type: "fos_dep_both" });
+      }
+    } catch {}
+
+    res.json({ success: true, screenshotUrl });
+  } catch (e: any) { res.status(500).json({ message: e.message }); }
+});
+
+  app.get("/api/admin/fos-depositions-export", requireAdmin, async (req, res) => {
+    try {
+      const result = await storage.query(`SELECT TO_CHAR(fd.deposition_date,'DD-Mon-YYYY') AS "Date", COALESCE(fa.name,'Unknown') AS "FOS Name", COALESCE(fd.customer_name,'') AS "Customer Name", COALESCE(fd.loan_no,'') AS "Loan No", ROUND(fd.cash_amount::numeric,2) AS "Cash Amount", ROUND(fd.online_amount::numeric,2) AS "Online Amount", ROUND(fd.amount::numeric,2) AS "Total Amount", fd.payment_method AS "Payment Method", COALESCE(fd.notes,'') AS "Notes" FROM fos_depositions fd LEFT JOIN fos_agents fa ON fa.id=fd.agent_id ORDER BY fd.deposition_date DESC, fa.name, fd.created_at DESC`);
+      const wb = new ExcelJS.Workbook(); const ws = wb.addWorksheet("FOS Depositions");
+      ws.columns = [{ header: "Date", key: "Date", width: 16 }, { header: "FOS Name", key: "FOS Name", width: 22 }, { header: "Customer Name", key: "Customer Name", width: 28 }, { header: "Loan No", key: "Loan No", width: 18 }, { header: "Cash Amount", key: "Cash Amount", width: 16 }, { header: "Online Amount", key: "Online Amount", width: 16 }, { header: "Total Amount", key: "Total Amount", width: 16 }, { header: "Payment Method", key: "Payment Method", width: 16 }, { header: "Notes", key: "Notes", width: 24 }];
+      ws.getRow(1).eachCell((cell) => { cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF0F172A" } }; cell.font = { bold: true, color: { argb: "FFFFFFFF" } }; cell.alignment = { vertical: "middle", horizontal: "center" }; });
+      let totalCash = 0, totalOnline = 0, totalAmt = 0;
+      result.rows.forEach((row: any) => { const c = parseFloat(row["Cash Amount"] || 0); const o = parseFloat(row["Online Amount"] || 0); const t = parseFloat(row["Total Amount"] || 0); totalCash += c; totalOnline += o; totalAmt += t; ws.addRow({ "Date": row["Date"] || "", "FOS Name": row["FOS Name"] || "", "Customer Name": row["Customer Name"] || "", "Loan No": row["Loan No"] || "", "Cash Amount": c, "Online Amount": o, "Total Amount": t, "Payment Method": (row["Payment Method"] || "pending").toUpperCase(), "Notes": row["Notes"] || "" }); });
+      if (result.rows.length > 0) { const tr = ws.addRow({ "Date": "TOTAL", "FOS Name": "", "Customer Name": "", "Loan No": `${result.rows.length} records`, "Cash Amount": totalCash, "Online Amount": totalOnline, "Total Amount": totalAmt, "Payment Method": "", "Notes": "" }); tr.eachCell((cell) => { cell.font = { bold: true }; }); }
+      const buf = await wb.xlsx.writeBuffer();
+      res.setHeader("Content-Disposition", `attachment; filename="FOS_Depositions_${new Date().toISOString().slice(0, 10)}.xlsx"`);
+      res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+      res.send(Buffer.from(buf));
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  app.post("/api/admin/import-depositions", requireAdmin, upload.single("file"), async (req, res) => {
+    try {
+      if (!req.file) return res.status(400).json({ message: "No file uploaded" });
+      const wb = new ExcelJS.Workbook(); await wb.xlsx.load(req.file.buffer);
+      const ws = wb.worksheets[0]; const rawRows = worksheetToRows(ws, true);
+      if (rawRows.length === 0) return res.json({ imported: 0, skipped: 0, errors: [] });
+      const COL_MAP: Record<string, string> = { agreementno: "loan_no", agreementnumber: "loan_no", agreement: "loan_no", agrmtno: "loan_no", agrno: "loan_no", loanno: "loan_no", loannumber: "loan_no", loan: "loan_no", custname: "customer_name", customername: "customer_name", cust: "customer_name", customer: "customer_name", name: "customer_name", amount: "amount", totalamount: "amount", total: "amount", amountdue: "amount", dueamount: "amount", fos: "fos_name", fosname: "fos_name", fosagent: "fos_name", agent: "fos_name", collector: "fos_name" };
+      let headerIdx = -1; let colMap: Record<number, string> = {};
+      for (let r = 0; r < Math.min(rawRows.length, 10); r++) { const row = rawRows[r]; const tempMap: Record<number, string> = {}; let matched = 0; for (let c = 0; c < row.length; c++) { const norm = normalizeHeader(String(row[c] || "")); if (COL_MAP[norm]) { tempMap[c] = COL_MAP[norm]; matched++; } } if (matched >= 2) { headerIdx = r; colMap = tempMap; break; } }
+      if (headerIdx === -1) return res.status(400).json({ message: "Could not find header row." });
+      const { rows: existingAgents } = await storage.query(`SELECT id, name FROM fos_agents WHERE name IS NOT NULL`);
+      const agentByName: Record<string, number> = {};
+      for (const a of existingAgents) { if (a.name) agentByName[a.name.toLowerCase().trim()] = a.id; }
+      function resolveAgentId(fosName: string): number | null {
+        if (!fosName) return null; const lower = fosName.toLowerCase().trim();
+        if (agentByName[lower]) return agentByName[lower];
+        for (const [dbName, id] of Object.entries(agentByName)) { if (lower.includes(dbName) || dbName.includes(lower)) return id; }
+        return null;
+      }
+      // ── Do NOT delete historical depositions – preserve all past records ──
+      let imported = 0, skipped = 0; const errors: string[] = [];
+      const today = new Date().toISOString().slice(0, 10);
+      for (let i = 0; i < rawRows.slice(headerIdx + 1).length; i++) {
+        const row = rawRows.slice(headerIdx + 1)[i]; const mapped: Record<string, any> = {};
+        for (const [ci, field] of Object.entries(colMap)) { const val = row[Number(ci)]; mapped[field] = val !== undefined && val !== "" ? String(val).trim() : null; }
+        if (!mapped.fos_name && !mapped.customer_name && !mapped.loan_no && !mapped.amount) { skipped++; continue; }
+        if (!mapped.amount || parseFloat(mapped.amount) <= 0) { skipped++; continue; }
+        const agentId = mapped.fos_name ? resolveAgentId(mapped.fos_name) : null;
+        if (mapped.fos_name && !agentId) { errors.push(`Row ${i + headerIdx + 2}: FOS "${mapped.fos_name}" not found`); skipped++; continue; }
+        try { await storage.query(`INSERT INTO fos_depositions (agent_id,loan_no,customer_name,amount,cash_amount,online_amount,payment_method,deposition_date) VALUES ($1,$2,$3,$4,0,0,'pending',$5)`, [agentId, mapped.loan_no || null, mapped.customer_name || null, parseFloat(mapped.amount || "0") || 0, today]); imported++; }
+        catch (e: any) { errors.push(`Row ${i + headerIdx + 2}: ${e.message}`); skipped++; }
+      }
+      if (imported > 0) {
+        try {
+          const fosAgents = await storage.query(
+            `SELECT id, name, push_token FROM fos_agents WHERE role='fos' AND push_token IS NOT NULL AND push_token != ''`
+          );
+          const playerIds = fosAgents.rows.map((r: any) => r.push_token?.trim()).filter(Boolean);
+          console.log(`[import-dep] Notifying ${playerIds.length} FOS agents about ${imported} new records`);
+          if (playerIds.length > 0) {
+            const pushResult = await sendPushToMany(
+              playerIds,
+              "📋 New Deposits Assigned",
+              `Admin uploaded ${imported} new deposit record${imported > 1 ? "s" : ""}. Open app to mark payments.`,
+              { screen: "fos-depositions", type: "bulk_import" }
+            );
+            console.log("[import-dep] push result:", JSON.stringify(pushResult));
+          } else {
+            console.warn("[import-dep] ⚠️  No FOS agents have push tokens registered");
+          }
+        } catch (pushErr: any) {
+          console.error("[import-dep] Push failed:", pushErr.message);
+        }
+      }
+      res.json({ imported, skipped, total: rawRows.slice(headerIdx + 1).length, errors: errors.slice(0, 20) });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  app.post("/api/push-token", requireAuth, async (req, res) => {
+    try {
+      const { token } = req.body;
+      if (!token || typeof token !== "string" || token.trim() === "") return res.status(400).json({ message: "token required" });
+      await storage.query("UPDATE fos_agents SET push_token=$1 WHERE id=$2", [token.trim(), req.session.agentId!]);
+      res.json({ success: true });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+  app.get("/api/admin/push-status", requireAdmin, async (req, res) => {
+    try {
+      const result = await storage.query(`SELECT id, name, CASE WHEN push_token IS NOT NULL AND push_token<>'' THEN true ELSE false END AS has_token, LEFT(push_token,40) AS token_preview FROM fos_agents WHERE role='fos' ORDER BY name`);
+      res.json({ agents: result.rows });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+  app.post("/api/admin/test-push/:agentId", requireAdmin, async (req, res) => {
+    try {
+      const agentRow = await storage.query("SELECT id, name, push_token FROM fos_agents WHERE id=$1", [Number(req.params.agentId)]);
+      const agent = agentRow.rows[0];
+      if (!agent) return res.status(404).json({ message: "Agent not found" });
+      if (!agent.push_token) return res.status(400).json({ message: "No push token." });
+      const result = await sendPush(agent.push_token, "🔔 Test Notification", `Hello ${agent.name}!`, { type: "test" });
+      res.json({ success: result.ok, error: result.error ?? null, agentName: agent.name });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+  app.post("/api/admin/test-push-all", requireAdmin, async (req, res) => {
+    try {
+      const agents = await storage.query("SELECT push_token FROM fos_agents WHERE role='fos' AND push_token IS NOT NULL AND push_token<>''");
+      if (agents.rows.length === 0) return res.json({ sent: 0, total: 0 });
+      const result = await sendPushToMany(agents.rows.map((a: any) => a.push_token), "🔔 Test Notification", "Admin sent a test notification.", { type: "test" });
+      res.json({ sent: result.sent, total: result.total });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  app.post("/api/profile-photo", requireAuth, async (req, res) => {
+    try { await storage.query("UPDATE fos_agents SET photo_url=$1 WHERE id=$2", [req.body.photoUrl, req.session.agentId!]); res.json({ success: true }); }
+    catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+  app.get("/api/profile", requireAuth, async (req, res) => {
+    try { const result = await storage.query("SELECT id,name,username,role,phone,photo_url FROM fos_agents WHERE id=$1", [req.session.agentId!]); res.json(result.rows[0] || {}); }
+    catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  app.post("/api/required-deposits/:id/screenshot", requireAuth, screenshotUpload.single("screenshot"), async (req, res) => {
+    try {
+      const depositId = Number(req.params.id);
+      if (!req.file) return res.status(400).json({ message: "No file uploaded" });
+      const baseUrl = process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : "";
+      const screenshotUrl = `${baseUrl}/uploads/screenshots/${req.file.filename}`;
+      await storage.query("UPDATE required_deposits SET screenshot_url=$1, screenshot_uploaded_at=NOW() WHERE id=$2 AND agent_id=$3", [screenshotUrl, depositId, req.session.agentId!]);
+      const depositRow = await storage.query(`SELECT rd.amount, fa.name AS agent_name FROM required_deposits rd JOIN fos_agents fa ON fa.id=rd.agent_id WHERE rd.id=$1`, [depositId]);
+      const deposit = depositRow.rows[0];
+      const adminRows = await storage.query(`SELECT push_token FROM fos_agents WHERE role='admin' AND push_token IS NOT NULL AND push_token<>''`);
+      if (adminRows.rows.length > 0) await sendPushToMany(adminRows.rows.map((r: any) => r.push_token), "📸 Screenshot Uploaded", `${deposit?.agent_name || "FOS"} uploaded ₹${parseFloat(deposit?.amount || 0).toLocaleString("en-IN")}.`, { type: "screenshot_uploaded", depositId });
+      res.json({ success: true, screenshotUrl });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+  app.put("/api/admin/required-deposits/:id/verify", requireAdmin, async (req, res) => {
+    try {
+      await storage.query("UPDATE required_deposits SET alarm_scheduled=TRUE WHERE id=$1", [Number(req.params.id)]);
+      const depositRow = await storage.query(`SELECT rd.agent_id, rd.amount, fa.push_token FROM required_deposits rd JOIN fos_agents fa ON fa.id=rd.agent_id WHERE rd.id=$1`, [Number(req.params.id)]);
+      const deposit = depositRow.rows[0];
+      if (deposit?.push_token) await sendPush(deposit.push_token, "✅ Deposit Verified", `Payment of ₹${parseFloat(deposit.amount).toLocaleString("en-IN")} verified.`, { type: "deposit_verified" });
+      res.json({ success: true });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  app.post("/api/admin/cases", requireAdmin, async (req, res) => {
+    try { await storage.createLoanCase(req.body); res.json({ success: true }); }
+    catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+  app.get("/api/admin/agent/:agentId/stats", requireAdmin, async (req, res) => {
+    try { res.json(await storage.getAgentStats(Number(req.params.agentId))); }
+    catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+  app.get("/api/admin/bkt-cases", requireAdmin, async (req, res) => {
+    try { res.json({ cases: await storage.getAllBktCases(req.query.category as string | undefined) }); }
+    catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+ app.get("/api/bkt-cases", requireAuth, async (req, res) => {
+  try {
+    const agentId  = req.session.agentId!;
+    const category = req.query.category as string | undefined;
+    const company  = (req.query.company as string) || null;
+ 
+    // bkt_cases doesn't have company_name, so company filter delegates to loan_cases
+    // For now fall through to normal query (bkt is separate allocation)
+    res.json({ cases: await storage.getBktCasesByAgent(agentId, category) });
+  } catch (e: any) { res.status(500).json({ message: e.message }); }
+});
+
+  app.get("/api/bkt-cases/:id", requireAuth, async (req, res) => {
+    try {
+      const result = await storage.query(
+        `SELECT *, 'bkt' AS case_type FROM bkt_cases WHERE id = $1`,
+        [Number(req.params.id)]
+      );
+      const c = result.rows[0];
+      if (!c) return res.status(404).json({ message: "Not found" });
+      res.json({ case: c });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  app.put("/api/bkt-cases/:id/feedback", requireAuth, async (req, res) => {
+    try {
+      const { status, feedback, comments, ptp_date, rollback_yn, customer_available, vehicle_available, third_party, third_party_name, third_party_number, feedback_code, projection, non_starter, kyc_purchase, workable, monthly_feedback, occupation, shifted_to, cbc_paid, lpp_paid, emi_paid, call_outcome, call_comments } = req.body;
+      const ynVal = rollback_yn === true || rollback_yn === "true" ? true : rollback_yn === false || rollback_yn === "false" ? false : null;
+      const toBool = (v: any) => v === true || v === "true" ? true : v === false || v === "false" ? false : null;
+      const caseId = Number(req.params.id);
+      const oldRow = await storage.query(`SELECT status, rollback_yn, pos::numeric AS pos, agent_id, case_category, pro FROM bkt_cases WHERE id=$1`, [caseId]);
+      const old = oldRow.rows[0];
+      const bktExtraFields = {
+        ...(customer_available !== undefined && { customerAvailable: toBool(customer_available) }),
+        ...(vehicle_available !== undefined && { vehicleAvailable: toBool(vehicle_available) }),
+        ...(third_party !== undefined && { thirdParty: toBool(third_party) }),
+        ...(third_party_name !== undefined && { thirdPartyName: third_party_name || null }),
+        ...(third_party_number !== undefined && { thirdPartyNumber: third_party_number || null }),
+        ...(feedback_code !== undefined && { feedbackCode: feedback_code || null }),
+        ...(projection !== undefined && { projection: projection || null }),
+        ...(non_starter !== undefined && { nonStarter: toBool(non_starter) }),
+        ...(kyc_purchase !== undefined && { kycPurchase: toBool(kyc_purchase) }),
+        ...(workable !== undefined && { workable: toBool(workable) }),
+        ...(occupation !== undefined && { occupation: occupation || null }),
+        ...(shifted_to !== undefined && { shiftedCity: shifted_to || null }),
+        ...(cbc_paid !== undefined && { cbcPaid: cbc_paid != null ? parseFloat(cbc_paid) : null }),
+        ...(lpp_paid !== undefined && { lppPaid: lpp_paid != null ? parseFloat(lpp_paid) : null }),
+        ...(emi_paid !== undefined && { emiPaid: emi_paid != null ? parseFloat(emi_paid) : null }),
+        monthlyFeedback: monthly_feedback || null,
+      };
+      await storage.updateBktCaseFeedback(caseId, status, feedback, comments, ptp_date, ynVal, bktExtraFields);
+      await storage.query(
+        `UPDATE bkt_cases SET broken_ptp = false, broken_ptp_date = NULL WHERE id = $1`,
+        [caseId]
+      );
+      // ✅ Record call log history (wrapped so it never breaks feedback saving)
+      // call_outcome comes from the "Call Log" tab; feedback from "Monthly Feedback" tab
+      try {
+        const logOutcome  = call_outcome  || feedback  || null;
+        const logComments = call_comments || comments  || null;
+        if (logOutcome) {
+          const caseRow = await storage.query(
+            `SELECT loan_no, customer_name, agent_id FROM bkt_cases WHERE id = $1`, [caseId]
+          );
+          const cr = caseRow.rows[0];
+          if (cr) {
+            await storage.insertCallLog({
+              caseId, caseType: "bkt", agentId: cr.agent_id,
+              loanNo: cr.loan_no, customerName: cr.customer_name,
+              outcome: logOutcome, comments: logComments,
+              ptpDate: ptp_date || null, status,
+            });
+          }
+        }
+      } catch (logErr: any) {
+        console.error("[call_log] bkt insert failed:", logErr.message);
+      }
+      if (old && old.case_category && old.agent_id && (old.pro || "").toUpperCase() === 'TW') {
+        const pos = parseFloat(old.pos) || 0;
+        const bktKey = (old.case_category as string).toLowerCase().replace(/\s+/g, "");
+        const wasPaid = old.status === "Paid"; const nowPaid = status === "Paid";
+        const wasRb = old.rollback_yn === true; const nowRb = ynVal === true;
+        const dPos = !wasPaid && nowPaid ? pos : wasPaid && !nowPaid ? -pos : 0;
+        const dCount = !wasPaid && nowPaid ? 1 : wasPaid && !nowPaid ? -1 : 0;
+        const dRb = !wasRb && nowRb ? pos : wasRb && !nowRb ? -pos : 0;
+        await storage.applyBktPerfDelta(old.agent_id, bktKey, dPos, -dPos, dCount, -dCount, dRb, -dRb);
+      }
+      res.json({ success: true });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // IMPORT ALLOCATION — now includes company_name
+  // ─────────────────────────────────────────────────────────────────────────────
+  app.post("/api/admin/import", requireAdmin, upload.single("file"), async (req, res) => {
+    try {
+      if (!req.file) return res.status(400).json({ message: "No file uploaded" });
+      const ejWorkbook1 = new ExcelJS.Workbook(); await ejWorkbook1.xlsx.load(req.file.buffer);
+      const worksheet1 = ejWorkbook1.worksheets.find((ws) => ws.name.toUpperCase() === "ALLU") || ejWorkbook1.worksheets[0];
+      // Only read first 37 cols (A-AK) — AL onwards are formula-only summary cols that must not be imported
+      const MAX_IMPORT_COLS = 37;
+      const rawRows: any[][] = worksheetToRows(worksheet1, true).map((row) => row.slice(0, MAX_IMPORT_COLS));
+      if (rawRows.length === 0) return res.json({ imported: 0, updated: 0, skipped: 0, agentsCreated: 0, agentsRemoved: 0, errors: [] });
+      let headerRowIdx = -1; let colIdxMap: Record<number, string> = {};
+      for (let r = 0; r < Math.min(rawRows.length, 15); r++) { const row = rawRows[r]; const tempMap: Record<number, string> = {}; let matched = 0; for (let c = 0; c < row.length; c++) { const norm = normalizeHeader(String(row[c] || "")); if (COLUMN_MAP[norm]) { tempMap[c] = COLUMN_MAP[norm]; matched++; } } if (matched >= 3) { headerRowIdx = r; colIdxMap = tempMap; break; } }
+      if (headerRowIdx === -1) return res.status(400).json({ message: "Could not find header row." });
+      const fosNamesInExcel = new Set<string>();
+      for (const row of rawRows.slice(headerRowIdx + 1)) { const mapped: Record<string, any> = {}; for (const [colIdx, dbField] of Object.entries(colIdxMap)) { const val = row[Number(colIdx)]; mapped[dbField] = val !== undefined && val !== "" ? String(val).trim() : null; } if (mapped.fos_name && !isRepeatHeaderRow(mapped)) fosNamesInExcel.add(mapped.fos_name.toLowerCase().trim()); }
+      // ── Save user-entered data that must survive the re-import ────────────
+      const savedExtras = await storage.query(
+        `SELECT loan_no, extra_numbers FROM loan_cases WHERE extra_numbers IS NOT NULL AND array_length(extra_numbers, 1) > 0`
+      );
+      const extrasMap = new Map<string, string[]>();
+      for (const row of savedExtras.rows) { if (row.extra_numbers?.length) extrasMap.set(row.loan_no, row.extra_numbers); }
+      console.log(`[import] 💾 Saved extra_numbers for ${extrasMap.size} loan(s)`);
+
+      const savedMonthlyFb = await storage.query(
+        `SELECT loan_no, monthly_feedback FROM loan_cases WHERE monthly_feedback IS NOT NULL AND monthly_feedback != ''`
+      );
+      const monthlyFeedbackMap = new Map<string, string>();
+      for (const row of savedMonthlyFb.rows) { if (row.monthly_feedback) monthlyFeedbackMap.set(row.loan_no, row.monthly_feedback); }
+      console.log(`[import] 💾 Saved monthly_feedback for ${monthlyFeedbackMap.size} loan(s)`);
+
+      // ── Collect loan_nos present in the new file ───────────────────────────
+      const loanNosInExcel = new Set<string>();
+      for (const row of rawRows.slice(headerRowIdx + 1)) {
+        const mapped: Record<string, any> = {};
+        for (const [colIdx, dbField] of Object.entries(colIdxMap)) { const val = row[Number(colIdx)]; mapped[dbField] = val !== undefined && val !== "" ? String(val).trim() : null; }
+        if (mapped.loan_no && !isRepeatHeaderRow(mapped)) loanNosInExcel.add(mapped.loan_no.trim());
+      }
+
+      // ── Remove cases no longer in allocation (stale cases) ────────────────
+      if (loanNosInExcel.size > 0) {
+        await storage.query(`UPDATE depositions SET loan_case_id=NULL WHERE loan_case_id IN (SELECT id FROM loan_cases WHERE loan_no != ALL($1::text[]))`, [Array.from(loanNosInExcel)]);
+        await storage.query(`DELETE FROM loan_cases WHERE loan_no != ALL($1::text[])`, [Array.from(loanNosInExcel)]);
+        console.log(`[import] 🗑️ Removed stale cases not in new allocation file`);
+      }
+
+      // ── Remove FOS agents no longer in allocation ──────────────────────────
+      const existingFosAgents = await storage.query(`SELECT id, name FROM fos_agents WHERE role='fos'`);
+      let agentsRemoved = 0;
+      for (const agent of existingFosAgents.rows) { if (!fosNamesInExcel.has((agent.name || "").toLowerCase().trim())) { await safeDeleteAgent(agent.id, "import"); agentsRemoved++; } }
+      const { rows: existingAgents } = await storage.query(`SELECT id, name FROM fos_agents WHERE name IS NOT NULL`);
+      const agentByName: Record<string, number> = {};
+      for (const a of existingAgents) { if (a.name) agentByName[a.name.toLowerCase().trim()] = a.id; }
+      let imported = 0, updated = 0, skipped = 0, agentsCreated = 0; const errors: string[] = [];
+      for (let i = 0; i < rawRows.slice(headerRowIdx + 1).length; i++) {
+        const row = rawRows.slice(headerRowIdx + 1)[i]; const mapped: Record<string, any> = {};
+        for (const [colIdx, dbField] of Object.entries(colIdxMap)) { const val = row[Number(colIdx)]; mapped[dbField] = val !== undefined && val !== "" ? String(val).trim() : null; }
+        if (!mapped.loan_no || !mapped.customer_name || isRepeatHeaderRow(mapped)) { skipped++; continue; }
+        let agentId: number | null = null;
+        if (mapped.fos_name) {
+          const fosLower = mapped.fos_name.toLowerCase().trim();
+          if (agentByName[fosLower]) { agentId = agentByName[fosLower]; }
+          else { try { const username = fosLower.replace(/\s+/g, ".").replace(/[^a-z0-9.]/g, ""); const newAgent = await storage.createFosAgent({ name: mapped.fos_name, username, password: randomBytes(16).toString("hex") }); agentByName[fosLower] = newAgent.id; agentId = newAgent.id; agentsCreated++; } catch { const found = await storage.getAgentByUsername(mapped.fos_name.toLowerCase().trim().replace(/\s+/g, ".").replace(/[^a-z0-9.]/g, "")); if (found) { agentByName[mapped.fos_name.toLowerCase().trim()] = found.id; agentId = found.id; } } }
+        }
+        try {
+          // ── Force-update: all allocation fields overwritten from file ──────
+          const upsertResult = await storage.upsertLoanCase({
+            agentId,
+            fosName: mapped.fos_name || null,
+            loanNo: mapped.loan_no,
+            customerName: mapped.customer_name,
+            bkt: mapped.bkt ? parseInt(mapped.bkt) || null : null,
+            appId: mapped.app_id || null,
+            address: mapped.address || null,
+            mobileNo: mapped.mobile_no || null,
+            referenceAddress: mapped.reference_address || null,
+            pos: parseNum(mapped.pos),
+            assetMake: mapped.asset_make || null,
+            registrationNo: mapped.registration_no || null,
+            engineNo: mapped.engine_no || null,
+            chassisNo: mapped.chassis_no || null,
+            emiAmount: parseNum(mapped.emi_amount),
+            emiDue: parseNum(mapped.emi_due),
+            cbc: parseNum(mapped.cbc),
+            lpp: parseNum(mapped.lpp),
+            cbcLpp: parseNum(mapped.cbc_lpp),
+            rollback: parseNum(mapped.rollback),
+            clearance: parseNum(mapped.clearance),
+            firstEmiDueDate: parseDate(mapped.first_emi_due_date),
+            loanMaturityDate: parseDate(mapped.loan_maturity_date),
+            tenor: mapped.tenor ? parseInt(mapped.tenor) || null : null,
+            pro: mapped.pro || null,
+            status: normalizeStatus(mapped.status),
+            latestFeedback: mapped.latest_feedback || null,
+            feedbackComments: mapped.feedback_comments || null,
+            telecallerPtpDate: parseDate(mapped.telecaller_ptp_date),
+            rollbackYn: parseRollbackYn(mapped.rollback),
+            companyName: mapped.company_name || null,  // ← NEW
+            collAmount: mapped.coll_amount || null,    // ← NEW: from Coll Amount column
+          });
+          if (upsertResult === "inserted") { imported++; } else { updated++; }
+        } catch (e: any) { errors.push(`Row ${i + headerRowIdx + 2}: ${e.message}`); skipped++; }
+      }
+
+if (extrasMap.size > 0) {
+  for (const [loanNo, numbers] of extrasMap) {
+    await storage.query(
+      `UPDATE loan_cases SET extra_numbers = $1::text[] WHERE loan_no = $2`,
+      [numbers, loanNo]
+    );
+  }
+  console.log(`[import] ✅ Restored extra_numbers for ${extrasMap.size} loan(s)`);
 }
 
-export async function getBktCasesByAgent(agentId: number, category?: string) {
-  if (category === "penal") {
-    return (await query(`SELECT * FROM bkt_cases WHERE agent_id = $1 AND cbc IS NOT NULL AND cbc::numeric > 0 ORDER BY customer_name`, [agentId])).rows;
+// ── Restore monthly_feedback ───────────────────────────────────
+if (monthlyFeedbackMap.size > 0) {
+  for (const [loanNo, feedback] of monthlyFeedbackMap) {
+    await storage.query(
+      `UPDATE loan_cases SET monthly_feedback = $1 WHERE loan_no = $2`,
+      [feedback, loanNo]
+    );
   }
-  if (category) {
-    return (await query(`SELECT * FROM bkt_cases WHERE agent_id = $1 AND case_category = $2 ORDER BY customer_name`, [agentId, category])).rows;
-  }
-  return (await query(`SELECT * FROM bkt_cases WHERE agent_id = $1 ORDER BY case_category, customer_name`, [agentId])).rows;
+  console.log(`[import] ✅ Restored monthly_feedback for ${monthlyFeedbackMap.size} loan(s)`);
 }
 
-export async function updateBktCaseFeedback(
-  id: number, status: string, feedback: string, comments: string,
-  ptpDate?: string | null, rollbackYn?: boolean | null, extra?: FeedbackExtra
+      // ── Aggregate penal per agent — BKT 1 rows only ──────────────────────────
+      // Target = 3.5% of BKT 1 CBC+LPP total
+      // Paid (Col CBC) = SUM of Penal column values for PAID BKT 1 rows only
+const penalByAgent: Record<number, { fosName: string; paid: number; unpaid: number; cbcPaid: number }> = {};
+for (let i = 0; i < rawRows.slice(headerRowIdx + 1).length; i++) {
+  const row = rawRows.slice(headerRowIdx + 1)[i];
+  const mapped2: Record<string, any> = {};
+  for (const [colIdx, dbField] of Object.entries(colIdxMap)) {
+    const val = row[Number(colIdx)];
+    mapped2[dbField] = val !== undefined && val !== "" ? String(val).trim() : null;
+  }
+  if (!mapped2.loan_no || !mapped2.customer_name || isRepeatHeaderRow(mapped2)) continue;
+  if (!mapped2.fos_name) continue;
+  // Only BKT 1 rows contribute to penal
+  const rowBkt = mapped2.bkt ? parseInt(mapped2.bkt) : null;
+  if (rowBkt !== 1) continue;
+  const fosLower = mapped2.fos_name.toLowerCase().trim();
+  const agId = agentByName[fosLower];
+  if (!agId) continue;
+  // CBC+LPP for this BKT 1 row — used as the 3.5% target base
+  const cbcLppVal = parseFloat(mapped2.cbc_lpp || mapped2.cbc || "0") || 0;
+  // Penal column value — only present on penal-flagged rows
+  const penalCbc = parseFloat(mapped2.penal_cbc || "0") || 0;
+  if (cbcLppVal <= 0 && penalCbc <= 0) continue;
+  const isPenalPaid = normalizeStatus(mapped2.status) === "Paid";
+  if (!penalByAgent[agId]) penalByAgent[agId] = { fosName: mapped2.fos_name, paid: 0, unpaid: 0, cbcPaid: 0 };
+  // Accumulate BKT 1 CBC+LPP → 3.5% target base
+  if (isPenalPaid) {
+    penalByAgent[agId].paid += cbcLppVal;
+  } else {
+    penalByAgent[agId].unpaid += cbcLppVal;
+  }
+  // Sum ALL values in the Penal column — regardless of paid/unpaid status
+  if (penalCbc > 0) { penalByAgent[agId].cbcPaid += penalCbc; }
+
+
+
+}
+for (const [agIdStr, d] of Object.entries(penalByAgent)) {
+  const total = d.paid + d.unpaid;
+  const pct = total > 0 ? Math.round((d.paid / total) * 10000) / 100 : 0;
+  try {
+    await storage.upsertBktPerfSummary({
+      fosName: d.fosName, agentId: Number(agIdStr), bkt: "penal",
+      posPaid: d.paid, posUnpaid: d.unpaid, posGrandTotal: total, posPercentage: pct,
+      countPaid: d.cbcPaid, countUnpaid: 0, countTotal: 0,
+      rollbackPaid: 0, rollbackUnpaid: 0, rollbackGrandTotal: 0, rollbackPercentage: 0,
+    });
+  } catch (e: any) { console.warn("[import] penal upsert warn:", e.message); }
+}
+console.log(`[import] ✅ Penal perf upserted for ${Object.keys(penalByAgent).length} agents from allocation`);
+try { await recalcBktPerfFromAllocation(); } catch (e: any) { console.warn("[import] BKT recalc warning:", e.message); }
+res.json({ imported, updated, skipped, agentsCreated, agentsRemoved, total: rawRows.slice(headerRowIdx + 1).length, errors: errors.slice(0, 20) });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+     
+
+  app.post("/api/admin/import-bkt", requireAdmin, upload.single("file"), async (req, res) => {
+    try {
+      if (!req.file) return res.status(400).json({ message: "No file uploaded" });
+      const ejWorkbook2 = new ExcelJS.Workbook(); await ejWorkbook2.xlsx.load(req.file.buffer);
+      const worksheet2 = ejWorkbook2.worksheets.find((ws) => ws.name.toUpperCase() === "ALLO") || ejWorkbook2.worksheets[0];
+      const rawRows: any[][] = worksheetToRows(worksheet2, true);
+      if (rawRows.length === 0) return res.json({ imported: 0, updated: 0, skipped: 0, agentsCreated: 0, agentsRemoved: 0, errors: [] });
+      let headerRowIdx = -1; let colIdxMap: Record<number, string> = {};
+      for (let r = 0; r < Math.min(rawRows.length, 15); r++) { const row = rawRows[r]; const tempMap: Record<number, string> = {}; let matched = 0; for (let c = 0; c < row.length; c++) { const norm = normalizeHeader(String(row[c] || "")); if (COLUMN_MAP[norm]) { tempMap[c] = COLUMN_MAP[norm]; matched++; } } if (matched >= 3) { headerRowIdx = r; colIdxMap = tempMap; break; } }
+      if (headerRowIdx === -1) return res.status(400).json({ message: "Could not find header row." });
+      const fosNamesInBktExcel = new Set<string>();
+      for (const row of rawRows.slice(headerRowIdx + 1)) { const mapped: Record<string, any> = {}; for (const [colIdx, dbField] of Object.entries(colIdxMap)) { const val = row[Number(colIdx)]; mapped[dbField] = val !== undefined && val !== "" ? String(val).trim() : null; } if (mapped.fos_name && !isRepeatHeaderRow(mapped)) fosNamesInBktExcel.add(mapped.fos_name.toLowerCase().trim()); }
+      const ptpBktSave = await storage.query(`SELECT loan_no, ptp_date, telecaller_ptp_date FROM bkt_cases WHERE status='PTP'`);
+      const ptpBktMap = new Map(ptpBktSave.rows.map((r: any) => [r.loan_no, { ptpDate: r.ptp_date, telecallerPtpDate: r.telecaller_ptp_date }]));
+      await storage.deleteAllBktCases();
+      const existingFosBktAgents = await storage.query(`SELECT id, name FROM fos_agents WHERE role='fos'`);
+      let agentsRemoved = 0;
+      for (const agent of existingFosBktAgents.rows) { if (!fosNamesInBktExcel.has((agent.name || "").toLowerCase().trim())) { await safeDeleteAgent(agent.id, "import-bkt"); agentsRemoved++; } }
+      const { rows: existingAgents } = await storage.query(`SELECT id, name FROM fos_agents WHERE name IS NOT NULL`);
+      const agentByName: Record<string, number> = {};
+      for (const a of existingAgents) { if (a.name) agentByName[a.name.toLowerCase().trim()] = a.id; }
+      let imported = 0, skipped = 0, agentsCreated = 0; const errors: string[] = [];
+      for (let i = 0; i < rawRows.slice(headerRowIdx + 1).length; i++) {
+        const row = rawRows.slice(headerRowIdx + 1)[i]; const mapped: Record<string, any> = {};
+        for (const [colIdx, dbField] of Object.entries(colIdxMap)) { const val = row[Number(colIdx)]; mapped[dbField] = val !== undefined && val !== "" ? String(val).trim() : null; }
+        if (!mapped.loan_no || !mapped.customer_name || isRepeatHeaderRow(mapped)) { skipped++; continue; }
+        const bktVal = mapped.bkt ? parseInt(mapped.bkt) : null;
+        let caseCategory = "penal";
+        if (bktVal === 1) caseCategory = "bkt1"; else if (bktVal === 2) caseCategory = "bkt2"; else if (bktVal === 3) caseCategory = "bkt3";
+        let agentId: number | null = null;
+        if (mapped.fos_name) { const fosLower = mapped.fos_name.toLowerCase().trim(); if (agentByName[fosLower]) { agentId = agentByName[fosLower]; } else { try { const username = fosLower.replace(/\s+/g, ".").replace(/[^a-z0-9.]/g, ""); const newAgent = await storage.createFosAgent({ name: mapped.fos_name, username, password: randomBytes(16).toString("hex") }); agentByName[fosLower] = newAgent.id; agentId = newAgent.id; agentsCreated++; } catch { const found = await storage.getAgentByUsername(mapped.fos_name.toLowerCase().trim().replace(/\s+/g, ".").replace(/[^a-z0-9.]/g, "")); if (found) { agentByName[mapped.fos_name.toLowerCase().trim()] = found.id; agentId = found.id; } } } }
+        try { await storage.upsertBktCase({ caseCategory, agentId, fosName: mapped.fos_name || null, loanNo: mapped.loan_no, customerName: mapped.customer_name, bkt: bktVal, appId: mapped.app_id || null, address: mapped.address || null, mobileNo: mapped.mobile_no || null, ref1Name: mapped.ref1_name || null, ref1Mobile: mapped.ref1_mobile || null, ref2Name: mapped.ref2_name || null, ref2Mobile: mapped.ref2_mobile || null, referenceAddress: mapped.reference_address || null, pos: parseNum(mapped.pos), assetName: mapped.asset_name || null, assetMake: mapped.asset_make || null, registrationNo: mapped.registration_no || null, engineNo: mapped.engine_no || null, chassisNo: mapped.chassis_no || null, emiAmount: parseNum(mapped.emi_amount), emiDue: parseNum(mapped.emi_due), cbc: parseNum(mapped.cbc), lpp: parseNum(mapped.lpp), cbcLpp: parseNum(mapped.cbc_lpp), rollback: parseNum(mapped.rollback), clearance: parseNum(mapped.clearance), firstEmiDueDate: parseDate(mapped.first_emi_due_date), loanMaturityDate: parseDate(mapped.loan_maturity_date), tenor: mapped.tenor ? parseInt(mapped.tenor) || null : null, pro: mapped.pro || null, status: normalizeStatus(mapped.status), telecallerPtpDate: parseDate(mapped.telecaller_ptp_date) }); imported++; }
+        catch (e: any) { errors.push(`Row ${i + headerRowIdx + 2}: ${e.message}`); skipped++; }
+      }
+      for (const [loanNo, ptpData] of ptpBktMap) { await storage.query(`UPDATE bkt_cases SET status='PTP', ptp_date=$1, telecaller_ptp_date=$2 WHERE loan_no=$3`, [ptpData.ptpDate, ptpData.telecallerPtpDate, loanNo]); }
+      res.json({ imported, updated: 0, skipped, agentsCreated, agentsRemoved, total: rawRows.slice(headerRowIdx + 1).length, errors: errors.slice(0, 20) });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  app.get("/api/admin/ptp-export", requireAdmin, async (req, res) => {
+    try {
+      const result = await storage.query(`SELECT fa.name AS fos_name, lc.customer_name, lc.loan_no, lc.mobile_no, lc.address, lc.ptp_date, lc.telecaller_ptp_date, lc.pos, lc.bkt::text AS bkt, lc.status FROM loan_cases lc LEFT JOIN fos_agents fa ON lc.agent_id=fa.id WHERE lc.status='PTP' OR lc.telecaller_ptp_date IS NOT NULL UNION ALL SELECT fa.name AS fos_name, bc.customer_name, bc.loan_no, bc.mobile_no, bc.address, bc.ptp_date, bc.telecaller_ptp_date, bc.pos, bc.case_category AS bkt, bc.status FROM bkt_cases bc LEFT JOIN fos_agents fa ON bc.agent_id=fa.id WHERE bc.status='PTP' OR bc.telecaller_ptp_date IS NOT NULL ORDER BY fos_name NULLS LAST, telecaller_ptp_date NULLS LAST`);
+      const rows = result.rows.map((r: any) => ({ "FOS Name": r.fos_name || "", "Customer Name": r.customer_name || "", "Loan No": r.loan_no || "", "Mobile No": r.mobile_no || "", "Address": r.address || "", "Telecaller PTP Date": r.telecaller_ptp_date ? String(r.telecaller_ptp_date).slice(0, 10) : "", "FOS PTP Date": r.ptp_date ? String(r.ptp_date).slice(0, 10) : "", "POS": r.pos || "", "BKT": r.bkt || "", "Status": r.status || "" }));
+      const exportWb = new ExcelJS.Workbook(); const exportWs = exportWb.addWorksheet("PTP Cases");
+      const exportRows = rows.length ? rows : [{ "FOS Name": "No PTP cases found" }];
+      exportWs.columns = Object.keys(exportRows[0]).map((key) => ({ header: key, key, width: 20 }));
+      exportRows.forEach((row) => exportWs.addRow(row)); exportWs.getRow(1).font = { bold: true };
+      const buf = await exportWb.xlsx.writeBuffer();
+      res.setHeader("Content-Disposition", `attachment; filename="PTP_Report_${new Date().toISOString().slice(0, 10)}.xlsx"`);
+      res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+      res.send(Buffer.from(buf));
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+// ─── Call Log Admin Endpoints ─────────────────────────────────────────────────
+
+  app.get("/api/admin/call-logs", requireAdmin, async (req, res) => {
+    try {
+      const limit = Math.min(Number(req.query.limit) || 500, 2000);
+      const logs = await storage.getAllCallLogs(limit);
+      res.json({ logs });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  // ── Activity logs (login / logout) ────────────────────────────────────────
+  app.get("/api/admin/activity-logs", requireAdmin, async (req, res) => {
+    try {
+      const limit = Math.min(Number(req.query.limit) || 500, 2000);
+      const logs = await storage.getActivityLogs(limit);
+      res.json({ logs });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  app.get("/api/admin/call-logs/agent/:agentId", requireAdmin, async (req, res) => {
+    try {
+      const agentId = Number(req.params.agentId);
+      const limit = Math.min(Number(req.query.limit) || 200, 1000);
+      const logs = await storage.getCallLogsByAgent(agentId, limit);
+      res.json({ logs });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  app.get("/api/admin/call-logs/case/:caseId", requireAdmin, async (req, res) => {
+    try {
+      const caseId = Number(req.params.caseId);
+      const caseType = (req.query.type as string) || "loan";
+      const logs = await storage.getCallLogsByCase(caseId, caseType);
+      res.json({ logs });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  app.get("/api/admin/feedback-export", requireAdmin, async (req, res) => {
+  try {
+    // ── Sheet 1: Feedback Summary ─────────────────────────────────────────────
+    const result = await storage.query(`
+      SELECT
+        TO_CHAR(COALESCE(lc.created_at, NOW()), 'DD-Mon') AS allu_date,
+        lc.loan_no, lc.app_id, lc.customer_name,
+        lc.bkt::text AS bkt, lc.pro, 'NANDED'::text AS branch,
+        lc.customer_available, lc.vehicle_available, lc.third_party,
+        lc.third_party_name, lc.third_party_number,
+        lc.feedback_code, lc.latest_feedback, lc.monthly_feedback,
+        lc.ptp_date, lc.telecaller_ptp_date, lc.ptp_date_mf,
+        lc.projection, lc.non_starter,
+        lc.kyc_purchase, lc.workable, lc.status, lc.feedback_comments,
+        lc.occupation, lc.shifted_city AS sft_city, lc.rollback_yn,
+        lc.feedback_date,
+        lc.cbc_paid, lc.lpp_paid, lc.emi_paid,
+        fa.name AS fos_name, 'Loan' AS case_type
+      FROM loan_cases lc
+      LEFT JOIN fos_agents fa ON lc.agent_id = fa.id
+
+      UNION ALL
+
+      SELECT
+        TO_CHAR(COALESCE(bc.created_at, NOW()), 'DD-Mon') AS allu_date,
+        bc.loan_no, bc.app_id, bc.customer_name,
+        bc.case_category AS bkt, bc.pro, 'NANDED'::text AS branch,
+        bc.customer_available, bc.vehicle_available, bc.third_party,
+        bc.third_party_name, bc.third_party_number,
+        bc.feedback_code, bc.latest_feedback, bc.monthly_feedback,
+        bc.ptp_date, bc.telecaller_ptp_date, bc.ptp_date_mf,
+        bc.projection, bc.non_starter,
+        bc.kyc_purchase, bc.workable, bc.status, bc.feedback_comments,
+        bc.occupation, bc.shifted_city AS sft_city, bc.rollback_yn,
+        bc.feedback_date,
+        bc.cbc_paid, bc.lpp_paid, bc.emi_paid,
+        fa.name AS fos_name, 'BKT' AS case_type
+      FROM bkt_cases bc
+      LEFT JOIN fos_agents fa ON bc.agent_id = fa.id
+
+      ORDER BY fos_name NULLS LAST, loan_no
+    `);
+
+    // ── Sheet 2: Call Log History ─────────────────────────────────────────────
+    let callResult: any = { rows: [] };
+    try {
+      callResult = await storage.query(`
+        SELECT
+          cl.loan_no, cl.customer_name, cl.case_type,
+          cl.outcome, cl.comments, cl.status, cl.ptp_date,
+          TO_CHAR(cl.logged_at AT TIME ZONE 'Asia/Kolkata', 'DD-Mon-YYYY HH12:MI AM') AS logged_at,
+          fa.name AS agent_name
+        FROM call_logs cl
+        LEFT JOIN fos_agents fa ON fa.id = cl.agent_id
+        ORDER BY cl.logged_at DESC
+      `);
+    } catch (e: any) { console.error("[export] call_logs query failed:", e.message); }
+
+    // ── Sheet 3: Field Visits ─────────────────────────────────────────────────
+    let visitResult: any = { rows: [] };
+    try {
+      visitResult = await storage.query(`
+        SELECT
+          fa.name AS agent_name,
+          CASE WHEN LOWER(TRIM(fv.case_type)) = 'bkt' THEN bc.loan_no      ELSE lc.loan_no      END AS loan_no,
+          CASE WHEN LOWER(TRIM(fv.case_type)) = 'bkt' THEN bc.customer_name ELSE lc.customer_name END AS customer_name,
+          fv.case_type,
+          fv.visit_outcome,
+          fv.visit_remarks,
+          fv.lat,
+          fv.lng,
+          fv.accuracy,
+          (fv.photo_url IS NOT NULL AND fv.photo_url <> '') AS has_photo,
+          TO_CHAR(fv.visited_at AT TIME ZONE 'Asia/Kolkata', 'DD-Mon-YYYY HH12:MI AM') AS visited_at
+        FROM field_visits fv
+        LEFT JOIN fos_agents fa ON fa.id  = fv.agent_id::integer
+        LEFT JOIN loan_cases lc ON lc.id  = fv.case_id::integer
+        LEFT JOIN bkt_cases  bc ON bc.id  = fv.case_id::integer
+        ORDER BY fv.visited_at DESC
+      `);
+      console.log("[export] field_visits rows:", visitResult.rows.length);
+    } catch (e: any) { console.error("[export] field_visits query failed:", e.message); }
+
+    const yn = (v: any) =>
+      v === true  || v === "true"  || v === "t" || v === 1 ? "Y" :
+      v === false || v === "false" || v === "f" || v === 0 ? "N" : "";
+
+    const fmtDate = (v: any) =>
+      v ? (v instanceof Date ? v.toISOString().slice(0,10) : String(v).slice(0,10)) : "";
+
+    // ── Build rows ────────────────────────────────────────────────────────────
+    const feedbackRows = result.rows.map((r: any) => ({
+      "FOS Name":           r.fos_name          || "",
+      "Case Type":          r.case_type         || "",
+      "Allu Date":          r.allu_date         || "",
+      "LOAN NO":            r.loan_no           || "",
+      "APP ID":             r.app_id            || "",
+      "CUSTOMER NAME":      r.customer_name     || "",
+      "BKT":                r.bkt               || "",
+      "PRO":                r.pro               || "",
+      "Branch":             r.branch            || "",
+      "Status":             r.status            || "",
+      "Feedback Date":      fmtDate(r.feedback_date),
+      "Customer Y/N":       yn(r.customer_available),
+      "Vehicle Y/N":        yn(r.vehicle_available),
+      "Third Party Y/N":    yn(r.third_party),
+      "Third Party Name":   (r.third_party === true || r.third_party === "true" || r.third_party === "t") ? r.third_party_name || "" : "",
+      "Third Party Number": (r.third_party === true || r.third_party === "true" || r.third_party === "t") ? r.third_party_number || "" : "",
+      "Occupation":         r.occupation        || "",
+      "Feedback Code":      r.feedback_code    != null ? String(r.feedback_code)    : "",
+      "Latest Feedback":    r.latest_feedback  != null ? String(r.latest_feedback)  : "",
+      "Monthly Feedback":   r.monthly_feedback != null ? String(r.monthly_feedback) : "",
+      "PTP Date":           fmtDate(r.ptp_date),
+      "Telecaller PTP":     fmtDate(r.telecaller_ptp_date),
+      "MF PTP Date":        fmtDate(r.ptp_date_mf),
+      "Shifted To City":    r.sft_city          || "",
+      "Projection":         r.projection       != null ? String(r.projection) : "",
+      "Non-Starter":        yn(r.non_starter),
+      "KYC Purchase":       yn(r.kyc_purchase),
+      "Workable":           r.workable === true || r.workable === "true" || r.workable === "t" ? "WORKABLE" :
+                            r.workable === false || r.workable === "false" || r.workable === "f" ? "NONWORKABLE" : "",
+      "Rollback":           yn(r.rollback_yn),
+      "CBC Paid":           yn(r.cbc_paid),
+      "LPP Paid":           yn(r.lpp_paid),
+      "EMI Paid":           yn(r.emi_paid),
+      "Comments":           r.feedback_comments || "",
+      "Monthly Detail Feedback": (() => {
+          if (!r.monthly_feedback) return "";
+          const custAvail   = r.customer_available === true  || r.customer_available === "t";
+          const custNA      = r.customer_available === false || r.customer_available === "f";
+          const vehAvail    = r.vehicle_available  === true  || r.vehicle_available  === "t";
+          const vehNA       = r.vehicle_available  === false || r.vehicle_available  === "f";
+          const tp          = r.third_party        === true  || r.third_party        === "t";
+          const tpNo        = r.third_party        === false || r.third_party        === "f";
+          const parts: string[] = [];
+          if (custAvail)      parts.push("The customer was available at the time of the field visit.");
+          else if (custNA)    parts.push("The customer was not available at the time of the field visit.");
+          if (vehAvail)       parts.push("The vehicle was present at the location.");
+          else if (vehNA)     parts.push("The vehicle was not present at the location.");
+          if (tp)             parts.push("A third party was present during the visit.");
+          else if (tpNo)      parts.push("No third party was present during the visit.");
+          if (r.occupation)   parts.push(`The customer's occupation is ${r.occupation}.`);
+          if (r.feedback_code && r.latest_feedback)
+            parts.push(`Feedback recorded as ${r.feedback_code} — ${r.latest_feedback}.`);
+          else if (r.feedback_code)
+            parts.push(`Feedback code recorded as ${r.feedback_code}.`);
+          if (r.ptp_date)     parts.push(`The customer has promised to make payment by ${fmtDate(r.ptp_date)}.`);
+          if (r.sft_city)     parts.push(`The customer has shifted to ${r.sft_city}.`);
+          if (r.non_starter === true || r.non_starter === "t") parts.push("This case is identified as a non-starter.");
+          return parts.join(" ");
+        })(),
+    }));
+
+    const callRows = callResult.rows.map((r: any) => ({
+      "Agent Name":    r.agent_name   || "",
+      "Loan No":       r.loan_no      || "",
+      "Customer Name": r.customer_name|| "",
+      "Case Type":     r.case_type    || "",
+      "Outcome":       r.outcome      || "",
+      "Comments":      r.comments     || "",
+      "Status":        r.status       || "",
+      "PTP Date":      fmtDate(r.ptp_date),
+      "Logged At":     r.logged_at    || "",
+    }));
+
+    const visitRows = visitResult.rows.map((r: any) => ({
+      "Agent Name":    r.agent_name     || "",
+      "Loan No":       r.loan_no        || "",
+      "Customer Name": r.customer_name  || "",
+      "Case Type":     r.case_type      || "",
+      "Visit Outcome": r.visit_outcome  || "",
+      "Remarks":       r.visit_remarks  || "",
+      "Photo":         r.has_photo ? "Yes" : "No",
+      "Latitude":      r.lat            || "",
+      "Longitude":     r.lng            || "",
+      "Accuracy (m)":  r.accuracy       || "",
+      "Visited At":    r.visited_at     || "",
+    }));
+
+    // ── Build workbook ────────────────────────────────────────────────────────
+    const wb = new ExcelJS.Workbook();
+
+    const styleSheet = (ws: ExcelJS.Worksheet, rows: any[], headerColor: string) => {
+      const exportRows = rows.length ? rows : [{}];
+      ws.columns = Object.keys(exportRows[0]).map((key) => ({
+        header: key, key,
+        width: ["CUSTOMER NAME", "Customer Name", "Latest Feedback", "Monthly Feedback",
+                "Monthly Detail Feedback", "Outcome", "Comments", "Third Party Name"].includes(key) ? 35
+             : ["Logged At", "Visited At", "Feedback Date"].includes(key) ? 22
+             : 16,
+      }));
+      exportRows.forEach((row) => ws.addRow(row));
+      ws.getRow(1).eachCell((cell) => {
+        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: headerColor } };
+        cell.font = { bold: true, color: { argb: "FF000000" } };
+        cell.alignment = { vertical: "middle", horizontal: "center", wrapText: true };
+        cell.border = {
+          bottom: { style: "medium", color: { argb: "FF000000" } },
+        };
+      });
+      ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: Object.keys(exportRows[0]).length } };
+      ws.views = [{ state: "frozen", ySplit: 1 }];
+      ws.getRow(1).height = 28;
+    };
+
+    const ws1 = wb.addWorksheet("Feedback Summary");
+    styleSheet(ws1, feedbackRows, "FFFFFF00");   // yellow header
+
+    const ws2 = wb.addWorksheet("Call Log History");
+    styleSheet(ws2, callRows, "FFCCE5FF");       // blue header
+
+    const ws3 = wb.addWorksheet("Field Visits");
+    styleSheet(ws3, visitRows, "FFD4EDDA");      // green header
+
+    const buf = await wb.xlsx.writeBuffer();
+    res.setHeader("Content-Disposition", `attachment; filename="Full_Report_${new Date().toISOString().slice(0, 10)}.xlsx"`);
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.send(Buffer.from(buf));
+  } catch (e: any) { res.status(500).json({ message: e.message }); }
+});
+
+  app.post("/api/admin/clear-ptp", requireAdmin, async (req, res) => {
+    try {
+      await storage.query(`UPDATE loan_cases SET ptp_date=NULL, telecaller_ptp_date=NULL, status='Pending' WHERE status='PTP'`);
+      await storage.query(`UPDATE bkt_cases SET ptp_date=NULL, telecaller_ptp_date=NULL, status='Pending' WHERE status='PTP'`);
+      await storage.query(`UPDATE loan_cases SET ptp_date=NULL, telecaller_ptp_date=NULL WHERE ptp_date IS NOT NULL OR telecaller_ptp_date IS NOT NULL`);
+      await storage.query(`UPDATE bkt_cases SET ptp_date=NULL, telecaller_ptp_date=NULL WHERE ptp_date IS NOT NULL OR telecaller_ptp_date IS NOT NULL`);
+      res.json({ success: true });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  // ─── Admin: Manually trigger PTP break sound alert ──────────────────────────
+  // Replaces the old auto-notification that fired every 10 min.
+  // Admin presses a button → this sends the urgent loud push to every agent
+  // that currently has broken PTPs, then records the notification timestamp.
+  app.post("/api/admin/trigger-ptp-alert", requireAdmin, async (req, res) => {
+    try {
+      // BUG FIX: Mark all overdue PTPs as broken first so the alert is accurate
+      // and agents who haven't been polled yet are also included.
+      await storage.query(`
+        UPDATE loan_cases
+        SET broken_ptp = true, broken_ptp_date = ptp_date
+        WHERE status = 'PTP'
+          AND ptp_date IS NOT NULL
+          AND ptp_date < CURRENT_DATE
+          AND broken_ptp IS DISTINCT FROM true
+      `);
+      await storage.query(`
+        UPDATE bkt_cases
+        SET broken_ptp = true, broken_ptp_date = ptp_date
+        WHERE status = 'PTP'
+          AND ptp_date IS NOT NULL
+          AND ptp_date < CURRENT_DATE
+          AND broken_ptp IS DISTINCT FROM true
+      `);
+
+      const affectedAgents = await storage.query(`
+        SELECT fa.id, fa.name, fa.push_token,
+               COUNT(*)::int AS broken_count
+        FROM (
+          SELECT agent_id FROM loan_cases
+          WHERE broken_ptp = true AND ptp_date < CURRENT_DATE
+          UNION ALL
+          SELECT agent_id FROM bkt_cases
+          WHERE broken_ptp = true AND ptp_date < CURRENT_DATE
+        ) t
+        JOIN fos_agents fa ON fa.id = t.agent_id
+        WHERE fa.push_token IS NOT NULL AND fa.push_token <> ''
+        GROUP BY fa.id, fa.name, fa.push_token
+      `);
+
+      if (affectedAgents.rows.length === 0) {
+        return res.json({ ok: true, sent: 0, total: 0, message: "No agents with broken PTPs found." });
+      }
+
+      let sent = 0;
+      for (const agent of affectedAgents.rows) {
+        const { id, name, push_token, broken_count } = agent;
+        await sendUrgentPush(push_token.trim(), name, broken_count);
+        sent++;
+
+        // Record so the admin can see last triggered timestamp if needed
+        await storage.query(
+          `INSERT INTO ptp_break_notifications (agent_id, broken_count, notified_at)
+           VALUES ($1, $2, NOW())
+           ON CONFLICT (agent_id) DO UPDATE
+           SET broken_count = $2, notified_at = NOW()`,
+          [id, broken_count]
+        );
+      }
+
+      console.log(`[admin-ptp-alert] ✅ Admin triggered PTP alert — sent: ${sent}/${affectedAgents.rows.length}`);
+      res.json({ ok: true, sent, total: affectedAgents.rows.length });
+    } catch (e: any) {
+      console.error("[admin-ptp-alert] ❌", e.message);
+      res.status(500).json({ ok: false, error: e.message });
+    }
+  });
+
+  app.get("/api/admin/bkt-perf-summary", requireAdmin, async (req, res) => {
+  try {
+    const company = (req.query.company as string) || null;
+
+    if (company) {
+      // Calculate live from loan_cases for the selected company
+      const result = await storage.query(`
+        SELECT
+          fa.name AS fos_name,
+          fa.id   AS agent_id,
+          CASE lc.bkt
+            WHEN 1 THEN 'bkt1'
+            WHEN 2 THEN 'bkt2'
+            WHEN 3 THEN 'bkt3'
+          END AS bkt,
+          COALESCE(SUM(lc.pos::numeric) FILTER (WHERE lc.status='Paid'), 0)  AS pos_paid,
+          COALESCE(SUM(lc.pos::numeric) FILTER (WHERE lc.status!='Paid'), 0) AS pos_unpaid,
+          COALESCE(SUM(lc.pos::numeric), 0)                                   AS pos_grand_total,
+          CASE WHEN COALESCE(SUM(lc.pos::numeric),0) > 0
+               THEN ROUND((COALESCE(SUM(lc.pos::numeric) FILTER (WHERE lc.status='Paid'),0) / SUM(lc.pos::numeric)) * 100, 2)
+               ELSE 0 END                                                      AS pos_percentage,
+          COUNT(*) FILTER (WHERE lc.status='Paid')::int  AS count_paid,
+          COUNT(*) FILTER (WHERE lc.status!='Paid')::int AS count_unpaid,
+          COUNT(*)::int                                   AS count_total,
+          COALESCE(SUM(lc.pos::numeric) FILTER (WHERE lc.rollback_yn=true), 0)                   AS rollback_paid,
+          COALESCE(SUM(lc.pos::numeric) FILTER (WHERE lc.rollback_yn IS DISTINCT FROM true), 0)  AS rollback_unpaid,
+          COALESCE(SUM(lc.pos::numeric), 0)                                                       AS rollback_grand_total,
+          CASE WHEN COALESCE(SUM(lc.pos::numeric),0) > 0
+               THEN ROUND((COALESCE(SUM(lc.pos::numeric) FILTER (WHERE lc.rollback_yn=true),0) / SUM(lc.pos::numeric)) * 100, 2)
+               ELSE 0 END AS rollback_percentage,
+          -- Actual cash collected: prefer coll_amount when available, else POS of paid cases
+          CASE
+            WHEN COALESCE(SUM(lc.coll_amount::numeric) FILTER (WHERE lc.status='Paid'), 0) > 0
+            THEN COALESCE(SUM(lc.coll_amount::numeric) FILTER (WHERE lc.status='Paid'), 0)
+            ELSE COALESCE(SUM(lc.pos::numeric) FILTER (WHERE lc.status='Paid'), 0)
+          END AS collected_amount
+        FROM loan_cases lc
+        JOIN fos_agents fa ON fa.id = lc.agent_id
+        WHERE lc.bkt IS NOT NULL
+          AND lc.company_name = $1
+          AND UPPER(COALESCE(lc.pro, '')) = 'TW'
+        GROUP BY fa.id, fa.name, lc.bkt
+        HAVING CASE lc.bkt WHEN 1 THEN 'bkt1' WHEN 2 THEN 'bkt2' WHEN 3 THEN 'bkt3' END IS NOT NULL
+        ORDER BY fa.name, lc.bkt
+      `, [company]);
+      // Append penal rows from bkt_perf_summary (not present in loan_cases)
+      const penalResult = await storage.query(`
+        SELECT s.fos_name, s.agent_id, s.bkt,
+               s.pos_paid, s.pos_unpaid, s.pos_grand_total, s.pos_percentage,
+               s.count_paid, s.count_unpaid, s.count_total,
+               s.rollback_paid, s.rollback_unpaid, s.rollback_grand_total, s.rollback_percentage
+        FROM bkt_perf_summary s
+        WHERE s.bkt = 'penal'
+        ORDER BY s.fos_name
+      `);
+      res.json({ rows: [...result.rows, ...penalResult.rows] });
+    } else {
+      // Live from loan_cases (all companies) — TW only
+      const result = await storage.query(`
+        SELECT
+          fa.name AS fos_name,
+          fa.id   AS agent_id,
+          CASE lc.bkt
+            WHEN 1 THEN 'bkt1'
+            WHEN 2 THEN 'bkt2'
+            WHEN 3 THEN 'bkt3'
+          END AS bkt,
+          COALESCE(SUM(lc.pos::numeric) FILTER (WHERE lc.status='Paid'), 0)  AS pos_paid,
+          COALESCE(SUM(lc.pos::numeric) FILTER (WHERE lc.status!='Paid'), 0) AS pos_unpaid,
+          COALESCE(SUM(lc.pos::numeric), 0)                                   AS pos_grand_total,
+          CASE WHEN COALESCE(SUM(lc.pos::numeric),0) > 0
+               THEN ROUND((COALESCE(SUM(lc.pos::numeric) FILTER (WHERE lc.status='Paid'),0) / SUM(lc.pos::numeric)) * 100, 2)
+               ELSE 0 END                                                      AS pos_percentage,
+          COUNT(*) FILTER (WHERE lc.status='Paid')::int  AS count_paid,
+          COUNT(*) FILTER (WHERE lc.status!='Paid')::int AS count_unpaid,
+          COUNT(*)::int                                   AS count_total,
+          COALESCE(SUM(lc.pos::numeric) FILTER (WHERE lc.rollback_yn=true), 0)                   AS rollback_paid,
+          COALESCE(SUM(lc.pos::numeric) FILTER (WHERE lc.rollback_yn IS DISTINCT FROM true), 0)  AS rollback_unpaid,
+          COALESCE(SUM(lc.pos::numeric), 0)                                                       AS rollback_grand_total,
+          CASE WHEN COALESCE(SUM(lc.pos::numeric),0) > 0
+               THEN ROUND((COALESCE(SUM(lc.pos::numeric) FILTER (WHERE lc.rollback_yn=true),0) / SUM(lc.pos::numeric)) * 100, 2)
+               ELSE 0 END AS rollback_percentage,
+          -- Actual cash collected: prefer coll_amount when available, else POS of paid cases
+          CASE
+            WHEN COALESCE(SUM(lc.coll_amount::numeric) FILTER (WHERE lc.status='Paid'), 0) > 0
+            THEN COALESCE(SUM(lc.coll_amount::numeric) FILTER (WHERE lc.status='Paid'), 0)
+            ELSE COALESCE(SUM(lc.pos::numeric) FILTER (WHERE lc.status='Paid'), 0)
+          END AS collected_amount
+        FROM loan_cases lc
+        JOIN fos_agents fa ON fa.id = lc.agent_id
+        WHERE lc.bkt IS NOT NULL
+          AND lc.agent_id IS NOT NULL
+          AND UPPER(COALESCE(lc.pro,'')) = 'TW'
+        GROUP BY fa.id, fa.name, lc.bkt
+        HAVING CASE lc.bkt WHEN 1 THEN 'bkt1' WHEN 2 THEN 'bkt2' WHEN 3 THEN 'bkt3' END IS NOT NULL
+        ORDER BY fa.name, lc.bkt
+      `);
+      // Append penal rows from bkt_perf_summary (not present in loan_cases)
+      const penalResult = await storage.query(`
+        SELECT s.fos_name, s.agent_id, s.bkt,
+               s.pos_paid, s.pos_unpaid, s.pos_grand_total, s.pos_percentage,
+               s.count_paid, s.count_unpaid, s.count_total,
+               s.rollback_paid, s.rollback_unpaid, s.rollback_grand_total, s.rollback_percentage
+        FROM bkt_perf_summary s
+        WHERE s.bkt = 'penal'
+        ORDER BY s.fos_name
+      `);
+      res.json({ rows: [...result.rows, ...penalResult.rows] });
+    }
+  } catch (e: any) {
+    res.status(500).json({ message: e.message });
+  }
+});
+
+
+app.get("/api/bkt-tw-collection-summary", requireAuth, async (req, res) => {
+  try {
+    const agentId = req.session.agentId!;
+    const company = (req.query.company as string) || null;
+
+    const companyFilter = company ? `AND company_name = '${company.replace(/'/g, "''")}'` : "";
+
+    const result = await storage.query(
+      `SELECT
+         bkt_key AS case_category,
+         COUNT(*) FILTER (WHERE status = 'Paid')::int AS count_paid,
+         COUNT(*)::int                                 AS count_total,
+         COALESCE(SUM(pos::numeric), 0)               AS amount_total,
+         -- Prefer coll_amount from allocation import; fall back to POS of Paid cases
+         CASE
+           WHEN COALESCE(SUM(coll_amount::numeric), 0) > 0
+           THEN SUM(coll_amount::numeric)
+           ELSE COALESCE(SUM(pos::numeric) FILTER (WHERE status = 'Paid'), 0)
+         END AS amount_collected
+       FROM (
+         SELECT 'bkt' || bkt::text AS bkt_key, pos, status, coll_amount
+         FROM loan_cases
+         WHERE agent_id = $1 AND bkt IN (1, 2, 3) AND pos IS NOT NULL
+           AND UPPER(COALESCE(pro,'')) = 'TW' ${companyFilter}
+         UNION ALL
+         SELECT case_category AS bkt_key, pos, status, NULL::numeric AS coll_amount
+         FROM bkt_cases
+         WHERE agent_id = $1 AND case_category IN ('bkt1','bkt2','bkt3') AND pos IS NOT NULL
+           AND UPPER(COALESCE(pro,'')) = 'TW'
+       ) combined
+       GROUP BY bkt_key
+       ORDER BY bkt_key`,
+      [agentId],
+    );
+
+    res.json({ summary: result.rows });
+  } catch (e: any) { res.status(500).json({ message: e.message }); }
+});
+app.get("/api/bkt-perf-summary", requireAuth, async (req, res) => {
+  try {
+    const agentId = req.session.agentId!;
+    const company = (req.query.company as string) || null;
+
+    if (company) {
+      // Live calculation from loan_cases for the selected company
+      const result = await storage.query(`
+        SELECT
+          CASE lc.bkt WHEN 1 THEN 'bkt1' WHEN 2 THEN 'bkt2' WHEN 3 THEN 'bkt3' END AS bkt,
+          COALESCE(SUM(lc.pos::numeric) FILTER (WHERE lc.status='Paid'),  0) AS pos_paid,
+          COALESCE(SUM(lc.pos::numeric) FILTER (WHERE lc.status<>'Paid'), 0) AS pos_unpaid,
+          COALESCE(SUM(lc.pos::numeric), 0)                                  AS pos_grand_total,
+          CASE WHEN COALESCE(SUM(lc.pos::numeric),0) > 0
+               THEN ROUND((COALESCE(SUM(lc.pos::numeric) FILTER (WHERE lc.status='Paid'),0) / SUM(lc.pos::numeric)) * 100, 2)
+               ELSE 0 END                                                    AS pos_percentage,
+          COUNT(*) FILTER (WHERE lc.status='Paid')::int                      AS count_paid,
+          COUNT(*) FILTER (WHERE lc.status<>'Paid')::int                     AS count_unpaid,
+          COUNT(*)::int                                                       AS count_total,
+          COALESCE(SUM(lc.pos::numeric) FILTER (WHERE lc.rollback_yn=true), 0)                  AS rollback_paid,
+          COALESCE(SUM(lc.pos::numeric) FILTER (WHERE lc.rollback_yn IS DISTINCT FROM true), 0) AS rollback_unpaid,
+          COALESCE(SUM(lc.pos::numeric), 0)                                                      AS rollback_grand_total,
+          CASE WHEN COALESCE(SUM(lc.pos::numeric),0) > 0
+               THEN ROUND((COALESCE(SUM(lc.pos::numeric) FILTER (WHERE lc.rollback_yn=true),0) / SUM(lc.pos::numeric)) * 100, 2)
+               ELSE 0 END AS rollback_percentage
+        FROM loan_cases lc
+        WHERE lc.agent_id = $1
+          AND lc.bkt IS NOT NULL
+          AND lc.company_name = $2
+          AND UPPER(COALESCE(lc.pro,'')) = 'TW'
+        GROUP BY lc.bkt
+        HAVING CASE lc.bkt WHEN 1 THEN 'bkt1' WHEN 2 THEN 'bkt2' WHEN 3 THEN 'bkt3' END IS NOT NULL
+        ORDER BY lc.bkt
+      `, [agentId, company]);
+
+      // Append penal row for this agent from bkt_perf_summary
+      const penalResult = await storage.query(`
+        SELECT bkt, pos_paid, pos_unpaid, pos_grand_total, pos_percentage,
+               count_paid, count_unpaid, count_total,
+               rollback_paid, rollback_unpaid, rollback_grand_total, rollback_percentage
+        FROM bkt_perf_summary
+        WHERE agent_id = $1 AND bkt = 'penal'
+      `, [agentId]);
+
+      res.json({ rows: [...result.rows, ...penalResult.rows] });
+      return;
+    }
+
+    // ── Default: live from loan_cases — TW only ──
+    const result = await storage.query(`
+      SELECT
+        CASE lc.bkt WHEN 1 THEN 'bkt1' WHEN 2 THEN 'bkt2' WHEN 3 THEN 'bkt3' END AS bkt,
+        COALESCE(SUM(lc.pos::numeric) FILTER (WHERE lc.status='Paid'),  0) AS pos_paid,
+        COALESCE(SUM(lc.pos::numeric) FILTER (WHERE lc.status<>'Paid'), 0) AS pos_unpaid,
+        COALESCE(SUM(lc.pos::numeric), 0)                                  AS pos_grand_total,
+        CASE WHEN COALESCE(SUM(lc.pos::numeric),0) > 0
+             THEN ROUND((COALESCE(SUM(lc.pos::numeric) FILTER (WHERE lc.status='Paid'),0) / SUM(lc.pos::numeric)) * 100, 2)
+             ELSE 0 END                                                    AS pos_percentage,
+        COUNT(*) FILTER (WHERE lc.status='Paid')::int                      AS count_paid,
+        COUNT(*) FILTER (WHERE lc.status<>'Paid')::int                     AS count_unpaid,
+        COUNT(*)::int                                                       AS count_total,
+        COALESCE(SUM(lc.pos::numeric) FILTER (WHERE lc.rollback_yn=true), 0)                  AS rollback_paid,
+        COALESCE(SUM(lc.pos::numeric) FILTER (WHERE lc.rollback_yn IS DISTINCT FROM true), 0) AS rollback_unpaid,
+        COALESCE(SUM(lc.pos::numeric), 0)                                                      AS rollback_grand_total,
+        CASE WHEN COALESCE(SUM(lc.pos::numeric),0) > 0
+             THEN ROUND((COALESCE(SUM(lc.pos::numeric) FILTER (WHERE lc.rollback_yn=true),0) / SUM(lc.pos::numeric)) * 100, 2)
+             ELSE 0 END AS rollback_percentage
+      FROM loan_cases lc
+      WHERE lc.agent_id = $1
+        AND lc.bkt IS NOT NULL
+        AND UPPER(COALESCE(lc.pro,'')) = 'TW'
+      GROUP BY lc.bkt
+      HAVING CASE lc.bkt WHEN 1 THEN 'bkt1' WHEN 2 THEN 'bkt2' WHEN 3 THEN 'bkt3' END IS NOT NULL
+      ORDER BY lc.bkt
+    `, [agentId]);
+
+    // Append penal row for this agent from bkt_perf_summary
+    const penalResult = await storage.query(`
+      SELECT bkt, pos_paid, pos_unpaid, pos_grand_total, pos_percentage,
+             count_paid, count_unpaid, count_total,
+             rollback_paid, rollback_unpaid, rollback_grand_total, rollback_percentage
+      FROM bkt_perf_summary
+      WHERE agent_id = $1 AND bkt = 'penal'
+    `, [agentId]);
+
+    res.json({ rows: [...result.rows, ...penalResult.rows] });
+  } catch (e: any) { res.status(500).json({ message: e.message }); }
+});
+
+ 
+
+  app.post("/api/admin/reset-feedback/agent/:agentId", requireAdmin, async (req, res) => {
+    try {
+      const agentId = Number(req.params.agentId);
+      const agentRow = await storage.query("SELECT name FROM fos_agents WHERE id=$1", [agentId]);
+      if (!agentRow.rows[0]) return res.status(404).json({ message: "Agent not found" });
+      await storage.query(`UPDATE loan_cases SET latest_feedback=NULL, feedback_comments=NULL, feedback_code=NULL, customer_available=NULL, vehicle_available=NULL, third_party=NULL, third_party_name=NULL, third_party_number=NULL, projection=NULL, non_starter=NULL, kyc_purchase=NULL, workable=NULL, feedback_date=NULL, monthly_feedback=NULL WHERE agent_id=$1`, [agentId]);
+      await storage.query(`UPDATE bkt_cases SET latest_feedback=NULL, feedback_comments=NULL, feedback_code=NULL, customer_available=NULL, vehicle_available=NULL, third_party=NULL, third_party_name=NULL, third_party_number=NULL, projection=NULL, non_starter=NULL, kyc_purchase=NULL, workable=NULL, feedback_date=NULL, monthly_feedback=NULL WHERE agent_id=$1`, [agentId]);
+      res.json({ success: true, message: `All feedback reset for ${agentRow.rows[0].name}` });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  app.post("/api/admin/reset-feedback/case/:caseId", requireAdmin, async (req, res) => {
+    try {
+      const caseId = Number(req.params.caseId); const { table } = req.body;
+      const tbl = table === "bkt" ? "bkt_cases" : "loan_cases";
+      await storage.query(`UPDATE ${tbl} SET latest_feedback=NULL, feedback_comments=NULL, feedback_code=NULL, customer_available=NULL, vehicle_available=NULL, third_party=NULL, third_party_name=NULL, third_party_number=NULL, projection=NULL, non_starter=NULL, kyc_purchase=NULL, workable=NULL, feedback_date=NULL, monthly_feedback=NULL, status='Unpaid' WHERE id=$1`, [caseId]);
+      res.json({ success: true });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+app.post("/api/admin/reset-monthly-feedback/agent/:agentId", requireAdmin, async (req, res) => {
+  try {
+    const agentId = Number(req.params.agentId);
+    const agentRow = await storage.query("SELECT name FROM fos_agents WHERE id=$1", [agentId]);
+    if (!agentRow.rows[0]) return res.status(404).json({ message: "Agent not found" });
+    await storage.query(`UPDATE loan_cases SET monthly_feedback=NULL WHERE agent_id=$1`, [agentId]);
+    await storage.query(`UPDATE bkt_cases SET monthly_feedback=NULL WHERE agent_id=$1`, [agentId]);
+    res.json({ success: true, message: `Monthly feedback reset for ${agentRow.rows[0].name}` });
+  } catch (e: any) { res.status(500).json({ message: e.message }); }
+});
+
+app.post("/api/admin/reset-monthly-feedback/case/:caseId", requireAdmin, async (req, res) => {
+  try {
+    const caseId = Number(req.params.caseId);
+    const { table } = req.body;
+    const tbl = table === "bkt" ? "bkt_cases" : "loan_cases";
+    await storage.query(`UPDATE ${tbl} SET monthly_feedback=NULL WHERE id=$1`, [caseId]);
+    res.json({ success: true });
+  } catch (e: any) { res.status(500).json({ message: e.message }); }
+});
+
+  app.put("/api/admin/cases/:id/status", requireAdmin, async (req, res) => {
+    try {
+      const caseId = Number(req.params.id); const { status, rollback_yn, table } = req.body;
+      const tbl = table === "bkt" ? "bkt_cases" : "loan_cases";
+      const oldRow = await storage.query(`SELECT status, rollback_yn, pos::numeric AS pos, agent_id, ${table === "bkt" ? "case_category AS bkt_key" : "bkt::text AS bkt_key"}, pro FROM ${tbl} WHERE id=$1`, [caseId]);
+      const old = oldRow.rows[0];
+      if (!old) return res.status(404).json({ message: "Case not found" });
+      const ynVal = rollback_yn === true || rollback_yn === "true" ? true : rollback_yn === false || rollback_yn === "false" ? false : null;
+      await storage.query(`UPDATE ${tbl} SET status=$1, rollback_yn=$2, updated_at=NOW() WHERE id=$3`, [status, ynVal, caseId]);
+      if (old.bkt_key && old.agent_id && (old.pro || "").toUpperCase() === 'TW') {
+        const pos = parseFloat(old.pos) || 0;
+        const bktKey = table === "bkt" ? old.bkt_key.toLowerCase().replace(/\s+/g, "") : `bkt${old.bkt_key}`;
+        const wasPaid = old.status === "Paid"; const nowPaid = status === "Paid";
+        const wasRb = old.rollback_yn === true; const nowRb = ynVal === true;
+        const dPos = !wasPaid && nowPaid ? pos : wasPaid && !nowPaid ? -pos : 0;
+        const dCount = !wasPaid && nowPaid ? 1 : wasPaid && !nowPaid ? -1 : 0;
+        const dRb = !wasRb && nowRb ? pos : wasRb && !nowRb ? -pos : 0;
+        await storage.applyBktPerfDelta(old.agent_id, bktKey, dPos, -dPos, dCount, -dCount, dRb, -dRb);
+      }
+      if (old.agent_id) {
+        const agentRow = await storage.query("SELECT push_token FROM fos_agents WHERE id=$1", [old.agent_id]);
+        const playerId = agentRow.rows[0]?.push_token;
+        if (playerId) { const caseRow = await storage.query(`SELECT customer_name, loan_no FROM ${tbl} WHERE id=$1`, [caseId]); const c = caseRow.rows[0]; if (c) await sendPush(playerId, status === "Paid" ? "✅ Case Marked Paid" : status === "Unpaid" ? "❌ Case Marked Unpaid" : "🔄 Status Updated", `${c.customer_name} (${c.loan_no}) marked ${status} by admin.`, { type: "status_update", caseId, status }); }
+      }
+      res.json({ success: true });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  // ── Background Jobs ────────────────────────────────────────────────────────────
+  const ptpReminderSentDates = new Set<string>();
+  async function runPtpPushJob() {
+    try {
+      const { hour, todayKey } = getISTHour(); const isMorning = hour === 9; const isAfternoon = hour === 13;
+      if (!isMorning && !isAfternoon) return;
+      const slotKey = `${todayKey}-${hour}`; if (ptpReminderSentDates.has(slotKey)) return;
+      const agents = await storage.query(`SELECT id, name, push_token FROM fos_agents WHERE role='fos' AND push_token IS NOT NULL AND push_token<>''`);
+      for (const agent of agents.rows) {
+        const result = await storage.query(`SELECT COUNT(*) AS cnt FROM (SELECT id FROM loan_cases WHERE agent_id=$1 AND ((status='PTP' AND (ptp_date IS NULL OR ptp_date<=CURRENT_DATE)) OR (telecaller_ptp_date IS NOT NULL AND telecaller_ptp_date<=CURRENT_DATE)) UNION ALL SELECT id FROM bkt_cases WHERE agent_id=$1 AND ((status='PTP' AND (ptp_date IS NULL OR ptp_date<=CURRENT_DATE)) OR (telecaller_ptp_date IS NOT NULL AND telecaller_ptp_date<=CURRENT_DATE))) t`, [agent.id]);
+        const cnt = parseInt(result.rows[0]?.cnt || "0", 10);
+        if (cnt > 0) await sendPush(agent.push_token, isMorning ? "📅 Good Morning — PTP Due Today" : "📅 Afternoon Reminder", `You have ${cnt} PTP case${cnt !== 1 ? "s" : ""} due today!`, { screen: "dashboard" });
+      }
+      ptpReminderSentDates.add(slotKey);
+      if (ptpReminderSentDates.size > 14) ptpReminderSentDates.delete(ptpReminderSentDates.values().next().value);
+    } catch (e: any) { console.error("[ptp-job]", e.message); }
+  }
+  runPtpPushJob(); setInterval(runPtpPushJob, 10 * 60 * 1000);
+
+  async function runReminderJob() {
+    try {
+      const result = await storage.query(`SELECT rd.id, rd.agent_id, rd.amount, rd.created_at, rd.last_reminder_at, fa.push_token FROM required_deposits rd JOIN fos_agents fa ON fa.id=rd.agent_id WHERE rd.screenshot_url IS NULL AND (rd.cash_collected IS NULL OR rd.cash_collected=FALSE) AND fa.push_token IS NOT NULL AND fa.push_token<>'' AND (rd.last_reminder_at IS NULL OR rd.last_reminder_at<NOW()-INTERVAL '1 hour')`);
+      for (const row of result.rows) {
+        const hoursElapsed = Math.floor((Date.now() - new Date(row.created_at).getTime()) / 3600000);
+        const amtStr = parseFloat(row.amount).toLocaleString("en-IN");
+        await sendPush(row.push_token, hoursElapsed === 0 ? "💰 Deposit Assigned" : `⏰ Deposit Reminder — ${hoursElapsed}h Pending`, hoursElapsed === 0 ? `Admin assigned ₹${amtStr}. Upload screenshot.` : `Upload ₹${amtStr} screenshot now! ${hoursElapsed}h elapsed.`, { screen: "deposition" });
+        await storage.query(`UPDATE required_deposits SET last_reminder_at=NOW() WHERE id=$1`, [row.id]);
+      }
+    } catch (e: any) { console.error("[reminder-job]", e.message); }
+  }
+  runReminderJob(); setInterval(runReminderJob, 60 * 60 * 1000);
+
+  async function runFosDepositionReminderJob() {
+    try {
+      const result = await storage.query(`SELECT fa.id AS agent_id, fa.name AS agent_name, fa.push_token, COUNT(fd.id)::int AS pending_count, SUM(fd.amount)::numeric AS pending_total, MIN(fd.created_at) AS oldest_at FROM fos_agents fa JOIN fos_depositions fd ON fd.agent_id=fa.id AND fd.payment_method='pending' WHERE fa.push_token IS NOT NULL AND fa.push_token<>'' GROUP BY fa.id, fa.name, fa.push_token HAVING COUNT(fd.id)>0`);
+      for (const row of result.rows) {
+        const count = parseInt(row.pending_count || 0); const total = parseFloat(row.pending_total || 0).toLocaleString("en-IN"); const hoursOld = Math.floor((Date.now() - new Date(row.oldest_at).getTime()) / 3600000);
+        await sendPush(row.push_token, `⏳ Pending Payment Reminder`, `You have ${count} pending deposit${count > 1 ? "s" : ""} totalling ₹${total} (${hoursOld}h old).`, { screen: "fos-depositions", type: "fos_dep_reminder" });
+      }
+    } catch (e: any) { console.error("[fos-dep-reminder]", e.message); }
+  }
+  runFosDepositionReminderJob(); setInterval(runFosDepositionReminderJob, 60 * 60 * 1000);
+
+  const batchReminderSentDates = new Set<string>();
+  async function runBatchReminderJob() {
+    try {
+      const { hour, todayKey } = getISTHour(); if (hour < 19 || hour > 20) return; if (batchReminderSentDates.has(todayKey)) return;
+      const agents = await storage.query(`SELECT id, push_token FROM fos_agents WHERE role='fos' AND push_token IS NOT NULL AND push_token<>''`);
+      let sent = 0;
+      for (const agent of agents.rows) {
+        const statsResult = await storage.query(`SELECT COUNT(*) FILTER (WHERE status='Paid')::int AS paid_count, COUNT(*) FILTER (WHERE status='Unpaid')::int AS unpaid_count, COUNT(*) FILTER (WHERE status='PTP')::int AS ptp_count, COUNT(*)::int AS total FROM (SELECT status FROM loan_cases WHERE agent_id=$1 UNION ALL SELECT status FROM bkt_cases WHERE agent_id=$1) t`, [agent.id]);
+        const s = statsResult.rows[0]; const total = parseInt(s?.total || "0", 10); if (total === 0) continue;
+        const r = await sendPush(agent.push_token, "📊 End of Day Summary", `Today: ✅ ${s.paid_count} Paid | 🔄 ${s.ptp_count} PTP | ❌ ${s.unpaid_count} Unpaid out of ${total} cases.`, { screen: "dashboard", type: "daily_summary" });
+        if (r.ok) sent++;
+      }
+      batchReminderSentDates.add(todayKey); if (batchReminderSentDates.size > 7) batchReminderSentDates.delete(batchReminderSentDates.values().next().value);
+    } catch (e: any) { console.error("[batch-reminder]", e.message); }
+  }
+  runBatchReminderJob(); setInterval(runBatchReminderJob, 10 * 60 * 1000);
+
+  async function runPtpBreakJob() {
+    try {
+      // Mark as broken: PTP date has passed (strictly before today)
+      // We use CURRENT_DATE so it's always in the DB server's timezone.
+      await storage.query(`
+        UPDATE loan_cases
+        SET broken_ptp = true, broken_ptp_date = ptp_date
+        WHERE status = 'PTP'
+          AND ptp_date IS NOT NULL
+          AND ptp_date < CURRENT_DATE
+          AND broken_ptp IS DISTINCT FROM true
+      `);
+
+      await storage.query(`
+        UPDATE bkt_cases
+        SET broken_ptp = true, broken_ptp_date = ptp_date
+        WHERE status = 'PTP'
+          AND ptp_date IS NOT NULL
+          AND ptp_date < CURRENT_DATE
+          AND broken_ptp IS DISTINCT FROM true
+      `);
+
+      // Auto-clear broken flag if agent has already given a new future PTP date
+      // (i.e. they rescheduled — broken_ptp should not persist for future dates)
+      await storage.query(`
+        UPDATE loan_cases
+        SET broken_ptp = false, broken_ptp_date = NULL
+        WHERE broken_ptp = true
+          AND ptp_date IS NOT NULL
+          AND ptp_date >= CURRENT_DATE
+      `);
+
+      await storage.query(`
+        UPDATE bkt_cases
+        SET broken_ptp = false, broken_ptp_date = NULL
+        WHERE broken_ptp = true
+          AND ptp_date IS NOT NULL
+          AND ptp_date >= CURRENT_DATE
+      `);
+
+      // ── Auto-notification removed ─────────────────────────────────────
+      // Sound alerts are now admin-triggered only via POST /api/admin/trigger-ptp-alert
+      console.log("[ptp-break-job] ✅ Broken PTP check complete (notifications disabled — use admin trigger)");
+    } catch (e: any) { console.error("[ptp-break-job]", e.message); }
+  }
+  // Run every 10 minutes so the block clears quickly after agent resolves
+  runPtpBreakJob(); setInterval(runPtpBreakJob, 10 * 60 * 1000);
+
+  async function runOverdueDepositionPushJob() {
+    try {
+      const result = await storage.query(`
+        SELECT fd.agent_id, fa.push_token, fa.name,
+               COUNT(fd.id)::int AS overdue_count,
+               SUM(fd.amount)::numeric AS overdue_total
+        FROM fos_depositions fd
+        JOIN fos_agents fa ON fa.id = fd.agent_id
+        WHERE fd.payment_method = 'pending'
+          AND fd.deposition_date < CURRENT_DATE
+          AND fa.push_token IS NOT NULL AND fa.push_token <> ''
+          AND (fd.snooze_until IS NULL OR fd.snooze_until < NOW())
+        GROUP BY fd.agent_id, fa.push_token, fa.name
+        HAVING COUNT(fd.id) > 0
+      `);
+
+      for (const row of result.rows) {
+        const total = parseFloat(row.overdue_total || 0).toLocaleString("en-IN");
+        await sendPush(
+          row.push_token,
+          "⚠️ Overdue Deposits",
+          `You have ${row.overdue_count} overdue deposit${row.overdue_count > 1 ? "s" : ""} totalling ₹${total}. Please settle immediately.`,
+          { screen: "fos-depositions", type: "overdue_dep" }
+        );
+      }
+      console.log("[overdue-dep-job] ✅ Done");
+    } catch (e: any) { console.error("[overdue-dep-job]", e.message); }
+  }
+  runOverdueDepositionPushJob(); setInterval(runOverdueDepositionPushJob, 60 * 60 * 1000);
+
+  const monthlyCleanupDone = new Set<string>();
+  async function runMonthlyCleanupJob() {
+    try {
+      const now = new Date(); const ist = new Date(now.getTime() + 5.5 * 60 * 60 * 1000);
+      const day = ist.getUTCDate(); const month = ist.getUTCMonth() + 1; const year = ist.getUTCFullYear();
+      if (day !== 1) return;
+      const monthKey = `${year}-${String(month).padStart(2, "0")}`; if (monthlyCleanupDone.has(monthKey)) return;
+      // ── Depositions are NEVER auto-deleted – only admin can delete individually via UI ──
+      // Old screenshot files older than 2 months are cleaned up to save disk space
+      try {
+        const uploadsDir = path.join(process.cwd(), "server/uploads/screenshots"); const cutoff = new Date(year, month - 2, 1);
+        const files = fs.readdirSync(uploadsDir); let deletedFiles = 0;
+        for (const file of files) { try { const stat = fs.statSync(path.join(uploadsDir, file)); if (stat.mtime < cutoff) { fs.unlinkSync(path.join(uploadsDir, file)); deletedFiles++; } } catch {} }
+        console.log(`[monthly-cleanup] 🖼️ Deleted ${deletedFiles} old screenshots`);
+      } catch {}
+      monthlyCleanupDone.add(monthKey); if (monthlyCleanupDone.size > 3) monthlyCleanupDone.delete(monthlyCleanupDone.values().next().value);
+    } catch (e: any) { console.error("[monthly-cleanup]", e.message); }
+  }
+  runMonthlyCleanupJob(); setInterval(runMonthlyCleanupJob, 60 * 60 * 1000);
+
+  const drrPushSentDates = new Set<string>();
+
+  async function runDrrDailyPushJob() {
+    try {
+      const { hour, todayKey } = getISTHour();
+      if (hour !== 10) return;
+
+      const slotKey = `${todayKey}-drr-10`;
+      if (drrPushSentDates.has(slotKey)) return;
+
+      const istDate = new Date(new Date().getTime() + 5.5 * 60 * 60 * 1000);
+      const dayOfMonth = istDate.getUTCDate();
+
+      const MILESTONES = [
+        { day: 10, label: "1st Milestone", targets: { bkt1: 28, bkt2: 22, bkt3: 18 } },
+        { day: 15, label: "2nd Milestone", targets: { bkt1: 60, bkt2: 48, bkt3: 40 } },
+        { day: 20, label: "3rd Milestone", targets: { bkt1: 80, bkt2: 65, bkt3: 45 } },
+        { day: 25, label: "4th Milestone", targets: { bkt1: 85, bkt2: 68, bkt3: 60 } },
+      ];
+      const nextMilestone = MILESTONES.find((m) => m.day >= dayOfMonth) ?? MILESTONES[MILESTONES.length - 1];
+      const daysLeft = Math.max(0, nextMilestone.day - dayOfMonth);
+      const effectiveDays = Math.max(1, daysLeft);
+
+      const agents = await storage.query(
+        `SELECT id, name, push_token FROM fos_agents WHERE role='fos' AND push_token IS NOT NULL AND push_token != ''`
+      );
+      console.log(`[drr-push] Day ${dayOfMonth} | ${daysLeft}d to ${nextMilestone.label} | ${agents.rows.length} agents`);
+
+      const fmtAmt = (v: number) =>
+        `₹${Math.round(v).toLocaleString("en-IN")}`;
+
+      let sent = 0;
+      for (const agent of agents.rows) {
+        try {
+          const perfResult = await storage.query(
+            `SELECT
+               CASE lc.bkt WHEN 1 THEN 'bkt1' WHEN 2 THEN 'bkt2' WHEN 3 THEN 'bkt3' END AS bkt,
+               COALESCE(SUM(lc.pos::numeric) FILTER (WHERE lc.status='Paid'), 0)  AS pos_paid,
+               COALESCE(SUM(lc.pos::numeric), 0)                                   AS pos_grand_total
+             FROM loan_cases lc
+             WHERE lc.agent_id = $1
+               AND lc.bkt IN (1,2,3)
+               AND UPPER(COALESCE(lc.pro,'')) = 'TW'
+             GROUP BY lc.bkt
+             HAVING CASE lc.bkt WHEN 1 THEN 'bkt1' WHEN 2 THEN 'bkt2' WHEN 3 THEN 'bkt3' END IS NOT NULL`,
+            [agent.id]
+          );
+
+          const bktMap: Record<string, { paid: number; total: number }> = {
+            bkt1: { paid: 0, total: 0 },
+            bkt2: { paid: 0, total: 0 },
+            bkt3: { paid: 0, total: 0 },
+          };
+          for (const row of perfResult.rows) {
+            const key = (row.bkt || "").toLowerCase();
+            if (bktMap[key]) {
+              bktMap[key].paid  = parseFloat(row.pos_paid) || 0;
+              bktMap[key].total = parseFloat(row.pos_grand_total) || 0;
+            }
+          }
+
+          const totalPaid = Object.values(bktMap).reduce((s, b) => s + b.paid,  0);
+          const totalPos  = Object.values(bktMap).reduce((s, b) => s + b.total, 0);
+          if (totalPos === 0) continue;
+
+          const overallPct = (totalPaid / totalPos) * 100;
+
+          const bktLines: string[] = [];
+          let totalRemaining = 0;
+
+          for (const bkt of ["bkt1", "bkt2", "bkt3"] as const) {
+            const d = bktMap[bkt];
+            if (!d || d.total === 0) continue;
+            const targetPct    = nextMilestone.targets[bkt];
+            const targetAmount = (targetPct / 100) * d.total;
+            const remaining    = Math.max(0, targetAmount - d.paid);
+            totalRemaining    += remaining;
+            const currentPct   = d.total > 0 ? (d.paid / d.total) * 100 : 0;
+            const label        = bkt === "bkt1" ? "B1" : bkt === "bkt2" ? "B2" : "B3";
+            bktLines.push(currentPct >= targetPct ? `${label}:✅` : `${label}:${fmtAmt(remaining / effectiveDays)}/d`);
+          }
+
+          const overallDailyNeed = totalRemaining / effectiveDays;
+          const daysText = daysLeft === 0 ? "Milestone day TODAY!" : `${daysLeft}d left`;
+          const title = `📊 Daily DRR — Day ${dayOfMonth}`;
+          const body  = totalRemaining <= 0
+            ? `🎉 All targets met! Overall: ${overallPct.toFixed(1)}% ✅`
+            : `${overallPct.toFixed(1)}% done | Need ${fmtAmt(overallDailyNeed)}/day\n${daysText} | ${bktLines.join("  ")}`;
+
+          const r = await sendPush(agent.push_token, title, body, { screen: "drr", type: "drr_daily" });
+          if (r.ok) sent++;
+        } catch (agentErr: any) {
+          console.error(`[drr-push] Error for agent ${agent.id}:`, agentErr.message);
+        }
+      }
+
+      drrPushSentDates.add(slotKey);
+      if (drrPushSentDates.size > 14) drrPushSentDates.delete(drrPushSentDates.values().next().value);
+      console.log(`[drr-push] ✅ Done — sent to ${sent}/${agents.rows.length} agents`);
+    } catch (e: any) {
+      console.error("[drr-push] Job error:", e.message);
+    }
+  }
+
+  runDrrDailyPushJob();
+  setInterval(runDrrDailyPushJob, 10 * 60 * 1000);
+
+// ── PDF helpers ───────────────────────────────────────────────────────────────
+
+function buildPreIntimationPdf(
+  doc: any,
+  p: ReturnType<typeof buildIntimationParams>,
+  logoPath: string
 ) {
-  await query(
-    `UPDATE bkt_cases SET
-       status             = COALESCE($1, status),
-       latest_feedback    = COALESCE($2, latest_feedback),
-       feedback_comments  = COALESCE($3, feedback_comments),
-       feedback_date      = NOW(),
-       ptp_date           = $5,
-       rollback_yn        = COALESCE($6,  rollback_yn),
-       customer_available = COALESCE($7,  customer_available),
-       vehicle_available  = COALESCE($8,  vehicle_available),
-       third_party        = COALESCE($9,  third_party),
-       third_party_name   = COALESCE($10, third_party_name),
-       third_party_number = COALESCE($11, third_party_number),
-       feedback_code      = COALESCE(NULLIF($12,''), feedback_code),
-       projection         = COALESCE(NULLIF($13,''), projection),
-       non_starter        = COALESCE($14, non_starter),
-       kyc_purchase       = COALESCE($15, kyc_purchase),
-       workable           = COALESCE($16, workable),
-       monthly_feedback   = COALESCE(NULLIF($17,''), monthly_feedback),
-       ptp_date_mf        = COALESCE($18, ptp_date_mf),
-       shifted_city       = COALESCE(NULLIF($19,''), shifted_city),
-       occupation         = COALESCE(NULLIF($20,''), occupation),
-       cbc_paid           = COALESCE($21, cbc_paid),
-       lpp_paid           = COALESCE($22, lpp_paid),
-       emi_paid           = COALESCE($23, emi_paid)
-     WHERE id = $4`,
-    [
-      status, feedback, comments, id, ptpDate || null,
-      rollbackYn != null ? rollbackYn : null,
-      extra?.customerAvailable ?? null, extra?.vehicleAvailable ?? null,
-      extra?.thirdParty ?? null, extra?.thirdPartyName ?? null, extra?.thirdPartyNumber ?? null,
-      extra?.feedbackCode ?? null, extra?.projection ?? null,
-      extra?.nonStarter ?? null, extra?.kycPurchase ?? null, extra?.workable ?? null,
-      extra?.monthlyFeedback ?? null, extra?.ptpDateMf ?? null,
-      extra?.shiftedCity ?? null, extra?.occupation ?? null,
-      extra?.cbcPaid ?? null, extra?.lppPaid ?? null, extra?.emiPaid ?? null,
-    ]
+  const lm         = doc.page.margins.left;
+  const rm         = doc.page.width - doc.page.margins.right;
+  const pageWidth  = rm - lm;
+  const pageHeight = doc.page.height - doc.page.margins.top - doc.page.margins.bottom;
+  const fsNode     = require("fs");
+ 
+  const logoW  = 110;
+  const logoH  = 50;
+  const startY = doc.page.margins.top;
+ 
+  if (fsNode.existsSync(logoPath)) {
+    try {
+      doc.image(fsNode.readFileSync(logoPath), rm - logoW, startY, {
+        width: logoW, height: logoH,
+      });
+    } catch {}
+  }
+ 
+  const titleAreaW    = pageWidth - logoW - 10;
+  const titleFontSize = 13;
+  doc.font("Helvetica-Bold").fontSize(titleFontSize).text(
+    "Pre Repossession Intimation to Police Station",
+    lm, startY + (logoH - titleFontSize * 1.2) / 2,
+    { align: "center", width: titleAreaW }
+  );
+ 
+  doc.y = startY + logoH + 4;
+ 
+  doc.moveTo(lm, doc.y).lineTo(rm, doc.y).strokeColor("#bbbbbb").lineWidth(0.5).stroke();
+  doc.strokeColor("#000000").lineWidth(1);
+  doc.moveDown(0.6);
+ 
+  doc.font("Helvetica-Bold").fontSize(10.5)
+    .text(`Date :- ${p.date}`, lm, doc.y, { align: "right", width: pageWidth });
+  doc.moveDown(0.8);
+ 
+  const policeLabel =
+    p.police_station && p.police_station !== "________________________________"
+      ? `${p.police_station} Police Station,`
+      : "________________________________,";
+ 
+  doc.font("Helvetica").fontSize(10.5);
+  doc.text("To,", lm);                                    doc.moveDown(0.25);
+  doc.text("The Senior Inspector,", lm);                  doc.moveDown(0.25);
+  doc.text(policeLabel, lm);                              doc.moveDown(0.25);
+  doc.text(`TQ. ${p.tq}     Dist. Nanded`, lm);
+  doc.moveDown(0.8);
+ 
+  doc.font("Helvetica").fontSize(10.5).text(
+    `Sub :- Pre intimation of repossession of the vehicle from ${p.customer_name}`,
+    lm, doc.y, { width: pageWidth }
+  );
+  doc.moveDown(0.25);
+  doc.text(`(Borrower) residing ${p.address}`, lm, doc.y, { width: pageWidth });
+  doc.moveDown(0.8);
+ 
+  doc.font("Helvetica-Bold").fontSize(10.5).text("Respected Sir,", lm);
+  doc.moveDown(0.6);
+ 
+  doc.font("Helvetica").fontSize(10.5).text(
+    'The afore mentioned borrower has taken a loan from Hero Fin-Corp Limited ("Company") for the' +
+    " purchase of the Vehicle having the below mentioned details and further the Borrower hypothecated" +
+    " the said vehicle to the Company in terms of loan-cum-hypothecation agreement executed between" +
+    " the borrower and the Company.",
+    lm, doc.y, { align: "justify", width: pageWidth }
+  );
+  doc.moveDown(0.7);
+ 
+  const col1W = pageWidth * 0.46;
+  const detailRows: [string, string][] = [
+    ["Name of the Borrower",                 p.customer_name],
+    ["Address of Borrower",                  p.address],
+    ["App ID",                               p.app_id],
+    ["Loan cum Hypothecation Agreement No.", p.loan_no],
+    ["Date",                                 p.date],
+    ["Vehicle Registration No.",             p.registration_no],
+    ["Model Make",                           p.asset_make],
+    ["Engine No.",                           p.engine_no],
+    ["Chassis No.",                          p.chassis_no],
+  ];
+ 
+  doc.font("Helvetica").fontSize(10.5);
+  detailRows.forEach(([label, value]) => {
+    const rowY = doc.y;
+    doc.fillColor("#333333").text(label, lm, rowY, { width: col1W - 4, lineBreak: false });
+    doc.fillColor("#000000").text(`: ${value || "—"}`, lm + col1W, rowY, {
+      width: pageWidth - col1W,
+    });
+    doc.moveDown(0.28);
+  });
+  doc.moveDown(0.7);
+ 
+  doc.font("Helvetica").fillColor("#000000").fontSize(10.5).text(
+    "The Borrower has committed default on the scheduled payment of the Monthly Payments and/or" +
+    " other charges payable on the loan obtained by the Borrower from the Company in terms of the" +
+    " provisions of the aforesaid loan-cum-hypothecation agreement. In spite of Company's requests" +
+    " and reminders, the Borrower has not remitted the outstanding dues; as a result of which the" +
+    " company was left with no option but to enforce the terms and conditions of the said agreement." +
+    " Under the said agreement, the said Borrower has specifically authorized Company or any of its" +
+    " authorized persons to take charge/repossession of the vehicle, in the event he fails to pay" +
+    " the loan amount when due to the Company. Pursuant to our right therein we are taking steps to" +
+    " recover possession of the said vehicle. This communication is for your record and to prevent" +
+    " confusion that may arise from any complaint that the borrower may lodge with respect to the" +
+    " aforesaid vehicle.",
+    lm, doc.y, { align: "justify", width: pageWidth }
+  );
+  doc.moveDown(0.8);
+ 
+  doc.font("Helvetica").fontSize(10.5).text("Thanking you,", lm);
+  doc.moveDown(0.3);
+  doc.text("Yours Sincerely,", lm);
+ 
+  const footerAbsY  = doc.page.margins.top + pageHeight;
+  const forLineH    = 10.5 + 6;
+  const footerLineH = 9 + 12;
+  const sigTargetY  = footerAbsY - footerLineH - forLineH - 24;
+  if (sigTargetY > doc.y + 8) doc.y = sigTargetY;
+  else doc.moveDown(1.5);
+ 
+  doc.font("Helvetica").fontSize(10.5).text("For, Hero Fin-Corp Limited", lm);
+  doc.moveDown(1.0);
+ 
+  doc.moveTo(lm, doc.y).lineTo(rm, doc.y).strokeColor("#bbbbbb").lineWidth(0.5).stroke();
+  doc.strokeColor("#000000").lineWidth(1);
+  doc.moveDown(0.3);
+  doc.font("Helvetica-Bold").fontSize(8.5).fillColor("#000000").text(
+    "Hero Fincorp Ltd. Corporate Office: 09, Basant Lok, Vasant Vihar, New Delhi-110057 India",
+    lm, doc.y, { align: "center", width: pageWidth }
   );
 }
-
-export async function upsertBktPerfSummary(data: {
-  fosName: string; agentId: number | null; bkt: string;
-  posPaid: number; posUnpaid: number; posGrandTotal: number; posPercentage: number;
-  countPaid: number; countUnpaid: number; countTotal: number;
-  rollbackPaid: number; rollbackUnpaid: number; rollbackGrandTotal: number; rollbackPercentage: number;
-}) {
-  await query(
-    `INSERT INTO bkt_perf_summary
-       (fos_name, agent_id, bkt,
-        pos_paid, pos_unpaid, pos_grand_total, pos_percentage,
-        count_paid, count_unpaid, count_total,
-        rollback_paid, rollback_unpaid, rollback_grand_total, rollback_percentage,
-        uploaded_at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,NOW())
-     ON CONFLICT (fos_name, bkt) DO UPDATE SET
-       agent_id             = COALESCE(EXCLUDED.agent_id, bkt_perf_summary.agent_id),
-       pos_paid             = EXCLUDED.pos_paid,
-       pos_unpaid           = EXCLUDED.pos_unpaid,
-       pos_grand_total      = EXCLUDED.pos_grand_total,
-       pos_percentage       = EXCLUDED.pos_percentage,
-       count_paid           = EXCLUDED.count_paid,
-       count_unpaid         = EXCLUDED.count_unpaid,
-       count_total          = EXCLUDED.count_total,
-       rollback_paid        = EXCLUDED.rollback_paid,
-       rollback_unpaid      = EXCLUDED.rollback_unpaid,
-       rollback_grand_total = EXCLUDED.rollback_grand_total,
-       rollback_percentage  = EXCLUDED.rollback_percentage,
-       uploaded_at          = NOW()`,
-    [
-      data.fosName, data.agentId, data.bkt,
-      data.posPaid, data.posUnpaid, data.posGrandTotal, data.posPercentage,
-      data.countPaid, data.countUnpaid, data.countTotal,
-      data.rollbackPaid, data.rollbackUnpaid, data.rollbackGrandTotal, data.rollbackPercentage,
-    ]
-  );
-}
-
-export async function applyBktPerfDelta(
-  agentId: number, bkt: string,
-  deltaPosPaid: number, deltaPosUnpaid: number,
-  deltaCountPaid: number, deltaCountUnpaid: number,
-  deltaRbPaid: number, deltaRbUnpaid: number,
+ 
+function buildPostIntimationPdf(
+  doc: any,
+  p: ReturnType<typeof buildIntimationParams>,
+  logoPath: string
 ) {
-  if (deltaPosPaid === 0 && deltaCountPaid === 0 && deltaRbPaid === 0) return;
-  await query(
-    `UPDATE bkt_perf_summary SET
-       pos_paid        = GREATEST(0, pos_paid       + $1),
-       pos_unpaid      = GREATEST(0, pos_unpaid     + $2),
-       pos_percentage  = CASE WHEN pos_grand_total > 0 THEN ROUND((GREATEST(0, pos_paid + $1) / pos_grand_total) * 100, 2) ELSE 0 END,
-       count_paid      = GREATEST(0, count_paid     + $3),
-       count_unpaid    = GREATEST(0, count_unpaid   + $4),
-       rollback_paid   = GREATEST(0, rollback_paid  + $5),
-       rollback_unpaid = GREATEST(0, rollback_unpaid+ $6),
-       rollback_percentage = CASE WHEN rollback_grand_total > 0 THEN ROUND((GREATEST(0, rollback_paid + $5) / rollback_grand_total) * 100, 2) ELSE 0 END
-     WHERE agent_id = $7 AND bkt = $8`,
-    [deltaPosPaid, deltaPosUnpaid, deltaCountPaid, deltaCountUnpaid, deltaRbPaid, deltaRbUnpaid, agentId, bkt]
+  const lm         = doc.page.margins.left;
+  const rm         = doc.page.width - doc.page.margins.right;
+  const pageWidth  = rm - lm;
+  const pageHeight = doc.page.height - doc.page.margins.top - doc.page.margins.bottom;
+  const fsNode     = require("fs");
+ 
+  const logoW  = 110;
+  const logoH  = 50;
+  const startY = doc.page.margins.top;
+ 
+  if (fsNode.existsSync(logoPath)) {
+    try {
+      doc.image(fsNode.readFileSync(logoPath), rm - logoW, startY, {
+        width: logoW, height: logoH,
+      });
+    } catch {}
+  }
+ 
+  const titleAreaW    = pageWidth - logoW - 10;
+  const titleFontSize = 13;
+  const titleText     = "Post Repossession Intimation to Police Station";
+ 
+  doc.font("Helvetica-Bold").fontSize(titleFontSize).text(
+    titleText,
+    lm, startY + (logoH - titleFontSize * 1.2) / 2,
+    { align: "center", width: titleAreaW }
+  );
+ 
+  const tw           = doc.widthOfString(titleText, { fontSize: titleFontSize });
+  const titleCentreX = lm + (titleAreaW - tw) / 2;
+  const underlineY   = startY + (logoH - titleFontSize * 1.2) / 2 + titleFontSize * 1.15;
+  doc.moveTo(titleCentreX, underlineY)
+    .lineTo(titleCentreX + tw, underlineY)
+    .strokeColor("#000000").lineWidth(0.7).stroke();
+  doc.strokeColor("#000000").lineWidth(1);
+ 
+  doc.y = startY + logoH + 4;
+ 
+  doc.font("Helvetica-Bold").fontSize(10.5)
+    .text(`Date :- ${p.date}`, lm, doc.y, { align: "right", width: pageWidth });
+  doc.moveDown(0.8);
+ 
+  const policeLabel =
+    p.police_station && p.police_station !== "________________________________"
+      ? `${p.police_station} Police Station,`
+      : "________________________________,";
+ 
+  doc.font("Helvetica").fontSize(10.5);
+  doc.text("To,", lm);                                    doc.moveDown(0.25);
+  doc.text("The Senior Inspector,", lm);                  doc.moveDown(0.25);
+  doc.text(policeLabel, lm);                              doc.moveDown(0.25);
+  doc.text(`TQ. ${p.tq}     Dist. Nanded`, lm);
+  doc.moveDown(0.8);
+ 
+  doc.font("Helvetica").fontSize(10.5).text(
+    `Sub :- Intimation after repossession of the vehicle No ${p.registration_no}` +
+    ` From Mr. ${p.customer_name}`,
+    lm, doc.y, { width: pageWidth }
+  );
+  doc.moveDown(0.25);
+  doc.text(`(Borrower) residing ${p.address}`, lm, doc.y, { width: pageWidth });
+  doc.moveDown(0.8);
+ 
+  doc.font("Helvetica-Bold").fontSize(10.5).text("Respected Sir,", lm);
+  doc.moveDown(0.6);
+ 
+  doc.font("Helvetica").fontSize(10.5);
+ 
+  doc.text(
+    `This is in furtherance to our letter dated bearing reference number ${p.reference_no}` +
+    " whereby it was intimated to you that despite our repeated requests, reminders and personal" +
+    " visits the above said borrower has defaulted in repaying the above TW Loan as expressly" +
+    " agreed by him/her under the Loan (cum Hypothecation) Agreement and guarantee entered between" +
+    " the said borrower and the company.",
+    lm, doc.y, { align: "justify", width: pageWidth }
+  );
+  doc.moveDown(0.6);
+ 
+  doc.text(
+    "Pursuant to our right under the said Agreement we have taken peaceful repossession of the" +
+    " said vehicle.",
+    lm, doc.y, { align: "justify", width: pageWidth }
+  );
+  doc.moveDown(0.6);
+ 
+  doc.text(
+    `We have taken peaceful repossession of the said vehicle on ${p.repossession_date}` +
+    ` at from ${p.repossession_address}`,
+    lm, doc.y, { align: "justify", width: pageWidth }
+  );
+  doc.moveDown(0.7);
+ 
+  doc.font("Helvetica-Bold").fontSize(10.5).text("DETAILS OF THE VEHICLE REPOSSESSED:-", lm);
+  doc.moveDown(0.5);
+ 
+  const col1W = pageWidth * 0.42;
+  const detailRows: [string, string][] = [
+    ["Name of the Borrower",        p.customer_name],
+    ["Address of Borrower",         p.address],
+    ["Loan Agreement No.",          p.loan_no],
+    ["App ID",                      p.app_id],
+    ["Vehicle Registration Number", p.registration_no],
+    ["Model Make",                  p.asset_make],
+    ["Engine No.",                  p.engine_no],
+    ["Chassis No.",                 p.chassis_no],
+  ];
+ 
+  doc.font("Helvetica").fontSize(10.5);
+  detailRows.forEach(([label, value]) => {
+    const rowY = doc.y;
+    doc.fillColor("#333333").text(label, lm, rowY, { width: col1W - 4, lineBreak: false });
+    doc.fillColor("#000000").text(`: ${value || "—"}`, lm + col1W, rowY, {
+      width: pageWidth - col1W,
+    });
+    doc.moveDown(0.28);
+  });
+  doc.moveDown(0.7);
+ 
+  doc.font("Helvetica").fillColor("#000000").fontSize(10.5).text(
+    "This communication is for your records and to prevent any confusion that may arise for any" +
+    " complaint that the Borrower may lodge with respect to the said vehicle.",
+    lm, doc.y, { align: "justify", width: pageWidth }
+  );
+  doc.moveDown(0.8);
+ 
+  doc.font("Helvetica").fontSize(10.5).text("Thanking You,", lm);
+  doc.moveDown(0.3);
+  doc.text("Yours Sincerely,", lm);
+ 
+  const footerAbsY  = doc.page.margins.top + pageHeight;
+  const forLineH    = 10.5 + 6;
+  const footerLineH = 9 + 12;
+  const sigTargetY  = footerAbsY - footerLineH - forLineH - 24;
+  if (sigTargetY > doc.y + 8) doc.y = sigTargetY;
+  else doc.moveDown(1.5);
+ 
+  doc.font("Helvetica").fontSize(10.5).text("For, Hero Fin Corp Limited", lm);
+  doc.moveDown(1.0);
+ 
+  doc.moveTo(lm, doc.y).lineTo(rm, doc.y).strokeColor("#bbbbbb").lineWidth(0.5).stroke();
+  doc.strokeColor("#000000").lineWidth(1);
+  doc.moveDown(0.3);
+  doc.font("Helvetica-Bold").fontSize(8.5).fillColor("#000000").text(
+    "Hero Fincorp Ltd. Corporate Office: 09, Basant Lok, Vasant Vihar, New Delhi-110057 India",
+    lm, doc.y, { align: "center", width: pageWidth }
   );
 }
 
-export async function getAllBktPerfSummary() {
-  const result = await query(
-    `SELECT s.*, fa.name as agent_real_name FROM bkt_perf_summary s
-     LEFT JOIN fos_agents fa ON fa.id = s.agent_id
-     ORDER BY s.fos_name, s.bkt`
+async function buildIntimationDocx(
+  p: ReturnType<typeof buildIntimationParams>,
+  isPost: boolean,
+  logoPath: string
+): Promise<Buffer> {
+  const {
+    Document, Packer, Paragraph, TextRun, AlignmentType, BorderStyle,
+    WidthType, ImageRun, Table, TableRow, TableCell,
+  } = require("docx");
+  const fsNode = require("fs");
+
+const logoData: Uint8Array | null = fsNode.existsSync(logoPath) ? new Uint8Array(fsNode.readFileSync(logoPath)) : null;
+  const body11 = { size: 22, font: "Arial" };
+  const body10 = { size: 20, font: "Arial" };
+  const sp     = (n: number) => ({ before: n, after: n });
+
+  const noBorder  = { style: BorderStyle.NONE, size: 0, color: "FFFFFF" };
+  const noBorders = {
+    top: noBorder, bottom: noBorder, left: noBorder, right: noBorder,
+    insideH: noBorder, insideV: noBorder,
+  };
+
+  function detailRow(label: string, value: string): any {
+    return new TableRow({
+      children: [
+        new TableCell({
+          borders: noBorders,
+          width: { size: 4200, type: WidthType.DXA },
+          margins: { top: 50, bottom: 50, left: 0, right: 60 },
+          children: [new Paragraph({ children: [new TextRun({ text: label, color: "333333", ...body10 })] })],
+        }),
+        new TableCell({
+          borders: noBorders,
+          width: { size: 180, type: WidthType.DXA },
+          margins: { top: 50, bottom: 50, left: 0, right: 0 },
+          children: [new Paragraph({ children: [new TextRun({ text: ":", ...body10 })] })],
+        }),
+        new TableCell({
+          borders: noBorders,
+          width: { size: 5020, type: WidthType.DXA },
+          margins: { top: 50, bottom: 50, left: 60, right: 0 },
+          children: [new Paragraph({ children: [new TextRun({ text: value || "—", ...body10 })] })],
+        }),
+      ],
+    });
+  }
+
+  function detailsTable(rows: [string, string][]): any {
+    return new Table({
+      width: { size: 9400, type: WidthType.DXA },
+      columnWidths: [4200, 180, 5020],
+      borders: noBorders,
+      rows: rows.map(([label, value]) => detailRow(label, value)),
+    });
+  }
+
+  const children: any[] = [];
+
+  if (logoData) {
+    children.push(new Paragraph({
+      alignment: AlignmentType.RIGHT,
+      spacing: { before: 0, after: 80 },
+      children: [new ImageRun({ data: logoData, transformation: { width: 120, height: 65 }, type: "png" })],
+    }));
+  }
+
+  children.push(new Paragraph({
+    alignment: AlignmentType.CENTER,
+    spacing: sp(60),
+    children: [new TextRun({
+      text: isPost
+        ? "Post Repossession Intimation to Police Station"
+        : "Pre Repossession Intimation to Police Station",
+      size: 26, font: "Arial", bold: true,
+      underline: { type: "single" },
+    })],
+  }));
+
+  children.push(new Paragraph({
+    alignment: isPost ? AlignmentType.RIGHT : AlignmentType.LEFT,
+    spacing: { before: 20, after: 80 },
+    children: [new TextRun({ text: `Date :- ${p.date}`, ...body11 })],
+  }));
+
+  const policeLabel = p.police_station && p.police_station !== "________________________________"
+    ? `${p.police_station} Police Station,`
+    : "________________________________,";
+
+  children.push(
+    new Paragraph({ spacing: { before: 40, after: 16 }, children: [new TextRun({ text: "To,", ...body11 })] }),
+    new Paragraph({ spacing: { before: 0, after: 16 }, children: [new TextRun({ text: "The Senior Inspector,", ...body11 })] }),
+    new Paragraph({ spacing: { before: 0, after: 16 }, children: [new TextRun({ text: policeLabel, ...body11 })] }),
+    new Paragraph({ spacing: { before: 0, after: 80 }, children: [new TextRun({ text: `TQ. ${p.tq}     Dist. Nanded`, ...body11 })] })
   );
-  return result.rows;
+
+  if (isPost) {
+    children.push(
+      new Paragraph({
+        spacing: { before: 20, after: 16 },
+        children: [new TextRun({ text: `Sub :- Intimation after repossession of the vehicle No ${p.registration_no} From Mr. ${p.customer_name}`, ...body11 })],
+      }),
+      new Paragraph({
+        spacing: { before: 0, after: 80 },
+        children: [new TextRun({ text: `(Borrower) residing ${p.address}`, ...body11 })],
+      })
+    );
+  } else {
+    children.push(
+      new Paragraph({
+        spacing: { before: 20, after: 16 },
+        children: [new TextRun({ text: `Sub :- Pre intimation of repossession of the vehicle from ${p.customer_name}`, ...body11 })],
+      }),
+      new Paragraph({
+        spacing: { before: 0, after: 80 },
+        children: [new TextRun({ text: `(Borrower) residing ${p.address}`, ...body11 })],
+      })
+    );
+  }
+
+  children.push(new Paragraph({ spacing: { before: 20, after: 40 }, children: [new TextRun({ text: "Respected Sir,", ...body11 })] }));
+
+  if (isPost) {
+    children.push(
+      new Paragraph({
+        spacing: { before: 40, after: 40 }, alignment: AlignmentType.JUSTIFIED,
+        children: [new TextRun({ text: `This is in furtherance to our letter dated bearing reference number ${p.reference_no} whereby it was intimated to you that despite our repeated requests, reminders and personal visits the above said borrower has defaulted in repaying the above TW Loan as expressly agreed by him/her under the Loan (cum Hypothecation) Agreement and guarantee entered between the said borrower and the company.`, ...body10 })],
+      }),
+      new Paragraph({
+        spacing: { before: 40, after: 40 }, alignment: AlignmentType.JUSTIFIED,
+        children: [new TextRun({ text: "Pursuant to our right under the said Agreement we have taken peaceful repossession of the said vehicle.", ...body10 })],
+      }),
+      new Paragraph({
+        spacing: { before: 40, after: 60 }, alignment: AlignmentType.JUSTIFIED,
+        children: [new TextRun({ text: `We have taken peaceful repossession of the said vehicle on ${p.repossession_date} at from ${p.repossession_address}`, ...body10 })],
+      }),
+      new Paragraph({
+        spacing: { before: 40, after: 40 },
+        children: [new TextRun({ text: "DETAILS OF THE VEHICLE REPOSSESSED:-", size: 22, font: "Arial", bold: true })],
+      }),
+      detailsTable([
+        ["Name of the Borrower",        p.customer_name],
+        ["Address of Borrower",         p.address],
+        ["Loan Agreement No.",          p.loan_no],
+        ["App ID",                      p.app_id],
+        ["Vehicle Registration Number", p.registration_no],
+        ["Model Make",                  p.asset_make],
+        ["Engine No.",                  p.engine_no],
+        ["Chassis No.",                 p.chassis_no],
+      ]),
+      new Paragraph({
+        spacing: { before: 60, after: 40 }, alignment: AlignmentType.JUSTIFIED,
+        children: [new TextRun({ text: "This communication is for your records and to prevent any confusion that may arise for any complaint that the Borrower may lodge with respect to the said vehicle.", ...body10 })],
+      })
+    );
+  } else {
+    children.push(
+      new Paragraph({
+        spacing: { before: 40, after: 60 }, alignment: AlignmentType.JUSTIFIED,
+        children: [new TextRun({ text: 'The afore mentioned borrower has taken a loan from Hero Fin-Corp Limited ("Company") for the purchase of the Vehicle having the below mentioned details and further the Borrower hypothecated the said vehicle to the Company in terms of loan-cum-hypothecation agreement executed between the borrower and the Company.', ...body10 })],
+      }),
+      detailsTable([
+        ["Name of the Borrower",                  p.customer_name],
+        ["Address of Borrower",                   p.address],
+        ["App ID",                                p.app_id],
+        ["Loan cum Hypothecation Agreement No.",  p.loan_no],
+        ["Date",                                  p.date],
+        ["Vehicle Registration No.",              p.registration_no],
+        ["Model Make",                            p.asset_make],
+        ["Engine No.",                            p.engine_no],
+        ["Chassis No.",                           p.chassis_no],
+      ]),
+      new Paragraph({
+        spacing: { before: 60, after: 40 }, alignment: AlignmentType.JUSTIFIED,
+        children: [new TextRun({ text: "The Borrower has committed default on the scheduled payment of the Monthly Payments and/or other charges payable on the loan obtained by the Borrower from the Company in terms of the provisions of the aforesaid loan-cum-hypothecation agreement. In spite of Company's requests and reminders, the Borrower has not remitted the outstanding dues; as a result of which the company was left with no option but to enforce the terms and conditions of the said agreement. Under the said agreement, the said Borrower has specifically authorized Company or any of its authorized persons to take charge/repossession of the vehicle, in the event he fails to pay the loan amount when due to the Company. Pursuant to our right therein we are taking steps to recover possession of the said vehicle. This communication is for your record and to prevent confusion that may arise from any complaint that the borrower may lodge with respect to the aforesaid vehicle.", ...body10 })],
+      })
+    );
+  }
+
+  children.push(
+    new Paragraph({ spacing: { before: 60, after: 16 }, children: [new TextRun({ text: "Thanking You,", ...body11 })] }),
+    new Paragraph({ spacing: { before: 0, after: 16 }, children: [new TextRun({ text: "Yours Sincerely,", ...body11 })] }),
+    new Paragraph({ spacing: { before: 520, after: 60 }, children: [new TextRun({ text: `For, Hero Fin${isPost ? " " : "-"}Corp Limited`, ...body11 })] })
+  );
+
+  children.push(new Paragraph({
+    alignment: AlignmentType.CENTER,
+    spacing: { before: 360, after: 0 },
+    border: { top: { style: BorderStyle.SINGLE, size: 6, color: "CCCCCC" } },
+    children: [new TextRun({ text: "Hero Fincorp Ltd. Corporate Office: 09, Basant Lok, Vasant Vihar, New Delhi-110057 India", size: 18, font: "Arial" })],
+  }));
+
+  const doc = new Document({
+    sections: [{
+      properties: {
+        page: {
+          size: { width: 11906, height: 16838 },
+          margin: { top: 720, right: 720, bottom: 720, left: 720 },
+        },
+      },
+      children,
+    }],
+  });
+
+  return await Packer.toBuffer(doc);
 }
 
-export async function getBktPerfSummaryByAgent(agentId: number) {
-  const result = await query(
-    `SELECT * FROM bkt_perf_summary WHERE agent_id = $1 ORDER BY bkt`, [agentId]
-  );
-  return result.rows;
+// ── GET preview routes (return HTML for WebView) ──────────────────────────
+app.get("/api/admin/preview-pre-intimation", requireAdmin, (req, res) => {
+  try {
+    const p = buildIntimationParams({
+      customer_name:   req.query.customer_name   || "___________",
+      address:         req.query.address         || "___________",
+      app_id:          req.query.app_id          || "___________",
+      loan_no:         req.query.loan_no         || "___________",
+      registration_no: req.query.registration_no || "___________",
+      asset_make:      req.query.asset_make      || "___________",
+      engine_no:       req.query.engine_no       || "___________",
+      chassis_no:      req.query.chassis_no      || "___________",
+      date:            req.query.date            || new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "2-digit", year: "numeric" }),
+      police_station:  req.query.police_station  || "________________________________",
+      tq:              req.query.tq              || "_____________",
+    });
+    res.setHeader("Content-Type", "text/html");
+    res.send(buildPreIntimationHtml(p));
+  } catch (err: any) { res.status(500).send(err.message); }
+});
+
+app.get("/api/admin/preview-post-intimation", requireAdmin, (req, res) => {
+  try {
+    const p = buildIntimationParams({
+      customer_name:        req.query.customer_name        || "___________",
+      address:              req.query.address              || "___________",
+      app_id:               req.query.app_id              || "___________",
+      loan_no:              req.query.loan_no             || "___________",
+      registration_no:      req.query.registration_no     || "___________",
+      asset_make:           req.query.asset_make          || "___________",
+      engine_no:            req.query.engine_no           || "___________",
+      chassis_no:           req.query.chassis_no          || "___________",
+      date:                 req.query.date                || new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "2-digit", year: "numeric" }),
+      police_station:       req.query.police_station       || "________________________________",
+      tq:                   req.query.tq                  || "_____________",
+      repossession_date:    req.query.repossession_date   || "",
+      repossession_address: req.query.repossession_address|| "",
+      reference_no:         req.query.reference_no        || "",
+    }, true);
+    res.setHeader("Content-Type", "text/html");
+    res.send(buildPostIntimationHtml(p));
+  } catch (err: any) { res.status(500).send(err.message); }
+});
+
+app.post("/api/admin/generate-pre-intimation", requireAdmin, async (req, res) => {
+  try {
+    const p           = buildIntimationParams(req.body);
+    const logoPath    = path.join(process.cwd(), "assets/images/hero-logo.png");
+    const PDFDocument = require("pdfkit");
+    const doc         = new PDFDocument({ size: "A4", margins: { top: 50, bottom: 50, left: 60, right: 60 }, info: { Title: "Pre Repossession Intimation" } });
+    const chunks: Buffer[] = [];
+    doc.on("data", (c: Buffer) => chunks.push(c));
+    doc.on("end", () => {
+      const filename = `Pre_Intimation_${p.customer_name.replace(/\s+/g, "_")}.pdf`;
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+      res.end(Buffer.concat(chunks));
+    });
+    buildPreIntimationPdf(doc, p, logoPath);
+    doc.end();
+  } catch (err: any) {
+    console.error("[pre-intimation PDF]", err);
+    res.status(500).json({ message: err.message || "Failed to generate PDF" });
+  }
+});
+
+app.post("/api/admin/generate-pre-intimation-docx", requireAdmin, async (req, res) => {
+  try {
+    const p        = buildIntimationParams(req.body);
+    const logoPath = path.join(process.cwd(), "assets/images/hero-logo.png");
+    const buf      = await buildIntimationDocx(p, false, logoPath);
+    const filename = `Pre_Intimation_${p.customer_name.replace(/\s+/g, "_")}.docx`;
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.end(buf);
+  } catch (err: any) {
+    console.error("[pre-intimation DOCX]", err);
+    res.status(500).json({ message: err.message || "Failed to generate DOCX" });
+  }
+});
+
+app.post("/api/admin/generate-post-intimation", requireAdmin, async (req, res) => {
+  try {
+    const p           = buildIntimationParams(req.body, true);
+    const logoPath    = path.join(process.cwd(), "assets/images/hero-logo.png");
+    const PDFDocument = require("pdfkit");
+    const doc         = new PDFDocument({ size: "A4", margins: { top: 50, bottom: 50, left: 60, right: 60 }, info: { Title: "Post Repossession Intimation" } });
+    const chunks: Buffer[] = [];
+    doc.on("data", (c: Buffer) => chunks.push(c));
+    doc.on("end", () => {
+      const filename = `Post_Intimation_${p.customer_name.replace(/\s+/g, "_")}.pdf`;
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+      res.end(Buffer.concat(chunks));
+    });
+    buildPostIntimationPdf(doc, p, logoPath);
+    doc.end();
+  } catch (err: any) {
+    console.error("[post-intimation PDF]", err);
+    res.status(500).json({ message: err.message || "Failed to generate PDF" });
+  }
+});
+
+app.post("/api/admin/generate-post-intimation-docx", requireAdmin, async (req, res) => {
+  try {
+    const p        = buildIntimationParams(req.body, true);
+    const logoPath = path.join(process.cwd(), "assets/images/hero-logo.png");
+    const buf      = await buildIntimationDocx(p, true, logoPath);
+    const filename = `Post_Intimation_${p.customer_name.replace(/\s+/g, "_")}.docx`;
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.end(buf);
+  } catch (err: any) {
+    console.error("[post-intimation DOCX]", err);
+    res.status(500).json({ message: err.message || "Failed to generate DOCX" });
+  }
+});
+
+  app.post("/api/cases/:id/extra-numbers", requireAuth, async (req, res) => {
+  try {
+    const { number, table } = req.body;
+    const caseId = Number(req.params.id);
+    const tbl = table === "bkt" ? "bkt_cases" : "loan_cases";
+    if (!number?.trim()) return res.status(400).json({ message: "number required" });
+    await storage.query(
+      `UPDATE ${tbl} SET extra_numbers = array_append(COALESCE(extra_numbers, '{}'), $1) WHERE id = $2`,
+      [number.trim(), caseId]
+    );
+    res.json({ success: true });
+  } catch (e: any) { res.status(500).json({ message: e.message }); }
+});
+
+app.delete("/api/cases/:id/extra-numbers", requireAuth, async (req, res) => {
+  try {
+    const { number, table } = req.body;
+    const caseId = Number(req.params.id);
+    const tbl = table === "bkt" ? "bkt_cases" : "loan_cases";
+    await storage.query(
+      `UPDATE ${tbl} SET extra_numbers = array_remove(extra_numbers, $1) WHERE id = $2`,
+      [number, caseId]
+    );
+    res.json({ success: true });
+  } catch (e: any) { res.status(500).json({ message: e.message }); }
+});
+
+app.delete("/api/admin/cases/:id/extra-numbers", requireAdmin, async (req, res) => {
+  try {
+    const { number, table } = req.body;
+    const caseId = Number(req.params.id);
+    const tbl = table === "bkt" ? "bkt_cases" : "loan_cases";
+    await storage.query(
+      `UPDATE ${tbl} SET extra_numbers = array_remove(extra_numbers, $1) WHERE id = $2`,
+      [number, caseId]
+    );
+    res.json({ success: true });
+  } catch (e: any) { res.status(500).json({ message: e.message }); }
+});
+
+  // ── DB migrations for receipt requests ────────────────────────────────────────
+try {
+  await storage.query(`ALTER TABLE fos_agents ADD COLUMN IF NOT EXISTS can_request_receipt BOOLEAN DEFAULT FALSE`);
+  console.log("[DB] fos_agents.can_request_receipt column ready ✅");
+} catch (e: any) { console.error("[DB] can_request_receipt migration:", e.message); }
+
+try {
+  await storage.query(`CREATE TABLE IF NOT EXISTS receipt_requests (
+    id SERIAL PRIMARY KEY,
+    agent_id INTEGER REFERENCES fos_agents(id),
+    case_id INTEGER,
+    loan_no TEXT,
+    customer_name TEXT,
+    table_type TEXT DEFAULT 'loan',
+    status TEXT DEFAULT 'pending',
+    notes TEXT,
+    emi_amount NUMERIC(12,2),
+    cbc NUMERIC(12,2),
+    lpp NUMERIC(12,2),
+    requested_at TIMESTAMP DEFAULT NOW(),
+    resolved_at TIMESTAMP
+  )`);
+  // Migration for existing tables
+  await storage.query(`ALTER TABLE receipt_requests ADD COLUMN IF NOT EXISTS emi_amount NUMERIC(12,2)`);
+  await storage.query(`ALTER TABLE receipt_requests ADD COLUMN IF NOT EXISTS cbc NUMERIC(12,2)`);
+  await storage.query(`ALTER TABLE receipt_requests ADD COLUMN IF NOT EXISTS lpp NUMERIC(12,2)`);
+  console.log("[DB] receipt_requests table ready ✅");
+} catch (e: any) { console.error("[DB] receipt_requests error:", e.message); }
+
+app.get("/api/receipt-permission", requireAuth, async (req, res) => {
+  try {
+    const result = await storage.query(
+      `SELECT can_request_receipt FROM fos_agents WHERE id = $1`,
+      [req.session.agentId!]
+    );
+    res.json({ canRequestReceipt: result.rows[0]?.can_request_receipt === true });
+  } catch (e: any) { res.status(500).json({ message: e.message }); }
+});
+
+// ── FOS submits a receipt request ─────────────────────────────────────────────
+app.post("/api/cases/:id/request-receipt", requireAuth, async (req, res) => {
+  try {
+    const agentId = req.session.agentId!;
+    const caseId  = Number(req.params.id);
+    const { loan_no, customer_name, table_type, notes, emi_amount, cbc, lpp } = req.body;
+
+    // Verify this agent has the receipt permission
+    const permRow = await storage.query(
+      `SELECT can_request_receipt FROM fos_agents WHERE id = $1`, [agentId]
+    );
+    if (!permRow.rows[0]?.can_request_receipt) {
+      return res.status(403).json({ message: "Receipt request not permitted for your account" });
+    }
+
+   // With this:
+const existing = await storage.query(
+  `SELECT id FROM receipt_requests WHERE agent_id=$1 AND case_id=$2 AND status='pending' AND requested_at > NOW() - INTERVAL '24 hours'`,
+  [agentId, caseId]
+);
+if (existing.rows.length > 0) {
+  return res.status(409).json({ message: "Already requested. Admin will process it shortly." });
 }
 
-export async function insertCallLog(data: {
-  caseId: number; caseType: "loan" | "bkt"; agentId: number;
-  loanNo: string | null; customerName: string | null;
-  outcome: string | null; comments: string | null; ptpDate: string | null; status: string | null;
-}) {
-  await query(
-    `INSERT INTO call_logs (case_id, case_type, agent_id, loan_no, customer_name, outcome, comments, ptp_date, status)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-    [data.caseId, data.caseType, data.agentId, data.loanNo, data.customerName,
-     data.outcome, data.comments, data.ptpDate || null, data.status]
-  );
+   const result = await storage.query(
+      `INSERT INTO receipt_requests (agent_id, case_id, loan_no, customer_name, table_type, notes, emi_amount, cbc, lpp)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
+      [agentId, caseId, loan_no || null, customer_name || null, table_type || "loan", notes || null,
+       emi_amount || null, cbc || null, lpp || null]
+    );
+
+    // Notify all admins via push
+    try {
+      const agentRow  = await storage.query(`SELECT name FROM fos_agents WHERE id=$1`, [agentId]);
+      const adminRows = await storage.query(
+        `SELECT push_token FROM fos_agents WHERE role='admin' AND push_token IS NOT NULL AND push_token<>''`
+      );
+      const agentName = agentRow.rows[0]?.name || "FOS";
+      for (const admin of adminRows.rows) {
+        await sendPush(
+          admin.push_token,
+          "🧾 Receipt Request",
+          `${agentName} requested a receipt for ${customer_name || loan_no || "a case"}.`,
+          { screen: "receipt-requests", type: "receipt_request", caseId }
+        );
+      }
+    } catch (pushErr: any) { console.error("[receipt-request] push error:", pushErr.message); }
+
+    res.json({ success: true, request: result.rows[0] });
+  } catch (e: any) { res.status(500).json({ message: e.message }); }
+});
+
+// ── Admin: get all receipt requests ──────────────────────────────────────────
+app.get("/api/admin/receipt-requests", requireAdmin, async (req, res) => {
+  try {
+    const result = await storage.query(`
+      SELECT rr.*, fa.name AS agent_name, fa.push_token AS agent_push_token
+      FROM receipt_requests rr
+      LEFT JOIN fos_agents fa ON fa.id = rr.agent_id
+      ORDER BY rr.requested_at DESC
+    `);
+    res.json({ requests: result.rows });
+  } catch (e: any) { res.status(500).json({ message: e.message }); }
+});
+
+// ── Admin: resolve (approve/reject) a receipt request ────────────────────────
+app.put("/api/admin/receipt-requests/:id/resolve", requireAdmin, async (req, res) => {
+  try {
+    const id     = Number(req.params.id);
+    const { status, notes } = req.body; // status: 'approved' | 'rejected'
+
+    const reqRow = await storage.query(
+      `UPDATE receipt_requests SET status=$1, notes=COALESCE($2, notes), resolved_at=NOW()
+       WHERE id=$3 RETURNING *`,
+      [status, notes || null, id]
+    );
+    const request = reqRow.rows[0];
+    if (!request) return res.status(404).json({ message: "Request not found" });
+
+    // Notify the FOS agent
+    if (request.agent_push_token || request.agent_id) {
+      const agentRow = await storage.query(
+        `SELECT push_token, name FROM fos_agents WHERE id=$1`, [request.agent_id]
+      );
+      const agent = agentRow.rows[0];
+      if (agent?.push_token) {
+        await sendPush(
+          agent.push_token,
+          status === "approved" ? "✅ Receipt Approved" : "❌ Receipt Request Rejected",
+          status === "approved"
+            ? `Your receipt request for ${request.customer_name || request.loan_no} was approved.`
+            : `Your receipt request for ${request.customer_name || request.loan_no} was declined.`,
+          { screen: "receipt-requests", type: "receipt_resolved", status }
+        );
+      }
+    }
+
+    res.json({ success: true });
+  } catch (e: any) { res.status(500).json({ message: e.message }); }
+});
+
+// ── Admin: toggle receipt permission for a FOS agent ─────────────────────────
+app.put("/api/admin/agents/:agentId/receipt-permission", requireAdmin, async (req, res) => {
+  try {
+    const agentId = Number(req.params.agentId);
+    const { enabled } = req.body;
+    await storage.query(
+      `UPDATE fos_agents SET can_request_receipt=$1 WHERE id=$2`,
+      [!!enabled, agentId]
+    );
+
+    // Notify the agent
+    const agentRow = await storage.query(
+      `SELECT name, push_token FROM fos_agents WHERE id=$1`, [agentId]
+    );
+    const agent = agentRow.rows[0];
+    if (agent?.push_token && enabled) {
+      await sendPush(
+        agent.push_token,
+        "🧾 Receipt Feature Enabled",
+        "Admin enabled receipt request for your account. You can now request receipts.",
+        { screen: "allocation", type: "receipt_permission" }
+      );
+    }
+
+    res.json({ success: true });
+  } catch (e: any) { res.status(500).json({ message: e.message }); }
+});
+
+// ── FOS: get own receipt requests (for status tracking) ──────────────────────
+app.get("/api/receipt-requests", requireAuth, async (req, res) => {
+  try {
+    const result = await storage.query(
+      `SELECT * FROM receipt_requests WHERE agent_id=$1 ORDER BY requested_at DESC LIMIT 50`,
+      [req.session.agentId!]
+    );
+    res.json({ requests: result.rows });
+  } catch (e: any) { res.status(500).json({ message: e.message }); }
+});
+
+  // ── Auto-create field_visits table ──────────────────────────────────────────
+  try {
+    await storage.query(`
+      CREATE TABLE IF NOT EXISTS field_visits (
+        id          SERIAL PRIMARY KEY,
+        case_id     INTEGER NOT NULL,
+        case_type   TEXT    NOT NULL DEFAULT 'loan',
+        agent_id    INTEGER REFERENCES fos_agents(id) ON DELETE SET NULL,
+        lat         NUMERIC(11, 7) NOT NULL,
+        lng         NUMERIC(11, 7) NOT NULL,
+        accuracy    NUMERIC(8, 2),
+        visited_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    console.log("[DB] field_visits table ready ✅");
+  } catch (e) {
+    console.error("[field_visits] Table creation error:", e);
+  }
+
+  // ── Migrate field_visits: add case_type column if missing ───────────────────
+  try {
+    await storage.query(`
+      ALTER TABLE field_visits
+        ADD COLUMN IF NOT EXISTS case_type TEXT NOT NULL DEFAULT 'loan'
+    `);
+    console.log("[DB] field_visits.case_type column ensured ✅");
+  } catch (e) {
+    console.error("[field_visits] Migration error (case_type):", e);
+  }
+
+  try {
+  await storage.query(`ALTER TABLE field_visits ADD COLUMN IF NOT EXISTS photo_url TEXT`);
+  console.log("[DB] field_visits.photo_url column ready ✅");
+} catch (e: any) { console.error("[DB] field_visits.photo_url migration:", e.message); }
+  try {
+    await storage.query(`ALTER TABLE field_visits ADD COLUMN IF NOT EXISTS visit_outcome TEXT`);
+    await storage.query(`ALTER TABLE field_visits ADD COLUMN IF NOT EXISTS visit_remarks TEXT`);
+    console.log("[DB] field_visits.visit_outcome/visit_remarks columns ready ✅");
+  } catch (e: any) { console.error("[DB] field_visits outcome/remarks migration:", e.message); }
+  try {
+    await storage.query(`ALTER TABLE field_visits ADD COLUMN IF NOT EXISTS lat NUMERIC(11, 7)`);
+    await storage.query(`ALTER TABLE field_visits ADD COLUMN IF NOT EXISTS lng NUMERIC(11, 7)`);
+    await storage.query(`ALTER TABLE field_visits ADD COLUMN IF NOT EXISTS accuracy NUMERIC(8, 2)`);
+    console.log("[DB] field_visits lat/lng/accuracy columns ensured ✅");
+  } catch (e) {
+    console.error("[field_visits] Migration error (lat/lng):", e);
+  }
+
+  try {
+    const dropNotNulls = [
+      `ALTER TABLE field_visits ALTER COLUMN outcome DROP NOT NULL`,
+      `ALTER TABLE field_visits ALTER COLUMN latitude DROP NOT NULL`,
+      `ALTER TABLE field_visits ALTER COLUMN longitude DROP NOT NULL`,
+      `ALTER TABLE field_visits ALTER COLUMN customer_name DROP NOT NULL`,
+      `ALTER TABLE field_visits ALTER COLUMN loan_no DROP NOT NULL`,
+      `ALTER TABLE field_visits ALTER COLUMN remarks DROP NOT NULL`,
+      `ALTER TABLE field_visits ALTER COLUMN status DROP NOT NULL`,
+    ];
+    for (const sql of dropNotNulls) {
+      try { await storage.query(sql); } catch {}
+    }
+    console.log("[DB] field_visits all NOT NULL constraints dropped ✅");
+  } catch (e: any) { console.error("[DB] field_visits constraint migration:", e.message); }
+  
+
+// ── POST /api/cases/:id/visit — agent records a geo check-in ────────────────
+
+ 
+app.post(
+  "/api/cases/:id/visit",
+  requireAuth,
+  upload.single("photo"),   // memory storage — buffer stored as base64 in DB, survives Railway restarts
+  async (req: Request, res: Response) => {
+    try {
+      const caseId  = Number(req.params.id);
+      const agentId = req.session.agentId!;
+
+      const lat       = Number(req.body.lat);
+      const lng       = Number(req.body.lng);
+      const accuracy  = req.body.accuracy ? Number(req.body.accuracy) : null;
+      const case_type = req.body.case_type || "loan";
+
+      if (!lat || !lng) {
+        return res.status(400).json({ message: "lat and lng are required" });
+      }
+
+      // Store photo as base64 data URL directly in PostgreSQL so it is never
+      // lost when the Railway container restarts (ephemeral filesystem).
+      let photoUrl: string | null = null;
+      if (req.file) {
+        const mime = req.file.mimetype || "image/jpeg";
+        photoUrl = `data:${mime};base64,${req.file.buffer.toString("base64")}`;
+      }
+
+      const visit_outcome = req.body.visit_outcome ? String(req.body.visit_outcome) : null;
+      const visit_remarks = req.body.visit_remarks ? String(req.body.visit_remarks) : null;
+
+      const result = await storage.query(
+        `INSERT INTO field_visits (case_id, case_type, agent_id, lat, lng, accuracy, photo_url, visit_outcome, visit_remarks)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+         RETURNING *`,
+        [caseId, case_type, agentId, lat, lng, accuracy, photoUrl, visit_outcome, visit_remarks]
+      );
+
+      res.json({ visit: result.rows[0] });
+    } catch (e: any) {
+      console.error("[POST /api/cases/:id/visit]", e);
+      res.status(500).json({ message: e.message });
+    }
+  }
+);
+// ── GET /api/cases/:id/visits — agent fetches their own visit history ─────────
+app.get("/api/cases/:id/visits", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const caseId  = Number(req.params.id);
+    const agentId = req.session.agentId!;
+    const result  = await storage.query(
+      `SELECT id, case_id, case_type, agent_id, lat, lng, accuracy, visited_at,
+              (photo_url IS NOT NULL AND photo_url <> '') AS has_photo
+       FROM field_visits
+       WHERE case_id = $1 AND agent_id = $2
+       ORDER BY visited_at DESC
+       LIMIT 50`,
+      [caseId, agentId]
+    );
+    res.json({ visits: result.rows });
+  } catch (e: any) {
+    console.error("[GET /api/cases/:id/visits]", e);
+    res.status(500).json({ message: e.message });
+  }
+});
+
+// ── GET /api/field-visits/:id/photo — serve visit photo as image ────────────
+// Accepts auth via: session cookie, Authorization header, OR ?token= query param
+// (React Native <Image> cannot set headers, so query param is needed)
+app.get("/api/field-visits/:id/photo", async (req: Request, res: Response) => {
+  try {
+    // Auth check: session, Bearer header, or ?token= query param
+    let authed = false;
+    if (req.session.agentId) {
+      authed = true;
+    } else {
+      const authHeader = req.headers.authorization;
+      const queryToken = req.query.token as string | undefined;
+      const rawToken = authHeader?.startsWith("Bearer ")
+        ? authHeader.slice(7)
+        : queryToken;
+      if (rawToken) {
+        const payload = verifyToken(rawToken);
+        if (payload) authed = true;
+      }
+    }
+    if (!authed) return res.status(401).json({ message: "Unauthorized" });
+
+    const visitId = Number(req.params.id);
+    const result = await storage.query(
+      `SELECT photo_url FROM field_visits WHERE id = $1`,
+      [visitId]
+    );
+    const row = result.rows[0];
+    if (!row || !row.photo_url) {
+      return res.status(404).json({ message: "No photo found" });
+    }
+    const dataUrl: string = row.photo_url;
+    const match = dataUrl.match(/^data:([^;]+);base64,(.+)$/s);
+    if (!match) {
+      return res.status(500).json({ message: "Invalid photo format" });
+    }
+    const mimeType = match[1];
+    const buffer = Buffer.from(match[2], "base64");
+    res.setHeader("Content-Type", mimeType);
+    res.setHeader("Cache-Control", "public, max-age=86400");
+    res.send(buffer);
+  } catch (e: any) {
+    console.error("[GET /api/field-visits/:id/photo]", e);
+    res.status(500).json({ message: e.message });
+  }
+});
+
+// ── GET /api/admin/field-visits — admin sees all visits with filters ─────────
+// ── GET /api/admin/debug-photos — check photo_url status for recent visits ──
+app.get("/api/admin/debug-photos", requireAdmin, async (req: Request, res: Response) => {
+  try {
+    const result = await storage.query(`
+      SELECT id, agent_id, visited_at,
+        CASE WHEN photo_url IS NULL THEN 'NULL'
+             WHEN photo_url = '' THEN 'EMPTY'
+             ELSE 'HAS_PHOTO (' || LENGTH(photo_url)::text || ' chars)'
+        END AS photo_status
+      FROM field_visits
+      ORDER BY visited_at DESC
+      LIMIT 20
+    `);
+    res.json({ visits: result.rows });
+  } catch (e: any) {
+    res.status(500).json({ message: e.message });
+  }
+});
+app.get("/api/admin/field-visits", requireAdmin, async (req: Request, res: Response) => {
+  try {
+    const { agent_id, case_id, date } = req.query;
+
+    let sql = `
+      SELECT
+        fv.id, fv.case_id, fv.case_type, fv.agent_id, fv.lat, fv.lng,
+        fv.accuracy, fv.visited_at,
+        fv.visit_outcome,
+        fv.visit_remarks,
+        fv.photo_url,
+        (fv.photo_url IS NOT NULL AND fv.photo_url <> '') AS has_photo,
+        fa.name AS agent_name,
+        CASE
+          WHEN LOWER(TRIM(fv.case_type)) = 'bkt'
+          THEN bc.customer_name
+          ELSE lc.customer_name
+        END AS customer_name,
+        CASE
+          WHEN LOWER(TRIM(fv.case_type)) = 'bkt'
+          THEN bc.loan_no
+          ELSE lc.loan_no
+        END AS loan_no,
+        CASE
+          WHEN LOWER(TRIM(fv.case_type)) = 'bkt'
+          THEN bc.pos::numeric
+          ELSE lc.pos::numeric
+        END AS pos,
+        CASE
+          WHEN LOWER(TRIM(fv.case_type)) = 'bkt'
+          THEN bc.latest_feedback
+          ELSE lc.latest_feedback
+        END AS latest_feedback,
+        CASE
+          WHEN LOWER(TRIM(fv.case_type)) = 'bkt'
+          THEN bc.status
+          ELSE lc.status
+        END AS case_status
+      FROM field_visits fv
+      LEFT JOIN fos_agents fa  ON fa.id  = fv.agent_id::integer
+      LEFT JOIN loan_cases lc  ON lc.id  = fv.case_id::integer
+      LEFT JOIN bkt_cases  bc  ON bc.id  = fv.case_id::integer
+      WHERE 1=1
+    `;
+    const params: any[] = [];
+
+    if (agent_id) {
+      params.push(Number(agent_id));
+      sql += ` AND fv.agent_id::integer = $${params.length}`;
+    }
+    if (case_id) {
+      params.push(Number(case_id));
+      sql += ` AND fv.case_id::integer = $${params.length}`;
+    }
+    if (date) {
+      params.push(String(date));
+      sql += ` AND DATE(fv.visited_at AT TIME ZONE 'Asia/Kolkata') = $${params.length}::date`;
+    }
+    if (req.query.company) {
+  params.push(String(req.query.company));
+  sql += `
+    AND (
+      (LOWER(TRIM(fv.case_type)) = 'bkt' AND bc.company_name = $${params.length})
+      OR
+      (LOWER(TRIM(fv.case_type)) != 'bkt' AND lc.company_name = $${params.length})
+    )
+  `;
 }
 
-export async function getCallLogsByCase(caseId: number, caseType: string) {
-  const result = await query(
-    `SELECT cl.*, fa.name AS agent_name FROM call_logs cl
-     LEFT JOIN fos_agents fa ON fa.id = cl.agent_id
-     WHERE cl.case_id = $1 AND cl.case_type = $2
-     ORDER BY cl.logged_at DESC`,
-    [caseId, caseType]
-  );
-  return result.rows;
+    sql += " ORDER BY fv.visited_at DESC LIMIT 200";
+
+    const result = await storage.query(sql, params);
+
+    // Map lat/lng column names to latitude/longitude expected by the frontend
+    const visits = result.rows.map((r: any) => ({
+      ...r,
+      latitude:  r.lat  != null ? parseFloat(r.lat)  : null,
+      longitude: r.lng  != null ? parseFloat(r.lng)  : null,
+    }));
+
+    res.json({ visits });
+  } catch (e: any) {
+    console.error("[GET /api/admin/field-visits]", e);
+    res.status(500).json({ message: e.message });
+  }
+});
+ 
+  // ── Case Reassign ────────────────────────────────────────────────────────────
+
+  // ── Auto-create case_reassign_log table ─────────────────────────────────────
+  try {
+    await storage.query(`
+      CREATE TABLE IF NOT EXISTS case_reassign_log (
+        id              SERIAL PRIMARY KEY,
+        case_id         INTEGER NOT NULL,
+        case_type       TEXT    NOT NULL DEFAULT 'loan',
+        from_agent_id   INTEGER REFERENCES fos_agents(id) ON DELETE SET NULL,
+        to_agent_id     INTEGER NOT NULL REFERENCES fos_agents(id) ON DELETE CASCADE,
+        reason          TEXT,
+        reassigned_by   INTEGER NOT NULL REFERENCES fos_agents(id),
+        reassigned_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    console.log("[DB] case_reassign_log table ready ✅");
+  } catch (e) {
+    console.error("[case_reassign_log] Table creation error:", e);
+  }
+
+// ── Helper: recalculate bkt_perf_summary for one agent+bkt from live case data
+async function recalcBktPerfSummary(agentId: number, bktNorm: string): Promise<void> {
+  // Aggregate POS from both loan_cases and bkt_cases for this agent+bkt
+  const agg = await storage.query(`
+    SELECT
+      COALESCE(SUM(pos::numeric) FILTER (WHERE status = 'Paid'),  0) AS pos_paid,
+      COALESCE(SUM(pos::numeric) FILTER (WHERE status <> 'Paid'), 0) AS pos_unpaid,
+      COALESCE(SUM(pos::numeric), 0)                                  AS pos_grand_total,
+      COUNT(*) FILTER (WHERE status = 'Paid')::int                    AS count_paid,
+      COUNT(*) FILTER (WHERE status <> 'Paid')::int                   AS count_unpaid,
+      COUNT(*)::int                                                    AS count_total,
+      COALESCE(SUM(pos::numeric) FILTER (WHERE rollback_yn = true), 0)                  AS rollback_paid,
+      COALESCE(SUM(pos::numeric) FILTER (WHERE rollback_yn IS DISTINCT FROM true), 0)   AS rollback_unpaid,
+      COALESCE(SUM(pos::numeric), 0)                                                     AS rollback_grand_total
+    FROM (
+      SELECT pos, status, rollback_yn
+      FROM loan_cases
+      WHERE agent_id = $1 AND 'bkt' || bkt::text = $2
+      UNION ALL
+      SELECT pos, status, rollback_yn
+      FROM bkt_cases
+      WHERE agent_id = $1 AND LOWER(REPLACE(case_category, ' ', '')) = $2
+    ) combined
+  `, [agentId, bktNorm]);
+
+  const r = agg.rows[0];
+  if (!r) return;
+
+  const posGrand      = parseFloat(r.pos_grand_total)      || 0;
+  const rbGrand       = parseFloat(r.rollback_grand_total) || 0;
+  const posPerc       = posGrand > 0 ? Math.round((parseFloat(r.pos_paid) / posGrand) * 10000) / 100 : 0;
+  const rbPerc        = rbGrand  > 0 ? Math.round((parseFloat(r.rollback_paid) / rbGrand) * 10000) / 100 : 0;
+
+  // Fetch agent name
+  const agentRow = await storage.query(`SELECT name FROM fos_agents WHERE id = $1`, [agentId]);
+  const fosName  = agentRow.rows[0]?.name ?? "";
+
+  // Upsert — update existing row if (fos_name, bkt) already exists
+  await storage.query(`
+    INSERT INTO bkt_perf_summary
+      (fos_name, agent_id, bkt,
+       pos_paid, pos_unpaid, pos_grand_total, pos_percentage,
+       count_paid, count_unpaid, count_total,
+       rollback_paid, rollback_unpaid, rollback_grand_total, rollback_percentage,
+       uploaded_at)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14, NOW())
+    ON CONFLICT (fos_name, bkt) DO UPDATE SET
+      agent_id              = EXCLUDED.agent_id,
+      pos_paid              = EXCLUDED.pos_paid,
+      pos_unpaid            = EXCLUDED.pos_unpaid,
+      pos_grand_total       = EXCLUDED.pos_grand_total,
+      pos_percentage        = EXCLUDED.pos_percentage,
+      count_paid            = EXCLUDED.count_paid,
+      count_unpaid          = EXCLUDED.count_unpaid,
+      count_total           = EXCLUDED.count_total,
+      rollback_paid         = EXCLUDED.rollback_paid,
+      rollback_unpaid       = EXCLUDED.rollback_unpaid,
+      rollback_grand_total  = EXCLUDED.rollback_grand_total,
+      rollback_percentage   = EXCLUDED.rollback_percentage,
+      uploaded_at           = NOW()
+  `, [
+    fosName, agentId, bktNorm,
+    r.pos_paid, r.pos_unpaid, r.pos_grand_total, posPerc,
+    r.count_paid, r.count_unpaid, r.count_total,
+    r.rollback_paid, r.rollback_unpaid, r.rollback_grand_total, rbPerc,
+  ]);
 }
 
-export async function getCallLogsByAgent(agentId: number, limit = 200) {
-  const result = await query(
-    `SELECT cl.*, fa.name AS agent_name FROM call_logs cl
-     LEFT JOIN fos_agents fa ON fa.id = cl.agent_id
-     WHERE cl.agent_id = $1 ORDER BY cl.logged_at DESC LIMIT $2`,
-    [agentId, limit]
-  );
-  return result.rows;
-}
+// ── PATCH /api/admin/cases/:id/reassign ─────────────────────────────────────
+app.patch("/api/admin/cases/:id/reassign", requireAdmin, async (req: Request, res: Response) => {
+  try {
+    const caseId        = Number(req.params.id);
+    const adminId       = req.session.agentId!;
+    const { to_agent_id, case_type = "loan", reason } = req.body as {
+      to_agent_id: number; case_type?: string; reason?: string;
+    };
 
-export async function getAllCallLogs(limit = 500) {
-  const result = await query(
-    `SELECT cl.*, fa.name AS agent_name FROM call_logs cl
-     LEFT JOIN fos_agents fa ON fa.id = cl.agent_id
-     ORDER BY cl.logged_at DESC LIMIT $1`,
-    [limit]
-  );
-  return result.rows;
-}
+    if (!to_agent_id) {
+      return res.status(400).json({ message: "to_agent_id is required" });
+    }
 
-// ── Activity Logs ─────────────────────────────────────────────────────────────
+    // 1. Fetch current agent + BKT for the log and POS recalc
+    const table = case_type === "bkt" ? "bkt_cases" : "loan_cases";
+    const bktCol = case_type === "bkt" ? "LOWER(REPLACE(case_category,' ',''))" : "'bkt'||bkt::text";
+    const current = await storage.query(
+      `SELECT agent_id, ${bktCol} AS bkt_norm FROM ${table} WHERE id = $1`,
+      [caseId]
+    );
+    if (!current.rows.length) {
+      return res.status(404).json({ message: "Case not found" });
+    }
+    const fromAgentId: number | null = current.rows[0].agent_id ?? null;
+    const bktNorm: string | null     = current.rows[0].bkt_norm ?? null;
 
-export async function insertActivityLog(data: {
-  agentId: number | null;
-  agentName: string | null;
-  eventType: "login" | "logout" | "app_open";
-  detail?: string | null;
-  ip?: string | null;
-}) {
-  await query(
-    `INSERT INTO activity_logs (agent_id, agent_name, event_type, detail, ip)
-     VALUES ($1, $2, $3, $4, $5)`,
-    [data.agentId, data.agentName, data.eventType, data.detail ?? null, data.ip ?? null]
-  );
-}
+    // 2. Update agent_id on the case
+    await storage.query(
+      `UPDATE ${table} SET agent_id = $1 WHERE id = $2`,
+      [to_agent_id, caseId]
+    );
 
-export async function getActivityLogs(limit = 500) {
-  const result = await query(
-    `SELECT al.*, fa.name AS agent_name_live
-     FROM activity_logs al
-     LEFT JOIN fos_agents fa ON fa.id = al.agent_id
-     ORDER BY al.logged_at DESC LIMIT $1`,
-    [limit]
-  );
-  return result.rows;
+    // 3. Write audit log
+    await storage.query(
+      `INSERT INTO case_reassign_log
+         (case_id, case_type, from_agent_id, to_agent_id, reason, reassigned_by)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [caseId, case_type, fromAgentId, to_agent_id, reason ?? null, adminId]
+    );
+
+    // 4. Recalculate bkt_perf_summary for both agents so POS updates immediately
+    if (bktNorm) {
+      const agentsToRefresh = [...new Set([fromAgentId, to_agent_id].filter(Boolean))] as number[];
+      await Promise.all(agentsToRefresh.map((aid) => recalcBktPerfSummary(aid, bktNorm)));
+    }
+
+    res.json({ success: true, case_id: caseId, to_agent_id });
+  } catch (e: any) {
+    console.error("[PATCH /api/admin/cases/:id/reassign]", e);
+    res.status(500).json({ message: e.message });
+  }
+});
+ 
+// ── GET /api/admin/cases/:id/reassign-log — audit trail for one case ─────────
+app.get("/api/admin/cases/:id/reassign-log", requireAdmin, async (req: Request, res: Response) => {
+  try {
+    const caseId = Number(req.params.id);
+    const result = await storage.query(
+      `SELECT crl.*,
+              f.name AS from_agent_name,
+              t.name AS to_agent_name,
+              r.name AS reassigned_by_name
+       FROM   case_reassign_log crl
+       LEFT JOIN fos_agents f ON f.id = crl.from_agent_id
+       LEFT JOIN fos_agents t ON t.id = crl.to_agent_id
+       LEFT JOIN fos_agents r ON r.id = crl.reassigned_by
+       WHERE  crl.case_id = $1
+       ORDER  BY crl.reassigned_at DESC`,
+      [caseId]
+    );
+    res.json({ log: result.rows });
+  } catch (e: any) {
+    console.error("[GET /api/admin/cases/:id/reassign-log]", e);
+    res.status(500).json({ message: e.message });
+  }
+});
+  
+// ── Daily Report ─────────────────────────────────────────────────────────────
+app.get("/api/admin/daily-report", requireAdmin, async (req: Request, res: Response) => {
+  try {
+    const date: string = typeof req.query.date === "string" && req.query.date
+      ? req.query.date
+      : new Date().toISOString().split("T")[0];
+
+    // 1. All FOS agents
+    const agentsResult = await storage.query(
+      `SELECT id, name FROM fos_agents WHERE role = 'fos' ORDER BY name`
+    );
+    const agents: { id: number; name: string }[] = agentsResult.rows;
+
+    // 2. Attendance for the day
+    const attResult = await storage.query(
+      `SELECT agent_id, check_in, check_out FROM attendance WHERE date = $1`,
+      [date]
+    );
+    const attMap = new Map<number, { checkIn: string | null; checkOut: string | null }>();
+    for (const row of attResult.rows) {
+      attMap.set(Number(row.agent_id), { checkIn: row.check_in, checkOut: row.check_out });
+    }
+
+    // 3. Field visits for the day
+    const fvResult = await storage.query(
+      `SELECT agent_id, COUNT(*)::int AS visit_count
+       FROM field_visits
+       WHERE DATE(visited_at AT TIME ZONE 'Asia/Kolkata') = $1
+       GROUP BY agent_id`,
+      [date]
+    );
+    const fvMap = new Map<number, number>();
+    for (const row of fvResult.rows) {
+      fvMap.set(Number(row.agent_id), Number(row.visit_count));
+    }
+
+    // 4. PTP set for this date (across loan_cases + bkt_cases)
+    const ptpResult = await storage.query(
+      `SELECT agent_id, COUNT(*)::int AS ptp_count
+       FROM (
+         SELECT agent_id FROM loan_cases
+         WHERE status = 'PTP' AND (ptp_date = $1 OR telecaller_ptp_date = $1)
+         UNION ALL
+         SELECT agent_id FROM bkt_cases
+         WHERE status = 'PTP' AND (ptp_date = $1 OR telecaller_ptp_date = $1)
+       ) t
+       GROUP BY agent_id`,
+      [date]
+    );
+    const ptpMap = new Map<number, number>();
+    for (const row of ptpResult.rows) {
+      ptpMap.set(Number(row.agent_id), Number(row.ptp_count));
+    }
+
+    // 5. Paid cases on this date (feedback_date = date, status = Paid)
+    const paidResult = await storage.query(
+      `SELECT agent_id,
+              COUNT(*)::int                     AS paid_count,
+              COALESCE(SUM(pos::numeric), 0)    AS paid_amount
+       FROM (
+         SELECT agent_id, pos, feedback_date FROM loan_cases
+         WHERE status = 'Paid'
+           AND DATE(feedback_date AT TIME ZONE 'Asia/Kolkata') = $1
+         UNION ALL
+         SELECT agent_id, pos, feedback_date FROM bkt_cases
+         WHERE status = 'Paid'
+           AND DATE(feedback_date AT TIME ZONE 'Asia/Kolkata') = $1
+       ) t
+       GROUP BY agent_id`,
+      [date]
+    );
+    const paidMap = new Map<number, { count: number; amount: number }>();
+    for (const row of paidResult.rows) {
+      paidMap.set(Number(row.agent_id), {
+        count: Number(row.paid_count),
+        amount: Number(row.paid_amount),
+      });
+    }
+
+    // 6. Depositions submitted on this date
+    const depResult = await storage.query(
+      `SELECT agent_id,
+              COUNT(*)::int                       AS dep_count,
+              COALESCE(SUM(amount::numeric), 0)   AS dep_amount
+       FROM depositions
+       WHERE deposition_date = $1
+       GROUP BY agent_id`,
+      [date]
+    );
+    const depMap = new Map<number, { count: number; amount: number }>();
+    for (const row of depResult.rows) {
+      depMap.set(Number(row.agent_id), {
+        count: Number(row.dep_count),
+        amount: Number(row.dep_amount),
+      });
+    }
+
+    // 7. Overall performance stats per agent (all-time)
+    const perfResult = await storage.query(
+      `SELECT fa.id,
+         COUNT(lc.id)::int                                      AS total,
+         COUNT(lc.id) FILTER (WHERE lc.status='Paid')::int     AS paid,
+         COUNT(lc.id) FILTER (WHERE lc.status='Unpaid')::int   AS "notProcess",
+         COUNT(lc.id) FILTER (WHERE lc.status='PTP')::int      AS ptp
+       FROM fos_agents fa
+       LEFT JOIN loan_cases lc ON lc.agent_id = fa.id
+       WHERE fa.role = 'fos'
+       GROUP BY fa.id`
+    );
+    const agentPerfMap = new Map<number, { total: number; paid: number; notProcess: number; ptp: number }>();
+    for (const row of perfResult.rows) {
+      agentPerfMap.set(Number(row.id), {
+        total:      Number(row.total),
+        paid:       Number(row.paid),
+        notProcess: Number(row.notProcess),
+        ptp:        Number(row.ptp),
+      });
+    }
+
+    // 8. Assemble one row per agent
+    const report = agents.map((agent) => {
+      const att = attMap.get(agent.id);
+      const checkIn = att?.checkIn ?? null;
+      const checkOut = att?.checkOut ?? null;
+
+      let durationMinutes: number | null = null;
+      if (checkIn && checkOut) {
+        durationMinutes = Math.round(
+          (new Date(checkOut).getTime() - new Date(checkIn).getTime()) / 60000
+        );
+      }
+
+      const attendanceStatus = checkIn
+        ? checkOut
+          ? "Present"
+          : "Checked-In"
+        : "Absent";
+
+      const paid = paidMap.get(agent.id) ?? { count: 0, amount: 0 };
+      const dep  = depMap.get(agent.id)  ?? { count: 0, amount: 0 };
+      const perf = agentPerfMap.get(agent.id) ?? { total: 0, paid: 0, notProcess: 0, ptp: 0 };
+
+      return {
+        agentId:           agent.id,
+        agentName:         agent.name,
+        attendanceStatus,
+        checkIn,
+        checkOut,
+        durationMinutes,
+        fieldVisits:       fvMap.get(agent.id)  ?? 0,
+        ptpCount:          ptpMap.get(agent.id) ?? 0,
+        paidCount:         paid.count,
+        paidAmount:        paid.amount,
+        depositionCount:   dep.count,
+        depositionAmount:  dep.amount,
+        // break tracking placeholder — add break_sessions table later
+        breakCount:        0,
+        breakMinutes:      0,
+        // overall all-time performance
+        perfTotal:         perf.total,
+        perfPaid:          perf.paid,
+        perfUnpaid:        perf.notProcess,
+        perfPtp:           perf.ptp,
+      };
+    });
+
+    res.json({ date, report });
+  } catch (e: any) {
+    console.error("[GET /api/admin/daily-report]", e);
+    res.status(500).json({ message: e.message });
+  }
+});
+
+  const httpServer = createServer(app);
+  return httpServer;
 }
