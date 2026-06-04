@@ -453,6 +453,9 @@ export const api = {
     getCallLogs: (limit?: number) =>
       apiRequest("GET", `/api/admin/call-logs${limit ? `?limit=${limit}` : ""}`),
 
+    getActivityLogs: (limit?: number) =>
+      apiRequest("GET", `/api/admin/activity-logs${limit ? `?limit=${limit}` : ""}`),
+
     getCallLogsByAgent: (agentId: number, limit?: number) =>
       apiRequest("GET", `/api/admin/call-logs/agent/${agentId}${limit ? `?limit=${limit}` : ""}`),
 
