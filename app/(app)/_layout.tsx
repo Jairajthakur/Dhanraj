@@ -244,6 +244,13 @@ function AppLayoutInner() {
   const { agent }                                  = useAuth();
   const { items: blockingItems, isBlocking, snooze } = useBlocking();
 
+  // ── Log app open once per mount ──────────────────────────────────────────
+  React.useEffect(() => {
+    if (agent) {
+      api.logAppOpen(Platform.OS);
+    }
+  }, [agent?.id]);
+
   const handleBlockingItemPress = (item: BlockingItem) => {
     // Snooze the modal so the agent can actually see and interact with the case.
     // The modal will reappear after 1 hour (or immediately on next refetch if
