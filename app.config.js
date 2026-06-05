@@ -68,7 +68,7 @@ module.exports = ({ config }) => {
     },
 
     extra: {
-      apiUrl: process.env.EXPO_PUBLIC_API_URL || "https://dhanraj-production.up.railway.app",
+      apiUrl: "https://dhanraj-production.up.railway.app",
       eas: {
         projectId: "1b09251a-4423-4759-a22b-fc2f0a44fd8e",
       },
