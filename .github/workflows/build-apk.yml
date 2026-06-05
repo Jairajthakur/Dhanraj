@@ -1,14 +1,15 @@
 name: Build Android APK
+
 on:
   workflow_dispatch:
     inputs:
       api_url:
-        description: 'API URL (leave blank to use default Railway URL)'
+        description: 'API URL'
         required: false
-        default: 'https://dhanraj-production.up.railway.app'
+        default: 'https://app.thdhanraj.co.in'
 
 env:
-  EXPO_PUBLIC_API_URL: ${{ github.event.inputs.api_url || 'https://dhanraj-production.up.railway.app' }}
+  EXPO_PUBLIC_API_URL: ${{ github.event.inputs.api_url || 'https://app.thdhanraj.co.in' }}
 
 jobs:
   build:
@@ -22,7 +23,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
+          # No cache: npm — avoids lock file requirement
 
       - name: Setup Java
         uses: actions/setup-java@v4
@@ -38,7 +39,7 @@ jobs:
         continue-on-error: true
         with:
           path: node_modules
-          key: ${{ runner.os }}-node-${{ hashFiles('package-lock.json') }}
+          key: ${{ runner.os }}-node-${{ hashFiles('package.json') }}
           restore-keys: |
             ${{ runner.os }}-node-
 
@@ -54,14 +55,14 @@ jobs:
       - name: Configure Gradle memory
         run: |
           mkdir -p ~/.gradle
-          cat >> ~/.gradle/gradle.properties << 'EOF'
+          cat >> ~/.gradle/gradle.properties << 'GRADLE'
           org.gradle.jvmargs=-Xmx6g -XX:MaxMetaspaceSize=1g
           org.gradle.parallel=true
           org.gradle.caching=true
           org.gradle.configureondemand=true
           kotlin.daemon.jvm.options=-Xmx4g -XX:MaxMetaspaceSize=1g
           kotlin.incremental=true
-          EOF
+          GRADLE
 
       - name: Install dependencies
         run: |
@@ -83,7 +84,6 @@ jobs:
         env:
           EXPO_PUBLIC_API_URL: ${{ env.EXPO_PUBLIC_API_URL }}
 
-      # Cache Gradle AFTER prebuild so android/ gradle files exist for hashing
       - name: Cache Gradle
         uses: actions/cache@v4
         continue-on-error: true
@@ -104,10 +104,6 @@ jobs:
         run: |
           cd android
           chmod +x gradlew
-          # Generate react-native-webview JNI codegen before CMake configure runs
-          ./gradlew :react-native-webview:generateCodegenArtifactsFromSchema \
-            --no-daemon \
-            --build-cache
           ./gradlew assembleRelease \
             --no-daemon \
             --parallel \
@@ -128,7 +124,7 @@ jobs:
           path: android/app/build/outputs/apk/release/app-release.apk
           retention-days: 30
 
-      - name: Upload Debug APK (fallback on failure)
+      - name: Upload Debug APK (fallback)
         if: failure()
         uses: actions/upload-artifact@v4
         with:
