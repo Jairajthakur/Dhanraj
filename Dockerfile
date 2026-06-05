@@ -9,7 +9,7 @@ COPY package*.json ./
 RUN npm install --legacy-peer-deps
 # Copy all source files
 # Cache-bust: increment CACHEBUST when you need a clean rebuild
-ARG CACHEBUST=3
+ARG CACHEBUST=6
 COPY . .
 # Build web frontend
 RUN EXPO_PUBLIC_BASE_URL=/ npx expo export --platform web --output-dir static-build
