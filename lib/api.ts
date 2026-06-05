@@ -239,6 +239,8 @@ export const api = {
     return res;
   },
   logout: async () => { try { await apiRequest("POST", "/api/auth/logout"); } catch {} },
+  logAppOpen: (platform?: string) =>
+    apiRequest("POST", "/api/app/log-open", { platform }).catch(() => {}),
   me: async () => {
     const res = await apiRequest("GET", "/api/auth/me");
     if (res?.agent) { await agentCache.set(res.agent); if (res?.token) await tokenStore.set(res.token); }
