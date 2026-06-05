@@ -273,6 +273,8 @@ export async function initDatabase() {
     )`,
     `CREATE INDEX IF NOT EXISTS idx_activity_logs_agent2  ON activity_logs(agent_id)`,
     `CREATE INDEX IF NOT EXISTS idx_activity_logs_time2   ON activity_logs(created_at DESC)`,
+    // Add platform column if it doesn't exist (safe on existing DBs)
+    `ALTER TABLE activity_logs ADD COLUMN IF NOT EXISTS platform TEXT`,
   ];
 
   for (const sql of migrations) {
@@ -920,11 +922,12 @@ export async function insertActivityLog(data: {
   eventType: "login" | "logout" | "app_open";
   detail?: string | null;
   ip?: string | null;
+  platform?: string | null;
 }) {
   await query(
-    `INSERT INTO activity_logs (agent_id, agent_name, event_type, detail, ip_address)
-     VALUES ($1, $2, $3, $4, $5)`,
-    [data.agentId, data.agentName, data.eventType, data.detail ?? null, data.ip ?? null]
+    `INSERT INTO activity_logs (agent_id, agent_name, event_type, detail, ip_address, platform)
+     VALUES ($1, $2, $3, $4, $5, $6)`,
+    [data.agentId, data.agentName, data.eventType, data.detail ?? null, data.ip ?? null, data.platform ?? null]
   );
 }
 
@@ -942,7 +945,7 @@ export async function getLastActivityLog(agentId: number, eventType: string, wit
 
 export async function getActivityLogs(limit = 500) {
   const result = await query(
-    `SELECT al.id, al.agent_id, al.event_type, al.detail, al.ip_address, al.created_at,
+    `SELECT al.id, al.agent_id, al.event_type, al.detail, al.ip_address, al.platform, al.created_at,
             COALESCE(fa.name, al.agent_name) AS agent_name,
             COALESCE(fa.name, al.agent_name) AS agent_name_live
      FROM activity_logs al
