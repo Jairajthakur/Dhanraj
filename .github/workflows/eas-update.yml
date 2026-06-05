@@ -6,7 +6,7 @@ on:
       - main
 
 env:
-  EXPO_PUBLIC_API_URL: https://app.thdhanraj.co.in
+  EXPO_PUBLIC_API_URL: https://www.thdhanraj.co.in
 
 jobs:
   update:
@@ -39,5 +39,5 @@ jobs:
             --message "${{ github.event.head_commit.message }}" \
             --non-interactive
         env:
-          EXPO_PUBLIC_API_URL: https://app.thdhanraj.co.in
+          EXPO_PUBLIC_API_URL: https://www.thdhanraj.co.in
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
