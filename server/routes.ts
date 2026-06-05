@@ -763,6 +763,28 @@ app.use("/api/fos-depositions", (req, res, next) => {
     req.session.destroy(() => res.json({ success: true }));
   });
 
+  // ── Log app open ──────────────────────────────────────────────────────────
+  app.post("/api/app/log-open", requireAuth, async (req, res) => {
+    try {
+      const agent = await storage.getAgentById(req.session.agentId!);
+      if (!agent) return res.status(404).json({ message: "Not found" });
+      const ip = (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || req.socket?.remoteAddress || null;
+      const platform = (req.body?.platform as string) ?? null;
+      // Deduplicate: skip if the same agent already logged an app_open in the last 5 minutes
+      const recent = await storage.getLastActivityLog(agent.id, "app_open", 5);
+      if (!recent) {
+        await storage.insertActivityLog({
+          agentId:   agent.id,
+          agentName: agent.name,
+          eventType: "app_open",
+          ip,
+          platform,
+        });
+      }
+      res.json({ ok: true });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
   app.get("/api/auth/me", requireAuth, async (req, res) => {
     try {
       const agent = await storage.getAgentById(req.session.agentId!);
