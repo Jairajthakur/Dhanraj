@@ -334,9 +334,11 @@ export default function AppLogsScreen() {
     refetchInterval: 60000,
   });
 
-  const isLoading =
-    activityQ.isLoading || callLogsQ.isLoading || fieldVisitsQ.isLoading ||
-    attendanceQ.isLoading || depositionsQ.isLoading || receiptQ.isLoading || fosQ.isLoading;
+  // Only block on activity logs — show page immediately, other sources merge in when ready
+  const isLoading = activityQ.isLoading;
+
+
+
 
   // ── Merge + sort ─────────────────────────────────────────────────────────
   const allLogs = useMemo<AppLog[]>(() => {
@@ -397,7 +399,15 @@ export default function AppLogsScreen() {
     activityQ.isRefetching || callLogsQ.isRefetching || fieldVisitsQ.isRefetching ||
     attendanceQ.isRefetching || depositionsQ.isRefetching || receiptQ.isRefetching || fosQ.isRefetching;
 
-  if (isLoading) {
+  // Show spinner only for first 8 seconds; after that render whatever we have
+  const [timedOut, setTimedOut] = React.useState(false);
+  React.useEffect(() => {
+    if (!isLoading) return;
+    const t = setTimeout(() => setTimedOut(true), 8000);
+    return () => clearTimeout(t);
+  }, [isLoading]);
+
+  if (isLoading && !timedOut) {
     return (
       <View style={{ flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: Colors.background }}>
         <ActivityIndicator color={Colors.primary} size="large" />
