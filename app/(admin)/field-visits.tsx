@@ -40,6 +40,7 @@ import * as Location from "expo-location";
 import * as ImagePicker from "expo-image-picker";
 import Constants from "expo-constants";
 import { tokenStore } from "@/lib/api";
+import { getApiUrl } from "@/lib/query-client";
 
 // ─── Theme ────────────────────────────────────────────────────────────────────
 const C = {
@@ -59,7 +60,7 @@ const C = {
   borderLight:  "#F3F0EA",
 };
 
-const API = (Constants.expoConfig?.extra?.apiUrl as string) ?? "https://dhanraj-production.up.railway.app";
+const API = getApiUrl();
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface FieldVisit {
