@@ -87,7 +87,7 @@ module.exports = ({ config }) => {
       reactCompiler: false,
     },
     extra: {
-      apiUrl: "https://dhanraj-production.up.railway.app",
+      apiUrl: "https://app.thdhanraj.co.in",
       oneSignalAppId: "bff2c8e0-de24-4aad-a373-d030c210155f",
       eas: {
         projectId: "1b09251a-4423-4759-a22b-fc2f0a44fd8e",
