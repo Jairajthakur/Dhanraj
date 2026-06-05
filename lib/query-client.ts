@@ -31,7 +31,7 @@ export function getApiUrl(): string {
   }
 
   // Absolute fallback
-  return "https://dhanraj-production.up.railway.app";
+  return "https://www.thdhanraj.co.in";
 }
 
 async function throwIfResNotOk(res: Response) {
