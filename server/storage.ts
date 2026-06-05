@@ -260,9 +260,19 @@ export async function initDatabase() {
     `INSERT INTO fos_agents (name, username, password, role)
      VALUES ('Admin', 'admin', 'admin123', 'admin')
      ON CONFLICT (username) DO NOTHING`,
-    // Fix activity_logs columns if created with old names
-    `ALTER TABLE activity_logs RENAME COLUMN logged_at TO created_at`,
-    `ALTER TABLE activity_logs RENAME COLUMN ip TO ip_address`,
+    // Drop and recreate activity_logs with correct column names
+    `DROP TABLE IF EXISTS activity_logs`,
+    `CREATE TABLE IF NOT EXISTS activity_logs (
+      id          SERIAL PRIMARY KEY,
+      agent_id    INTEGER REFERENCES fos_agents(id) ON DELETE SET NULL,
+      agent_name  TEXT,
+      event_type  TEXT NOT NULL,
+      detail      TEXT,
+      ip_address  TEXT,
+      created_at  TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_activity_logs_agent2  ON activity_logs(agent_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_activity_logs_time2   ON activity_logs(created_at DESC)`,
   ];
 
   for (const sql of migrations) {
