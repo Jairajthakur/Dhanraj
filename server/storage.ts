@@ -260,6 +260,9 @@ export async function initDatabase() {
     `INSERT INTO fos_agents (name, username, password, role)
      VALUES ('Admin', 'admin', 'admin123', 'admin')
      ON CONFLICT (username) DO NOTHING`,
+    // Fix activity_logs columns if created with old names
+    `ALTER TABLE activity_logs RENAME COLUMN logged_at TO created_at`,
+    `ALTER TABLE activity_logs RENAME COLUMN ip TO ip_address`,
   ];
 
   for (const sql of migrations) {
@@ -913,6 +916,18 @@ export async function insertActivityLog(data: {
      VALUES ($1, $2, $3, $4, $5)`,
     [data.agentId, data.agentName, data.eventType, data.detail ?? null, data.ip ?? null]
   );
+}
+
+// Returns the most recent log for an agent+eventType within `withinMinutes`
+export async function getLastActivityLog(agentId: number, eventType: string, withinMinutes: number) {
+  const result = await query(
+    `SELECT id FROM activity_logs
+     WHERE agent_id = $1 AND event_type = $2
+       AND created_at > NOW() - ($3 || ' minutes')::INTERVAL
+     ORDER BY created_at DESC LIMIT 1`,
+    [agentId, eventType, withinMinutes]
+  );
+  return result.rows[0] ?? null;
 }
 
 export async function getActivityLogs(limit = 500) {
