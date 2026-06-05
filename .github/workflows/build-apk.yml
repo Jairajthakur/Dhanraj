@@ -6,10 +6,10 @@ on:
       api_url:
         description: 'API URL'
         required: false
-        default: 'https://app.thdhanraj.co.in'
+        default: 'https://www.thdhanraj.co.in'
 
 env:
-  EXPO_PUBLIC_API_URL: ${{ github.event.inputs.api_url || 'https://app.thdhanraj.co.in' }}
+  EXPO_PUBLIC_API_URL: ${{ github.event.inputs.api_url || 'https://www.thdhanraj.co.in' }}
 
 jobs:
   build:
