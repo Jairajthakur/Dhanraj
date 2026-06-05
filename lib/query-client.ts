@@ -7,10 +7,18 @@ import {
 } from "@tanstack/react-query";
 
 // ✅ Fix: Check multiple sources for the API URL in priority order:
-//   1. EAS build env var (EXPO_PUBLIC_API_URL)  — set in eas.json
-//   2. app.config.js extra.apiUrl               — baked in at build time
-//   3. Hardcoded fallback                        — last resort
+//   1. Web browser — use relative URL (same origin) so ISP DNS never matters
+//   2. EAS build env var (EXPO_PUBLIC_API_URL)  — set in eas.json
+//   3. app.config.js extra.apiUrl               — baked in at build time
+//   4. Hardcoded fallback                        — last resort
 export function getApiUrl(): string {
+  // On web (browser), always use relative URLs — the API is served from the
+  // same origin, so there's no need to resolve an external domain at all.
+  // This means ISP DNS issues with *.railway.app never affect API calls.
+  if (Platform.OS === "web" && typeof window !== "undefined") {
+    return window.location.origin;
+  }
+
   // EAS / Expo public env var (available at JS runtime in EAS builds)
   if (process.env.EXPO_PUBLIC_API_URL) {
     return process.env.EXPO_PUBLIC_API_URL;
