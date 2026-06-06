@@ -11,16 +11,8 @@ import { api } from "@/lib/api";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type LogType =
-  | "login"
-  | "logout"
-  | "app_open"
-  | "call_log"
-  | "field_visit"
-  | "attendance_in"
-  | "attendance_out"
-  | "deposition"
-  | "receipt_request"
-  | "fos_deposition";
+  | "login" | "logout" | "app_open" | "call_log" | "field_visit"
+  | "attendance_in" | "attendance_out" | "deposition" | "receipt_request" | "fos_deposition";
 
 interface AppLog {
   id: string;
@@ -36,19 +28,17 @@ interface AppLog {
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 const TYPE_CONFIG: Record<LogType, { label: string; icon: any; color: string }> = {
-  login:           { label: "Login",        icon: "log-in-outline",       color: "#16A34A" },
-  logout:          { label: "Logout",       icon: "log-out-outline",      color: "#DC2626" },
-  app_open:        { label: "App Open",     icon: "phone-portrait-outline",color: "#2563EB" },
-  call_log:        { label: "Call Log",     icon: "call-outline",          color: Colors.info },
-  field_visit:     { label: "Field Visit",  icon: "location-outline",      color: "#059669" },
-  attendance_in:   { label: "Check-In",     icon: "checkmark-circle-outline", color: Colors.success },
-  attendance_out:  { label: "Check-Out",    icon: "exit-outline",          color: Colors.warning },
-  deposition:      { label: "Deposition",   icon: "cash-outline",          color: "#7C3AED" },
-  receipt_request: { label: "Receipt Req.", icon: "receipt-outline",       color: Colors.accent },
-  fos_deposition:  { label: "FOS Deposit",  icon: "wallet-outline",        color: "#D97706" },
+  login:           { label: "Login",        icon: "log-in-outline",          color: "#16A34A" },
+  logout:          { label: "Logout",       icon: "log-out-outline",         color: "#DC2626" },
+  app_open:        { label: "App Open",     icon: "phone-portrait-outline",  color: "#2563EB" },
+  call_log:        { label: "Call Log",     icon: "call-outline",            color: Colors.info },
+  field_visit:     { label: "Field Visit",  icon: "location-outline",        color: "#059669" },
+  attendance_in:   { label: "Check-In",     icon: "checkmark-circle-outline",color: Colors.success },
+  attendance_out:  { label: "Check-Out",    icon: "exit-outline",            color: Colors.warning },
+  deposition:      { label: "Deposition",   icon: "cash-outline",            color: "#7C3AED" },
+  receipt_request: { label: "Receipt Req.", icon: "receipt-outline",         color: Colors.accent },
+  fos_deposition:  { label: "FOS Deposit",  icon: "wallet-outline",          color: "#D97706" },
 };
-
-const ALL_TYPES = Object.keys(TYPE_CONFIG) as LogType[];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function fmtDateTime(v: any) {
@@ -79,21 +69,17 @@ function normActivityLogs(raw: any[]): AppLog[] {
     type: l.event_type as LogType,
     agent_name: l.agent_name_live ?? l.agent_name ?? null,
     title:
-      l.event_type === "login"
-        ? "Logged In"
-        : l.event_type === "logout"
-        ? "Logged Out"
-        : "App Opened",
+      l.event_type === "login"   ? "Logged In"  :
+      l.event_type === "logout"  ? "Logged Out" : "App Opened",
     subtitle: l.platform ? `Platform: ${l.platform}` : null,
-    detail: l.ip_address ? `IP: ${l.ip_address}` : null,
+    detail:   l.ip_address ? `IP: ${l.ip_address}` : null,
     timestamp: l.created_at ?? null,
-    status: l.event_type === "login" ? "Login" : l.event_type === "logout" ? "Logout" : "App Open",
+    status:
+      l.event_type === "login"   ? "Login"    :
+      l.event_type === "logout"  ? "Logout"   : "App Open",
     statusColor:
-      l.event_type === "login"
-        ? "#16A34A"
-        : l.event_type === "logout"
-        ? "#DC2626"
-        : "#2563EB",
+      l.event_type === "login"   ? "#16A34A"  :
+      l.event_type === "logout"  ? "#DC2626"  : "#2563EB",
   }));
 }
 
@@ -105,10 +91,11 @@ function normCallLogs(raw: any[]): AppLog[] {
     title: l.customer_name ?? "Unknown Customer",
     subtitle: l.loan_no ? `Loan: ${l.loan_no}` : null,
     detail: l.outcome ?? null,
-    timestamp: l.logged_at ?? null,
+    timestamp: l.logged_at ?? l.created_at ?? null,
     status: l.status ?? null,
     statusColor:
-      l.status === "Paid" ? Colors.success : l.status === "PTP" ? Colors.statusPTP : Colors.danger,
+      l.status === "Paid" ? Colors.success :
+      l.status === "PTP"  ? Colors.statusPTP : Colors.danger,
   }));
 }
 
@@ -129,30 +116,24 @@ function normFieldVisits(raw: any[]): AppLog[] {
 function normAttendance(raw: any[]): AppLog[] {
   const logs: AppLog[] = [];
   raw.forEach((a) => {
-    if (a.check_in)
-      logs.push({
-        id: `att_in_${a.id}`,
-        type: "attendance_in",
-        agent_name: a.agent_name ?? null,
-        title: "Checked In",
-        subtitle: null,
-        detail: null,
-        timestamp: a.check_in,
-        status: "Present",
-        statusColor: Colors.success,
-      });
-    if (a.check_out)
-      logs.push({
-        id: `att_out_${a.id}`,
-        type: "attendance_out",
-        agent_name: a.agent_name ?? null,
-        title: "Checked Out",
-        subtitle: null,
-        detail: null,
-        timestamp: a.check_out,
-        status: "Done",
-        statusColor: Colors.warning,
-      });
+    if (a.check_in) logs.push({
+      id: `att_in_${a.id}`,
+      type: "attendance_in",
+      agent_name: a.agent_name ?? null,
+      title: "Checked In",
+      subtitle: null, detail: null,
+      timestamp: a.check_in,
+      status: "Present", statusColor: Colors.success,
+    });
+    if (a.check_out) logs.push({
+      id: `att_out_${a.id}`,
+      type: "attendance_out",
+      agent_name: a.agent_name ?? null,
+      title: "Checked Out",
+      subtitle: null, detail: null,
+      timestamp: a.check_out,
+      status: "Done", statusColor: Colors.warning,
+    });
   });
   return logs;
 }
@@ -182,7 +163,8 @@ function normReceiptRequests(raw: any[]): AppLog[] {
     timestamp: r.requested_at ?? r.created_at ?? null,
     status: r.status ?? "pending",
     statusColor:
-      r.status === "approved" ? Colors.success : r.status === "rejected" ? Colors.danger : Colors.warning,
+      r.status === "approved" ? Colors.success :
+      r.status === "rejected" ? Colors.danger  : Colors.warning,
   }));
 }
 
@@ -200,14 +182,62 @@ function normFosDepositions(raw: any[]): AppLog[] {
   }));
 }
 
+// ─── Debug Panel ──────────────────────────────────────────────────────────────
+function DebugPanel({ queries }: { queries: Record<string, { data: any; isError: boolean; error: any; isLoading: boolean }> }) {
+  const [open, setOpen] = useState(false);
+  if (!open) {
+    return (
+      <Pressable onPress={() => setOpen(true)} style={dbg.btn}>
+        <Ionicons name="bug-outline" size={12} color={Colors.textMuted} />
+        <Text style={dbg.btnText}>Debug API</Text>
+      </Pressable>
+    );
+  }
+  return (
+    <View style={dbg.panel}>
+      <Pressable onPress={() => setOpen(false)} style={dbg.closeRow}>
+        <Text style={dbg.title}>API Debug</Text>
+        <Ionicons name="close" size={14} color={Colors.textMuted} />
+      </Pressable>
+      {Object.entries(queries).map(([name, q]) => {
+        const count = q.isLoading ? "…" :
+          q.isError ? `ERR: ${(q.error as any)?.message?.slice(0, 40) ?? "?"}` :
+          q.data == null ? "null" :
+          Array.isArray(q.data) ? `array[${q.data.length}]` :
+          typeof q.data === "object" ? Object.entries(q.data).map(([k, v]) => `${k}:${Array.isArray(v) ? v.length : v}`).join(", ") :
+          String(q.data);
+        const ok = !q.isLoading && !q.isError && q.data != null;
+        return (
+          <View key={name} style={dbg.row}>
+            <Ionicons name={ok ? "checkmark-circle" : q.isError ? "close-circle" : "time-outline"} size={12}
+              color={ok ? Colors.success : q.isError ? Colors.danger : Colors.textMuted} />
+            <Text style={dbg.key}>{name}</Text>
+            <Text style={[dbg.val, q.isError && { color: Colors.danger }]} numberOfLines={2}>{count}</Text>
+          </View>
+        );
+      })}
+    </View>
+  );
+}
+
+const dbg = StyleSheet.create({
+  btn:      { flexDirection: "row", alignItems: "center", gap: 4, alignSelf: "flex-end", paddingVertical: 4, paddingHorizontal: 8, borderRadius: 8, backgroundColor: Colors.surfaceAlt, borderWidth: 1, borderColor: Colors.border },
+  btnText:  { fontSize: 10, color: Colors.textMuted, fontWeight: "600" },
+  panel:    { backgroundColor: Colors.surfaceAlt, borderRadius: 12, padding: 12, borderWidth: 1, borderColor: Colors.border, gap: 6 },
+  closeRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 4 },
+  title:    { fontSize: 11, fontWeight: "800", color: Colors.text },
+  row:      { flexDirection: "row", alignItems: "flex-start", gap: 6 },
+  key:      { fontSize: 10, fontWeight: "700", color: Colors.textSecondary, width: 80, flexShrink: 0 },
+  val:      { fontSize: 10, color: Colors.textMuted, flex: 1, flexWrap: "wrap" },
+});
+
 // ─── Log Card ─────────────────────────────────────────────────────────────────
 function LogCard({ log }: { log: AppLog }) {
-  const cfg = TYPE_CONFIG[log.type];
+  const cfg = TYPE_CONFIG[log.type] ?? TYPE_CONFIG.call_log;
   return (
     <View style={card.wrap}>
       <View style={[card.accent, { backgroundColor: cfg.color }]} />
       <View style={card.body}>
-        {/* Type badge + relative time */}
         <View style={card.topRow}>
           <View style={[card.typeBadge, { backgroundColor: cfg.color + "18" }]}>
             <Ionicons name={cfg.icon} size={11} color={cfg.color} />
@@ -215,8 +245,6 @@ function LogCard({ log }: { log: AppLog }) {
           </View>
           <Text style={card.relTime}>{relativeTime(log.timestamp)}</Text>
         </View>
-
-        {/* Title + status */}
         <View style={card.titleRow}>
           <Text style={card.title} numberOfLines={1}>{log.title}</Text>
           {log.status && (
@@ -225,11 +253,8 @@ function LogCard({ log }: { log: AppLog }) {
             </View>
           )}
         </View>
-
         {log.subtitle ? <Text style={card.sub} numberOfLines={1}>{log.subtitle}</Text> : null}
         {log.detail   ? <Text style={card.detail} numberOfLines={2}>{log.detail}</Text>   : null}
-
-        {/* Footer */}
         <View style={card.footer}>
           <View style={card.agentChip}>
             <Ionicons name="person-outline" size={11} color={Colors.primary} />
@@ -254,11 +279,11 @@ function StatsBar({ logs }: { logs: AppLog[] }) {
   }, [logs]);
 
   const items = [
-    { label: "Logins",   value: c.login    ?? 0, color: "#16A34A" },
-    { label: "App Opens",value: c.app_open ?? 0, color: Colors.info },
-    { label: "Calls",    value: c.call_log ?? 0, color: Colors.accent },
-    { label: "Visits",   value: c.field_visit ?? 0, color: "#059669" },
-    { label: "Deposits", value: (c.deposition ?? 0) + (c.fos_deposition ?? 0), color: "#7C3AED" },
+    { label: "Logins",    value: c.login       ?? 0, color: "#16A34A" },
+    { label: "App Opens", value: c.app_open    ?? 0, color: Colors.info },
+    { label: "Calls",     value: c.call_log    ?? 0, color: Colors.accent },
+    { label: "Visits",    value: c.field_visit ?? 0, color: "#059669" },
+    { label: "Deposits",  value: (c.deposition ?? 0) + (c.fos_deposition ?? 0), color: "#7C3AED" },
   ];
 
   return (
@@ -275,92 +300,92 @@ function StatsBar({ logs }: { logs: AppLog[] }) {
   );
 }
 
-// ─── Group label ──────────────────────────────────────────────────────────────
+// ─── Filter chips ─────────────────────────────────────────────────────────────
 const GROUPS: { key: LogType | "All"; label: string; icon: any; color: string }[] = [
-  { key: "All",            label: "All",         icon: "apps-outline",          color: Colors.primary },
-  { key: "login",          label: "Login",        icon: "log-in-outline",        color: "#16A34A" },
-  { key: "logout",         label: "Logout",       icon: "log-out-outline",       color: "#DC2626" },
-  { key: "app_open",       label: "App Open",     icon: "phone-portrait-outline",color: "#2563EB" },
-  { key: "call_log",       label: "Call Logs",    icon: "call-outline",          color: Colors.info },
-  { key: "field_visit",    label: "Field Visits", icon: "location-outline",      color: "#059669" },
+  { key: "All",            label: "All",         icon: "apps-outline",            color: Colors.primary },
+  { key: "login",          label: "Login",        icon: "log-in-outline",          color: "#16A34A" },
+  { key: "logout",         label: "Logout",       icon: "log-out-outline",         color: "#DC2626" },
+  { key: "app_open",       label: "App Open",     icon: "phone-portrait-outline",  color: "#2563EB" },
+  { key: "call_log",       label: "Call Logs",    icon: "call-outline",            color: Colors.info },
+  { key: "field_visit",    label: "Field Visits", icon: "location-outline",        color: "#059669" },
   { key: "attendance_in",  label: "Check-In",     icon: "checkmark-circle-outline",color: Colors.success },
-  { key: "attendance_out", label: "Check-Out",    icon: "exit-outline",          color: Colors.warning },
-  { key: "deposition",     label: "Depositions",  icon: "cash-outline",          color: "#7C3AED" },
-  { key: "receipt_request",label: "Receipts",     icon: "receipt-outline",       color: Colors.accent },
-  { key: "fos_deposition", label: "FOS Deposits", icon: "wallet-outline",        color: "#D97706" },
+  { key: "attendance_out", label: "Check-Out",    icon: "exit-outline",            color: Colors.warning },
+  { key: "deposition",     label: "Depositions",  icon: "cash-outline",            color: "#7C3AED" },
+  { key: "receipt_request",label: "Receipts",     icon: "receipt-outline",         color: Colors.accent },
+  { key: "fos_deposition", label: "FOS Deposits", icon: "wallet-outline",          color: "#D97706" },
 ];
 
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 export default function AppLogsScreen() {
   const insets = useSafeAreaInsets();
-  const [search, setSearch]         = useState("");
-  const [typeFilter, setTypeFilter] = useState<LogType | "All">("All");
+  const [search, setSearch]           = useState("");
+  const [typeFilter, setTypeFilter]   = useState<LogType | "All">("All");
   const [agentFilter, setAgentFilter] = useState("All");
 
-  // ── Fetch all sources ────────────────────────────────────────────────────
+  // ── Fetch all sources ──────────────────────────────────────────────────
   const activityQ = useQuery({
     queryKey: ["/api/admin/activity-logs"],
     queryFn:  () => api.admin.getActivityLogs(500),
     refetchInterval: 30000,
+    retry: 1,
   });
   const callLogsQ = useQuery({
     queryKey: ["/api/admin/call-logs"],
     queryFn:  () => api.admin.getCallLogs(500),
     refetchInterval: 60000,
+    retry: 1,
   });
   const fieldVisitsQ = useQuery({
     queryKey: ["/api/admin/field-visits"],
     queryFn:  () => api.admin.getAdminFieldVisits({}),
     refetchInterval: 60000,
+    retry: 1,
   });
   const attendanceQ = useQuery({
     queryKey: ["/api/admin/attendance"],
     queryFn:  () => api.admin.getAllAttendance(),
     refetchInterval: 60000,
+    retry: 1,
   });
   const depositionsQ = useQuery({
     queryKey: ["/api/admin/depositions"],
     queryFn:  () => api.admin.getAllDepositions(),
     refetchInterval: 60000,
+    retry: 1,
   });
   const receiptQ = useQuery({
     queryKey: ["/api/admin/receipt-requests"],
     queryFn:  () => api.admin.getReceiptRequests(),
     refetchInterval: 60000,
+    retry: 1,
   });
   const fosQ = useQuery({
     queryKey: ["/api/admin/fos-depositions"],
     queryFn:  () => api.admin.getFosDepositions(),
     refetchInterval: 60000,
+    retry: 1,
   });
 
-  // Only block on activity logs — show page immediately, other sources merge in when ready
-  const isLoading = activityQ.isLoading;
-  const hasError  = activityQ.isError;
-
-
-
-
-  // ── Merge + sort ─────────────────────────────────────────────────────────
+  // ── Merge + sort ───────────────────────────────────────────────────────
   const allLogs = useMemo<AppLog[]>(() => {
+    // Extract arrays safely from each response shape
+    const actLogs  = Array.isArray(activityQ.data)    ? activityQ.data    : activityQ.data?.logs        ?? [];
+    const callLogs = Array.isArray(callLogsQ.data)     ? callLogsQ.data    : callLogsQ.data?.logs         ?? [];
+    const visits   = Array.isArray(fieldVisitsQ.data)  ? fieldVisitsQ.data : fieldVisitsQ.data?.visits     ?? [];
+    // ✅ FIX: backend returns { attendance: [...] } NOT { records: [...] }
+    const attend   = Array.isArray(attendanceQ.data)   ? attendanceQ.data  : attendanceQ.data?.attendance  ?? [];
+    const deps     = Array.isArray(depositionsQ.data)  ? depositionsQ.data : depositionsQ.data?.depositions ?? [];
+    const recs     = Array.isArray(receiptQ.data)      ? receiptQ.data     : receiptQ.data?.requests        ?? [];
+    const fos      = Array.isArray(fosQ.data)          ? fosQ.data         : fosQ.data?.depositions         ?? [];
+
     const merged: AppLog[] = [
-      ...normActivityLogs(activityQ.data?.logs ?? []),
-      ...normCallLogs(callLogsQ.data?.logs ?? []),
-      ...normFieldVisits(
-        Array.isArray(fieldVisitsQ.data) ? fieldVisitsQ.data : fieldVisitsQ.data?.visits ?? [],
-      ),
-      ...normAttendance(
-        Array.isArray(attendanceQ.data) ? attendanceQ.data : attendanceQ.data?.attendance ?? [],
-      ),
-      ...normDepositions(
-        Array.isArray(depositionsQ.data) ? depositionsQ.data : depositionsQ.data?.depositions ?? [],
-      ),
-      ...normReceiptRequests(
-        Array.isArray(receiptQ.data) ? receiptQ.data : receiptQ.data?.requests ?? [],
-      ),
-      ...normFosDepositions(
-        Array.isArray(fosQ.data) ? fosQ.data : fosQ.data?.depositions ?? [],
-      ),
+      ...normActivityLogs(actLogs),
+      ...normCallLogs(callLogs),
+      ...normFieldVisits(visits),
+      ...normAttendance(attend),
+      ...normDepositions(deps),
+      ...normReceiptRequests(recs),
+      ...normFosDepositions(fos),
     ];
     merged.sort((a, b) => {
       if (!a.timestamp) return 1;
@@ -368,10 +393,8 @@ export default function AppLogsScreen() {
       return new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime();
     });
     return merged;
-  }, [
-    activityQ.data, callLogsQ.data, fieldVisitsQ.data,
-    attendanceQ.data, depositionsQ.data, receiptQ.data, fosQ.data,
-  ]);
+  }, [activityQ.data, callLogsQ.data, fieldVisitsQ.data,
+      attendanceQ.data, depositionsQ.data, receiptQ.data, fosQ.data]);
 
   const agents = useMemo(() => {
     const names = Array.from(new Set(allLogs.map((l) => l.agent_name).filter(Boolean))).sort() as string[];
@@ -400,42 +423,34 @@ export default function AppLogsScreen() {
     activityQ.isRefetching || callLogsQ.isRefetching || fieldVisitsQ.isRefetching ||
     attendanceQ.isRefetching || depositionsQ.isRefetching || receiptQ.isRefetching || fosQ.isRefetching;
 
-  // Show spinner only for first 8 seconds; after that render whatever we have
+  const anyLoading = activityQ.isLoading || callLogsQ.isLoading;
+
+  // Show loading spinner for max 8 seconds
   const [timedOut, setTimedOut] = React.useState(false);
   React.useEffect(() => {
-    if (!isLoading) return;
+    if (!anyLoading) { setTimedOut(false); return; }
     const t = setTimeout(() => setTimedOut(true), 8000);
     return () => clearTimeout(t);
-  }, [isLoading]);
+  }, [anyLoading]);
 
-  if (isLoading && !timedOut) {
+  if (anyLoading && !timedOut) {
     return (
       <View style={{ flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: Colors.background }}>
         <ActivityIndicator color={Colors.primary} size="large" />
-        <Text style={{ color: Colors.textMuted, marginTop: 12, fontSize: 13 }}>Loading application logs…</Text>
+        <Text style={{ color: Colors.textMuted, marginTop: 12, fontSize: 13 }}>Loading logs…</Text>
       </View>
     );
   }
 
-  if (hasError && allLogs.length === 0) {
-    return (
-      <View style={{ flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: Colors.background, padding: 32 }}>
-        <Ionicons name="cloud-offline-outline" size={48} color={Colors.danger ?? "#DC2626"} />
-        <Text style={{ color: Colors.text, marginTop: 12, fontSize: 15, fontWeight: "700", textAlign: "center" }}>
-          Failed to load logs
-        </Text>
-        <Text style={{ color: Colors.textMuted, marginTop: 6, fontSize: 13, textAlign: "center" }}>
-          {(activityQ.error as Error)?.message ?? "Network error. Check your connection."}
-        </Text>
-        <Pressable
-          style={{ marginTop: 20, backgroundColor: Colors.primary, borderRadius: 12, paddingHorizontal: 24, paddingVertical: 12 }}
-          onPress={refetchAll}
-        >
-          <Text style={{ color: "#fff", fontWeight: "700", fontSize: 14 }}>Retry</Text>
-        </Pressable>
-      </View>
-    );
-  }
+  const debugQueries = {
+    "activity":   activityQ,
+    "calls":      callLogsQ,
+    "visits":     fieldVisitsQ,
+    "attendance": attendanceQ,
+    "deposits":   depositionsQ,
+    "receipts":   receiptQ,
+    "fos":        fosQ,
+  };
 
   return (
     <View style={{ flex: 1, backgroundColor: Colors.background }}>
@@ -473,8 +488,11 @@ export default function AppLogsScreen() {
           </Pressable>
         </View>
 
+        {/* Debug Panel */}
+        <DebugPanel queries={debugQueries} />
+
         {/* Stats */}
-        <StatsBar logs={filtered} />
+        <StatsBar logs={allLogs} />
 
         {/* Type filter */}
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.filterRow}>
@@ -483,13 +501,7 @@ export default function AppLogsScreen() {
             return (
               <Pressable
                 key={g.key}
-                style={[
-                  s.chip,
-                  {
-                    borderColor: g.color + "66",
-                    backgroundColor: active ? g.color : g.color + "15",
-                  },
-                ]}
+                style={[s.chip, { borderColor: g.color + "66", backgroundColor: active ? g.color : g.color + "15" }]}
                 onPress={() => setTypeFilter(g.key as LogType | "All")}
               >
                 <Ionicons name={g.icon} size={11} color={active ? "#fff" : g.color} />
@@ -506,11 +518,7 @@ export default function AppLogsScreen() {
             return (
               <Pressable
                 key={a}
-                style={[
-                  s.chip,
-                  s.agentChipBase,
-                  active && { backgroundColor: Colors.primary, borderColor: Colors.primary },
-                ]}
+                style={[s.chip, s.agentChipBase, active && { backgroundColor: Colors.primary, borderColor: Colors.primary }]}
                 onPress={() => setAgentFilter(a)}
               >
                 <Ionicons name="person-outline" size={11} color={active ? "#fff" : Colors.primary} />
@@ -523,16 +531,18 @@ export default function AppLogsScreen() {
         {/* Count */}
         <Text style={s.sectionTitle}>
           {filtered.length} Log{filtered.length !== 1 ? "s" : ""}
-          {typeFilter !== "All" ? ` · ${TYPE_CONFIG[typeFilter]?.label ?? typeFilter}` : ""}
+          {typeFilter !== "All" ? ` · ${TYPE_CONFIG[typeFilter as LogType]?.label ?? typeFilter}` : ""}
           {agentFilter !== "All" ? ` · ${agentFilter}` : ""}
         </Text>
 
-        {/* Cards */}
+        {/* Cards or empty state */}
         {filtered.length === 0 ? (
           <View style={s.empty}>
             <Ionicons name="document-text-outline" size={48} color={Colors.textMuted} />
             <Text style={s.emptyText}>
-              {allLogs.length === 0 ? "No activity logs yet." : "No logs match your filters."}
+              {allLogs.length === 0
+                ? "No logs yet. Check the Debug API panel above to see API responses."
+                : "No logs match your filters."}
             </Text>
           </View>
         ) : (
@@ -560,8 +570,7 @@ const s = StyleSheet.create({
   statCard: {
     width: 80, backgroundColor: Colors.surface, borderRadius: 12, padding: 10,
     alignItems: "center", gap: 3, borderTopWidth: 3, borderWidth: StyleSheet.hairlineWidth,
-    borderColor: Colors.border, shadowColor: "#000", shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05, shadowRadius: 4, elevation: 1,
+    borderColor: Colors.border,
   },
   statNum:    { fontSize: 18, fontWeight: "800" },
   statLabel:  { fontSize: 9, color: Colors.textSecondary, fontWeight: "600", textAlign: "center" },
@@ -582,8 +591,6 @@ const card = StyleSheet.create({
   wrap: {
     flexDirection: "row", backgroundColor: Colors.surface, borderRadius: 14,
     borderWidth: StyleSheet.hairlineWidth, borderColor: Colors.border, overflow: "hidden",
-    shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.04,
-    shadowRadius: 6, elevation: 1,
   },
   accent: { width: 4, flexShrink: 0 },
   body:   { flex: 1, padding: 13, gap: 6 },
