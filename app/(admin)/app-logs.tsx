@@ -327,42 +327,49 @@ export default function AppLogsScreen() {
     queryKey: ["/api/admin/activity-logs"],
     queryFn:  () => api.admin.getActivityLogs(500),
     refetchInterval: 30000,
+    staleTime: 0,
     retry: 1,
   });
   const callLogsQ = useQuery({
     queryKey: ["/api/admin/call-logs"],
     queryFn:  () => api.admin.getCallLogs(500),
     refetchInterval: 60000,
+    staleTime: 0,
     retry: 1,
   });
   const fieldVisitsQ = useQuery({
     queryKey: ["/api/admin/field-visits"],
     queryFn:  () => api.admin.getAdminFieldVisits({}),
     refetchInterval: 60000,
+    staleTime: 0,
     retry: 1,
   });
   const attendanceQ = useQuery({
     queryKey: ["/api/admin/attendance"],
     queryFn:  () => api.admin.getAllAttendance(),
     refetchInterval: 60000,
+    staleTime: 0,
     retry: 1,
   });
   const depositionsQ = useQuery({
     queryKey: ["/api/admin/depositions"],
     queryFn:  () => api.admin.getAllDepositions(),
     refetchInterval: 60000,
+    staleTime: 0,
     retry: 1,
   });
   const receiptQ = useQuery({
     queryKey: ["/api/admin/receipt-requests"],
     queryFn:  () => api.admin.getReceiptRequests(),
     refetchInterval: 60000,
+    staleTime: 0,
     retry: 1,
   });
   const fosQ = useQuery({
     queryKey: ["/api/admin/fos-depositions"],
     queryFn:  () => api.admin.getFosDepositions(),
     refetchInterval: 60000,
+    staleTime: 0,
     retry: 1,
   });
 
@@ -423,7 +430,9 @@ export default function AppLogsScreen() {
     activityQ.isRefetching || callLogsQ.isRefetching || fieldVisitsQ.isRefetching ||
     attendanceQ.isRefetching || depositionsQ.isRefetching || receiptQ.isRefetching || fosQ.isRefetching;
 
-  const anyLoading = activityQ.isLoading || callLogsQ.isLoading;
+  const anyLoading = activityQ.isLoading && callLogsQ.isLoading &&
+    fieldVisitsQ.isLoading && attendanceQ.isLoading &&
+    depositionsQ.isLoading && receiptQ.isLoading && fosQ.isLoading;
 
   // Show loading spinner for max 8 seconds
   const [timedOut, setTimedOut] = React.useState(false);
