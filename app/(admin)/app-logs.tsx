@@ -336,6 +336,7 @@ export default function AppLogsScreen() {
 
   // Only block on activity logs — show page immediately, other sources merge in when ready
   const isLoading = activityQ.isLoading;
+  const hasError  = activityQ.isError;
 
 
 
@@ -349,7 +350,7 @@ export default function AppLogsScreen() {
         Array.isArray(fieldVisitsQ.data) ? fieldVisitsQ.data : fieldVisitsQ.data?.visits ?? [],
       ),
       ...normAttendance(
-        Array.isArray(attendanceQ.data) ? attendanceQ.data : attendanceQ.data?.records ?? [],
+        Array.isArray(attendanceQ.data) ? attendanceQ.data : attendanceQ.data?.attendance ?? [],
       ),
       ...normDepositions(
         Array.isArray(depositionsQ.data) ? depositionsQ.data : depositionsQ.data?.depositions ?? [],
@@ -412,6 +413,26 @@ export default function AppLogsScreen() {
       <View style={{ flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: Colors.background }}>
         <ActivityIndicator color={Colors.primary} size="large" />
         <Text style={{ color: Colors.textMuted, marginTop: 12, fontSize: 13 }}>Loading application logs…</Text>
+      </View>
+    );
+  }
+
+  if (hasError && allLogs.length === 0) {
+    return (
+      <View style={{ flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: Colors.background, padding: 32 }}>
+        <Ionicons name="cloud-offline-outline" size={48} color={Colors.danger ?? "#DC2626"} />
+        <Text style={{ color: Colors.text, marginTop: 12, fontSize: 15, fontWeight: "700", textAlign: "center" }}>
+          Failed to load logs
+        </Text>
+        <Text style={{ color: Colors.textMuted, marginTop: 6, fontSize: 13, textAlign: "center" }}>
+          {(activityQ.error as Error)?.message ?? "Network error. Check your connection."}
+        </Text>
+        <Pressable
+          style={{ marginTop: 20, backgroundColor: Colors.primary, borderRadius: 12, paddingHorizontal: 24, paddingVertical: 12 }}
+          onPress={refetchAll}
+        >
+          <Text style={{ color: "#fff", fontWeight: "700", fontSize: 14 }}>Retry</Text>
+        </Pressable>
       </View>
     );
   }
