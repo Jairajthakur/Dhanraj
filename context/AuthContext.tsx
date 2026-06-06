@@ -73,7 +73,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setAgent(res.agent);
         agentRef.current = res.agent;
         await agentCache.set(res.agent);
-        if (res?.token && Platform.OS !== "web") {
+        if (res?.token) {
           await tokenStore.set(res.token);
         }
       }
@@ -242,7 +242,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (!res?.agent) throw new Error("Invalid response from server");
 
       await agentCache.set(res.agent);
-      if (res?.token && Platform.OS !== "web") {
+      if (res?.token) {
         await tokenStore.set(res.token);
       }
       lastValidatedRef.current = Date.now();
