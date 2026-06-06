@@ -686,9 +686,9 @@ app.use("/api/fos-depositions", (req, res, next) => {
 });
   const PgStore = connectPgSimple(session);
   app.use(session({
-    store: new PgStore({ conString: process.env.DATABASE_URL, tableName: "user_sessions", createTableIfMissing: true }),
+    store: new PgStore({ conString: process.env.DATABASE_URL, tableName: "user_sessions", createTableIfMissing: true, pruneSessionInterval: 3600 }),
     secret: process.env.SESSION_SECRET || "fos-secret-key-2024",
-    resave: true, saveUninitialized: false,
+    resave: false, saveUninitialized: false,
 // ✅ FIX: Mobile internet (React Native on 4G/5G) sends cross-origin requests.
     // sameSite:"lax" blocks cookies on cross-origin POSTs (including login) →
     // session is never attached → every request returns 401.
@@ -698,36 +698,50 @@ app.use("/api/fos-depositions", (req, res, next) => {
   }));
 
  function requireAuth(req: Request, res: Response, next: any) {
-    // ADD THESE 2 LINES:
-    console.log("[auth] session agentId:", req.session.agentId);
-    console.log("[auth] auth header:", req.headers.authorization?.slice(0, 30));
-    
-    if (req.session.agentId) return next();
+    // Fast path: check JWT Bearer token first (no DB round-trip)
     const authHeader = req.headers.authorization;
     if (authHeader?.startsWith("Bearer ")) {
       const payload = verifyToken(authHeader.slice(7));
-      if (payload) { req.session.agentId = payload.agentId; req.session.role = payload.role; return next(); }
+      if (payload) {
+        req.session.agentId = payload.agentId;
+        req.session.role = payload.role;
+        return next();
+      }
     }
+    // Fallback: session cookie (set by login on same-origin web)
+    if (req.session.agentId) return next();
     return res.status(401).json({ message: "Unauthorized" });
   }
 
   function requireAdmin(req: Request, res: Response, next: any) {
-    if (req.session.agentId && req.session.role === "admin") return next();
+    // Fast path: check JWT Bearer token first (no DB round-trip)
     const authHeader = req.headers.authorization;
     if (authHeader?.startsWith("Bearer ")) {
       const payload = verifyToken(authHeader.slice(7));
-      if (payload?.role === "admin") { req.session.agentId = payload.agentId; req.session.role = payload.role; return next(); }
+      if (payload?.role === "admin") {
+        req.session.agentId = payload.agentId;
+        req.session.role = payload.role;
+        return next();
+      }
     }
+    // Fallback: session cookie
+    if (req.session.agentId && req.session.role === "admin") return next();
     return res.status(403).json({ message: "Forbidden" });
   }
 
   function requireRepo(req: Request, res: Response, next: any) {
-    if (req.session.agentId && req.session.role === "repo") return next();
+    // Fast path: check JWT Bearer token first (no DB round-trip)
     const authHeader = req.headers.authorization;
     if (authHeader?.startsWith("Bearer ")) {
       const payload = verifyToken(authHeader.slice(7));
-      if (payload?.role === "repo") { req.session.agentId = payload.agentId; req.session.role = payload.role; return next(); }
+      if (payload?.role === "repo") {
+        req.session.agentId = payload.agentId;
+        req.session.role = payload.role;
+        return next();
+      }
     }
+    // Fallback: session cookie
+    if (req.session.agentId && req.session.role === "repo") return next();
     return res.status(403).json({ message: "Forbidden" });
   }
 
