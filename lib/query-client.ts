@@ -12,19 +12,15 @@ import {
 //   3. app.config.js extra.apiUrl               — baked in at build time
 //   4. Hardcoded fallback                        — last resort
 export function getApiUrl(): string {
-  // On web (browser), always use relative URLs — the API is served from the
-  // same origin, so there's no need to resolve an external domain at all.
-  // This means ISP DNS issues with *.railway.app never affect API calls.
-  if (Platform.OS === "web" && typeof window !== "undefined") {
-    return window.location.origin;
-  }
-
-  // EAS / Expo public env var (available at JS runtime in EAS builds)
+  // EAS / Expo public env var — highest priority
   if (process.env.EXPO_PUBLIC_API_URL) {
     return process.env.EXPO_PUBLIC_API_URL;
   }
 
-  // Expo config extra (baked in via app.config.js)
+  // Expo config extra (baked in via app.config.js) — works on all platforms.
+  // NOTE: We do NOT use window.location.origin on web because the frontend
+  // (Netlify) and backend (Railway) are on different origins. Sending API
+  // calls to the frontend origin would hit Netlify which has no /api/ routes.
   const extraUrl = Constants.expoConfig?.extra?.apiUrl;
   if (extraUrl) {
     return extraUrl;
