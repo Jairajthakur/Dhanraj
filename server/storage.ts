@@ -260,21 +260,12 @@ export async function initDatabase() {
     `INSERT INTO fos_agents (name, username, password, role)
      VALUES ('Admin', 'admin', 'admin123', 'admin')
      ON CONFLICT (username) DO NOTHING`,
-    // Drop and recreate activity_logs with correct column names
-    `DROP TABLE IF EXISTS activity_logs`,
-    `CREATE TABLE IF NOT EXISTS activity_logs (
-      id          SERIAL PRIMARY KEY,
-      agent_id    INTEGER REFERENCES fos_agents(id) ON DELETE SET NULL,
-      agent_name  TEXT,
-      event_type  TEXT NOT NULL,
-      detail      TEXT,
-      ip_address  TEXT,
-      created_at  TIMESTAMPTZ DEFAULT NOW()
-    )`,
+    // Safe column additions only — never drops existing log data
+    `ALTER TABLE activity_logs ADD COLUMN IF NOT EXISTS agent_name  TEXT`,
+    `ALTER TABLE activity_logs ADD COLUMN IF NOT EXISTS ip_address  TEXT`,
+    `ALTER TABLE activity_logs ADD COLUMN IF NOT EXISTS platform    TEXT`,
     `CREATE INDEX IF NOT EXISTS idx_activity_logs_agent2  ON activity_logs(agent_id)`,
     `CREATE INDEX IF NOT EXISTS idx_activity_logs_time2   ON activity_logs(created_at DESC)`,
-    // Add platform column if it doesn't exist (safe on existing DBs)
-    `ALTER TABLE activity_logs ADD COLUMN IF NOT EXISTS platform TEXT`,
   ];
 
   for (const sql of migrations) {
