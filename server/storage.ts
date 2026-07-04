@@ -605,6 +605,8 @@ export async function upsertLoanCase(data: {
       loan_maturity_date  = EXCLUDED.loan_maturity_date,
       tenor               = EXCLUDED.tenor,
       pro                 = EXCLUDED.pro,
+      latest_feedback     = EXCLUDED.latest_feedback,
+      feedback_comments   = EXCLUDED.feedback_comments,
       -- Only overwrite status/ptp dates from Excel when the case is now Paid.
       -- This preserves agent-entered PTP data (PTP status, ptp_date) when the
       -- Excel file still shows the case as Unpaid/PTP.
