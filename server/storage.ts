@@ -605,14 +605,11 @@ export async function upsertLoanCase(data: {
       loan_maturity_date  = EXCLUDED.loan_maturity_date,
       tenor               = EXCLUDED.tenor,
       pro                 = EXCLUDED.pro,
-      latest_feedback     = EXCLUDED.latest_feedback,
-      feedback_comments   = EXCLUDED.feedback_comments,
-      -- Only overwrite status/ptp dates from Excel when the case is now Paid.
-      -- This preserves agent-entered PTP data (PTP status, ptp_date) when the
-      -- Excel file still shows the case as Unpaid/PTP.
-      status              = CASE WHEN EXCLUDED.status = 'Paid' THEN 'Paid' ELSE loan_cases.status END,
-      ptp_date            = CASE WHEN EXCLUDED.status = 'Paid' THEN NULL ELSE loan_cases.ptp_date END,
-      telecaller_ptp_date = CASE WHEN EXCLUDED.status = 'Paid' THEN NULL ELSE loan_cases.telecaller_ptp_date END,
+      -- Force-update: status and ptp dates always overwritten from the Excel file,
+      -- so every re-import fully reflects the uploaded allocation sheet.
+      status              = EXCLUDED.status,
+      ptp_date            = EXCLUDED.ptp_date,
+      telecaller_ptp_date = EXCLUDED.telecaller_ptp_date,
       rollback_yn         = EXCLUDED.rollback_yn,
       company_name        = EXCLUDED.company_name,
       coll_amount         = EXCLUDED.coll_amount
