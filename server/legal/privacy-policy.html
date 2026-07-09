@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Privacy Policy — Dhanraj Enterprises</title>
+<meta name="description" content="Privacy Policy for the Dhanraj Enterprises field collection app.">
+<style>
+  :root {
+    --bg: #ECEAE4;
+    --surface: #F5F4F0;
+    --surface-alt: #E2E0DA;
+    --ink: #111111;
+    --ink-soft: #4A4A4A;
+    --muted: #6B6B6B;
+    --border: #C8C6BE;
+    --accent: #FF6B00;
+    --accent-deep: #C4501A;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+  }
+  header.top {
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+  }
+  .top-inner {
+    max-width: 880px;
+    margin: 0 auto;
+    padding: 22px 24px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+  }
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-weight: 700;
+    letter-spacing: 0.01em;
+    color: var(--ink);
+    text-decoration: none;
+    font-size: 16px;
+  }
+  .brand .mark {
+    width: 28px; height: 28px;
+    border-radius: 7px;
+    background: var(--ink);
+    color: #fff;
+    display: flex; align-items: center; justify-content: center;
+    font-family: ui-serif, Georgia, serif;
+    font-weight: 700;
+    font-size: 14px;
+  }
+  .top-links { display: flex; gap: 18px; font-size: 13px; }
+  .top-links a { color: var(--muted); text-decoration: none; border-bottom: 1px solid transparent; }
+  .top-links a:hover { color: var(--ink); border-bottom-color: var(--accent); }
+
+  main { max-width: 880px; margin: 0 auto; padding: 48px 24px 96px; }
+
+  .doc-head { margin-bottom: 40px; }
+  .eyebrow {
+    display: inline-block;
+    font-size: 11px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--accent-deep);
+    background: #FFE7D6;
+    padding: 4px 10px;
+    border-radius: 999px;
+    margin-bottom: 16px;
+    font-weight: 700;
+  }
+  h1 {
+    font-family: ui-serif, Georgia, "Times New Roman", serif;
+    font-size: clamp(28px, 4vw, 40px);
+    font-weight: 600;
+    line-height: 1.15;
+    margin-bottom: 10px;
+  }
+  .meta { color: var(--muted); font-size: 14px; }
+  .meta strong { color: var(--ink-soft); }
+
+  .layout { display: grid; grid-template-columns: 220px 1fr; gap: 48px; align-items: start; }
+  @media (max-width: 760px) { .layout { grid-template-columns: 1fr; } }
+
+  nav.toc {
+    position: sticky; top: 24px;
+    border-left: 2px solid var(--border);
+    padding-left: 16px;
+  }
+  nav.toc .toc-label {
+    font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase;
+    color: var(--muted); margin-bottom: 10px; font-weight: 700;
+  }
+  nav.toc ol { list-style: none; counter-reset: toc; display: flex; flex-direction: column; gap: 8px; }
+  nav.toc li { counter-increment: toc; font-size: 13.5px; }
+  nav.toc a {
+    color: var(--ink-soft); text-decoration: none; display: flex; gap: 8px;
+  }
+  nav.toc a::before {
+    content: counter(toc, decimal-leading-zero);
+    color: var(--accent-deep);
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+  }
+  nav.toc a:hover { color: var(--accent-deep); }
+
+  article section { margin-bottom: 36px; scroll-margin-top: 24px; }
+  article h2 {
+    font-family: ui-serif, Georgia, serif;
+    font-size: 21px;
+    font-weight: 600;
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+  }
+  article h3 {
+    font-size: 15px;
+    font-weight: 700;
+    margin: 18px 0 6px;
+    color: var(--ink);
+  }
+  article p { color: var(--ink-soft); margin-bottom: 12px; font-size: 15px; }
+  article ul, article ol { margin: 0 0 12px 20px; color: var(--ink-soft); font-size: 15px; }
+  article li { margin-bottom: 6px; }
+  article a { color: var(--accent-deep); }
+
+  table.data-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 8px 0 18px;
+    font-size: 13.5px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+  }
+  table.data-table th, table.data-table td {
+    text-align: left;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+  table.data-table th {
+    background: var(--surface-alt);
+    font-size: 11px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  table.data-table tr:last-child td { border-bottom: none; }
+
+  .callout {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent);
+    border-radius: 6px;
+    padding: 14px 16px;
+    font-size: 14px;
+    color: var(--ink-soft);
+    margin-bottom: 16px;
+  }
+
+  footer.doc-footer {
+    border-top: 1px solid var(--border);
+    margin-top: 48px;
+    padding-top: 24px;
+    font-size: 13px;
+    color: var(--muted);
+  }
+  footer.doc-footer a { color: var(--accent-deep); text-decoration: none; }
+
+  @media print {
+    header.top, nav.toc { display: none; }
+    .layout { grid-template-columns: 1fr; }
+    body { background: #fff; }
+  }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="top-inner">
+    <a href="/" class="brand"><span class="mark">D</span> Dhanraj Enterprises</a>
+    <nav class="top-links">
+      <a href="/terms-and-conditions">Terms &amp; Conditions</a>
+      <a href="/delete-account">Data Deletion</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <div class="doc-head">
+    <span class="eyebrow">Legal</span>
+    <h1>Privacy Policy</h1>
+    <p class="meta"><strong>Effective date:</strong> July 9, 2026 &nbsp;·&nbsp; <strong>App:</strong> Dhanraj Enterprises (package <code>com.dhanraj.app</code>)</p>
+  </div>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Table of contents">
+      <div class="toc-label">On this page</div>
+      <ol>
+        <li><a href="#scope">Scope &amp; who we are</a></li>
+        <li><a href="#collect">Information we collect</a></li>
+        <li><a href="#customer-data">Borrower / customer data</a></li>
+        <li><a href="#use">How we use information</a></li>
+        <li><a href="#sharing">Sharing with third parties</a></li>
+        <li><a href="#permissions">Device permissions</a></li>
+        <li><a href="#retention">Data retention</a></li>
+        <li><a href="#security">Security</a></li>
+        <li><a href="#rights">Your rights &amp; deletion</a></li>
+        <li><a href="#children">Children's privacy</a></li>
+        <li><a href="#changes">Changes to this policy</a></li>
+        <li><a href="#contact">Contact us</a></li>
+      </ol>
+    </nav>
+
+    <article>
+      <section id="scope">
+        <h2>1. Scope &amp; who we are</h2>
+        <p>Dhanraj Enterprises ("Dhanraj", "we", "us", "our") operates the Dhanraj Enterprises mobile application (the "App"), an internal field-operations tool used by our employees and authorised field officers/agents to manage loan collection visits, deposition records, and related administrative work. This Privacy Policy explains what information the App collects, how it is used, and the choices available to you.</p>
+        <p>The App is <strong>not a public consumer app</strong>. Accounts are created and issued by Dhanraj administrators to verified employees, field officers, and agency staff for work purposes only. If you have received the App from us as part of your employment or engagement, this policy applies to you.</p>
+      </section>
+
+      <section id="collect">
+        <h2>2. Information we collect</h2>
+        <p>We collect the following categories of information in connection with your use of the App:</p>
+        <table class="data-table">
+          <thead>
+            <tr><th>Category</th><th>Examples</th><th>Source</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Account &amp; identity data</td>
+              <td>Name, phone number, employee/agent ID, role, login credentials, profile photo, ID card details</td>
+              <td>Provided by admin at onboarding, or by you</td>
+            </tr>
+            <tr>
+              <td>Location data</td>
+              <td>Precise GPS coordinates captured at the moment you record a field visit, deposition, or check-in</td>
+              <td>Device GPS (foreground only, with your permission)</td>
+            </tr>
+            <tr>
+              <td>Photos &amp; documents</td>
+              <td>Visit proof photos, receipt images, ID/KYC document scans, allocation files (Excel/CSV)</td>
+              <td>Camera, photo library, or file picker, uploaded by you</td>
+            </tr>
+            <tr>
+              <td>Voice input</td>
+              <td>Short audio captured only while you actively use the "speech-to-text" microphone button to dictate remarks</td>
+              <td>Device microphone, only while the feature is in use</td>
+            </tr>
+            <tr>
+              <td>Work &amp; performance records</td>
+              <td>Attendance, case assignments, collection/DRR records, payout &amp; salary computations, call/visit remarks</td>
+              <td>Generated by your use of the App and by admins</td>
+            </tr>
+            <tr>
+              <td>Device &amp; diagnostic data</td>
+              <td>Device model, OS version, app version, IP address, crash and error logs, push-notification token</td>
+              <td>Automatically collected</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="customer-data">
+        <h2>3. Borrower / customer data</h2>
+        <p>Because the App is used for loan collection operations, field officers enter and view information about the borrowers/customers they are assigned to visit — for example, name, address, phone number, loan/EMI details, outstanding balances, and repayment or promise-to-pay notes. This data belongs to and is controlled by Dhanraj Enterprises and its lending partners; it is entered into the App by our staff in the course of their duties, not collected directly from borrowers by the App itself.</p>
+        <p>Field officers and agents are required to access and use this data strictly for legitimate collection purposes and to keep it confidential, in line with our internal data-handling policies and applicable law.</p>
+      </section>
+
+      <section id="use">
+        <h2>4. How we use information</h2>
+        <ul>
+          <li>To operate core App features: case allocation, field-visit tracking, depositions, attendance, receipts, and reporting.</li>
+          <li>To verify that a visit was made at the recorded location (geo-tagging) and to prevent fraud.</li>
+          <li>To calculate performance, payout, and salary figures for field staff.</li>
+          <li>To send you work-related push notifications (e.g. new case assignments, reminders).</li>
+          <li>To convert your dictated voice notes into text for remarks — audio is processed for this purpose only and is not used for any other purpose.</li>
+          <li>To maintain security, investigate misuse, debug issues, and keep an audit trail of app activity (activity logs).</li>
+          <li>To comply with our obligations to lending partners and applicable regulatory requirements.</li>
+        </ul>
+        <p>We do <strong>not</strong> use your data for advertising, and we do not sell personal data to third parties.</p>
+      </section>
+
+      <section id="sharing">
+        <h2>5. Sharing with third parties</h2>
+        <p>We share information only as needed to run the App, with service providers bound to protect it:</p>
+        <ul>
+          <li><strong>Hosting &amp; infrastructure</strong> — our backend and database run on Railway.</li>
+          <li><strong>Push notifications</strong> — delivered via OneSignal, which receives a device token and basic device information to route notifications.</li>
+          <li><strong>Application logging &amp; monitoring</strong> — technical logs (not photos or documents) are sent to Betterstack to help us detect and fix errors.</li>
+          <li><strong>Lending partners</strong> — case, collection, and performance data may be shared with the lending institution(s) that Dhanraj works with, as necessary to operate the loan collection program.</li>
+          <li><strong>Legal requirements</strong> — we may disclose information if required to do so by law, regulation, or a valid request from a public authority.</li>
+        </ul>
+        <p>We do not permit these providers to use your data for their own marketing purposes.</p>
+      </section>
+
+      <section id="permissions">
+        <h2>6. Device permissions</h2>
+        <p>The App requests the following Android/iOS permissions. Each is used only for the purpose stated, and location/microphone/camera access is requested at the time of use, not silently in the background.</p>
+        <table class="data-table">
+          <thead><tr><th>Permission</th><th>Why we ask</th></tr></thead>
+          <tbody>
+            <tr><td>Location (foreground)</td><td>Geo-tag field visits and depositions at the moment you record them</td></tr>
+            <tr><td>Camera / Photos</td><td>Capture or attach visit proof, receipts, and KYC/ID document images</td></tr>
+            <tr><td>Microphone</td><td>Convert spoken remarks to text on your request</td></tr>
+            <tr><td>Storage / files</td><td>Attach, share, or import files such as Excel allocation sheets</td></tr>
+            <tr><td>Notifications</td><td>Deliver assignment and reminder alerts</td></tr>
+          </tbody>
+        </table>
+        <div class="callout">We do not access your location in the background, do not record audio outside the speech-to-text feature, and do not read your contacts or call history.</div>
+      </section>
+
+      <section id="retention">
+        <h2>7. Data retention</h2>
+        <p>We retain account, case, collection, and financial records for as long as your account is active and thereafter for the period required by our internal record-keeping practices and applicable financial/regulatory obligations (typically for the duration of the underlying loan relationship plus a statutory retention period). Diagnostic logs are retained for a shorter period and rotated periodically.</p>
+      </section>
+
+      <section id="security">
+        <h2>8. Security</h2>
+        <p>We use industry-standard safeguards to protect data in transit and at rest, including encrypted (HTTPS) connections between the App and our servers, access-controlled admin accounts, and role-based permissions so field staff can only see the cases assigned to them. No method of transmission or storage is 100% secure, and we work to continually improve our safeguards.</p>
+      </section>
+
+      <section id="rights">
+        <h2>9. Your rights &amp; deletion</h2>
+        <p>If you are a Dhanraj employee or agent, you may request access to, correction of, or deletion of your personal account data by contacting us at the email below, or by visiting our <a href="/delete-account">account &amp; data deletion page</a>. Some information may need to be retained even after a deletion request where required for legal, audit, or regulatory reasons — this is explained in detail on that page.</p>
+      </section>
+
+      <section id="children">
+        <h2>10. Children's privacy</h2>
+        <p>The App is intended solely for use by adult employees and authorised agents of Dhanraj Enterprises in the course of their work. It is not directed at, and we do not knowingly collect information from, children.</p>
+      </section>
+
+      <section id="changes">
+        <h2>11. Changes to this policy</h2>
+        <p>We may update this Privacy Policy from time to time to reflect changes in the App or our practices. We will update the "Effective date" above when we do, and material changes will be communicated to staff through normal work channels.</p>
+      </section>
+
+      <section id="contact">
+        <h2>12. Contact us</h2>
+        <p>For questions about this Privacy Policy or how your data is handled, contact:</p>
+        <p><strong>Dhanraj Enterprises</strong><br>
+        Email: <a href="mailto:support@thdhanraj.co.in">support@thdhanraj.co.in</a><br>
+        Website: <a href="https://www.thdhanraj.co.in">www.thdhanraj.co.in</a></p>
+      </section>
+    </article>
+  </div>
+
+  <footer class="doc-footer">
+    <p>© 2026 Dhanraj Enterprises. All rights reserved. &nbsp;·&nbsp; <a href="/terms-and-conditions">Terms &amp; Conditions</a> &nbsp;·&nbsp; <a href="/delete-account">Data Deletion</a></p>
+  </footer>
+</main>
+
+</body>
+</html>
