@@ -39,6 +39,7 @@ module.exports = ({ config }) => {
     },
     android: {
       package: "com.dhanraj.app",
+      versionCode: 1,
       permissions: [
         "NOTIFICATIONS",
         "RECEIVE_BOOT_COMPLETED",
