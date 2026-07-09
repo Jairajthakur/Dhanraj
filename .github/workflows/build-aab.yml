@@ -1,0 +1,74 @@
+name: Build Android App Bundle (AAB) for Play Store
+
+on:
+  workflow_dispatch:
+    inputs:
+      api_url:
+        description: 'API URL'
+        required: false
+        default: 'https://www.thdhanraj.co.in'
+
+env:
+  EXPO_PUBLIC_API_URL: ${{ github.event.inputs.api_url || 'https://www.thdhanraj.co.in' }}
+
+jobs:
+  build:
+    name: Build AAB via EAS
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: |
+          npm config set legacy-peer-deps true
+          npm install --legacy-peer-deps
+
+      - name: Setup EAS
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Build AAB on EAS (cloud build, signed automatically)
+        id: eas_build
+        run: |
+          eas build \
+            --platform android \
+            --profile playstore \
+            --non-interactive \
+            --wait \
+            --json > eas-build-result.json
+          cat eas-build-result.json
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          EXPO_PUBLIC_API_URL: ${{ env.EXPO_PUBLIC_API_URL }}
+
+      - name: Extract AAB download URL
+        id: extract_url
+        run: |
+          ARTIFACT_URL=$(node -e "
+            const runs = JSON.parse(require('fs').readFileSync('eas-build-result.json', 'utf-8'));
+            const run = Array.isArray(runs) ? runs[0] : runs;
+            const url = run.artifacts && run.artifacts.buildUrl;
+            if (!url) { console.error('No build artifact URL found — check eas-build-result.json'); process.exit(1); }
+            console.log(url);
+          ")
+          echo "artifact_url=$ARTIFACT_URL" >> "$GITHUB_OUTPUT"
+
+      - name: Download AAB
+        run: |
+          curl -L "${{ steps.extract_url.outputs.artifact_url }}" -o dhanraj-release.aab
+          ls -la dhanraj-release.aab
+
+      - name: Upload AAB as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dhanraj-release-${{ github.run_number }}.aab
+          path: dhanraj-release.aab
+          retention-days: 30
