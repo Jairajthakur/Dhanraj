@@ -19,8 +19,7 @@
     "playstore": {
       "channel": "production",
       "android": {
-        "buildType": "app-bundle",
-        "autoIncrement": "versionCode"
+        "buildType": "app-bundle"
       },
       "resourceClass": "medium",
       "env": {
