@@ -39,7 +39,7 @@ module.exports = ({ config }) => {
     },
     android: {
       package: "com.dhanraj.app",
-      versionCode: 2,
+      versionCode: 1,
       permissions: [
         "NOTIFICATIONS",
         "RECEIVE_BOOT_COMPLETED",
@@ -73,6 +73,19 @@ module.exports = ({ config }) => {
       "expo-router",
       "expo-font",
       "expo-web-browser",
+      [
+        "expo-build-properties",
+        {
+          android: {
+            // Fixes a manifest merger conflict: some dependencies (e.g. the
+            // deprecated @react-native-voice/voice) still ship pre-AndroidX
+            // "com.android.support" manifest attributes. Jetifier rewrites
+            // those to AndroidX equivalents so they don't collide with
+            // androidx.core at build time.
+            enableJetifier: true,
+          },
+        },
+      ],
       [
         "onesignal-expo-plugin",
         {
