@@ -189,8 +189,27 @@ function serveExpoManifest(platform: string, res: Response) {
   res.send(manifest);
 }
 
+function configureLegalPages(app: express.Application) {
+  // Play Store requires publicly reachable Privacy Policy / Terms / Data
+  // Deletion pages. These are registered before the SPA catch-all below so
+  // they're always served, whether or not the Expo web build exists.
+  const legalDir = path.resolve(process.cwd(), "server/legal");
+
+  app.get("/privacy-policy", (_req: Request, res: Response) => {
+    res.sendFile(path.join(legalDir, "privacy-policy.html"));
+  });
+  app.get("/terms-and-conditions", (_req: Request, res: Response) => {
+    res.sendFile(path.join(legalDir, "terms-and-conditions.html"));
+  });
+  app.get("/delete-account", (_req: Request, res: Response) => {
+    res.sendFile(path.join(legalDir, "account-deletion.html"));
+  });
+}
+
 function configureExpoAndLanding(app: express.Application) {
   log("Configuring static file serving...");
+
+  configureLegalPages(app);
 
   // Serve uploads and assets
   app.use("/uploads", express.static(path.resolve(process.cwd(), "server/uploads")));
