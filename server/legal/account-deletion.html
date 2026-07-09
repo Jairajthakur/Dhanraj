@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Account &amp; Data Deletion — Dhanraj Enterprises</title>
+<meta name="description" content="How to request account deactivation or data deletion for the Dhanraj Enterprises app.">
+<style>
+  :root {
+    --bg: #ECEAE4;
+    --surface: #F5F4F0;
+    --surface-alt: #E2E0DA;
+    --ink: #111111;
+    --ink-soft: #4A4A4A;
+    --muted: #6B6B6B;
+    --border: #C8C6BE;
+    --accent: #E24B4A;
+    --accent-deep: #B23533;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--bg); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.65; -webkit-font-smoothing: antialiased;
+  }
+  header.top { border-bottom: 1px solid var(--border); background: var(--surface); }
+  .top-inner {
+    max-width: 720px; margin: 0 auto; padding: 22px 24px;
+    display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  }
+  .brand {
+    display: flex; align-items: center; gap: 10px;
+    font-weight: 700; letter-spacing: 0.01em; color: var(--ink);
+    text-decoration: none; font-size: 16px;
+  }
+  .brand .mark {
+    width: 28px; height: 28px; border-radius: 7px; background: var(--ink); color: #fff;
+    display: flex; align-items: center; justify-content: center;
+    font-family: ui-serif, Georgia, serif; font-weight: 700; font-size: 14px;
+  }
+  .top-links { display: flex; gap: 18px; font-size: 13px; }
+  .top-links a { color: var(--muted); text-decoration: none; border-bottom: 1px solid transparent; }
+  .top-links a:hover { color: var(--ink); border-bottom-color: var(--accent); }
+
+  main { max-width: 720px; margin: 0 auto; padding: 48px 24px 96px; }
+  .eyebrow {
+    display: inline-block; font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase;
+    color: var(--accent-deep); background: #FBDCDB; padding: 4px 10px; border-radius: 999px;
+    margin-bottom: 16px; font-weight: 700;
+  }
+  h1 {
+    font-family: ui-serif, Georgia, "Times New Roman", serif;
+    font-size: clamp(28px, 4vw, 38px); font-weight: 600; line-height: 1.15; margin-bottom: 10px;
+  }
+  .meta { color: var(--muted); font-size: 14px; margin-bottom: 36px; }
+
+  .steps {
+    list-style: none; counter-reset: step;
+    display: flex; flex-direction: column; gap: 14px;
+    margin: 20px 0 36px;
+  }
+  .steps li {
+    counter-increment: step;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px 18px 16px 54px;
+    position: relative;
+    font-size: 15px;
+    color: var(--ink-soft);
+  }
+  .steps li::before {
+    content: counter(step);
+    position: absolute; left: 16px; top: 50%; transform: translateY(-50%);
+    width: 26px; height: 26px; border-radius: 50%;
+    background: var(--ink); color: #fff;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 13px; font-weight: 700;
+  }
+  .steps li strong { color: var(--ink); }
+
+  .card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+    padding: 22px; margin-bottom: 20px;
+  }
+  .card h2 {
+    font-family: ui-serif, Georgia, serif; font-size: 18px; font-weight: 600; margin-bottom: 10px;
+  }
+  .card p, section p { color: var(--ink-soft); font-size: 15px; margin-bottom: 10px; }
+  section { margin-bottom: 32px; }
+  section h2 {
+    font-family: ui-serif, Georgia, serif; font-size: 20px; font-weight: 600;
+    margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid var(--border);
+  }
+  ul { margin: 0 0 12px 20px; color: var(--ink-soft); font-size: 15px; }
+  li { margin-bottom: 6px; }
+  a.email-btn {
+    display: inline-block;
+    background: var(--ink); color: #fff; text-decoration: none;
+    padding: 12px 20px; border-radius: 8px; font-weight: 600; font-size: 14px;
+    margin-top: 6px;
+  }
+  a.email-btn:hover { background: #000; }
+
+  table.data-table {
+    width: 100%; border-collapse: collapse; margin: 8px 0 4px; font-size: 13.5px;
+    background: var(--surface); border: 1px solid var(--border);
+  }
+  table.data-table th, table.data-table td {
+    text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: top;
+  }
+  table.data-table th {
+    background: var(--surface-alt); font-size: 11px; letter-spacing: 0.06em;
+    text-transform: uppercase; color: var(--muted);
+  }
+  table.data-table tr:last-child td { border-bottom: none; }
+
+  footer.doc-footer {
+    border-top: 1px solid var(--border); margin-top: 48px; padding-top: 24px;
+    font-size: 13px; color: var(--muted);
+  }
+  footer.doc-footer a { color: var(--accent-deep); text-decoration: none; }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="top-inner">
+    <a href="/" class="brand"><span class="mark">D</span> Dhanraj Enterprises</a>
+    <nav class="top-links">
+      <a href="/privacy-policy">Privacy Policy</a>
+      <a href="/terms-and-conditions">Terms &amp; Conditions</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <span class="eyebrow">Account &amp; Data</span>
+  <h1>Request account deactivation or data deletion</h1>
+  <p class="meta">Applies to the Dhanraj Enterprises app (package <code>com.dhanraj.app</code>)</p>
+
+  <section>
+    <p>Accounts on the Dhanraj Enterprises app are created and managed by Dhanraj administrators for employees, field officers, and agents — there is no self-signup within the App. Because of this, account deactivation and data deletion are handled as an assisted request rather than an in-app "Delete Account" button.</p>
+  </section>
+
+  <section>
+    <h2>How to request deletion</h2>
+    <ol class="steps">
+      <li><strong>Email us</strong> from the address or phone number registered against your account, using the subject line "Account Deletion Request".</li>
+      <li><strong>Confirm your identity</strong> — include your full name and employee/agent ID so we can locate and verify your account.</li>
+      <li><strong>We process your request</strong> — our team will deactivate your account and delete or anonymise your personal data within 30 days, subject to the retention exceptions below.</li>
+    </ol>
+    <a class="email-btn" href="mailto:support@thdhanraj.co.in?subject=Account%20Deletion%20Request">Email support@thdhanraj.co.in</a>
+  </section>
+
+  <section>
+    <h2>What gets deleted vs. retained</h2>
+    <table class="data-table">
+      <thead><tr><th>Data</th><th>What happens</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>Profile &amp; account data (name, phone, login, photo)</td>
+          <td>Deleted, unless retained briefly for security/fraud investigation</td>
+        </tr>
+        <tr>
+          <td>Device tokens &amp; push notification data</td>
+          <td>Deleted immediately upon deactivation</td>
+        </tr>
+        <tr>
+          <td>Field-visit photos, location logs, voice-note transcripts</td>
+          <td>Deleted, except where tied to a case/audit record required to be retained (see below)</td>
+        </tr>
+        <tr>
+          <td>Case, collection, financial &amp; audit records</td>
+          <td>Retained for the period required by our internal record-keeping practices and applicable financial/regulatory obligations, even after account deletion, but disassociated from your active account access</td>
+        </tr>
+        <tr>
+          <td>Diagnostic/crash logs</td>
+          <td>Retained briefly per our normal log-rotation schedule, then deleted</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>Timeline</h2>
+    <p>We aim to complete deactivation and eligible data deletion within 30 days of verifying your request. You'll receive a confirmation email once it's done.</p>
+  </section>
+
+  <section>
+    <h2>Need help?</h2>
+    <p>If you have questions about this process or about how your data is used, see our <a href="/privacy-policy">Privacy Policy</a> or contact us directly.</p>
+    <p><strong>Dhanraj Enterprises</strong><br>
+    Email: <a href="mailto:support@thdhanraj.co.in">support@thdhanraj.co.in</a><br>
+    Website: <a href="https://www.thdhanraj.co.in">www.thdhanraj.co.in</a></p>
+  </section>
+
+  <footer class="doc-footer">
+    <p>© 2026 Dhanraj Enterprises. All rights reserved. &nbsp;·&nbsp; <a href="/privacy-policy">Privacy Policy</a> &nbsp;·&nbsp; <a href="/terms-and-conditions">Terms &amp; Conditions</a></p>
+  </footer>
+</main>
+
+</body>
+</html>
