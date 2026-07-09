@@ -15,6 +15,19 @@
         "EAS_BUILD_NO_EXPO_GO_WARNING": "true",
         "CI": "false"
       }
+    },
+    "playstore": {
+      "channel": "production",
+      "android": {
+        "buildType": "app-bundle",
+        "autoIncrement": "versionCode"
+      },
+      "resourceClass": "medium",
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://www.thdhanraj.co.in",
+        "EAS_BUILD_NO_EXPO_GO_WARNING": "true",
+        "CI": "false"
+      }
     }
   },
   "submit": {
