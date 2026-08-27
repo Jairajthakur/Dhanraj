@@ -51,6 +51,7 @@ export const loanCases = pgTable("loan_cases", {
   latestFeedback: varchar("latest_feedback", { length: 255 }),
   feedbackComments: text("feedback_comments"),
   feedbackDate: timestamp("feedback_date"),
+  recDate: integer("rec_date").default(0),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
