@@ -321,6 +321,8 @@ const COLUMN_MAP: Record<string, string> = {
 penalstatus: "penal_yn",
   collamount: "coll_amount", collamt: "coll_amount", collectionamount: "coll_amount",
   twcollection: "coll_amount", twcoll: "coll_amount",
+  // ── rec_date mapping ──────────────────────────────────────────────────────
+  recdate: "rec_date", receiptdate: "rec_date", receiveddate: "rec_date",
 };
 
 const MONTH_NAMES = ["January","February","March","April","May","June","July","August","September","October","November","December"];
@@ -626,6 +628,13 @@ try {
     await storage.query(`ALTER TABLE bkt_cases ADD COLUMN IF NOT EXISTS company_name TEXT`);
     console.log("[DB] bkt_cases.company_name column ready ✅");
   } catch (e: any) { console.error("[DB] bkt_cases.company_name migration:", e.message); }
+
+  // ── ADD THIS: migrate rec_date column onto loan_cases (from allocation "Rec Date" column) ─
+  try {
+    await storage.query(`ALTER TABLE loan_cases ADD COLUMN IF NOT EXISTS rec_date INTEGER DEFAULT 0`);
+    console.log("[DB] loan_cases.rec_date column ready ✅");
+  } catch (e: any) { console.error("[DB] loan_cases.rec_date migration:", e.message); }
+
   try {
     await storage.query(`CREATE TABLE IF NOT EXISTS fos_depositions (
       id SERIAL PRIMARY KEY, agent_id INTEGER REFERENCES fos_agents(id),
@@ -1897,6 +1906,8 @@ app.put("/api/fos-depositions/:id/pay-both", requireAuth, screenshotUpload.singl
             rollbackYn: parseRollbackYn(mapped.rollback),
             companyName: mapped.company_name || null,  // ← NEW
             collAmount: mapped.coll_amount || null,    // ← NEW: from Coll Amount column
+            // ← NEW: from "Rec Date" column — blank/invalid treated as 0
+            recDate: mapped.rec_date != null && mapped.rec_date !== "" ? (parseInt(mapped.rec_date, 10) || 0) : 0,
           });
           if (upsertResult === "inserted") { imported++; } else { updated++; }
         } catch (e: any) { errors.push(`Row ${i + headerRowIdx + 2}: ${e.message}`); skipped++; }
