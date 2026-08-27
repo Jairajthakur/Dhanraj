@@ -635,6 +635,13 @@ try {
     console.log("[DB] loan_cases.rec_date column ready ✅");
   } catch (e: any) { console.error("[DB] loan_cases.rec_date migration:", e.message); }
 
+  // ── rec_date onto bkt_cases too (mirrors loan_cases) — needed for the daily
+  // report's "receipts by BKT bucket" breakdown ─────────────────────────────
+  try {
+    await storage.query(`ALTER TABLE bkt_cases ADD COLUMN IF NOT EXISTS rec_date INTEGER DEFAULT 0`);
+    console.log("[DB] bkt_cases.rec_date column ready ✅");
+  } catch (e: any) { console.error("[DB] bkt_cases.rec_date migration:", e.message); }
+
   try {
     await storage.query(`CREATE TABLE IF NOT EXISTS fos_depositions (
       id SERIAL PRIMARY KEY, agent_id INTEGER REFERENCES fos_agents(id),
@@ -2022,7 +2029,7 @@ res.json({ imported, updated, skipped, agentsCreated, agentsRemoved, total: rawR
         if (bktVal === 1) caseCategory = "bkt1"; else if (bktVal === 2) caseCategory = "bkt2"; else if (bktVal === 3) caseCategory = "bkt3";
         let agentId: number | null = null;
         if (mapped.fos_name) { const fosLower = mapped.fos_name.toLowerCase().trim(); if (agentByName[fosLower]) { agentId = agentByName[fosLower]; } else { try { const username = fosLower.replace(/\s+/g, ".").replace(/[^a-z0-9.]/g, ""); const newAgent = await storage.createFosAgent({ name: mapped.fos_name, username, password: randomBytes(16).toString("hex") }); agentByName[fosLower] = newAgent.id; agentId = newAgent.id; agentsCreated++; } catch { const found = await storage.getAgentByUsername(mapped.fos_name.toLowerCase().trim().replace(/\s+/g, ".").replace(/[^a-z0-9.]/g, "")); if (found) { agentByName[mapped.fos_name.toLowerCase().trim()] = found.id; agentId = found.id; } } } }
-        try { await storage.upsertBktCase({ caseCategory, agentId, fosName: mapped.fos_name || null, loanNo: mapped.loan_no, customerName: mapped.customer_name, bkt: bktVal, appId: mapped.app_id || null, address: mapped.address || null, mobileNo: mapped.mobile_no || null, ref1Name: mapped.ref1_name || null, ref1Mobile: mapped.ref1_mobile || null, ref2Name: mapped.ref2_name || null, ref2Mobile: mapped.ref2_mobile || null, referenceAddress: mapped.reference_address || null, pos: parseNum(mapped.pos), assetName: mapped.asset_name || null, assetMake: mapped.asset_make || null, registrationNo: mapped.registration_no || null, engineNo: mapped.engine_no || null, chassisNo: mapped.chassis_no || null, emiAmount: parseNum(mapped.emi_amount), emiDue: parseNum(mapped.emi_due), cbc: parseNum(mapped.cbc), lpp: parseNum(mapped.lpp), cbcLpp: parseNum(mapped.cbc_lpp), rollback: parseNum(mapped.rollback), clearance: parseNum(mapped.clearance), firstEmiDueDate: parseDate(mapped.first_emi_due_date), loanMaturityDate: parseDate(mapped.loan_maturity_date), tenor: mapped.tenor ? parseInt(mapped.tenor) || null : null, pro: mapped.pro || null, status: normalizeStatus(mapped.status), telecallerPtpDate: parseDate(mapped.telecaller_ptp_date) }); imported++; }
+        try { await storage.upsertBktCase({ caseCategory, agentId, fosName: mapped.fos_name || null, loanNo: mapped.loan_no, customerName: mapped.customer_name, bkt: bktVal, appId: mapped.app_id || null, address: mapped.address || null, mobileNo: mapped.mobile_no || null, ref1Name: mapped.ref1_name || null, ref1Mobile: mapped.ref1_mobile || null, ref2Name: mapped.ref2_name || null, ref2Mobile: mapped.ref2_mobile || null, referenceAddress: mapped.reference_address || null, pos: parseNum(mapped.pos), assetName: mapped.asset_name || null, assetMake: mapped.asset_make || null, registrationNo: mapped.registration_no || null, engineNo: mapped.engine_no || null, chassisNo: mapped.chassis_no || null, emiAmount: parseNum(mapped.emi_amount), emiDue: parseNum(mapped.emi_due), cbc: parseNum(mapped.cbc), lpp: parseNum(mapped.lpp), cbcLpp: parseNum(mapped.cbc_lpp), rollback: parseNum(mapped.rollback), clearance: parseNum(mapped.clearance), firstEmiDueDate: parseDate(mapped.first_emi_due_date), loanMaturityDate: parseDate(mapped.loan_maturity_date), tenor: mapped.tenor ? parseInt(mapped.tenor) || null : null, pro: mapped.pro || null, status: normalizeStatus(mapped.status), telecallerPtpDate: parseDate(mapped.telecaller_ptp_date), recDate: mapped.rec_date != null && mapped.rec_date !== "" ? (parseInt(mapped.rec_date, 10) || 0) : 0 }); imported++; }
         catch (e: any) { errors.push(`Row ${i + headerRowIdx + 2}: ${e.message}`); skipped++; }
       }
       for (const [loanNo, ptpData] of ptpBktMap) { await storage.query(`UPDATE bkt_cases SET status='PTP', ptp_date=$1, telecaller_ptp_date=$2 WHERE loan_no=$3`, [ptpData.ptpDate, ptpData.telecallerPtpDate, loanNo]); }
@@ -4323,6 +4330,33 @@ app.get("/api/admin/daily-report", requireAdmin, async (req: Request, res: Respo
       });
     }
 
+    // 5b. Receipts done per agent, split by BKT bucket (1/2/3), for the selected
+    // date. rec_date is stored as a day-of-month integer (e.g. 1–31, from the
+    // allocation sheet's "Rec Date" column) on both loan_cases and bkt_cases,
+    // so it's matched against the day-of-month of the date filter.
+    const recDay = Number(date.split("-")[2]);
+    const receiptsResult = await storage.query(
+      `SELECT agent_id, bkt, COUNT(*)::int AS receipt_count
+       FROM (
+         SELECT agent_id, bkt FROM loan_cases WHERE rec_date = $1 AND bkt IN (1,2,3)
+         UNION ALL
+         SELECT agent_id, bkt FROM bkt_cases WHERE rec_date = $1 AND bkt IN (1,2,3)
+       ) t
+       WHERE agent_id IS NOT NULL
+       GROUP BY agent_id, bkt`,
+      [recDay]
+    );
+    const receiptsMap = new Map<number, { bkt1: number; bkt2: number; bkt3: number }>();
+    for (const row of receiptsResult.rows) {
+      const agentId = Number(row.agent_id);
+      const entry = receiptsMap.get(agentId) ?? { bkt1: 0, bkt2: 0, bkt3: 0 };
+      const count = Number(row.receipt_count);
+      if (Number(row.bkt) === 1) entry.bkt1 += count;
+      else if (Number(row.bkt) === 2) entry.bkt2 += count;
+      else if (Number(row.bkt) === 3) entry.bkt3 += count;
+      receiptsMap.set(agentId, entry);
+    }
+
     // 6. Depositions submitted on this date
     const depResult = await storage.query(
       `SELECT agent_id,
@@ -4385,6 +4419,7 @@ app.get("/api/admin/daily-report", requireAdmin, async (req: Request, res: Respo
       const paid = paidMap.get(agent.id) ?? { count: 0, amount: 0 };
       const dep  = depMap.get(agent.id)  ?? { count: 0, amount: 0 };
       const perf = agentPerfMap.get(agent.id) ?? { total: 0, paid: 0, notProcess: 0, ptp: 0 };
+      const receipts = receiptsMap.get(agent.id) ?? { bkt1: 0, bkt2: 0, bkt3: 0 };
 
       return {
         agentId:           agent.id,
@@ -4399,6 +4434,10 @@ app.get("/api/admin/daily-report", requireAdmin, async (req: Request, res: Respo
         paidAmount:        paid.amount,
         depositionCount:   dep.count,
         depositionAmount:  dep.amount,
+        receiptsBkt1:      receipts.bkt1,
+        receiptsBkt2:      receipts.bkt2,
+        receiptsBkt3:      receipts.bkt3,
+        receiptsTotal:     receipts.bkt1 + receipts.bkt2 + receipts.bkt3,
         // break tracking placeholder — add break_sessions table later
         breakCount:        0,
         breakMinutes:      0,
@@ -4410,7 +4449,18 @@ app.get("/api/admin/daily-report", requireAdmin, async (req: Request, res: Respo
       };
     });
 
-    res.json({ date, report });
+    const receiptTotals = report.reduce(
+      (acc, r) => {
+        acc.bkt1 += r.receiptsBkt1;
+        acc.bkt2 += r.receiptsBkt2;
+        acc.bkt3 += r.receiptsBkt3;
+        acc.total += r.receiptsTotal;
+        return acc;
+      },
+      { bkt1: 0, bkt2: 0, bkt3: 0, total: 0 }
+    );
+
+    res.json({ date, report, receiptTotals });
   } catch (e: any) {
     console.error("[GET /api/admin/daily-report]", e);
     res.status(500).json({ message: e.message });
