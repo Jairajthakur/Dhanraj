@@ -671,10 +671,12 @@ export async function upsertBktCase(data: any) {
        address, mobile_no, ref1_name, ref1_mobile, ref2_name, ref2_mobile, reference_address,
        pos, asset_name, asset_make, registration_no, engine_no, chassis_no,
        emi_amount, emi_due, cbc, lpp, cbc_lpp, rollback, clearance,
-       first_emi_due_date, loan_maturity_date, tenor, pro, status, ptp_date, telecaller_ptp_date
+       first_emi_due_date, loan_maturity_date, tenor, pro, status, ptp_date, telecaller_ptp_date,
+       rec_date
      ) VALUES (
        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,
-       $15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34
+       $15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,
+       $35
      )
      ON CONFLICT (loan_no) DO UPDATE SET
        case_category = EXCLUDED.case_category,
@@ -709,7 +711,8 @@ export async function upsertBktCase(data: any) {
        pro = COALESCE(EXCLUDED.pro, bkt_cases.pro),
        status = COALESCE(EXCLUDED.status, bkt_cases.status),
        ptp_date = COALESCE(EXCLUDED.ptp_date, bkt_cases.ptp_date),
-       telecaller_ptp_date = EXCLUDED.telecaller_ptp_date
+       telecaller_ptp_date = EXCLUDED.telecaller_ptp_date,
+       rec_date = EXCLUDED.rec_date
      RETURNING id, (xmax = 0) as is_new`,
     [
       data.caseCategory, data.agentId, data.fosName, data.customerName, data.loanNo,
@@ -719,6 +722,7 @@ export async function upsertBktCase(data: any) {
       data.emiAmount, data.emiDue, data.cbc, data.lpp, data.cbcLpp,
       data.rollback, data.clearance, data.firstEmiDueDate, data.loanMaturityDate,
       data.tenor, data.pro, data.status, data.ptpDate || null, data.telecallerPtpDate || null,
+      data.recDate ?? 0,
     ]
   );
   return result.rows[0]?.is_new ? "inserted" : "updated";
