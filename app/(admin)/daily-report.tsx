@@ -163,15 +163,22 @@ export default function DailyReportScreen() {
       `Total Receipts: ${totals.total}`;
 
     // ── Web: react-native's Alert.alert() and expo-sharing are no-ops on
-    // web, and captureRef's "tmpfile" result requires a native filesystem,
-    // so this platform needs its own implementation entirely.
+    // web, and react-native-view-shot's captureRef() is broken on web
+    // entirely — its universal wrapper unconditionally calls RN's
+    // findNodeHandle() before handing off to the web implementation, and
+    // current react-native-web throws on that call ("findNodeHandle is
+    // not supported on web"). So we skip that package on web and call
+    // html2canvas directly on the underlying DOM node instead (which is
+    // what react-native-view-shot itself does internally on web).
     if (Platform.OS === "web") {
       try {
-        const dataUrl = await captureRef(tableRef, {
-          format: "jpg",
-          quality: 0.95,
-          result: "data-url",
-        });
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const html2canvas = (await import("html2canvas")).default;
+        const node = tableRef.current as unknown as HTMLElement;
+        if (!node) throw new Error("Report view is not mounted");
+
+        const canvas = await html2canvas(node);
+        const dataUrl = canvas.toDataURL("image/jpeg", 0.95);
 
         const res = await fetch(dataUrl);
         const blob = await res.blob();
