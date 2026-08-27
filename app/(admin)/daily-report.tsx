@@ -23,18 +23,9 @@ const fmtDate = (s: string) => {
   return `${day} ${months[+m - 1]} ${y}`;
 };
 
-const rupee = (n?: number) => (n != null ? `₹${Number(n).toLocaleString("en-IN")}` : "₹0");
-
 interface DailyReportRow {
   agentId: number;
   agentName: string;
-  attendanceStatus: string;
-  fieldVisits: number;
-  ptpCount: number;
-  paidCount: number;
-  paidAmount: number;
-  depositionCount: number;
-  depositionAmount: number;
   receiptsBkt1: number;
   receiptsBkt2: number;
   receiptsBkt3: number;
@@ -107,14 +98,9 @@ const dn = StyleSheet.create({
 
 // ─── Table config ───────────────────────────────────────────────────────────
 const COL = {
-  agent: 150,
-  status: 90,
-  visits: 66,
-  ptp: 60,
-  paid: 96,
-  dep: 96,
-  bkt: 64,
-  total: 76,
+  agent: 170,
+  bkt: 90,
+  total: 100,
 };
 
 function HeaderCell({ label, width, sub }: { label: string; width: number; sub?: string }) {
@@ -137,12 +123,6 @@ function Cell({ children, width, align = "center", bold = false, color }: {
     </View>
   );
 }
-
-const attendanceColor = (status: string) => {
-  if (status === "Present") return Colors.success;
-  if (status === "Checked-In") return Colors.warning;
-  return Colors.danger;
-};
 
 export default function DailyReportScreen() {
   const insets = useSafeAreaInsets();
@@ -226,68 +206,53 @@ export default function DailyReportScreen() {
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator
-          contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
+          contentContainerStyle={{ flexGrow: 1 }}
         >
-          <View>
-            {/* Header row */}
-            <View style={tbl.headRow}>
-              <HeaderCell label="Agent" width={COL.agent} />
-              <HeaderCell label="Status" width={COL.status} />
-              <HeaderCell label="Visits" width={COL.visits} />
-              <HeaderCell label="PTP" width={COL.ptp} />
-              <HeaderCell label="Paid" width={COL.paid} />
-              <HeaderCell label="Deposit" width={COL.dep} />
-              <HeaderCell label="BKT1" width={COL.bkt} sub="Receipts" />
-              <HeaderCell label="BKT2" width={COL.bkt} sub="Receipts" />
-              <HeaderCell label="BKT3" width={COL.bkt} sub="Receipts" />
-              <HeaderCell label="Total" width={COL.total} sub="Receipts" />
-            </View>
-
-            {/* Data rows */}
-            {report.map((row, i) => (
-              <View
-                key={row.agentId}
-                style={[tbl.row, i % 2 === 1 && { backgroundColor: Colors.surfaceAlt }]}
-              >
-                <Cell width={COL.agent} align="left" bold>{row.agentName}</Cell>
-                <Cell width={COL.status} color={attendanceColor(row.attendanceStatus)}>
-                  {row.attendanceStatus}
-                </Cell>
-                <Cell width={COL.visits}>{row.fieldVisits}</Cell>
-                <Cell width={COL.ptp} color={Colors.statusPTP}>{row.ptpCount}</Cell>
-                <Cell width={COL.paid} color={Colors.success}>
-                  {row.paidCount} / {rupee(row.paidAmount)}
-                </Cell>
-                <Cell width={COL.dep}>{row.depositionCount} / {rupee(row.depositionAmount)}</Cell>
-                <Cell width={COL.bkt} color={Colors.info} bold={row.receiptsBkt1 > 0}>
-                  {row.receiptsBkt1}
-                </Cell>
-                <Cell width={COL.bkt} color={Colors.warning} bold={row.receiptsBkt2 > 0}>
-                  {row.receiptsBkt2}
-                </Cell>
-                <Cell width={COL.bkt} color={Colors.statusPTP} bold={row.receiptsBkt3 > 0}>
-                  {row.receiptsBkt3}
-                </Cell>
-                <Cell width={COL.total} bold color={Colors.success}>{row.receiptsTotal}</Cell>
+          <ScrollView
+            showsVerticalScrollIndicator
+            contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
+            style={{ flex: 1 }}
+          >
+            <View>
+              {/* Header row */}
+              <View style={tbl.headRow}>
+                <HeaderCell label="Agent" width={COL.agent} />
+                <HeaderCell label="BKT1" width={COL.bkt} sub="COLL Receipts" />
+                <HeaderCell label="BKT2" width={COL.bkt} sub="COLL Receipts" />
+                <HeaderCell label="BKT3" width={COL.bkt} sub="COLL Receipts" />
+                <HeaderCell label="Total" width={COL.total} sub="COLL Receipts" />
               </View>
-            ))}
 
-            {/* Totals row */}
-            <View style={[tbl.row, tbl.totalsRow]}>
-              <Cell width={COL.agent} align="left" bold>All Agents</Cell>
-              <Cell width={COL.status}>—</Cell>
-              <Cell width={COL.visits}>
-                {report.reduce((a, r) => a + r.fieldVisits, 0)}
-              </Cell>
-              <Cell width={COL.ptp}>{report.reduce((a, r) => a + r.ptpCount, 0)}</Cell>
-              <Cell width={COL.paid}>{report.reduce((a, r) => a + r.paidCount, 0)}</Cell>
-              <Cell width={COL.dep}>{report.reduce((a, r) => a + r.depositionCount, 0)}</Cell>
-              <Cell width={COL.bkt} bold color={Colors.info}>{totals.bkt1}</Cell>
-              <Cell width={COL.bkt} bold color={Colors.warning}>{totals.bkt2}</Cell>
-              <Cell width={COL.bkt} bold color={Colors.statusPTP}>{totals.bkt3}</Cell>
-              <Cell width={COL.total} bold color={Colors.success}>{totals.total}</Cell>
+              {/* Data rows */}
+              {report.map((row, i) => (
+                <View
+                  key={row.agentId}
+                  style={[tbl.row, i % 2 === 1 && { backgroundColor: Colors.surfaceAlt }]}
+                >
+                  <Cell width={COL.agent} align="left" bold>{row.agentName}</Cell>
+                  <Cell width={COL.bkt} color={Colors.info} bold={row.receiptsBkt1 > 0}>
+                    {row.receiptsBkt1}
+                  </Cell>
+                  <Cell width={COL.bkt} color={Colors.warning} bold={row.receiptsBkt2 > 0}>
+                    {row.receiptsBkt2}
+                  </Cell>
+                  <Cell width={COL.bkt} color={Colors.statusPTP} bold={row.receiptsBkt3 > 0}>
+                    {row.receiptsBkt3}
+                  </Cell>
+                  <Cell width={COL.total} bold color={Colors.success}>{row.receiptsTotal}</Cell>
+                </View>
+              ))}
+
+              {/* Totals row */}
+              <View style={[tbl.row, tbl.totalsRow]}>
+                <Cell width={COL.agent} align="left" bold>All Agents</Cell>
+                <Cell width={COL.bkt} bold color={Colors.info}>{totals.bkt1}</Cell>
+                <Cell width={COL.bkt} bold color={Colors.warning}>{totals.bkt2}</Cell>
+                <Cell width={COL.bkt} bold color={Colors.statusPTP}>{totals.bkt3}</Cell>
+                <Cell width={COL.total} bold color={Colors.success}>{totals.total}</Cell>
+              </View>
             </View>
-          </View>
+          </ScrollView>
         </ScrollView>
       )}
 
