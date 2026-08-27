@@ -156,6 +156,58 @@ export default function DailyReportScreen() {
   const shareReportToWhatsApp = useCallback(async () => {
     if (isSharing || !tableRef.current) return;
     setIsSharing(true);
+
+    const caption =
+      `*DAILY REPORT — ${fmtDate(dateStr)}*\n` +
+      `BKT1: ${totals.bkt1}   BKT2: ${totals.bkt2}   BKT3: ${totals.bkt3}\n` +
+      `Total Receipts: ${totals.total}`;
+
+    // ── Web: react-native's Alert.alert() and expo-sharing are no-ops on
+    // web, and captureRef's "tmpfile" result requires a native filesystem,
+    // so this platform needs its own implementation entirely.
+    if (Platform.OS === "web") {
+      try {
+        const dataUrl = await captureRef(tableRef, {
+          format: "jpg",
+          quality: 0.95,
+          result: "data-url",
+        });
+
+        const res = await fetch(dataUrl);
+        const blob = await res.blob();
+        const fileName = `daily-report-${dateStr}.jpg`;
+        const file = new File([blob], fileName, { type: "image/jpeg" });
+
+        // Prefer the native share sheet (lets the user pick WhatsApp)
+        // where the browser supports sharing files.
+        const nav: any = typeof navigator !== "undefined" ? navigator : null;
+        if (nav?.canShare?.({ files: [file] }) && nav?.share) {
+          await nav.share({ files: [file], title: "Daily Report", text: caption });
+          return;
+        }
+
+        // Fallback: download the image, then open WhatsApp with the
+        // caption pre-filled so the user can attach the saved image.
+        const link = document.createElement("a");
+        link.href = dataUrl;
+        link.download = fileName;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+
+        window.open(`https://wa.me/?text=${encodeURIComponent(caption)}`, "_blank");
+        window.alert(
+          `The report image "${fileName}" was downloaded. Attach it in the WhatsApp chat that just opened.`
+        );
+      } catch (e: any) {
+        console.error("[shareReportToWhatsApp] web share failed:", e);
+        window.alert("Failed to share the report. Please try again.");
+      } finally {
+        setIsSharing(false);
+      }
+      return;
+    }
+
     try {
       // Snapshot the table view (header + rows + totals) as a jpg file.
       const uri = await captureRef(tableRef, {
@@ -164,30 +216,23 @@ export default function DailyReportScreen() {
         result: "tmpfile",
       });
 
-      const caption =
-        `*DAILY REPORT — ${fmtDate(dateStr)}*\n` +
-        `BKT1: ${totals.bkt1}   BKT2: ${totals.bkt2}   BKT3: ${totals.bkt3}\n` +
-        `Total Receipts: ${totals.total}`;
-
-      if (Platform.OS !== "web") {
-        try {
-          // eslint-disable-next-line @typescript-eslint/no-var-requires
-          const RNShare = require("react-native-share").default;
-          await RNShare.shareSingle({
-            social: RNShare.Social.WHATSAPP,
-            url: uri,           // file:// URI → WhatsApp shows it as an image
-            type: "image/jpeg",
-            message: caption,   // caption shown below the image
-            title: "Daily Report",
-          });
-          return;
-        } catch (e: any) {
-          if (e?.error === "ECANCELLED" || e?.message?.includes("cancel")) return;
-          console.warn("[shareReportToWhatsApp] WhatsApp share failed, falling back:", e);
-        }
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const RNShare = require("react-native-share").default;
+        await RNShare.shareSingle({
+          social: RNShare.Social.WHATSAPP,
+          url: uri,           // file:// URI → WhatsApp shows it as an image
+          type: "image/jpeg",
+          message: caption,   // caption shown below the image
+          title: "Daily Report",
+        });
+        return;
+      } catch (e: any) {
+        if (e?.error === "ECANCELLED" || e?.message?.includes("cancel")) return;
+        console.warn("[shareReportToWhatsApp] WhatsApp share failed, falling back:", e);
       }
 
-      // Fallback (web, or WhatsApp not installed): generic share sheet.
+      // Fallback (WhatsApp not installed): generic share sheet.
       if (await Sharing.isAvailableAsync()) {
         await Sharing.shareAsync(uri, {
           mimeType: "image/jpeg",
