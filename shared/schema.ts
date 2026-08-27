@@ -52,6 +52,7 @@ export const loanCases = pgTable("loan_cases", {
   feedbackComments: text("feedback_comments"),
   feedbackDate: timestamp("feedback_date"),
   recDate: integer("rec_date").default(0),
+  remark: varchar("remark", { length: 20 }),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -131,6 +132,7 @@ export const bktCases = pgTable("bkt_cases", {
   feedbackComments: text("feedback_comments"),
   feedbackDate: timestamp("feedback_date"),
   recDate: integer("rec_date").default(0),
+  remark: varchar("remark", { length: 20 }),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
