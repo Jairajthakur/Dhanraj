@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useRef } from "react";
 import {
   View,
   Text,
@@ -7,12 +7,17 @@ import {
   Pressable,
   ActivityIndicator,
   Platform,
+  Alert,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQuery } from "@tanstack/react-query";
 import { Ionicons } from "@expo/vector-icons";
+import { captureRef } from "react-native-view-shot";
+import * as Sharing from "expo-sharing";
 import Colors from "@/constants/colors";
 import { api } from "@/lib/api";
+
+const WHATSAPP_GREEN = "#25D366";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 const toDateStr = (d: Date) => d.toISOString().slice(0, 10); // "YYYY-MM-DD"
@@ -127,6 +132,8 @@ function Cell({ children, width, align = "center", bold = false, color }: {
 export default function DailyReportScreen() {
   const insets = useSafeAreaInsets();
   const [dateStr, setDateStr] = useState(toDateStr(new Date()));
+  const [isSharing, setIsSharing] = useState(false);
+  const tableRef = useRef<View>(null);
 
   const { data, isLoading, isError, refetch, isRefetching } = useQuery({
     queryKey: ["/api/admin/daily-report", dateStr],
@@ -144,6 +151,58 @@ export default function DailyReportScreen() {
       return next > toDateStr(new Date()) ? prev : next;
     });
   }, []);
+
+  // ─── Capture the table exactly as rendered and send it to WhatsApp ────────
+  const shareReportToWhatsApp = useCallback(async () => {
+    if (isSharing || !tableRef.current) return;
+    setIsSharing(true);
+    try {
+      // Snapshot the table view (header + rows + totals) as a jpg file.
+      const uri = await captureRef(tableRef, {
+        format: "jpg",
+        quality: 0.95,
+        result: "tmpfile",
+      });
+
+      const caption =
+        `*DAILY REPORT — ${fmtDate(dateStr)}*\n` +
+        `BKT1: ${totals.bkt1}   BKT2: ${totals.bkt2}   BKT3: ${totals.bkt3}\n` +
+        `Total Receipts: ${totals.total}`;
+
+      if (Platform.OS !== "web") {
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-var-requires
+          const RNShare = require("react-native-share").default;
+          await RNShare.shareSingle({
+            social: RNShare.Social.WHATSAPP,
+            url: uri,           // file:// URI → WhatsApp shows it as an image
+            type: "image/jpeg",
+            message: caption,   // caption shown below the image
+            title: "Daily Report",
+          });
+          return;
+        } catch (e: any) {
+          if (e?.error === "ECANCELLED" || e?.message?.includes("cancel")) return;
+          console.warn("[shareReportToWhatsApp] WhatsApp share failed, falling back:", e);
+        }
+      }
+
+      // Fallback (web, or WhatsApp not installed): generic share sheet.
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(uri, {
+          mimeType: "image/jpeg",
+          dialogTitle: "Share Daily Report",
+        });
+      } else {
+        Alert.alert("Sharing unavailable", "Could not share the report image on this device.");
+      }
+    } catch (e: any) {
+      console.error("[shareReportToWhatsApp] capture failed:", e);
+      Alert.alert("Error", "Failed to capture the report as an image. Please try again.");
+    } finally {
+      setIsSharing(false);
+    }
+  }, [dateStr, totals, isSharing]);
 
   return (
     <View style={{ flex: 1, backgroundColor: Colors.background }}>
@@ -179,6 +238,24 @@ export default function DailyReportScreen() {
               <Ionicons name="refresh-outline" size={13} color={Colors.primary} />
               <Text style={[styles.chipText, { color: Colors.primary }]}>Refresh</Text>
             </Pressable>
+            <Pressable
+              style={[
+                styles.chip,
+                { backgroundColor: WHATSAPP_GREEN + "18" },
+                (isSharing || report.length === 0) && { opacity: 0.5 },
+              ]}
+              onPress={shareReportToWhatsApp}
+              disabled={isSharing || report.length === 0}
+            >
+              {isSharing ? (
+                <ActivityIndicator size="small" color={WHATSAPP_GREEN} />
+              ) : (
+                <Ionicons name="logo-whatsapp" size={14} color={WHATSAPP_GREEN} />
+              )}
+              <Text style={[styles.chipText, { color: WHATSAPP_GREEN }]}>
+                {isSharing ? "Preparing…" : "Share"}
+              </Text>
+            </Pressable>
           </View>
         </ScrollView>
       </View>
@@ -213,7 +290,13 @@ export default function DailyReportScreen() {
             contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
             style={{ flex: 1 }}
           >
-            <View>
+            {/* Everything inside this View is what gets captured & shared to WhatsApp */}
+            <View ref={tableRef} collapsable={false} style={tbl.captureWrap}>
+              <View style={tbl.captureHeader}>
+                <Text style={tbl.captureTitle}>Daily Report</Text>
+                <Text style={tbl.captureDate}>{fmtDate(dateStr)}</Text>
+              </View>
+
               {/* Header row */}
               <View style={tbl.headRow}>
                 <HeaderCell label="Agent" width={COL.agent} />
@@ -299,6 +382,15 @@ const styles = StyleSheet.create({
 });
 
 const tbl = StyleSheet.create({
+  captureWrap: { backgroundColor: Colors.surface },
+  captureHeader: {
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    alignItems: "center",
+    backgroundColor: Colors.surface,
+  },
+  captureTitle: { fontSize: 16, fontWeight: "800", color: Colors.text },
+  captureDate: { fontSize: 12, color: Colors.textSecondary, fontWeight: "600", marginTop: 2 },
   headRow: {
     flexDirection: "row",
     backgroundColor: Colors.primaryDeep ?? Colors.primary,
