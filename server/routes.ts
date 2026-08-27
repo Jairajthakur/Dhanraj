@@ -323,6 +323,8 @@ penalstatus: "penal_yn",
   twcollection: "coll_amount", twcoll: "coll_amount",
   // ── rec_date mapping ──────────────────────────────────────────────────────
   recdate: "rec_date", receiptdate: "rec_date", receiveddate: "rec_date",
+  // ── remark mapping (e.g. "COLL" / "DP") ────────────────────────────────────
+  remark: "remark", remarks: "remark",
 };
 
 const MONTH_NAMES = ["January","February","March","April","May","June","July","August","September","October","November","December"];
@@ -641,6 +643,14 @@ try {
     await storage.query(`ALTER TABLE bkt_cases ADD COLUMN IF NOT EXISTS rec_date INTEGER DEFAULT 0`);
     console.log("[DB] bkt_cases.rec_date column ready ✅");
   } catch (e: any) { console.error("[DB] bkt_cases.rec_date migration:", e.message); }
+
+  // ── remark column (e.g. "COLL" / "DP") on loan_cases + bkt_cases — used to
+  // filter the daily report's receipt counts down to COLL-only cases ────────
+  try {
+    await storage.query(`ALTER TABLE loan_cases ADD COLUMN IF NOT EXISTS remark VARCHAR(20)`);
+    await storage.query(`ALTER TABLE bkt_cases ADD COLUMN IF NOT EXISTS remark VARCHAR(20)`);
+    console.log("[DB] loan_cases/bkt_cases.remark column ready ✅");
+  } catch (e: any) { console.error("[DB] remark column migration:", e.message); }
 
   try {
     await storage.query(`CREATE TABLE IF NOT EXISTS fos_depositions (
@@ -1915,6 +1925,7 @@ app.put("/api/fos-depositions/:id/pay-both", requireAuth, screenshotUpload.singl
             collAmount: mapped.coll_amount || null,    // ← NEW: from Coll Amount column
             // ← NEW: from "Rec Date" column — blank/invalid treated as 0
             recDate: mapped.rec_date != null && mapped.rec_date !== "" ? (parseInt(mapped.rec_date, 10) || 0) : 0,
+            remark: mapped.remark ? mapped.remark.trim().toUpperCase() : null,
           });
           if (upsertResult === "inserted") { imported++; } else { updated++; }
         } catch (e: any) { errors.push(`Row ${i + headerRowIdx + 2}: ${e.message}`); skipped++; }
@@ -2029,7 +2040,7 @@ res.json({ imported, updated, skipped, agentsCreated, agentsRemoved, total: rawR
         if (bktVal === 1) caseCategory = "bkt1"; else if (bktVal === 2) caseCategory = "bkt2"; else if (bktVal === 3) caseCategory = "bkt3";
         let agentId: number | null = null;
         if (mapped.fos_name) { const fosLower = mapped.fos_name.toLowerCase().trim(); if (agentByName[fosLower]) { agentId = agentByName[fosLower]; } else { try { const username = fosLower.replace(/\s+/g, ".").replace(/[^a-z0-9.]/g, ""); const newAgent = await storage.createFosAgent({ name: mapped.fos_name, username, password: randomBytes(16).toString("hex") }); agentByName[fosLower] = newAgent.id; agentId = newAgent.id; agentsCreated++; } catch { const found = await storage.getAgentByUsername(mapped.fos_name.toLowerCase().trim().replace(/\s+/g, ".").replace(/[^a-z0-9.]/g, "")); if (found) { agentByName[mapped.fos_name.toLowerCase().trim()] = found.id; agentId = found.id; } } } }
-        try { await storage.upsertBktCase({ caseCategory, agentId, fosName: mapped.fos_name || null, loanNo: mapped.loan_no, customerName: mapped.customer_name, bkt: bktVal, appId: mapped.app_id || null, address: mapped.address || null, mobileNo: mapped.mobile_no || null, ref1Name: mapped.ref1_name || null, ref1Mobile: mapped.ref1_mobile || null, ref2Name: mapped.ref2_name || null, ref2Mobile: mapped.ref2_mobile || null, referenceAddress: mapped.reference_address || null, pos: parseNum(mapped.pos), assetName: mapped.asset_name || null, assetMake: mapped.asset_make || null, registrationNo: mapped.registration_no || null, engineNo: mapped.engine_no || null, chassisNo: mapped.chassis_no || null, emiAmount: parseNum(mapped.emi_amount), emiDue: parseNum(mapped.emi_due), cbc: parseNum(mapped.cbc), lpp: parseNum(mapped.lpp), cbcLpp: parseNum(mapped.cbc_lpp), rollback: parseNum(mapped.rollback), clearance: parseNum(mapped.clearance), firstEmiDueDate: parseDate(mapped.first_emi_due_date), loanMaturityDate: parseDate(mapped.loan_maturity_date), tenor: mapped.tenor ? parseInt(mapped.tenor) || null : null, pro: mapped.pro || null, status: normalizeStatus(mapped.status), telecallerPtpDate: parseDate(mapped.telecaller_ptp_date), recDate: mapped.rec_date != null && mapped.rec_date !== "" ? (parseInt(mapped.rec_date, 10) || 0) : 0 }); imported++; }
+        try { await storage.upsertBktCase({ caseCategory, agentId, fosName: mapped.fos_name || null, loanNo: mapped.loan_no, customerName: mapped.customer_name, bkt: bktVal, appId: mapped.app_id || null, address: mapped.address || null, mobileNo: mapped.mobile_no || null, ref1Name: mapped.ref1_name || null, ref1Mobile: mapped.ref1_mobile || null, ref2Name: mapped.ref2_name || null, ref2Mobile: mapped.ref2_mobile || null, referenceAddress: mapped.reference_address || null, pos: parseNum(mapped.pos), assetName: mapped.asset_name || null, assetMake: mapped.asset_make || null, registrationNo: mapped.registration_no || null, engineNo: mapped.engine_no || null, chassisNo: mapped.chassis_no || null, emiAmount: parseNum(mapped.emi_amount), emiDue: parseNum(mapped.emi_due), cbc: parseNum(mapped.cbc), lpp: parseNum(mapped.lpp), cbcLpp: parseNum(mapped.cbc_lpp), rollback: parseNum(mapped.rollback), clearance: parseNum(mapped.clearance), firstEmiDueDate: parseDate(mapped.first_emi_due_date), loanMaturityDate: parseDate(mapped.loan_maturity_date), tenor: mapped.tenor ? parseInt(mapped.tenor) || null : null, pro: mapped.pro || null, status: normalizeStatus(mapped.status), telecallerPtpDate: parseDate(mapped.telecaller_ptp_date), recDate: mapped.rec_date != null && mapped.rec_date !== "" ? (parseInt(mapped.rec_date, 10) || 0) : 0, remark: mapped.remark ? mapped.remark.trim().toUpperCase() : null }); imported++; }
         catch (e: any) { errors.push(`Row ${i + headerRowIdx + 2}: ${e.message}`); skipped++; }
       }
       for (const [loanNo, ptpData] of ptpBktMap) { await storage.query(`UPDATE bkt_cases SET status='PTP', ptp_date=$1, telecaller_ptp_date=$2 WHERE loan_no=$3`, [ptpData.ptpDate, ptpData.telecallerPtpDate, loanNo]); }
@@ -4333,14 +4344,15 @@ app.get("/api/admin/daily-report", requireAdmin, async (req: Request, res: Respo
     // 5b. Receipts done per agent, split by BKT bucket (1/2/3), for the selected
     // date. rec_date is stored as a day-of-month integer (e.g. 1–31, from the
     // allocation sheet's "Rec Date" column) on both loan_cases and bkt_cases,
-    // so it's matched against the day-of-month of the date filter.
+    // so it's matched against the day-of-month of the date filter. Only cases
+    // marked "COLL" in the remark column count as receipts — "DP" cases are excluded.
     const recDay = Number(date.split("-")[2]);
     const receiptsResult = await storage.query(
       `SELECT agent_id, bkt, COUNT(*)::int AS receipt_count
        FROM (
-         SELECT agent_id, bkt FROM loan_cases WHERE rec_date = $1 AND bkt IN (1,2,3)
+         SELECT agent_id, bkt FROM loan_cases WHERE rec_date = $1 AND bkt IN (1,2,3) AND UPPER(remark) = 'COLL'
          UNION ALL
-         SELECT agent_id, bkt FROM bkt_cases WHERE rec_date = $1 AND bkt IN (1,2,3)
+         SELECT agent_id, bkt FROM bkt_cases WHERE rec_date = $1 AND bkt IN (1,2,3) AND UPPER(remark) = 'COLL'
        ) t
        WHERE agent_id IS NOT NULL
        GROUP BY agent_id, bkt`,
