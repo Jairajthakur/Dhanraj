@@ -566,6 +566,7 @@ export async function upsertLoanCase(data: {
   pro?: string | null; status?: string | null; latestFeedback?: string | null;
   feedbackComments?: string | null; ptpDate?: string | null; telecallerPtpDate?: string | null;
   rollbackYn?: boolean | null; companyName?: string | null; collAmount?: string | null;
+  recDate?: number | null;
 }): Promise<"inserted" | "updated"> {
   const result = await query(
     `INSERT INTO loan_cases (
@@ -574,11 +575,11 @@ export async function upsertLoanCase(data: {
       emi_amount, emi_due, cbc, lpp, cbc_lpp, rollback, clearance,
       first_emi_due_date, loan_maturity_date, tenor, pro, status,
       latest_feedback, feedback_comments, ptp_date, telecaller_ptp_date, rollback_yn,
-      company_name, coll_amount
+      company_name, coll_amount, rec_date
     ) VALUES (
       $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,
       $15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,
-      $32,$33
+      $32,$33,$34
     )
     ON CONFLICT (loan_no) DO UPDATE SET
       agent_id            = EXCLUDED.agent_id,
@@ -612,7 +613,8 @@ export async function upsertLoanCase(data: {
       telecaller_ptp_date = EXCLUDED.telecaller_ptp_date,
       rollback_yn         = EXCLUDED.rollback_yn,
       company_name        = EXCLUDED.company_name,
-      coll_amount         = EXCLUDED.coll_amount
+      coll_amount         = EXCLUDED.coll_amount,
+      rec_date            = EXCLUDED.rec_date
     RETURNING (xmax = 0) AS is_insert`,
     [
       data.agentId, data.fosName, data.loanNo, data.customerName,
@@ -626,6 +628,7 @@ export async function upsertLoanCase(data: {
       data.ptpDate || null, data.telecallerPtpDate || null, data.rollbackYn ?? null,
       data.companyName || null,
       data.collAmount != null ? parseFloat(data.collAmount) || null : null,
+      data.recDate ?? 0,
     ]
   );
   return result.rows[0]?.is_insert ? "inserted" : "updated";
