@@ -28,6 +28,15 @@ const fmtDate = (s: string) => {
   return `${day} ${months[+m - 1]} ${y}`;
 };
 
+const fmtMonth = (s: string) => {
+  const [y, m] = s.split("-");
+  const months = [
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December",
+  ];
+  return `${months[+m - 1]} ${y}`;
+};
+
 interface DailyReportRow {
   agentId: number;
   agentName: string;
@@ -101,6 +110,98 @@ const dn = StyleSheet.create({
   todayLink: { fontSize: 11, color: Colors.info, fontWeight: "600" },
 });
 
+// ─── Month navigator (whole-month receipts view) ───────────────────────────
+function MonthNavigator({
+  monthStr,
+  onPrev,
+  onNext,
+  onThisMonth,
+}: {
+  monthStr: string;
+  onPrev: () => void;
+  onNext: () => void;
+  onThisMonth: () => void;
+}) {
+  const thisMonth = toDateStr(new Date()).slice(0, 7);
+  const isThisMonth = monthStr === thisMonth;
+
+  return (
+    <View style={dn.row}>
+      <Pressable onPress={onPrev} style={dn.arrow} hitSlop={6}>
+        <Ionicons name="chevron-back" size={20} color={Colors.text} />
+      </Pressable>
+
+      <Pressable style={dn.center} onPress={onThisMonth} disabled={isThisMonth}>
+        <Ionicons name="calendar-outline" size={14} color={Colors.textSecondary} />
+        <Text style={dn.dateLabel}>{fmtMonth(`${monthStr}-01`)}</Text>
+        {!isThisMonth && <Text style={dn.todayLink}>Jump to this month</Text>}
+      </Pressable>
+
+      <Pressable
+        onPress={onNext}
+        style={[dn.arrow, isThisMonth && dn.arrowDisabled]}
+        disabled={isThisMonth}
+        hitSlop={6}
+      >
+        <Ionicons name="chevron-forward" size={20} color={isThisMonth ? Colors.textMuted : Colors.text} />
+      </Pressable>
+    </View>
+  );
+}
+
+// ─── Day / Month view toggle ────────────────────────────────────────────────
+function ViewModeToggle({
+  mode,
+  onChange,
+}: {
+  mode: "day" | "month";
+  onChange: (m: "day" | "month") => void;
+}) {
+  return (
+    <View style={vm.wrap}>
+      <Pressable
+        style={[vm.btn, mode === "day" && vm.btnActive]}
+        onPress={() => onChange("day")}
+      >
+        <Text style={[vm.text, mode === "day" && vm.textActive]}>Day</Text>
+      </Pressable>
+      <Pressable
+        style={[vm.btn, mode === "month" && vm.btnActive]}
+        onPress={() => onChange("month")}
+      >
+        <Text style={[vm.text, mode === "month" && vm.textActive]}>Month</Text>
+      </Pressable>
+    </View>
+  );
+}
+
+const vm = StyleSheet.create({
+  wrap: {
+    flexDirection: "row",
+    alignSelf: "center",
+    backgroundColor: Colors.surfaceAlt,
+    borderRadius: 10,
+    padding: 3,
+    marginTop: 2,
+    marginBottom: 4,
+  },
+  btn: {
+    paddingHorizontal: 18,
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+  btnActive: {
+    backgroundColor: Colors.surface,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.08,
+    shadowRadius: 2,
+    elevation: 1,
+  },
+  text: { fontSize: 12.5, fontWeight: "700", color: Colors.textSecondary },
+  textActive: { color: Colors.text },
+});
+
 // ─── Table config ───────────────────────────────────────────────────────────
 const COL = {
   agent: 170,
@@ -131,17 +232,21 @@ function Cell({ children, width, align = "center", bold = false, color }: {
 
 export default function DailyReportScreen() {
   const insets = useSafeAreaInsets();
+  const [viewMode, setViewMode] = useState<"day" | "month">("day");
   const [dateStr, setDateStr] = useState(toDateStr(new Date()));
+  const [monthStr, setMonthStr] = useState(toDateStr(new Date()).slice(0, 7)); // "YYYY-MM"
   const [isSharing, setIsSharing] = useState(false);
   const tableRef = useRef<View>(null);
 
   const { data, isLoading, isError, refetch, isRefetching } = useQuery({
-    queryKey: ["/api/admin/daily-report", dateStr],
-    queryFn: () => api.admin.getDailyReport(dateStr),
+    queryKey: ["/api/admin/daily-report", viewMode, viewMode === "day" ? dateStr : monthStr],
+    queryFn: () =>
+      api.admin.getDailyReport(viewMode === "day" ? dateStr : `${monthStr}-01`, viewMode),
   });
 
   const report: DailyReportRow[] = data?.report ?? [];
   const totals = data?.receiptTotals ?? { bkt1: 0, bkt2: 0, bkt3: 0, total: 0 };
+  const periodLabel = viewMode === "day" ? fmtDate(dateStr) : fmtMonth(`${monthStr}-01`);
 
   const shiftDate = useCallback((days: number) => {
     setDateStr((prev) => {
@@ -152,13 +257,23 @@ export default function DailyReportScreen() {
     });
   }, []);
 
+  const shiftMonth = useCallback((months: number) => {
+    setMonthStr((prev) => {
+      const [y, m] = prev.split("-").map(Number);
+      const d = new Date(y, m - 1 + months, 1);
+      const next = toDateStr(d).slice(0, 7);
+      const thisMonth = toDateStr(new Date()).slice(0, 7);
+      return next > thisMonth ? prev : next;
+    });
+  }, []);
+
   // ─── Capture the table exactly as rendered and send it to WhatsApp ────────
   const shareReportToWhatsApp = useCallback(async () => {
     if (isSharing || !tableRef.current) return;
     setIsSharing(true);
 
     const caption =
-      `*RECEIPT COUNT — ${fmtDate(dateStr)}*\n\n` +
+      `*RECEIPT COUNT — ${periodLabel}${viewMode === "month" ? " (Monthly)" : ""}*\n\n` +
       `BKT1: ${totals.bkt1}\n` +
       `BKT2: ${totals.bkt2}\n` +
       `BKT3: ${totals.bkt3}\n` +
@@ -185,7 +300,7 @@ export default function DailyReportScreen() {
 
         const res = await fetch(dataUrl);
         const blob = await res.blob();
-        const fileName = `daily-report-${dateStr}.jpg`;
+        const fileName = `receipt-count-${viewMode === "day" ? dateStr : monthStr}.jpg`;
         const file = new File([blob], fileName, { type: "image/jpeg" });
 
         // Prefer the native share sheet (lets the user pick WhatsApp)
@@ -257,17 +372,28 @@ export default function DailyReportScreen() {
     } finally {
       setIsSharing(false);
     }
-  }, [dateStr, totals, isSharing]);
+  }, [dateStr, monthStr, viewMode, periodLabel, totals, report.length, isSharing]);
 
   return (
     <View style={{ flex: 1, backgroundColor: Colors.background }}>
       <View style={{ paddingTop: Platform.OS === "web" ? 67 : 12, backgroundColor: Colors.surface }}>
-        <DateNavigator
-          dateStr={dateStr}
-          onPrev={() => shiftDate(-1)}
-          onNext={() => shiftDate(1)}
-          onToday={() => setDateStr(toDateStr(new Date()))}
-        />
+        <ViewModeToggle mode={viewMode} onChange={setViewMode} />
+
+        {viewMode === "day" ? (
+          <DateNavigator
+            dateStr={dateStr}
+            onPrev={() => shiftDate(-1)}
+            onNext={() => shiftDate(1)}
+            onToday={() => setDateStr(toDateStr(new Date()))}
+          />
+        ) : (
+          <MonthNavigator
+            monthStr={monthStr}
+            onPrev={() => shiftMonth(-1)}
+            onNext={() => shiftMonth(1)}
+            onThisMonth={() => setMonthStr(toDateStr(new Date()).slice(0, 7))}
+          />
+        )}
 
         {/* Receipts summary chips */}
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 10 }}>
@@ -332,7 +458,7 @@ export default function DailyReportScreen() {
         <View style={styles.center}>
           <Ionicons name="bar-chart-outline" size={44} color={Colors.textMuted} />
           <Text style={styles.emptyTitle}>No Data</Text>
-          <Text style={styles.emptyText}>No agent activity found for {fmtDate(dateStr)}.</Text>
+          <Text style={styles.emptyText}>No agent activity found for {periodLabel}.</Text>
         </View>
       ) : (
         <ScrollView
@@ -349,7 +475,7 @@ export default function DailyReportScreen() {
             <View ref={tableRef} collapsable={false} style={tbl.captureWrap}>
               <View style={tbl.captureHeader}>
                 <Text style={tbl.captureTitle}>Receipt Count</Text>
-                <Text style={tbl.captureDate}>{fmtDate(dateStr)}</Text>
+                <Text style={tbl.captureDate}>{periodLabel}</Text>
               </View>
               <View style={tbl.captureDivider} />
 
