@@ -4275,6 +4275,10 @@ app.get("/api/admin/daily-report", requireAdmin, async (req: Request, res: Respo
       ? req.query.date
       : new Date().toISOString().split("T")[0];
 
+    // "day" (default) scopes receipts to the single selected date; "month"
+    // sums receipts across every day recorded so far in that date's month.
+    const view: "day" | "month" = req.query.view === "month" ? "month" : "day";
+
     // 1. All FOS agents
     const agentsResult = await storage.query(
       `SELECT id, name FROM fos_agents WHERE role = 'fos' ORDER BY name`
@@ -4347,22 +4351,28 @@ app.get("/api/admin/daily-report", requireAdmin, async (req: Request, res: Respo
       });
     }
 
-    // 5b. Receipts done per agent, split by BKT bucket (1/2/3), for the selected
-    // date. rec_date is stored as a day-of-month integer (e.g. 1–31, from the
-    // allocation sheet's "Rec Date" column) on both loan_cases and bkt_cases,
-    // so it's matched against the day-of-month of the date filter. Only cases
-    // marked "COLL" in the remark column count as receipts — "DP" cases are excluded.
-    const recDay = Number(date.split("-")[2]);
+    // 5b. Receipts done per agent, split by BKT bucket (1/2/3). rec_date is
+    // stored as a day-of-month integer (e.g. 1–31, from the allocation
+    // sheet's "Rec Date" column) on both loan_cases and bkt_cases — it does
+    // not carry a month/year, so "whole month" is approximated as every
+    // day-of-month from 1 up to the last day of the selected date's month.
+    // In "day" view this range collapses to a single day. Only cases marked
+    // "COLL" in the remark column count as receipts — "DP" cases are excluded.
+    const [yearNum, monthNum] = date.split("-").map(Number);
+    const recDayFrom = view === "month" ? 1 : Number(date.split("-")[2]);
+    const recDayTo = view === "month"
+      ? new Date(yearNum, monthNum, 0).getDate() // last day of that month
+      : Number(date.split("-")[2]);
     const receiptsResult = await storage.query(
       `SELECT agent_id, bkt, COUNT(*)::int AS receipt_count
        FROM (
-         SELECT agent_id, bkt FROM loan_cases WHERE rec_date = $1 AND bkt IN (1,2,3) AND UPPER(remark) = 'COLL'
+         SELECT agent_id, bkt FROM loan_cases WHERE rec_date BETWEEN $1 AND $2 AND bkt IN (1,2,3) AND UPPER(remark) = 'COLL'
          UNION ALL
-         SELECT agent_id, bkt FROM bkt_cases WHERE rec_date = $1 AND bkt IN (1,2,3) AND UPPER(remark) = 'COLL'
+         SELECT agent_id, bkt FROM bkt_cases WHERE rec_date BETWEEN $1 AND $2 AND bkt IN (1,2,3) AND UPPER(remark) = 'COLL'
        ) t
        WHERE agent_id IS NOT NULL
        GROUP BY agent_id, bkt`,
-      [recDay]
+      [recDayFrom, recDayTo]
     );
     const receiptsMap = new Map<number, { bkt1: number; bkt2: number; bkt3: number }>();
     for (const row of receiptsResult.rows) {
@@ -4478,7 +4488,7 @@ app.get("/api/admin/daily-report", requireAdmin, async (req: Request, res: Respo
       { bkt1: 0, bkt2: 0, bkt3: 0, total: 0 }
     );
 
-    res.json({ date, report, receiptTotals });
+    res.json({ date, view, report, receiptTotals });
   } catch (e: any) {
     console.error("[GET /api/admin/daily-report]", e);
     res.status(500).json({ message: e.message });
