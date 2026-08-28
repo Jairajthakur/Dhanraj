@@ -532,8 +532,8 @@ export const api = {
       agent_id?: number; date?: string; company?: string | null;
     }) => apiRequest("GET", `/api/admin/field-visits${qs(params ?? {})}`),
 
-    getDailyReport: (date?: string) =>
-      apiRequest("GET", `/api/admin/daily-report${qs({ date })}`),
+    getDailyReport: (date?: string, view?: "day" | "month") =>
+      apiRequest("GET", `/api/admin/daily-report${qs({ date, view })}`),
 
     // ── Attendance ───────────────────────────────────────────────────────────
     getAllAttendance: () => apiRequest("GET", "/api/admin/attendance"),
