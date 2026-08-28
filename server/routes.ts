@@ -43,13 +43,22 @@ function verifyToken(token: string): { agentId: number; role: string } | null {
 
 function worksheetToRows(worksheet: ExcelJS.Worksheet, rawStrings: boolean): any[][] {
   const rawRows: any[][] = [];
+  // IMPORTANT: When a sheet has an active AutoFilter, Excel marks every row that
+  // the filter is currently hiding as `hidden` in the saved file — exactly the
+  // same flag it uses for rows a user hides manually. There is no way to tell
+  // the two apart from the file alone. Previously we skipped ALL hidden rows,
+  // which meant: if someone applied a filter (e.g. "Status = Paid") and forgot
+  // to clear it before saving/uploading, every filtered-out row was silently
+  // treated as deleted on import — causing massive, silent data loss (a file
+  // with 800+ cases importing only the ~18 rows a stray filter left visible).
+  // To prevent that, we only honor the hidden flag when there is NO active
+  // AutoFilter on the sheet (i.e. rows a user deliberately hid via Format >
+  // Hide Rows on an unfiltered sheet are still respected). If a filter is
+  // active, we can't trust `hidden` to mean "deliberately removed", so every
+  // row is read regardless of its hidden state.
+  const hasActiveFilter = !!(worksheet as any).autoFilter;
   worksheet.eachRow({ includeEmpty: true }, (row) => {
-    // Skip rows hidden or filtered out in Excel — ExcelJS reads hidden rows by
-    // default, which caused agents/rows removed from *view* (via Hide or
-    // AutoFilter) to still be treated as "present" during import, so they
-    // never got cleaned up. Any row hidden directly, or hidden because it
-    // sits inside a collapsed/hidden outline group, is now skipped entirely.
-    if ((row as any).hidden) return;
+    if (!hasActiveFilter && (row as any).hidden) return;
     const rowVals = row.values as any[];
     const maxCol = rowVals.length - 1;
     const vals: any[] = [];
@@ -1837,6 +1846,10 @@ app.put("/api/fos-depositions/:id/pay-both", requireAuth, screenshotUpload.singl
       if (!req.file) return res.status(400).json({ message: "No file uploaded" });
       const ejWorkbook1 = new ExcelJS.Workbook(); await ejWorkbook1.xlsx.load(req.file.buffer);
       const worksheet1 = ejWorkbook1.worksheets.find((ws) => ws.name.toUpperCase() === "ALLU") || ejWorkbook1.worksheets[0];
+      // Let the admin know if the sheet had a filter applied — every row still
+      // gets imported (see worksheetToRows), but a stray filter usually means
+      // the file wasn't meant to be uploaded in this state, so it's worth flagging.
+      const hadActiveFilter = !!(worksheet1 as any).autoFilter;
       // Only read first 37 cols (A-AK) — AL onwards are formula-only summary cols that must not be imported
       const MAX_IMPORT_COLS = 37;
       const rawRows: any[][] = worksheetToRows(worksheet1, true).map((row) => row.slice(0, MAX_IMPORT_COLS));
@@ -2010,7 +2023,12 @@ for (const [agIdStr, d] of Object.entries(penalByAgent)) {
 }
 console.log(`[import] ✅ Penal perf upserted for ${Object.keys(penalByAgent).length} agents from allocation`);
 try { await recalcBktPerfFromAllocation(); } catch (e: any) { console.warn("[import] BKT recalc warning:", e.message); }
-res.json({ imported, updated, skipped, agentsCreated, agentsRemoved, total: rawRows.slice(headerRowIdx + 1).length, errors: errors.slice(0, 20) });
+res.json({
+  imported, updated, skipped, agentsCreated, agentsRemoved,
+  total: rawRows.slice(headerRowIdx + 1).length,
+  errors: errors.slice(0, 20),
+  ...(hadActiveFilter ? { warning: "The uploaded sheet had an active Excel filter. All rows were still imported regardless of which ones the filter was hiding — but if you only meant to upload the filtered subset, clear the filter and re-check the file." } : {}),
+});
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
      
