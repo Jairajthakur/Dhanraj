@@ -44,6 +44,12 @@ function verifyToken(token: string): { agentId: number; role: string } | null {
 function worksheetToRows(worksheet: ExcelJS.Worksheet, rawStrings: boolean): any[][] {
   const rawRows: any[][] = [];
   worksheet.eachRow({ includeEmpty: true }, (row) => {
+    // Skip rows hidden or filtered out in Excel — ExcelJS reads hidden rows by
+    // default, which caused agents/rows removed from *view* (via Hide or
+    // AutoFilter) to still be treated as "present" during import, so they
+    // never got cleaned up. Any row hidden directly, or hidden because it
+    // sits inside a collapsed/hidden outline group, is now skipped entirely.
+    if ((row as any).hidden) return;
     const rowVals = row.values as any[];
     const maxCol = rowVals.length - 1;
     const vals: any[] = [];
