@@ -158,9 +158,12 @@ export default function DailyReportScreen() {
     setIsSharing(true);
 
     const caption =
-      `*DAILY REPORT — ${fmtDate(dateStr)}*\n` +
-      `BKT1: ${totals.bkt1}   BKT2: ${totals.bkt2}   BKT3: ${totals.bkt3}\n` +
-      `Total Receipts: ${totals.total}`;
+      `*RECEIPT COUNT — ${fmtDate(dateStr)}*\n\n` +
+      `BKT1: ${totals.bkt1}\n` +
+      `BKT2: ${totals.bkt2}\n` +
+      `BKT3: ${totals.bkt3}\n` +
+      `Total Receipts: ${totals.total}\n\n` +
+      `Agents reporting: ${report.length}`;
 
     // ── Web: react-native's Alert.alert() and expo-sharing are no-ops on
     // web, and react-native-view-shot's captureRef() is broken on web
@@ -189,7 +192,7 @@ export default function DailyReportScreen() {
         // where the browser supports sharing files.
         const nav: any = typeof navigator !== "undefined" ? navigator : null;
         if (nav?.canShare?.({ files: [file] }) && nav?.share) {
-          await nav.share({ files: [file], title: "Daily Report", text: caption });
+          await nav.share({ files: [file], title: "Receipt Count", text: caption });
           return;
         }
 
@@ -231,7 +234,7 @@ export default function DailyReportScreen() {
           url: uri,           // file:// URI → WhatsApp shows it as an image
           type: "image/jpeg",
           message: caption,   // caption shown below the image
-          title: "Daily Report",
+          title: "Receipt Count",
         });
         return;
       } catch (e: any) {
@@ -243,7 +246,7 @@ export default function DailyReportScreen() {
       if (await Sharing.isAvailableAsync()) {
         await Sharing.shareAsync(uri, {
           mimeType: "image/jpeg",
-          dialogTitle: "Share Daily Report",
+          dialogTitle: "Share Receipt Count",
         });
       } else {
         Alert.alert("Sharing unavailable", "Could not share the report image on this device.");
@@ -345,9 +348,10 @@ export default function DailyReportScreen() {
             {/* Everything inside this View is what gets captured & shared to WhatsApp */}
             <View ref={tableRef} collapsable={false} style={tbl.captureWrap}>
               <View style={tbl.captureHeader}>
-                <Text style={tbl.captureTitle}>Daily Report</Text>
+                <Text style={tbl.captureTitle}>Receipt Count</Text>
                 <Text style={tbl.captureDate}>{fmtDate(dateStr)}</Text>
               </View>
+              <View style={tbl.captureDivider} />
 
               {/* Header row */}
               <View style={tbl.headRow}>
@@ -385,6 +389,18 @@ export default function DailyReportScreen() {
                 <Cell width={COL.bkt} bold color={Colors.warning}>{totals.bkt2}</Cell>
                 <Cell width={COL.bkt} bold color={Colors.statusPTP}>{totals.bkt3}</Cell>
                 <Cell width={COL.total} bold color={Colors.success}>{totals.total}</Cell>
+              </View>
+
+              <View style={tbl.captureFooter}>
+                <Text style={tbl.captureFooterText}>{report.length} Agents Reporting</Text>
+                <Text style={tbl.captureFooterText}>
+                  Generated {new Date().toLocaleString("en-IN", {
+                    day: "2-digit",
+                    month: "short",
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}
+                </Text>
               </View>
             </View>
           </ScrollView>
@@ -434,15 +450,33 @@ const styles = StyleSheet.create({
 });
 
 const tbl = StyleSheet.create({
-  captureWrap: { backgroundColor: Colors.surface },
+  captureWrap: {
+    backgroundColor: Colors.surface,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    borderRadius: 14,
+    overflow: "hidden",
+  },
   captureHeader: {
-    paddingVertical: 12,
+    paddingVertical: 14,
     paddingHorizontal: 12,
     alignItems: "center",
     backgroundColor: Colors.surface,
   },
-  captureTitle: { fontSize: 16, fontWeight: "800", color: Colors.text },
+  captureTitle: { fontSize: 17, fontWeight: "800", color: Colors.text, letterSpacing: 0.3 },
   captureDate: { fontSize: 12, color: Colors.textSecondary, fontWeight: "600", marginTop: 2 },
+  captureDivider: { height: 1, backgroundColor: Colors.border },
+  captureFooter: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    backgroundColor: Colors.surfaceAlt,
+    borderTopWidth: 1,
+    borderTopColor: Colors.borderLight,
+  },
+  captureFooterText: { fontSize: 10.5, color: Colors.textMuted, fontWeight: "600" },
   headRow: {
     flexDirection: "row",
     backgroundColor: Colors.primaryDeep ?? Colors.primary,
