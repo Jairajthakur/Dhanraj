@@ -4374,8 +4374,10 @@ app.get("/api/admin/daily-report", requireAdmin, async (req: Request, res: Respo
     // sheet's "Rec Date" column) on both loan_cases and bkt_cases — it does
     // not carry a month/year, so "whole month" is approximated as every
     // day-of-month from 1 up to the last day of the selected date's month.
-    // In "day" view this range collapses to a single day. Only cases marked
-    // "COLL" in the remark column count as receipts — "DP" cases are excluded.
+    // In "day" view this range collapses to a single day. A case only counts
+    // as a receipt if it's marked "COLL" in the remark column (not "DP") AND
+    // its status is "Paid" — flagged-for-collection alone isn't a receipt
+    // until the money has actually come in.
     const [yearNum, monthNum] = date.split("-").map(Number);
     const recDayFrom = view === "month" ? 1 : Number(date.split("-")[2]);
     const recDayTo = view === "month"
@@ -4387,10 +4389,12 @@ app.get("/api/admin/daily-report", requireAdmin, async (req: Request, res: Respo
          SELECT agent_id, bkt::text::integer AS bkt FROM loan_cases
            WHERE NULLIF(rec_date::text,'')::integer BETWEEN $1::integer AND $2::integer
              AND bkt::text::integer IN (1,2,3) AND UPPER(remark) = 'COLL'
+             AND UPPER(status) = 'PAID'
          UNION ALL
          SELECT agent_id, bkt::text::integer AS bkt FROM bkt_cases
            WHERE NULLIF(rec_date::text,'')::integer BETWEEN $1::integer AND $2::integer
              AND bkt::text::integer IN (1,2,3) AND UPPER(remark) = 'COLL'
+             AND UPPER(status) = 'PAID'
        ) t
        WHERE agent_id IS NOT NULL
        GROUP BY agent_id, bkt`,
