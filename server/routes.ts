@@ -4442,7 +4442,7 @@ app.get("/api/admin/daily-report", requireAdmin, async (req: Request, res: Respo
          FROM call_logs cl
          LEFT JOIN loan_cases lc ON cl.case_type = 'loan' AND lc.id::text = cl.case_id::text
          LEFT JOIN bkt_cases  bc ON cl.case_type = 'bkt'  AND bc.id::text = cl.case_id::text
-         WHERE UPPER(cl.outcome) = 'PAID'
+         WHERE UPPER(cl.status) = 'PAID'
            AND (
              ($3 = 'day'   AND DATE(cl.logged_at AT TIME ZONE 'Asia/Kolkata') = $1::date)
              OR
