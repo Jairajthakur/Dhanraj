@@ -4419,8 +4419,8 @@ app.get("/api/admin/daily-report", requireAdmin, async (req: Request, res: Respo
          SELECT fv.agent_id AS agent_id,
                 COALESCE(lc.bkt::text::integer, bc.bkt::text::integer) AS bkt
          FROM field_visits fv
-         LEFT JOIN loan_cases lc ON fv.case_type = 'loan' AND lc.id = fv.case_id
-         LEFT JOIN bkt_cases  bc ON fv.case_type = 'bkt'  AND bc.id = fv.case_id
+         LEFT JOIN loan_cases lc ON fv.case_type = 'loan' AND lc.id::text = fv.case_id::text
+         LEFT JOIN bkt_cases  bc ON fv.case_type = 'bkt'  AND bc.id::text = fv.case_id::text
          WHERE COALESCE(NULLIF(lc.rec_date::text,''), NULLIF(bc.rec_date::text,''))::integer
                  BETWEEN $1::integer AND $2::integer
            AND COALESCE(lc.bkt::text::integer, bc.bkt::text::integer) IN (1,2,3)
@@ -4431,8 +4431,8 @@ app.get("/api/admin/daily-report", requireAdmin, async (req: Request, res: Respo
          SELECT cl.agent_id AS agent_id,
                 COALESCE(lc.bkt::text::integer, bc.bkt::text::integer) AS bkt
          FROM call_logs cl
-         LEFT JOIN loan_cases lc ON cl.case_type = 'loan' AND lc.id = cl.case_id
-         LEFT JOIN bkt_cases  bc ON cl.case_type = 'bkt'  AND bc.id = cl.case_id
+         LEFT JOIN loan_cases lc ON cl.case_type = 'loan' AND lc.id::text = cl.case_id::text
+         LEFT JOIN bkt_cases  bc ON cl.case_type = 'bkt'  AND bc.id::text = cl.case_id::text
          WHERE COALESCE(NULLIF(lc.rec_date::text,''), NULLIF(bc.rec_date::text,''))::integer
                  BETWEEN $1::integer AND $2::integer
            AND COALESCE(lc.bkt::text::integer, bc.bkt::text::integer) IN (1,2,3)
