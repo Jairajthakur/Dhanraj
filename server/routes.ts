@@ -4378,14 +4378,16 @@ app.get("/api/admin/daily-report", requireAdmin, async (req: Request, res: Respo
     //       Feedback, AND the plain Unpaid/PTP/Paid status tabs). This is
     //       what makes a PTP case that gets resolved to Paid later the same
     //       day show up here, no matter which screen was used to do it.
-    //   (b) OR it was already "Paid" from the original upload sheet and has
-    //       never been touched via the app since (feedback_date IS NULL) —
-    //       in which case we fall back to the legacy rec_date/remark columns
-    //       from that sheet. rec_date is a day-of-month integer (1–31) with
-    //       no month/year, so "whole month" is approximated as every day of
-    //       the selected date's month; "day" view collapses that to one day.
-    // Each case is counted at most once (never both), so there's no overlap
-    // between (a) and (b) for the same row.
+    //   (b) OR its rec_date/remark from the original upload sheet says it
+    //       was collected in the selected day/month — this is the legacy
+    //       path for receipts that were already Paid at upload time, and it
+    //       applies regardless of feedback_date (that column can carry an
+    //       older, unrelated edit timestamp even on a case whose sheet data
+    //       says today). rec_date is a day-of-month integer (1–31) with no
+    //       month/year, so "whole month" is approximated as every day of the
+    //       selected date's month; "day" view collapses that to one day.
+    // Each case is one row here (not a join), so a case matching both (a)
+    // and (b) is still only counted once — there's no double-counting risk.
     const [yearNum, monthNum] = date.split("-").map(Number);
     const recDayFrom = view === "month" ? 1 : Number(date.split("-")[2]);
     const recDayTo = view === "month"
@@ -4404,7 +4406,7 @@ app.get("/api/admin/daily-report", requireAdmin, async (req: Request, res: Respo
                OR
                ($3 = 'month' AND to_char(feedback_date AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM') = $2)
                OR
-               (feedback_date IS NULL AND UPPER(remark) = 'COLL'
+               (UPPER(remark) = 'COLL'
                  AND NULLIF(rec_date::text,'')::integer BETWEEN $4::integer AND $5::integer)
              )
          UNION ALL
@@ -4417,7 +4419,7 @@ app.get("/api/admin/daily-report", requireAdmin, async (req: Request, res: Respo
                OR
                ($3 = 'month' AND to_char(feedback_date AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM') = $2)
                OR
-               (feedback_date IS NULL AND UPPER(remark) = 'COLL'
+               (UPPER(remark) = 'COLL'
                  AND NULLIF(rec_date::text,'')::integer BETWEEN $4::integer AND $5::integer)
              )
        ) t
