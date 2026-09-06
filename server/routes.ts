@@ -4371,28 +4371,13 @@ app.get("/api/admin/daily-report", requireAdmin, async (req: Request, res: Respo
 
     // 5b. Receipts done per agent, split by BKT bucket (1/2/3).
     //
-    // A case counts as a receipt for the selected day/month if EITHER:
-    //   (a) it was marked "Paid" through the app during that day/month —
-    //       matched on feedback_date, which is stamped NOW() by every save
-    //       path that can set status='Paid' (Field Visit, Call Log, Monthly
-    //       Feedback, AND the plain Unpaid/PTP/Paid status tabs). This is
-    //       what makes a PTP case that gets resolved to Paid later the same
-    //       day show up here, no matter which screen was used to do it.
-    //   (b) OR its rec_date/remark from the original upload sheet says it
-    //       was collected in the selected day/month — this is the legacy
-    //       path for receipts that were already Paid at upload time, and it
-    //       applies regardless of feedback_date (that column can carry an
-    //       older, unrelated edit timestamp even on a case whose sheet data
-    //       says today). rec_date is a day-of-month integer (1–31) with no
-    //       month/year, so "whole month" is approximated as every day of the
-    //       selected date's month; "day" view collapses that to one day.
-    // Each case is one row here (not a join), so a case matching both (a)
-    // and (b) is still only counted once — there's no double-counting risk.
-    const [yearNum, monthNum] = date.split("-").map(Number);
-    const recDayFrom = view === "month" ? 1 : Number(date.split("-")[2]);
-    const recDayTo = view === "month"
-      ? new Date(yearNum, monthNum, 0).getDate() // last day of that month
-      : Number(date.split("-")[2]);
+    // Perspective: a receipt is simply "a case that is currently marked
+    // Paid, dated to when it was marked Paid" — full stop. No more looking
+    // at field_visits or call_logs at all. feedback_date is stamped NOW() by
+    // every save path that can set status='Paid' (Field Visit, Call Log,
+    // Monthly Feedback, and the plain Unpaid/PTP/Paid status tabs), so it
+    // reliably reflects the day the case actually became Paid regardless of
+    // which screen was used to do it.
     const monthPrefix = date.slice(0, 7); // "YYYY-MM"
     const receiptsResult = await storage.query(
       `SELECT agent_id, bkt, COUNT(*)::int AS receipt_count
@@ -4405,9 +4390,6 @@ app.get("/api/admin/daily-report", requireAdmin, async (req: Request, res: Respo
                ($3 = 'day'   AND DATE(feedback_date AT TIME ZONE 'Asia/Kolkata') = $1::date)
                OR
                ($3 = 'month' AND to_char(feedback_date AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM') = $2)
-               OR
-               (UPPER(remark) = 'COLL'
-                 AND NULLIF(rec_date::text,'')::integer BETWEEN $4::integer AND $5::integer)
              )
          UNION ALL
          SELECT agent_id, bkt::text::integer AS bkt FROM bkt_cases
@@ -4418,13 +4400,10 @@ app.get("/api/admin/daily-report", requireAdmin, async (req: Request, res: Respo
                ($3 = 'day'   AND DATE(feedback_date AT TIME ZONE 'Asia/Kolkata') = $1::date)
                OR
                ($3 = 'month' AND to_char(feedback_date AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM') = $2)
-               OR
-               (UPPER(remark) = 'COLL'
-                 AND NULLIF(rec_date::text,'')::integer BETWEEN $4::integer AND $5::integer)
              )
        ) t
        GROUP BY agent_id, bkt`,
-      [date, monthPrefix, view, recDayFrom, recDayTo]
+      [date, monthPrefix, view]
     );
     const receiptsMap = new Map<number, { bkt1: number; bkt2: number; bkt3: number }>();
     for (const row of receiptsResult.rows) {
