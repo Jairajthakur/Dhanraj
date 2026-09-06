@@ -44,6 +44,9 @@ interface DailyReportRow {
   receiptsBkt2: number;
   receiptsBkt3: number;
   receiptsTotal: number;
+  fieldVisits: number;
+  callLogs: number;
+  paidCount: number;
 }
 
 // ─── Date navigator ───────────────────────────────────────────────────────
@@ -207,6 +210,7 @@ const COL = {
   agent: 170,
   bkt: 90,
   total: 100,
+  activity: 90,
 };
 
 function HeaderCell({ label, width, sub }: { label: string; width: number; sub?: string }) {
@@ -245,7 +249,9 @@ export default function DailyReportScreen() {
   });
 
   const report: DailyReportRow[] = data?.report ?? [];
-  const totals = data?.receiptTotals ?? { bkt1: 0, bkt2: 0, bkt3: 0, total: 0 };
+  const totals = data?.receiptTotals ?? {
+    bkt1: 0, bkt2: 0, bkt3: 0, total: 0, fieldVisits: 0, callLogs: 0, paidCount: 0,
+  };
   const periodLabel = viewMode === "day" ? fmtDate(dateStr) : fmtMonth(`${monthStr}-01`);
 
   const shiftDate = useCallback((days: number) => {
@@ -278,6 +284,9 @@ export default function DailyReportScreen() {
       `BKT2: ${totals.bkt2}\n` +
       `BKT3: ${totals.bkt3}\n` +
       `Total Receipts: ${totals.total}\n\n` +
+      `Field Visits: ${totals.fieldVisits}\n` +
+      `Calls Done: ${totals.callLogs}\n` +
+      `Paid: ${totals.paidCount}\n\n` +
       `Agents reporting: ${report.length}`;
 
     // ── Web: react-native's Alert.alert() and expo-sharing are no-ops on
@@ -412,6 +421,21 @@ export default function DailyReportScreen() {
                 Total Receipts: {totals.total}
               </Text>
             </View>
+            <View style={[styles.chip, { backgroundColor: Colors.primary + "18" }]}>
+              <Text style={[styles.chipText, { color: Colors.primary }]}>
+                Visits: {totals.fieldVisits}
+              </Text>
+            </View>
+            <View style={[styles.chip, { backgroundColor: Colors.info + "18" }]}>
+              <Text style={[styles.chipText, { color: Colors.info }]}>
+                Calls: {totals.callLogs}
+              </Text>
+            </View>
+            <View style={[styles.chip, { backgroundColor: Colors.success + "18" }]}>
+              <Text style={[styles.chipText, { color: Colors.success }]}>
+                Paid: {totals.paidCount}
+              </Text>
+            </View>
             <Pressable
               style={[styles.chip, { backgroundColor: Colors.primary + "18" }]}
               onPress={() => refetch()}
@@ -486,6 +510,9 @@ export default function DailyReportScreen() {
                 <HeaderCell label="BKT2" width={COL.bkt} sub="COLL Receipts" />
                 <HeaderCell label="BKT3" width={COL.bkt} sub="COLL Receipts" />
                 <HeaderCell label="Total" width={COL.total} sub="COLL Receipts" />
+                <HeaderCell label="Visits" width={COL.activity} sub="Field" />
+                <HeaderCell label="Calls" width={COL.activity} sub="Log" />
+                <HeaderCell label="Paid" width={COL.activity} sub="Cases" />
               </View>
 
               {/* Data rows */}
@@ -505,6 +532,15 @@ export default function DailyReportScreen() {
                     {row.receiptsBkt3}
                   </Cell>
                   <Cell width={COL.total} bold color={Colors.success}>{row.receiptsTotal}</Cell>
+                  <Cell width={COL.activity} color={Colors.primary} bold={row.fieldVisits > 0}>
+                    {row.fieldVisits}
+                  </Cell>
+                  <Cell width={COL.activity} color={Colors.info} bold={row.callLogs > 0}>
+                    {row.callLogs}
+                  </Cell>
+                  <Cell width={COL.activity} color={Colors.success} bold={row.paidCount > 0}>
+                    {row.paidCount}
+                  </Cell>
                 </View>
               ))}
 
@@ -515,6 +551,9 @@ export default function DailyReportScreen() {
                 <Cell width={COL.bkt} bold color={Colors.warning}>{totals.bkt2}</Cell>
                 <Cell width={COL.bkt} bold color={Colors.statusPTP}>{totals.bkt3}</Cell>
                 <Cell width={COL.total} bold color={Colors.success}>{totals.total}</Cell>
+                <Cell width={COL.activity} bold color={Colors.primary}>{totals.fieldVisits}</Cell>
+                <Cell width={COL.activity} bold color={Colors.info}>{totals.callLogs}</Cell>
+                <Cell width={COL.activity} bold color={Colors.success}>{totals.paidCount}</Cell>
               </View>
 
               <View style={tbl.captureFooter}>
