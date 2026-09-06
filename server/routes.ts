@@ -4326,6 +4326,19 @@ app.get("/api/admin/daily-report", requireAdmin, async (req: Request, res: Respo
       fvMap.set(Number(row.agent_id), Number(row.visit_count));
     }
 
+    // 3b. Call logs for the day
+    const clResult = await storage.query(
+      `SELECT agent_id, COUNT(*)::int AS call_count
+       FROM call_logs
+       WHERE DATE(logged_at AT TIME ZONE 'Asia/Kolkata') = $1
+       GROUP BY agent_id`,
+      [date]
+    );
+    const clMap = new Map<number, number>();
+    for (const row of clResult.rows) {
+      clMap.set(Number(row.agent_id), Number(row.call_count));
+    }
+
     // 4. PTP set for this date (across loan_cases + bkt_cases)
     const ptpResult = await storage.query(
       `SELECT agent_id, COUNT(*)::int AS ptp_count
@@ -4523,6 +4536,7 @@ app.get("/api/admin/daily-report", requireAdmin, async (req: Request, res: Respo
         checkOut,
         durationMinutes,
         fieldVisits:       fvMap.get(agent.id)  ?? 0,
+        callLogs:          clMap.get(agent.id)  ?? 0,
         ptpCount:          ptpMap.get(agent.id) ?? 0,
         paidCount:         paid.count,
         paidAmount:        paid.amount,
@@ -4549,9 +4563,12 @@ app.get("/api/admin/daily-report", requireAdmin, async (req: Request, res: Respo
         acc.bkt2 += r.receiptsBkt2;
         acc.bkt3 += r.receiptsBkt3;
         acc.total += r.receiptsTotal;
+        acc.fieldVisits += r.fieldVisits;
+        acc.callLogs += r.callLogs;
+        acc.paidCount += r.paidCount;
         return acc;
       },
-      { bkt1: 0, bkt2: 0, bkt3: 0, total: 0 }
+      { bkt1: 0, bkt2: 0, bkt3: 0, total: 0, fieldVisits: 0, callLogs: 0, paidCount: 0 }
     );
 
     res.json({ date, view, report, receiptTotals });
