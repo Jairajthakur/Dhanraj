@@ -4369,92 +4369,63 @@ app.get("/api/admin/daily-report", requireAdmin, async (req: Request, res: Respo
       });
     }
 
-    // 5b. Receipts done per agent, split by BKT bucket (1/2/3). rec_date is
-    // stored as a day-of-month integer (e.g. 1–31, from the allocation
-    // sheet's "Rec Date" column) on both loan_cases and bkt_cases — it does
-    // not carry a month/year, so "whole month" is approximated as every
-    // day-of-month from 1 up to the last day of the selected date's month.
-    // In "day" view this range collapses to a single day. A case only counts
-    // as a receipt if it's marked "COLL" in the remark column (not "DP") AND
-    // its status is "Paid" — flagged-for-collection alone isn't a receipt
-    // until the money has actually come in.
+    // 5b. Receipts done per agent, split by BKT bucket (1/2/3).
+    //
+    // A case counts as a receipt for the selected day/month if EITHER:
+    //   (a) it was marked "Paid" through the app during that day/month —
+    //       matched on feedback_date, which is stamped NOW() by every save
+    //       path that can set status='Paid' (Field Visit, Call Log, Monthly
+    //       Feedback, AND the plain Unpaid/PTP/Paid status tabs). This is
+    //       what makes a PTP case that gets resolved to Paid later the same
+    //       day show up here, no matter which screen was used to do it.
+    //   (b) OR it was already "Paid" from the original upload sheet and has
+    //       never been touched via the app since (feedback_date IS NULL) —
+    //       in which case we fall back to the legacy rec_date/remark columns
+    //       from that sheet. rec_date is a day-of-month integer (1–31) with
+    //       no month/year, so "whole month" is approximated as every day of
+    //       the selected date's month; "day" view collapses that to one day.
+    // Each case is counted at most once (never both), so there's no overlap
+    // between (a) and (b) for the same row.
     const [yearNum, monthNum] = date.split("-").map(Number);
     const recDayFrom = view === "month" ? 1 : Number(date.split("-")[2]);
     const recDayTo = view === "month"
       ? new Date(yearNum, monthNum, 0).getDate() // last day of that month
       : Number(date.split("-")[2]);
+    const monthPrefix = date.slice(0, 7); // "YYYY-MM"
     const receiptsResult = await storage.query(
       `SELECT agent_id, bkt, COUNT(*)::int AS receipt_count
        FROM (
          SELECT agent_id, bkt::text::integer AS bkt FROM loan_cases
-           WHERE NULLIF(rec_date::text,'')::integer BETWEEN $1::integer AND $2::integer
-             AND bkt::text::integer IN (1,2,3) AND UPPER(remark) = 'COLL'
-             AND UPPER(status) = 'PAID'
+           WHERE UPPER(status) = 'PAID'
+             AND bkt::text::integer IN (1,2,3)
+             AND agent_id IS NOT NULL
+             AND (
+               ($3 = 'day'   AND DATE(feedback_date AT TIME ZONE 'Asia/Kolkata') = $1::date)
+               OR
+               ($3 = 'month' AND to_char(feedback_date AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM') = $2)
+               OR
+               (feedback_date IS NULL AND UPPER(remark) = 'COLL'
+                 AND NULLIF(rec_date::text,'')::integer BETWEEN $4::integer AND $5::integer)
+             )
          UNION ALL
          SELECT agent_id, bkt::text::integer AS bkt FROM bkt_cases
-           WHERE NULLIF(rec_date::text,'')::integer BETWEEN $1::integer AND $2::integer
-             AND bkt::text::integer IN (1,2,3) AND UPPER(remark) = 'COLL'
-             AND UPPER(status) = 'PAID'
+           WHERE UPPER(status) = 'PAID'
+             AND bkt::text::integer IN (1,2,3)
+             AND agent_id IS NOT NULL
+             AND (
+               ($3 = 'day'   AND DATE(feedback_date AT TIME ZONE 'Asia/Kolkata') = $1::date)
+               OR
+               ($3 = 'month' AND to_char(feedback_date AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM') = $2)
+               OR
+               (feedback_date IS NULL AND UPPER(remark) = 'COLL'
+                 AND NULLIF(rec_date::text,'')::integer BETWEEN $4::integer AND $5::integer)
+             )
        ) t
-       WHERE agent_id IS NOT NULL
        GROUP BY agent_id, bkt`,
-      [recDayFrom, recDayTo]
+      [date, monthPrefix, view, recDayFrom, recDayTo]
     );
     const receiptsMap = new Map<number, { bkt1: number; bkt2: number; bkt3: number }>();
     for (const row of receiptsResult.rows) {
-      const agentId = Number(row.agent_id);
-      const entry = receiptsMap.get(agentId) ?? { bkt1: 0, bkt2: 0, bkt3: 0 };
-      const count = Number(row.receipt_count);
-      if (Number(row.bkt) === 1) entry.bkt1 += count;
-      else if (Number(row.bkt) === 2) entry.bkt2 += count;
-      else if (Number(row.bkt) === 3) entry.bkt3 += count;
-      receiptsMap.set(agentId, entry);
-    }
-
-    // 5c. Field visits and call logs whose outcome was "Paid" also count as 1
-    // receipt each — attributed to whichever BKT bucket (1/2/3) the
-    // underlying case belongs to. This is scoped by the actual date/month the
-    // visit or call was logged (visited_at / logged_at, in IST), NOT the
-    // case's uploaded "Rec Date" — so a receipt lands on the day the agent
-    // actually did the work, matching what they see in the app.
-    const monthPrefix = date.slice(0, 7); // "YYYY-MM"
-    const activityReceiptsResult = await storage.query(
-      `SELECT agent_id, bkt, COUNT(*)::int AS receipt_count
-       FROM (
-         SELECT fv.agent_id AS agent_id,
-                COALESCE(lc.bkt::text::integer, bc.bkt::text::integer) AS bkt
-         FROM field_visits fv
-         LEFT JOIN loan_cases lc ON fv.case_type IN ('loan','allocation') AND lc.id::text = fv.case_id::text
-         LEFT JOIN bkt_cases  bc ON fv.case_type = 'bkt' AND bc.id::text = fv.case_id::text
-         WHERE UPPER(fv.visit_outcome) = 'PAID'
-           AND (
-             ($3 = 'day'   AND DATE(fv.visited_at AT TIME ZONE 'Asia/Kolkata') = $1::date)
-             OR
-             ($3 = 'month' AND to_char(fv.visited_at AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM') = $2)
-           )
-           AND COALESCE(lc.bkt::text::integer, bc.bkt::text::integer) IN (1,2,3)
-           AND fv.agent_id IS NOT NULL
-
-         UNION ALL
-
-         SELECT cl.agent_id AS agent_id,
-                COALESCE(lc.bkt::text::integer, bc.bkt::text::integer) AS bkt
-         FROM call_logs cl
-         LEFT JOIN loan_cases lc ON cl.case_type = 'loan' AND lc.id::text = cl.case_id::text
-         LEFT JOIN bkt_cases  bc ON cl.case_type = 'bkt'  AND bc.id::text = cl.case_id::text
-         WHERE UPPER(cl.status) = 'PAID'
-           AND (
-             ($3 = 'day'   AND DATE(cl.logged_at AT TIME ZONE 'Asia/Kolkata') = $1::date)
-             OR
-             ($3 = 'month' AND to_char(cl.logged_at AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM') = $2)
-           )
-           AND COALESCE(lc.bkt::text::integer, bc.bkt::text::integer) IN (1,2,3)
-           AND cl.agent_id IS NOT NULL
-       ) t
-       GROUP BY agent_id, bkt`,
-      [date, monthPrefix, view]
-    );
-    for (const row of activityReceiptsResult.rows) {
       const agentId = Number(row.agent_id);
       const entry = receiptsMap.get(agentId) ?? { bkt1: 0, bkt2: 0, bkt3: 0 };
       const count = Number(row.receipt_count);
