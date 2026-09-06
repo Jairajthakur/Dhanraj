@@ -4420,8 +4420,8 @@ app.get("/api/admin/daily-report", requireAdmin, async (req: Request, res: Respo
          SELECT fv.agent_id AS agent_id,
                 COALESCE(lc.bkt::text::integer, bc.bkt::text::integer) AS bkt
          FROM field_visits fv
-         LEFT JOIN loan_cases lc ON fv.case_type = 'loan' AND lc.id::text = fv.case_id::text
-         LEFT JOIN bkt_cases  bc ON fv.case_type = 'bkt'  AND bc.id::text = fv.case_id::text
+         LEFT JOIN loan_cases lc ON fv.case_type IN ('loan','allocation') AND lc.id::text = fv.case_id::text
+         LEFT JOIN bkt_cases  bc ON fv.case_type = 'bkt' AND bc.id::text = fv.case_id::text
          WHERE UPPER(fv.visit_outcome) = 'PAID'
            AND (
              ($3 = 'day'   AND DATE(fv.visited_at AT TIME ZONE 'Asia/Kolkata') = $1::date)
