@@ -4326,19 +4326,6 @@ app.get("/api/admin/daily-report", requireAdmin, async (req: Request, res: Respo
       fvMap.set(Number(row.agent_id), Number(row.visit_count));
     }
 
-    // 3b. Call logs for the day
-    const clResult = await storage.query(
-      `SELECT agent_id, COUNT(*)::int AS call_count
-       FROM call_logs
-       WHERE DATE(logged_at AT TIME ZONE 'Asia/Kolkata') = $1
-       GROUP BY agent_id`,
-      [date]
-    );
-    const clMap = new Map<number, number>();
-    for (const row of clResult.rows) {
-      clMap.set(Number(row.agent_id), Number(row.call_count));
-    }
-
     // 4. PTP set for this date (across loan_cases + bkt_cases)
     const ptpResult = await storage.query(
       `SELECT agent_id, COUNT(*)::int AS ptp_count
@@ -4420,12 +4407,13 @@ app.get("/api/admin/daily-report", requireAdmin, async (req: Request, res: Respo
       receiptsMap.set(agentId, entry);
     }
 
-    // 5c. Field visits and call logs also count as 1 receipt each — attributed
-    // to whichever BKT bucket (1/2/3) the underlying case belongs to. Just
-    // like the COLL receipts above, this is scoped by the case's rec_date
-    // (NOT the timestamp the visit/call actually happened at), so re-uploading
-    // the allocation excel with a new "Rec Date" column automatically shifts
-    // which day/month these receipts land in — no admin re-work needed.
+    // 5c. Field visits and call logs whose outcome was "Paid" also count as 1
+    // receipt each — attributed to whichever BKT bucket (1/2/3) the
+    // underlying case belongs to. This is scoped by the actual date/month the
+    // visit or call was logged (visited_at / logged_at, in IST), NOT the
+    // case's uploaded "Rec Date" — so a receipt lands on the day the agent
+    // actually did the work, matching what they see in the app.
+    const monthPrefix = date.slice(0, 7); // "YYYY-MM"
     const activityReceiptsResult = await storage.query(
       `SELECT agent_id, bkt, COUNT(*)::int AS receipt_count
        FROM (
@@ -4434,8 +4422,12 @@ app.get("/api/admin/daily-report", requireAdmin, async (req: Request, res: Respo
          FROM field_visits fv
          LEFT JOIN loan_cases lc ON fv.case_type = 'loan' AND lc.id::text = fv.case_id::text
          LEFT JOIN bkt_cases  bc ON fv.case_type = 'bkt'  AND bc.id::text = fv.case_id::text
-         WHERE COALESCE(NULLIF(lc.rec_date::text,''), NULLIF(bc.rec_date::text,''))::integer
-                 BETWEEN $1::integer AND $2::integer
+         WHERE UPPER(fv.visit_outcome) = 'PAID'
+           AND (
+             ($3 = 'day'   AND DATE(fv.visited_at AT TIME ZONE 'Asia/Kolkata') = $1::date)
+             OR
+             ($3 = 'month' AND to_char(fv.visited_at AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM') = $2)
+           )
            AND COALESCE(lc.bkt::text::integer, bc.bkt::text::integer) IN (1,2,3)
            AND fv.agent_id IS NOT NULL
 
@@ -4446,13 +4438,17 @@ app.get("/api/admin/daily-report", requireAdmin, async (req: Request, res: Respo
          FROM call_logs cl
          LEFT JOIN loan_cases lc ON cl.case_type = 'loan' AND lc.id::text = cl.case_id::text
          LEFT JOIN bkt_cases  bc ON cl.case_type = 'bkt'  AND bc.id::text = cl.case_id::text
-         WHERE COALESCE(NULLIF(lc.rec_date::text,''), NULLIF(bc.rec_date::text,''))::integer
-                 BETWEEN $1::integer AND $2::integer
+         WHERE UPPER(cl.outcome) = 'PAID'
+           AND (
+             ($3 = 'day'   AND DATE(cl.logged_at AT TIME ZONE 'Asia/Kolkata') = $1::date)
+             OR
+             ($3 = 'month' AND to_char(cl.logged_at AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM') = $2)
+           )
            AND COALESCE(lc.bkt::text::integer, bc.bkt::text::integer) IN (1,2,3)
            AND cl.agent_id IS NOT NULL
        ) t
        GROUP BY agent_id, bkt`,
-      [recDayFrom, recDayTo]
+      [date, monthPrefix, view]
     );
     for (const row of activityReceiptsResult.rows) {
       const agentId = Number(row.agent_id);
@@ -4536,7 +4532,6 @@ app.get("/api/admin/daily-report", requireAdmin, async (req: Request, res: Respo
         checkOut,
         durationMinutes,
         fieldVisits:       fvMap.get(agent.id)  ?? 0,
-        callLogs:          clMap.get(agent.id)  ?? 0,
         ptpCount:          ptpMap.get(agent.id) ?? 0,
         paidCount:         paid.count,
         paidAmount:        paid.amount,
@@ -4563,12 +4558,9 @@ app.get("/api/admin/daily-report", requireAdmin, async (req: Request, res: Respo
         acc.bkt2 += r.receiptsBkt2;
         acc.bkt3 += r.receiptsBkt3;
         acc.total += r.receiptsTotal;
-        acc.fieldVisits += r.fieldVisits;
-        acc.callLogs += r.callLogs;
-        acc.paidCount += r.paidCount;
         return acc;
       },
-      { bkt1: 0, bkt2: 0, bkt3: 0, total: 0, fieldVisits: 0, callLogs: 0, paidCount: 0 }
+      { bkt1: 0, bkt2: 0, bkt3: 0, total: 0 }
     );
 
     res.json({ date, view, report, receiptTotals });
