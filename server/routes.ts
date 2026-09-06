@@ -4384,9 +4384,13 @@ app.get("/api/admin/daily-report", requireAdmin, async (req: Request, res: Respo
     const receiptsResult = await storage.query(
       `SELECT agent_id, bkt, COUNT(*)::int AS receipt_count
        FROM (
-         SELECT agent_id, bkt FROM loan_cases WHERE rec_date BETWEEN $1 AND $2 AND bkt IN (1,2,3) AND UPPER(remark) = 'COLL'
+         SELECT agent_id, bkt::text::integer AS bkt FROM loan_cases
+           WHERE NULLIF(rec_date::text,'')::integer BETWEEN $1::integer AND $2::integer
+             AND bkt::text::integer IN (1,2,3) AND UPPER(remark) = 'COLL'
          UNION ALL
-         SELECT agent_id, bkt FROM bkt_cases WHERE rec_date BETWEEN $1 AND $2 AND bkt IN (1,2,3) AND UPPER(remark) = 'COLL'
+         SELECT agent_id, bkt::text::integer AS bkt FROM bkt_cases
+           WHERE NULLIF(rec_date::text,'')::integer BETWEEN $1::integer AND $2::integer
+             AND bkt::text::integer IN (1,2,3) AND UPPER(remark) = 'COLL'
        ) t
        WHERE agent_id IS NOT NULL
        GROUP BY agent_id, bkt`,
@@ -4412,22 +4416,26 @@ app.get("/api/admin/daily-report", requireAdmin, async (req: Request, res: Respo
     const activityReceiptsResult = await storage.query(
       `SELECT agent_id, bkt, COUNT(*)::int AS receipt_count
        FROM (
-         SELECT fv.agent_id AS agent_id, COALESCE(lc.bkt, bc.bkt) AS bkt
+         SELECT fv.agent_id AS agent_id,
+                COALESCE(lc.bkt::text::integer, bc.bkt::text::integer) AS bkt
          FROM field_visits fv
          LEFT JOIN loan_cases lc ON fv.case_type = 'loan' AND lc.id = fv.case_id
          LEFT JOIN bkt_cases  bc ON fv.case_type = 'bkt'  AND bc.id = fv.case_id
-         WHERE COALESCE(lc.rec_date, bc.rec_date) BETWEEN $1 AND $2
-           AND COALESCE(lc.bkt, bc.bkt) IN (1,2,3)
+         WHERE COALESCE(NULLIF(lc.rec_date::text,''), NULLIF(bc.rec_date::text,''))::integer
+                 BETWEEN $1::integer AND $2::integer
+           AND COALESCE(lc.bkt::text::integer, bc.bkt::text::integer) IN (1,2,3)
            AND fv.agent_id IS NOT NULL
 
          UNION ALL
 
-         SELECT cl.agent_id AS agent_id, COALESCE(lc.bkt, bc.bkt) AS bkt
+         SELECT cl.agent_id AS agent_id,
+                COALESCE(lc.bkt::text::integer, bc.bkt::text::integer) AS bkt
          FROM call_logs cl
          LEFT JOIN loan_cases lc ON cl.case_type = 'loan' AND lc.id = cl.case_id
          LEFT JOIN bkt_cases  bc ON cl.case_type = 'bkt'  AND bc.id = cl.case_id
-         WHERE COALESCE(lc.rec_date, bc.rec_date) BETWEEN $1 AND $2
-           AND COALESCE(lc.bkt, bc.bkt) IN (1,2,3)
+         WHERE COALESCE(NULLIF(lc.rec_date::text,''), NULLIF(bc.rec_date::text,''))::integer
+                 BETWEEN $1::integer AND $2::integer
+           AND COALESCE(lc.bkt::text::integer, bc.bkt::text::integer) IN (1,2,3)
            AND cl.agent_id IS NOT NULL
        ) t
        GROUP BY agent_id, bkt`,
