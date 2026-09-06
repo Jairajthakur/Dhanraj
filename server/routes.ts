@@ -2716,7 +2716,7 @@ app.post("/api/admin/reset-monthly-feedback/case/:caseId", requireAdmin, async (
       const old = oldRow.rows[0];
       if (!old) return res.status(404).json({ message: "Case not found" });
       const ynVal = rollback_yn === true || rollback_yn === "true" ? true : rollback_yn === false || rollback_yn === "false" ? false : null;
-      await storage.query(`UPDATE ${tbl} SET status=$1, rollback_yn=$2, updated_at=NOW() WHERE id=$3`, [status, ynVal, caseId]);
+      await storage.query(`UPDATE ${tbl} SET status=$1, rollback_yn=$2, updated_at=NOW(), feedback_date=NOW() WHERE id=$3`, [status, ynVal, caseId]);
       if (old.bkt_key && old.agent_id && (old.pro || "").toUpperCase() === 'TW') {
         const pos = parseFloat(old.pos) || 0;
         const bktKey = table === "bkt" ? old.bkt_key.toLowerCase().replace(/\s+/g, "") : `bkt${old.bkt_key}`;
@@ -4371,13 +4371,27 @@ app.get("/api/admin/daily-report", requireAdmin, async (req: Request, res: Respo
 
     // 5b. Receipts done per agent, split by BKT bucket (1/2/3).
     //
-    // Perspective: a receipt is simply "a case that is currently marked
-    // Paid, dated to when it was marked Paid" — full stop. No more looking
-    // at field_visits or call_logs at all. feedback_date is stamped NOW() by
-    // every save path that can set status='Paid' (Field Visit, Call Log,
-    // Monthly Feedback, and the plain Unpaid/PTP/Paid status tabs), so it
-    // reliably reflects the day the case actually became Paid regardless of
-    // which screen was used to do it.
+    // Perspective: a receipt is "a case that is currently marked Paid, dated
+    // to when it was marked Paid" — regardless of which route was used to
+    // mark it. There are two routes into status='Paid', each with its own
+    // date column, so a case counts if EITHER matches the selected day/month:
+    //   (a) feedback_date — stamped NOW() by every in-app/admin path that
+    //       can set status='Paid': Field Visit, Call Log, Monthly Feedback,
+    //       the plain Unpaid/PTP/Paid status tabs, AND the admin's manual
+    //       "change status" action.
+    //   (b) rec_date + remark — the Excel/bulk-upload columns. A row that
+    //       arrives from an Excel upload already marked Paid never touches
+    //       feedback_date, so it's matched here instead. rec_date is a
+    //       day-of-month integer (1–31) with no month/year, so "whole month"
+    //       is approximated as every day of the selected date's month; "day"
+    //       view collapses that to one day.
+    // Each case is a single row (no joins to field_visits/call_logs), so a
+    // case matching both (a) and (b) is still only counted once.
+    const [yearNum, monthNum] = date.split("-").map(Number);
+    const recDayFrom = view === "month" ? 1 : Number(date.split("-")[2]);
+    const recDayTo = view === "month"
+      ? new Date(yearNum, monthNum, 0).getDate() // last day of that month
+      : Number(date.split("-")[2]);
     const monthPrefix = date.slice(0, 7); // "YYYY-MM"
     const receiptsResult = await storage.query(
       `SELECT agent_id, bkt, COUNT(*)::int AS receipt_count
@@ -4390,6 +4404,9 @@ app.get("/api/admin/daily-report", requireAdmin, async (req: Request, res: Respo
                ($3 = 'day'   AND DATE(feedback_date AT TIME ZONE 'Asia/Kolkata') = $1::date)
                OR
                ($3 = 'month' AND to_char(feedback_date AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM') = $2)
+               OR
+               (UPPER(remark) = 'COLL'
+                 AND NULLIF(rec_date::text,'')::integer BETWEEN $4::integer AND $5::integer)
              )
          UNION ALL
          SELECT agent_id, bkt::text::integer AS bkt FROM bkt_cases
@@ -4400,10 +4417,13 @@ app.get("/api/admin/daily-report", requireAdmin, async (req: Request, res: Respo
                ($3 = 'day'   AND DATE(feedback_date AT TIME ZONE 'Asia/Kolkata') = $1::date)
                OR
                ($3 = 'month' AND to_char(feedback_date AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM') = $2)
+               OR
+               (UPPER(remark) = 'COLL'
+                 AND NULLIF(rec_date::text,'')::integer BETWEEN $4::integer AND $5::integer)
              )
        ) t
        GROUP BY agent_id, bkt`,
-      [date, monthPrefix, view]
+      [date, monthPrefix, view, recDayFrom, recDayTo]
     );
     const receiptsMap = new Map<number, { bkt1: number; bkt2: number; bkt3: number }>();
     for (const row of receiptsResult.rows) {
