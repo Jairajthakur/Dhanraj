@@ -4403,6 +4403,46 @@ app.get("/api/admin/daily-report", requireAdmin, async (req: Request, res: Respo
       receiptsMap.set(agentId, entry);
     }
 
+    // 5c. Field visits and call logs also count as 1 receipt each — attributed
+    // to whichever BKT bucket (1/2/3) the underlying case belongs to. Just
+    // like the COLL receipts above, this is scoped by the case's rec_date
+    // (NOT the timestamp the visit/call actually happened at), so re-uploading
+    // the allocation excel with a new "Rec Date" column automatically shifts
+    // which day/month these receipts land in — no admin re-work needed.
+    const activityReceiptsResult = await storage.query(
+      `SELECT agent_id, bkt, COUNT(*)::int AS receipt_count
+       FROM (
+         SELECT fv.agent_id AS agent_id, COALESCE(lc.bkt, bc.bkt) AS bkt
+         FROM field_visits fv
+         LEFT JOIN loan_cases lc ON fv.case_type = 'loan' AND lc.id = fv.case_id
+         LEFT JOIN bkt_cases  bc ON fv.case_type = 'bkt'  AND bc.id = fv.case_id
+         WHERE COALESCE(lc.rec_date, bc.rec_date) BETWEEN $1 AND $2
+           AND COALESCE(lc.bkt, bc.bkt) IN (1,2,3)
+           AND fv.agent_id IS NOT NULL
+
+         UNION ALL
+
+         SELECT cl.agent_id AS agent_id, COALESCE(lc.bkt, bc.bkt) AS bkt
+         FROM call_logs cl
+         LEFT JOIN loan_cases lc ON cl.case_type = 'loan' AND lc.id = cl.case_id
+         LEFT JOIN bkt_cases  bc ON cl.case_type = 'bkt'  AND bc.id = cl.case_id
+         WHERE COALESCE(lc.rec_date, bc.rec_date) BETWEEN $1 AND $2
+           AND COALESCE(lc.bkt, bc.bkt) IN (1,2,3)
+           AND cl.agent_id IS NOT NULL
+       ) t
+       GROUP BY agent_id, bkt`,
+      [recDayFrom, recDayTo]
+    );
+    for (const row of activityReceiptsResult.rows) {
+      const agentId = Number(row.agent_id);
+      const entry = receiptsMap.get(agentId) ?? { bkt1: 0, bkt2: 0, bkt3: 0 };
+      const count = Number(row.receipt_count);
+      if (Number(row.bkt) === 1) entry.bkt1 += count;
+      else if (Number(row.bkt) === 2) entry.bkt2 += count;
+      else if (Number(row.bkt) === 3) entry.bkt3 += count;
+      receiptsMap.set(agentId, entry);
+    }
+
     // 6. Depositions submitted on this date
     const depResult = await storage.query(
       `SELECT agent_id,
