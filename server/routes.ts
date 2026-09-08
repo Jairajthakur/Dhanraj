@@ -787,8 +787,32 @@ app.use("/api/fos-depositions", (req, res, next) => {
   }
 
   app.get("/api/telecaller/cases", requireTelecaller, async (req, res) => {
-    try { res.json({ cases: await storage.getAllLoanCases() }); }
+    try {
+      const cases = await storage.getLoanCasesForTelecaller(req.session.agentId!);
+      res.json({ cases });
+    }
     catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  // ── Admin: FOS → Telecaller dedicated assignment ──────────────────────────
+  app.get("/api/admin/telecallers", requireAdmin, async (req, res) => {
+    try { res.json({ telecallers: await storage.getAllTelecallers() }); }
+    catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  app.get("/api/admin/fos-assignments", requireAdmin, async (req, res) => {
+    try { res.json({ agents: await storage.getFosAssignments() }); }
+    catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  app.put("/api/admin/fos-assignments/:fosId", requireAdmin, async (req, res) => {
+    try {
+      const fosId = parseInt(req.params.fosId, 10);
+      const raw = req.body?.telecallerId;
+      const telecallerId = raw === null || raw === undefined || raw === "" ? null : parseInt(raw, 10);
+      const agent = await storage.setFosTelecaller(fosId, telecallerId);
+      res.json({ agent });
+    } catch (e: any) { res.status(400).json({ message: e.message }); }
   });
 
   app.post("/api/auth/login", async (req, res) => {
