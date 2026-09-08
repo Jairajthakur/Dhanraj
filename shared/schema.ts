@@ -10,6 +10,8 @@ export const fosAgents = pgTable("fos_agents", {
   password: text("password").notNull(),
   role: varchar("role", { length: 20 }).default("fos"),
   phone: varchar("phone", { length: 20 }),
+  // For role = 'fos': which telecaller (fos_agents.id, role = 'telecaller') this FOS is dedicated to.
+  assignedTelecallerId: integer("assigned_telecaller_id"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
