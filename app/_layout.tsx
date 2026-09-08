@@ -121,7 +121,7 @@ function RootLayoutNav() {
       const roleHome: Record<string, string> = {
         admin: "/(admin)",
         fos:   "/(app)/dashboard",
-        telecaller:  "/(telecaller)",
+        telecaller:  "/(telecaller)/cases",
       };
       const home = roleHome[agent.role];
       if (!home) return null;
