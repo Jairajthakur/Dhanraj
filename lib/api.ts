@@ -431,11 +431,22 @@ export const api = {
     customerPhone: string; agentName: string; caseId: string | number; loanNo: string;
   }) => apiRequest("POST", "/api/make-call", data),
 
+  // ─── TELECALLER ───────────────────────────────────────────────────────────
+  telecaller: {
+    getCases: () => apiRequest("GET", "/api/telecaller/cases"),
+  },
+
   // ─── ADMIN ────────────────────────────────────────────────────────────────
   admin: {
 
     // ── Agents ──────────────────────────────────────────────────────────────
     getAgents:     () => apiRequest("GET", "/api/admin/agents"),
+
+    // ── FOS → Telecaller dedicated assignment ─────────────────────────────
+    getTelecallers:    () => apiRequest("GET", "/api/admin/telecallers"),
+    getFosAssignments: () => apiRequest("GET", "/api/admin/fos-assignments"),
+    assignFosToTelecaller: (fosId: number, telecallerId: number | null) =>
+      apiRequest("PUT", `/api/admin/fos-assignments/${fosId}`, { telecallerId }),
     getStats:      (company?: string | null) =>
       apiRequest("GET", `/api/admin/stats${qs({ company })}`),
     getAgentStats: (agentId: number) =>
