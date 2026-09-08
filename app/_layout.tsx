@@ -121,7 +121,7 @@ function RootLayoutNav() {
       const roleHome: Record<string, string> = {
         admin: "/(admin)",
         fos:   "/(app)/dashboard",
-        repo:  "/(repo)",
+        telecaller:  "/(telecaller)",
       };
       const home = roleHome[agent.role];
       if (!home) return null;
@@ -129,7 +129,7 @@ function RootLayoutNav() {
       const inCorrectSection =
         (agent.role === "admin" && segments[0] === "(admin)") ||
         (agent.role === "fos"   && segments[0] === "(app)" && segments[1] !== "login") ||
-        (agent.role === "repo"  && segments[0] === "(repo)");
+        (agent.role === "telecaller"  && segments[0] === "(telecaller)");
 
       if (inCorrectSection) return null;
 
@@ -155,7 +155,7 @@ function RootLayoutNav() {
       <Stack.Screen name="index" />
       <Stack.Screen name="(app)" />
       <Stack.Screen name="(admin)" />
-      <Stack.Screen name="(repo)" />
+      <Stack.Screen name="(telecaller)" />
       <Stack.Screen name="(tabs)" />
     </Stack>
   );
