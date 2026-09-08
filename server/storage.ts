@@ -221,6 +221,9 @@ export async function initDatabase() {
     `ALTER TABLE fos_agents ADD COLUMN IF NOT EXISTS phone      TEXT`,
     `ALTER TABLE fos_agents ADD COLUMN IF NOT EXISTS photo_url  TEXT`,
     `ALTER TABLE fos_agents ADD COLUMN IF NOT EXISTS push_token TEXT`,
+    // Dedicated FOS -> Telecaller assignment (a FOS agent belongs to at most one telecaller)
+    `ALTER TABLE fos_agents ADD COLUMN IF NOT EXISTS assigned_telecaller_id INTEGER REFERENCES fos_agents(id)`,
+    `CREATE INDEX IF NOT EXISTS idx_fos_agents_assigned_telecaller ON fos_agents(assigned_telecaller_id)`,
     `ALTER TABLE loan_cases ADD COLUMN IF NOT EXISTS monthly_feedback TEXT`,
     `ALTER TABLE bkt_cases  ADD COLUMN IF NOT EXISTS monthly_feedback TEXT`,
     `ALTER TABLE loan_cases ADD COLUMN IF NOT EXISTS extra_numbers TEXT[] DEFAULT '{}'`,
@@ -308,6 +311,60 @@ export async function createFosAgent(data: { name: string; username: string; pas
     [data.name, data.username, data.password]
   );
   return result.rows[0];
+}
+
+// ── FOS → Telecaller dedicated assignment ──────────────────────────────────
+
+export async function getAllTelecallers() {
+  const result = await query(
+    "SELECT id, name, username, phone, created_at FROM fos_agents WHERE role = 'telecaller' ORDER BY name"
+  );
+  return result.rows;
+}
+
+// Every FOS agent, with the name/id of the telecaller they're currently
+// dedicated to (if any), for the admin assignment screen.
+export async function getFosAssignments() {
+  const result = await query(
+    `SELECT fa.id, fa.name, fa.username, fa.phone, fa.assigned_telecaller_id,
+            tc.name AS telecaller_name
+     FROM fos_agents fa
+     LEFT JOIN fos_agents tc ON tc.id = fa.assigned_telecaller_id
+     WHERE fa.role = 'fos'
+     ORDER BY fa.name`
+  );
+  return result.rows;
+}
+
+// Assign (or unassign, when telecallerId is null) a FOS agent to a telecaller.
+export async function setFosTelecaller(fosId: number, telecallerId: number | null) {
+  if (telecallerId !== null) {
+    const telecaller = await query(
+      "SELECT id FROM fos_agents WHERE id = $1 AND role = 'telecaller'",
+      [telecallerId]
+    );
+    if (telecaller.rows.length === 0) {
+      throw new Error("Telecaller not found");
+    }
+  }
+  const result = await query(
+    `UPDATE fos_agents SET assigned_telecaller_id = $1 WHERE id = $2 AND role = 'fos' RETURNING *`,
+    [telecallerId, fosId]
+  );
+  if (result.rows.length === 0) throw new Error("FOS agent not found");
+  return result.rows[0];
+}
+
+// Loan cases belonging only to the FOS agents dedicated to this telecaller.
+export async function getLoanCasesForTelecaller(telecallerId: number) {
+  const result = await query(
+    `SELECT lc.*, fa.name as agent_name FROM loan_cases lc
+     JOIN fos_agents fa ON lc.agent_id = fa.id
+     WHERE fa.assigned_telecaller_id = $1
+     ORDER BY fa.name, lc.bkt DESC NULLS LAST`,
+    [telecallerId]
+  );
+  return result.rows;
 }
 
 export async function deleteAllLoanCases() { await query("DELETE FROM loan_cases"); }
