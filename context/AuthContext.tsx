@@ -16,7 +16,7 @@ interface Agent {
   id: number;
   name: string;
   username: string;
-  role: "fos" | "admin" | "repo";
+  role: "fos" | "admin" | "telecaller";
   phone?: string;
   photo_url?: string;
   agent_id?: string;
