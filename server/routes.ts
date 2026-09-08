@@ -770,23 +770,23 @@ app.use("/api/fos-depositions", (req, res, next) => {
     return res.status(403).json({ message: "Forbidden" });
   }
 
-  function requireRepo(req: Request, res: Response, next: any) {
+  function requireTelecaller(req: Request, res: Response, next: any) {
     // Fast path: check JWT Bearer token first (no DB round-trip)
     const authHeader = req.headers.authorization;
     if (authHeader?.startsWith("Bearer ")) {
       const payload = verifyToken(authHeader.slice(7));
-      if (payload?.role === "repo") {
+      if (payload?.role === "telecaller") {
         req.session.agentId = payload.agentId;
         req.session.role = payload.role;
         return next();
       }
     }
     // Fallback: session cookie
-    if (req.session.agentId && req.session.role === "repo") return next();
+    if (req.session.agentId && req.session.role === "telecaller") return next();
     return res.status(403).json({ message: "Forbidden" });
   }
 
-  app.get("/api/repo/cases", requireRepo, async (req, res) => {
+  app.get("/api/telecaller/cases", requireTelecaller, async (req, res) => {
     try { res.json({ cases: await storage.getAllLoanCases() }); }
     catch (e: any) { res.status(500).json({ message: e.message }); }
   });
