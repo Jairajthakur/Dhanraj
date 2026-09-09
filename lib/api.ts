@@ -447,6 +447,7 @@ export const api = {
     getFosAssignments: () => apiRequest("GET", "/api/admin/fos-assignments"),
     assignFosToTelecaller: (fosId: number, telecallerId: number | null) =>
       apiRequest("PUT", `/api/admin/fos-assignments/${fosId}`, { telecallerId }),
+    getTelecallerStats: () => apiRequest("GET", "/api/admin/telecaller-stats"),
     getStats:      (company?: string | null) =>
       apiRequest("GET", `/api/admin/stats${qs({ company })}`),
     getAgentStats: (agentId: number) =>
