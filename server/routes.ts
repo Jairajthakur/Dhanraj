@@ -805,6 +805,15 @@ app.use("/api/fos-depositions", (req, res, next) => {
     catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
+  // Per-telecaller performance summary: total/unpaid/PTP/paid case counts,
+  // today's activity (cases with feedback saved today), today's paid case
+  // list, and today's attendance — everything the admin needs to see about
+  // a telecaller's work at a glance.
+  app.get("/api/admin/telecaller-stats", requireAdmin, async (req, res) => {
+    try { res.json({ telecallers: await storage.getTelecallerStats() }); }
+    catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
   app.put("/api/admin/fos-assignments/:fosId", requireAdmin, async (req, res) => {
     try {
       const fosId = parseInt(req.params.fosId, 10);
