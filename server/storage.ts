@@ -663,12 +663,12 @@ export async function upsertLoanCase(data: {
       loan_maturity_date  = EXCLUDED.loan_maturity_date,
       tenor               = EXCLUDED.tenor,
       pro                 = EXCLUDED.pro,
-      -- Force-update: status and ptp dates always overwritten from the Excel file,
-      -- so every re-import fully reflects the uploaded allocation sheet.
-      status              = EXCLUDED.status,
-      ptp_date            = EXCLUDED.ptp_date,
+      -- Telecaller-owned fields: status (Paid/Unpaid/PTP/Rollback), the telecaller's
+      -- own ptp_date, and rollback_yn are NEVER overwritten by a re-import. They are
+      -- only set the first time a case is created and afterwards only change when the
+      -- telecaller updates them from the app. latest_feedback / feedback_comments are
+      -- also telecaller-owned and are intentionally left out of this SET clause.
       telecaller_ptp_date = EXCLUDED.telecaller_ptp_date,
-      rollback_yn         = EXCLUDED.rollback_yn,
       company_name        = EXCLUDED.company_name,
       coll_amount         = EXCLUDED.coll_amount,
       rec_date            = EXCLUDED.rec_date,
@@ -768,8 +768,10 @@ export async function upsertBktCase(data: any) {
        loan_maturity_date = COALESCE(EXCLUDED.loan_maturity_date, bkt_cases.loan_maturity_date),
        tenor = COALESCE(EXCLUDED.tenor, bkt_cases.tenor),
        pro = COALESCE(EXCLUDED.pro, bkt_cases.pro),
-       status = COALESCE(EXCLUDED.status, bkt_cases.status),
-       ptp_date = COALESCE(EXCLUDED.ptp_date, bkt_cases.ptp_date),
+       -- Telecaller-owned fields (status, the telecaller's own ptp_date, rollback_yn,
+       -- latest_feedback, feedback_comments, extra_numbers) are intentionally left out
+       -- of this SET clause so a re-import never wipes what the telecaller has entered.
+       -- They're only set once, when a case is first inserted.
        telecaller_ptp_date = EXCLUDED.telecaller_ptp_date,
        rec_date = EXCLUDED.rec_date,
        remark = EXCLUDED.remark
