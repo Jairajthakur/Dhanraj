@@ -342,6 +342,29 @@ penalstatus: "penal_yn",
   remark: "remark", remarks: "remark",
 };
 
+// ─── CR (Cash Receipt) import — separate column map + date parser ────────────
+// The CR file is exported straight from the loan/collection system, not
+// hand-built like the allocation sheet, so its headers and date format
+// ("08.09.2026") are different and are kept separate from COLUMN_MAP/parseDate.
+const CR_COLUMN_MAP: Record<string, string> = {
+  agreementno: "loan_no", agreementnumber: "loan_no", agreementnum: "loan_no",
+  customerid: "customer_id", custid: "customer_id",
+  custname: "customer_name", customername: "customer_name",
+  transactiondate: "txn_date", txndate: "txn_date",
+  amount: "amount",
+  receiptno: "receipt_no", receiptnumber: "receipt_no",
+  instrumenttype: "instrument_type",
+  fos: "fos_name", issuedby: "issued_by",
+};
+function parseCrDate(val: any): string | null {
+  if (val === null || val === undefined || val === "") return null;
+  const s = String(val).trim(); if (!s) return null;
+  const m = s.match(/^(\d{1,2})[.\-\/](\d{1,2})[.\-\/](\d{4})$/);
+  if (m) return `${m[3]}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}`;
+  const d = new Date(s); if (isNaN(d.getTime())) return null;
+  return d.toISOString().slice(0, 10);
+}
+
 const MONTH_NAMES = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 function monthToNumber(val: any): number {
   if (!val) return new Date().getMonth() + 1;
@@ -666,6 +689,20 @@ try {
     await storage.query(`ALTER TABLE bkt_cases ADD COLUMN IF NOT EXISTS remark VARCHAR(20)`);
     console.log("[DB] loan_cases/bkt_cases.remark column ready ✅");
   } catch (e: any) { console.error("[DB] remark column migration:", e.message); }
+
+  // ── CR (Cash Receipt) import columns — store the receipt that marked a
+  // case Paid, on both loan_cases and bkt_cases ─────────────────────────────
+  try {
+    await storage.query(`ALTER TABLE loan_cases ADD COLUMN IF NOT EXISTS cr_receipt_no  TEXT`);
+    await storage.query(`ALTER TABLE loan_cases ADD COLUMN IF NOT EXISTS cr_amount      NUMERIC`);
+    await storage.query(`ALTER TABLE loan_cases ADD COLUMN IF NOT EXISTS cr_txn_date    DATE`);
+    await storage.query(`ALTER TABLE loan_cases ADD COLUMN IF NOT EXISTS cr_imported_at TIMESTAMPTZ`);
+    await storage.query(`ALTER TABLE bkt_cases  ADD COLUMN IF NOT EXISTS cr_receipt_no  TEXT`);
+    await storage.query(`ALTER TABLE bkt_cases  ADD COLUMN IF NOT EXISTS cr_amount      NUMERIC`);
+    await storage.query(`ALTER TABLE bkt_cases  ADD COLUMN IF NOT EXISTS cr_txn_date    DATE`);
+    await storage.query(`ALTER TABLE bkt_cases  ADD COLUMN IF NOT EXISTS cr_imported_at TIMESTAMPTZ`);
+    console.log("[DB] loan_cases/bkt_cases.cr_* columns ready ✅");
+  } catch (e: any) { console.error("[DB] cr_* column migration:", e.message); }
 
   try {
     await storage.query(`CREATE TABLE IF NOT EXISTS fos_depositions (
@@ -2118,6 +2155,103 @@ res.json({
         catch (e: any) { errors.push(`Row ${i + headerRowIdx + 2}: ${e.message}`); skipped++; }
       }
       res.json({ imported, updated, skipped, agentsCreated, agentsRemoved, total: rawRows.slice(headerRowIdx + 1).length, errors: errors.slice(0, 20) });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // IMPORT CR (Cash Receipt) — every Agreement No in this file has been paid.
+  // Marks the matching case (loan_cases first, then bkt_cases) as Paid and
+  // records the receipt, without touching any other allocation data. This
+  // never creates new cases — an Agreement No with no matching case is
+  // reported back as "unmatched" rather than inserted.
+  // ─────────────────────────────────────────────────────────────────────────────
+  app.post("/api/admin/import-cr", requireAdmin, upload.single("file"), async (req, res) => {
+    try {
+      if (!req.file) return res.status(400).json({ message: "No file uploaded" });
+      const crWorkbook = new ExcelJS.Workbook();
+      await crWorkbook.xlsx.load(req.file.buffer);
+
+      // CR exports can carry the full sheet plus a duplicate/filtered "Sheet1" —
+      // read every sheet and de-dupe by Receipt No. so a row appearing twice
+      // (across sheets or otherwise) is only ever applied once.
+      type CrRow = { loanNo: string; receiptNo: string | null; amount: string | null; txnDate: string | null };
+      const byReceipt = new Map<string, CrRow>();
+      const noReceiptRows: CrRow[] = [];
+
+      for (const worksheet of crWorkbook.worksheets) {
+        const rawRows: any[][] = worksheetToRows(worksheet, true);
+        if (rawRows.length === 0) continue;
+        let headerRowIdx = -1; let colIdxMap: Record<number, string> = {};
+        for (let r = 0; r < Math.min(rawRows.length, 10); r++) {
+          const row = rawRows[r]; const tempMap: Record<number, string> = {}; let matched = 0;
+          for (let c = 0; c < row.length; c++) { const norm = normalizeHeader(String(row[c] || "")); if (CR_COLUMN_MAP[norm]) { tempMap[c] = CR_COLUMN_MAP[norm]; matched++; } }
+          if (matched >= 3) { headerRowIdx = r; colIdxMap = tempMap; break; }
+        }
+        if (headerRowIdx === -1) continue; // not a CR sheet (e.g. a blank/unrelated tab) — skip it
+
+        for (const row of rawRows.slice(headerRowIdx + 1)) {
+          const mapped: Record<string, any> = {};
+          for (const [colIdx, field] of Object.entries(colIdxMap)) { const val = row[Number(colIdx)]; mapped[field] = val !== undefined && val !== "" ? String(val).trim() : null; }
+          if (!mapped.loan_no || mapped.loan_no.toLowerCase() === "agreement no") continue;
+          const crRow: CrRow = {
+            loanNo: mapped.loan_no.trim(),
+            receiptNo: mapped.receipt_no || null,
+            amount: parseNum(mapped.amount),
+            txnDate: parseCrDate(mapped.txn_date),
+          };
+          if (crRow.receiptNo) byReceipt.set(crRow.receiptNo, crRow);
+          else noReceiptRows.push(crRow);
+        }
+      }
+
+      const crRows = [...byReceipt.values(), ...noReceiptRows];
+      if (crRows.length === 0) return res.status(400).json({ message: "Could not find a CR header row (expected columns like Agreement No, Amount, Receipt No.)." });
+
+      let updated = 0, skipped = 0; const unmatched: string[] = []; const errors: string[] = [];
+      for (const row of crRows) {
+        try {
+          // rec_date is a day-of-month int (see loan_cases.rec_date) — parsed
+          // directly from the YYYY-MM-DD string to avoid server-timezone drift.
+          const day = row.txnDate ? parseInt(row.txnDate.slice(8, 10), 10) : null;
+
+          const loanUpdate = await storage.query(
+            `UPDATE loan_cases SET
+               status         = 'Paid',
+               remark         = 'COLL',
+               rec_date       = COALESCE($2, rec_date),
+               cr_receipt_no  = COALESCE($3, cr_receipt_no),
+               cr_amount      = COALESCE($4, cr_amount),
+               cr_txn_date    = COALESCE($5, cr_txn_date),
+               cr_imported_at = NOW()
+             WHERE loan_no = $1 RETURNING id`,
+            [row.loanNo, day, row.receiptNo, row.amount, row.txnDate]
+          );
+          if (loanUpdate.rows.length > 0) { updated++; continue; }
+
+          const bktUpdate = await storage.query(
+            `UPDATE bkt_cases SET
+               status         = 'Paid',
+               remark         = 'COLL',
+               rec_date       = COALESCE($2, rec_date),
+               cr_receipt_no  = COALESCE($3, cr_receipt_no),
+               cr_amount      = COALESCE($4, cr_amount),
+               cr_txn_date    = COALESCE($5, cr_txn_date),
+               cr_imported_at = NOW()
+             WHERE loan_no = $1 RETURNING id`,
+            [row.loanNo, day, row.receiptNo, row.amount, row.txnDate]
+          );
+          if (bktUpdate.rows.length > 0) { updated++; continue; }
+
+          skipped++; unmatched.push(row.loanNo);
+        } catch (e: any) { errors.push(`${row.loanNo}: ${e.message}`); skipped++; }
+      }
+
+      res.json({
+        imported: 0, updated, skipped, agentsCreated: 0,
+        total: crRows.length,
+        unmatched: unmatched.slice(0, 30),
+        errors: errors.slice(0, 20),
+      });
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
