@@ -1,310 +1,105 @@
-import React, { useState, useMemo, useCallback } from "react";
+import React, { useState, useMemo } from "react";
 import {
-  View, Text, StyleSheet, SectionList, Pressable, TextInput,
-  Linking, Alert, ActivityIndicator, Modal, ScrollView, Platform
+  View, Text, StyleSheet, FlatList, Pressable, TextInput,
+  ActivityIndicator, Platform,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQuery } from "@tanstack/react-query";
 import { Ionicons } from "@expo/vector-icons";
+import { router } from "expo-router";
 import Colors from "@/constants/colors";
 import { api } from "@/lib/api";
+import {
+  countByStatus, StatBox, CaseCard, CaseDetailModal, StatusFilter,
+} from "@/components/TelecallerShared";
 
-const STATUS_COLORS: Record<string, string> = {
-  Unpaid: Colors.statusUnpaid,
-  PTP: Colors.statusPTP,
-  Paid: Colors.statusPaid,
+type AgentSummary = {
+  agentId: string;
+  agentName: string;
+  counts: ReturnType<typeof countByStatus>;
 };
 
-type StatusFilter = "All" | "Unpaid" | "PTP" | "Paid";
-
-function countByStatus(cases: any[]) {
-  const counts = { total: cases.length, Unpaid: 0, PTP: 0, Paid: 0, other: 0 };
-  for (const c of cases) {
-    if (c.status === "Unpaid") counts.Unpaid++;
-    else if (c.status === "PTP") counts.PTP++;
-    else if (c.status === "Paid") counts.Paid++;
-    else counts.other++;
-  }
-  return counts;
-}
-
-function fmt(v: any, prefix = "") {
-  if (v === null || v === undefined || v === "") return "";
-  const n = parseFloat(v);
-  if (!isNaN(n) && prefix) return prefix + n.toLocaleString("en-IN", { maximumFractionDigits: 2 });
-  return String(v);
-}
-
-function TableRow({ label, value, phone, even }: { label: string; value?: any; phone?: boolean; even?: boolean }) {
-  const display = (value !== null && value !== undefined && value !== "") ? String(value) : "";
-  return (
-    <View style={[detailStyles.row, even && { backgroundColor: Colors.surfaceAlt }]}>
-      <View style={detailStyles.labelCell}>
-        <Text style={detailStyles.labelText}>{label}</Text>
-      </View>
-      <View style={detailStyles.valueCell}>
-        {phone && display ? (
-          <Pressable onPress={() => Linking.openURL(`tel:${display.split(",")[0].trim()}`)}>
-            <Text style={[detailStyles.valueText, { color: Colors.info, textDecorationLine: "underline" }]}>{display}</Text>
-          </Pressable>
-        ) : (
-          <Text style={detailStyles.valueText}>{display}</Text>
-        )}
-      </View>
-    </View>
-  );
-}
-
-function CaseDetailModal({ item, onClose }: { item: any; onClose: () => void }) {
-  const insets = useSafeAreaInsets();
-  if (!item) return null;
-  const statusColor = STATUS_COLORS[item.status] || Colors.primary;
-
-  const rows = [
-    { label: "Latest Feedback", value: item.latest_feedback },
-    { label: "Comments", value: item.feedback_comments },
-    { label: "FOS Agent", value: item.agent_name },
-    { label: "Status", value: item.status },
-    { label: "Customer Name", value: item.customer_name },
-    { label: "Loan No", value: item.loan_no },
-    { label: "BKT", value: item.bkt },
-    { label: "APP ID", value: item.app_id },
-    { label: "Address", value: item.address },
-    { label: "Mobile No", value: item.mobile_no, phone: true },
-    { label: "Ref Address", value: item.reference_address },
-    { label: "POS", value: fmt(item.pos, "₹") },
-    { label: "EMI", value: fmt(item.emi_amount, "₹") },
-    { label: "EMI Due", value: fmt(item.emi_due, "₹") },
-    { label: "CBC", value: fmt(item.cbc, "₹") },
-    { label: "LPP", value: fmt(item.lpp, "₹") },
-    { label: "CBC + LPP", value: fmt(item.cbc_lpp, "₹") },
-    { label: "Rollback", value: fmt(item.rollback, "₹") },
-    { label: "Clearance", value: fmt(item.clearance, "₹") },
-    { label: "Tenor", value: item.tenor },
-    { label: "Product", value: item.pro },
-    { label: "Asset Name", value: item.asset_make },
-    { label: "Reg No", value: item.registration_no },
-    { label: "Engine No", value: item.engine_no },
-    { label: "Chassis No", value: item.chassis_no },
-    { label: "First EMI Date", value: item.first_emi_due_date },
-    { label: "Maturity Date", value: item.loan_maturity_date },
-  ];
+function AgentDashboardCard({ agent, onPress }: { agent: AgentSummary; onPress: () => void }) {
+  const { counts } = agent;
+  const paidPct = counts.total ? Math.round((counts.Paid / counts.total) * 100) : 0;
 
   return (
-    <Modal visible={!!item} transparent={false} animationType="slide" onRequestClose={onClose}>
-      <View style={[detailStyles.screen, { paddingTop: insets.top }]}>
-        <View style={[detailStyles.header, { backgroundColor: statusColor }]}>
-          <Pressable onPress={onClose} style={detailStyles.backBtn}>
-            <Ionicons name="arrow-back" size={22} color="#fff" />
-          </Pressable>
-          <Text style={detailStyles.headerTitle}>Details</Text>
-          <View style={detailStyles.statusPill}>
-            <Text style={[detailStyles.statusPillText, { color: statusColor }]}>{item.status}</Text>
-          </View>
+    <Pressable style={styles.agentCard} onPress={onPress}>
+      <View style={styles.agentCardTop}>
+        <View style={styles.agentAvatar}>
+          <Ionicons name="person" size={20} color="#fff" />
         </View>
-        <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false}>
-          {rows.map((r, i) => (
-            <TableRow key={r.label} label={r.label} value={r.value} phone={r.phone} even={i % 2 === 1} />
-          ))}
-          <View style={{ height: insets.bottom + 24 }} />
-        </ScrollView>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.agentCardName} numberOfLines={1}>{agent.agentName}</Text>
+          <Text style={styles.agentCardSub}>{counts.total} case{counts.total !== 1 ? "s" : ""} assigned</Text>
+        </View>
+        <Ionicons name="chevron-forward" size={20} color={Colors.textMuted} />
       </View>
-    </Modal>
-  );
-}
 
-function CaseCard({ item, onDetails }: { item: any; onDetails: (item: any) => void }) {
-  const call = () => {
-    const phones = item.mobile_no?.split(",") || [];
-    const num = phones[0]?.trim();
-    if (!num) { Alert.alert("No number available"); return; }
-    Linking.openURL(`tel:${num}`);
-  };
-
-  const statusColor = STATUS_COLORS[item.status] || Colors.textMuted;
-
-  return (
-    <View style={styles.card}>
-      <Pressable style={styles.cardTapArea} onPress={() => onDetails(item)}>
-        <View style={styles.cardHeader}>
-          <View style={styles.cardNameRow}>
-            <Ionicons name="person-circle" size={20} color={Colors.primary} />
-            <Text style={styles.cardName} numberOfLines={1}>{item.customer_name}</Text>
-          </View>
-          <View style={[styles.statusBadge, { backgroundColor: statusColor + "22" }]}>
-            <Text style={[styles.statusText, { color: statusColor }]}>{item.status}</Text>
-          </View>
-        </View>
-
-        {item.agent_name ? (
-          <View style={styles.agentRow}>
-            <Ionicons name="person" size={12} color={Colors.primary} />
-            <Text style={styles.agentName}>{item.agent_name}</Text>
-          </View>
-        ) : null}
-
-        {/* Row 1: Loan No + APP ID + BKT */}
-        <View style={styles.infoRow}>
-          <View style={styles.infoCell}>
-            <Text style={styles.infoLabel}>LOAN NO</Text>
-            <Text style={styles.infoValue} numberOfLines={1}>{item.loan_no || "—"}</Text>
-          </View>
-          <View style={styles.infoCell}>
-            <Text style={styles.infoLabel}>APP ID</Text>
-            <Text style={styles.infoValue} numberOfLines={1}>{item.app_id || "—"}</Text>
-          </View>
-          <View style={styles.infoCellSmall}>
-            <Text style={styles.infoLabel}>BKT</Text>
-            <Text style={[styles.infoValue, { color: Colors.primary }]}>{item.bkt ?? "—"}</Text>
-          </View>
-        </View>
-
-        {/* Row 2: EMI + EMI Due + POS */}
-        <View style={styles.infoRow}>
-          <View style={styles.infoCell}>
-            <Text style={styles.infoLabel}>EMI</Text>
-            <Text style={styles.infoValue}>{fmt(item.emi_amount, "₹")}</Text>
-          </View>
-          <View style={styles.infoCell}>
-            <Text style={styles.infoLabel}>EMI DUE</Text>
-            <Text style={[styles.infoValue, { color: Colors.danger }]}>{fmt(item.emi_due, "₹")}</Text>
-          </View>
-          <View style={styles.infoCell}>
-            <Text style={styles.infoLabel}>POS</Text>
-            <Text style={styles.infoValue}>{fmt(item.pos, "₹")}</Text>
-          </View>
-        </View>
-
-        {/* Row 3: CBC + LPP + CBC+LPP */}
-        <View style={styles.infoRow}>
-          <View style={styles.infoCell}>
-            <Text style={styles.infoLabel}>CBC</Text>
-            <Text style={styles.infoValue}>{fmt(item.cbc, "₹")}</Text>
-          </View>
-          <View style={styles.infoCell}>
-            <Text style={styles.infoLabel}>LPP</Text>
-            <Text style={styles.infoValue}>{fmt(item.lpp, "₹")}</Text>
-          </View>
-          <View style={styles.infoCell}>
-            <Text style={styles.infoLabel}>CBC+LPP</Text>
-            <Text style={[styles.infoValue, { color: Colors.warning }]}>{fmt(item.cbc_lpp, "₹")}</Text>
-          </View>
-        </View>
-
-        {/* Row 4: Rollback + Clearance + Tenor */}
-        <View style={styles.infoRow}>
-          <View style={styles.infoCell}>
-            <Text style={styles.infoLabel}>ROLLBACK</Text>
-            <Text style={styles.infoValue}>{fmt(item.rollback, "₹")}</Text>
-          </View>
-          <View style={styles.infoCell}>
-            <Text style={styles.infoLabel}>CLEARANCE</Text>
-            <Text style={[styles.infoValue, { color: Colors.success }]}>{fmt(item.clearance, "₹")}</Text>
-          </View>
-          <View style={styles.infoCellSmall}>
-            <Text style={styles.infoLabel}>TEN</Text>
-            <Text style={styles.infoValue}>{item.tenor ?? "—"}</Text>
-          </View>
-        </View>
-      </Pressable>
-
-      {item.mobile_no ? (
-        <Pressable style={styles.phoneRow} onPress={call}>
-          <Ionicons name="call" size={14} color={Colors.info} />
-          <Text style={styles.phoneText}>{item.mobile_no}</Text>
-        </Pressable>
-      ) : null}
-
-      {item.latest_feedback ? (
-        <View style={styles.feedbackRow}>
-          <Text style={styles.feedbackLabel}>Detail FB: </Text>
-          <Text style={styles.feedbackValue}>{item.latest_feedback}</Text>
-        </View>
-      ) : null}
-
-      <View style={styles.cardActions}>
-        <Pressable style={[styles.actionBtn, styles.callBtn]} onPress={call}>
-          <Ionicons name="call" size={16} color="#fff" />
-          <Text style={styles.actionBtnText}>Call</Text>
-        </Pressable>
-        <Pressable style={[styles.actionBtn, styles.detailBtn]} onPress={() => onDetails(item)}>
-          <Ionicons name="eye" size={16} color={Colors.primary} />
-          <Text style={[styles.actionBtnText, { color: Colors.primary }]}>Details</Text>
-        </Pressable>
+      <View style={styles.progressTrack}>
+        <View style={[styles.progressFill, { width: `${paidPct}%` }]} />
       </View>
-    </View>
-  );
-}
 
-function SummaryStat({
-  label, count, color, active, onPress,
-}: { label: string; count: number; color: string; active: boolean; onPress: () => void }) {
-  return (
-    <Pressable
-      onPress={onPress}
-      style={[
-        styles.statBox,
-        { borderColor: active ? color : Colors.border },
-        active && { backgroundColor: color + "18" },
-      ]}
-    >
-      <Text style={[styles.statCount, { color }]}>{count}</Text>
-      <Text style={styles.statLabel} numberOfLines={1}>{label}</Text>
-    </Pressable>
-  );
-}
-
-function AgentSectionHeader({
-  agentName, counts, collapsed, onToggle,
-}: { agentName: string; counts: ReturnType<typeof countByStatus>; collapsed: boolean; onToggle: () => void }) {
-  return (
-    <Pressable style={styles.agentHeader} onPress={onToggle}>
-      <View style={styles.agentHeaderLeft}>
-        <Ionicons name="person-circle-outline" size={20} color={Colors.primary} />
-        <Text style={styles.agentHeaderName} numberOfLines={1}>{agentName || "Unassigned"}</Text>
-        <View style={styles.agentCountPill}>
-          <Text style={styles.agentCountPillText}>{counts.total}</Text>
+      <View style={styles.agentCardStats}>
+        <View style={styles.agentStatItem}>
+          <Text style={[styles.agentStatNum, { color: Colors.statusUnpaid }]}>{counts.Unpaid}</Text>
+          <Text style={styles.agentStatLabel}>Unpaid</Text>
         </View>
-      </View>
-      <View style={styles.agentHeaderRight}>
-        {counts.Unpaid > 0 && (
-          <View style={[styles.miniBadge, { backgroundColor: Colors.statusUnpaid + "22" }]}>
-            <Text style={[styles.miniBadgeText, { color: Colors.statusUnpaid }]}>{counts.Unpaid} Unpaid</Text>
-          </View>
-        )}
-        {counts.PTP > 0 && (
-          <View style={[styles.miniBadge, { backgroundColor: Colors.statusPTP + "22" }]}>
-            <Text style={[styles.miniBadgeText, { color: Colors.statusPTP }]}>{counts.PTP} PTP</Text>
-          </View>
-        )}
-        {counts.Paid > 0 && (
-          <View style={[styles.miniBadge, { backgroundColor: Colors.statusPaid + "22" }]}>
-            <Text style={[styles.miniBadgeText, { color: Colors.statusPaid }]}>{counts.Paid} Paid</Text>
-          </View>
-        )}
-        <Ionicons name={collapsed ? "chevron-down" : "chevron-up"} size={18} color={Colors.textMuted} />
+        <View style={styles.agentStatDivider} />
+        <View style={styles.agentStatItem}>
+          <Text style={[styles.agentStatNum, { color: Colors.statusPTP }]}>{counts.PTP}</Text>
+          <Text style={styles.agentStatLabel}>PTP</Text>
+        </View>
+        <View style={styles.agentStatDivider} />
+        <View style={styles.agentStatItem}>
+          <Text style={[styles.agentStatNum, { color: Colors.statusPaid }]}>{counts.Paid}</Text>
+          <Text style={styles.agentStatLabel}>Paid</Text>
+        </View>
+        <View style={styles.agentStatDivider} />
+        <View style={styles.agentStatItem}>
+          <Text style={styles.agentStatNum}>{paidPct}%</Text>
+          <Text style={styles.agentStatLabel}>Recovered</Text>
+        </View>
       </View>
     </Pressable>
   );
 }
 
-export default function TelecallerAllCasesScreen() {
+export default function TelecallerDashboardScreen() {
   const insets = useSafeAreaInsets();
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("All");
   const [selectedCase, setSelectedCase] = useState<any>(null);
-  const [collapsedAgents, setCollapsedAgents] = useState<Set<string>>(new Set());
 
   const { data, isLoading } = useQuery({
     queryKey: ["/api/telecaller/cases"],
     queryFn: () => api.telecaller.getCases(),
   });
 
-  const allCases = data?.cases || [];
+  const allCases: any[] = data?.cases || [];
+  const overallCounts = useMemo(() => countByStatus(allCases), [allCases]);
 
-  // Search applies across all agents/statuses so the overall counts stay meaningful.
-  const searched = useMemo(() => {
-    if (!search) return allCases;
+  // Agent-wise summary cards for the default (no search) dashboard view.
+  const agentSummaries = useMemo<AgentSummary[]>(() => {
+    const order: string[] = [];
+    const map = new Map<string, any[]>();
+    for (const c of allCases) {
+      const key = String(c.agent_id ?? c.agent_name ?? "unassigned");
+      if (!map.has(key)) { map.set(key, []); order.push(key); }
+      map.get(key)!.push(c);
+    }
+    return order.map((key) => {
+      const cases = map.get(key)!;
+      return {
+        agentId: key,
+        agentName: cases[0]?.agent_name || "Unassigned",
+        counts: countByStatus(cases),
+      };
+    });
+  }, [allCases]);
+
+  // When searching, show matching cases directly (across all agents) instead of the agent list.
+  const searchResults = useMemo(() => {
+    if (!search) return [];
     const q = search.toLowerCase();
     return allCases.filter((c: any) =>
       c.customer_name?.toLowerCase().includes(q) ||
@@ -315,40 +110,14 @@ export default function TelecallerAllCasesScreen() {
     );
   }, [allCases, search]);
 
-  const overallCounts = useMemo(() => countByStatus(searched), [searched]);
-
-  const filtered = useMemo(() => {
-    if (statusFilter === "All") return searched;
-    return searched.filter((c: any) => c.status === statusFilter);
-  }, [searched, statusFilter]);
-
-  const sections = useMemo(() => {
-    const order: string[] = [];
-    const map = new Map<string, any[]>();
-    for (const c of filtered) {
-      const key = c.agent_name || "Unassigned";
-      if (!map.has(key)) { map.set(key, []); order.push(key); }
-      map.get(key)!.push(c);
-    }
-    return order.map((agentName) => {
-      const cases = map.get(agentName)!;
-      const counts = countByStatus(cases);
-      const collapsed = collapsedAgents.has(agentName);
-      return { title: agentName, counts, collapsed, data: collapsed ? [] : cases };
+  const goToAgent = (agent: AgentSummary) => {
+    router.push({
+      pathname: "/(telecaller)/agent/[id]",
+      params: { id: agent.agentId, name: agent.agentName },
     });
-  }, [filtered, collapsedAgents]);
-
-  const toggleAgent = useCallback((agentName: string) => {
-    setCollapsedAgents((prev) => {
-      const next = new Set(prev);
-      if (next.has(agentName)) next.delete(agentName); else next.add(agentName);
-      return next;
-    });
-  }, []);
-
-  const toggleStatusFilter = (status: StatusFilter) => {
-    setStatusFilter((prev) => (prev === status ? "All" : status));
   };
+
+  const isSearching = !!search;
 
   return (
     <View style={{ flex: 1, backgroundColor: Colors.background }}>
@@ -369,42 +138,53 @@ export default function TelecallerAllCasesScreen() {
       </View>
 
       <View style={styles.statsRow}>
-        <SummaryStat label="Total" count={overallCounts.total} color={Colors.primary}
-          active={statusFilter === "All"} onPress={() => setStatusFilter("All")} />
-        <SummaryStat label="Unpaid" count={overallCounts.Unpaid} color={Colors.statusUnpaid}
-          active={statusFilter === "Unpaid"} onPress={() => toggleStatusFilter("Unpaid")} />
-        <SummaryStat label="PTP" count={overallCounts.PTP} color={Colors.statusPTP}
-          active={statusFilter === "PTP"} onPress={() => toggleStatusFilter("PTP")} />
-        <SummaryStat label="Paid" count={overallCounts.Paid} color={Colors.statusPaid}
-          active={statusFilter === "Paid"} onPress={() => toggleStatusFilter("Paid")} />
+        <StatBox label="Total" count={overallCounts.total} color={Colors.primary} active={false} />
+        <StatBox label="Unpaid" count={overallCounts.Unpaid} color={Colors.statusUnpaid} active={false} />
+        <StatBox label="PTP" count={overallCounts.PTP} color={Colors.statusPTP} active={false} />
+        <StatBox label="Paid" count={overallCounts.Paid} color={Colors.statusPaid} active={false} />
       </View>
 
       {isLoading ? (
         <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
           <ActivityIndicator color={Colors.primary} size="large" />
         </View>
-      ) : (
-        <SectionList
-          sections={sections}
+      ) : isSearching ? (
+        <FlatList
+          data={searchResults}
           keyExtractor={(item) => String(item.id)}
           renderItem={({ item }) => <CaseCard item={item} onDetails={setSelectedCase} />}
-          renderSectionHeader={({ section }) => (
-            <AgentSectionHeader
-              agentName={section.title}
-              counts={section.counts}
-              collapsed={section.collapsed}
-              onToggle={() => toggleAgent(section.title)}
-            />
-          )}
-          stickySectionHeadersEnabled
           contentContainerStyle={[
             styles.list,
             { paddingBottom: insets.bottom + 24 },
-            filtered.length === 0 && { flex: 1 },
+            searchResults.length === 0 && { flex: 1 },
           ]}
           ListHeaderComponent={
             <Text style={styles.countText}>
-              {filtered.length} case{filtered.length !== 1 ? "s" : ""} across {sections.length} agent{sections.length !== 1 ? "s" : ""}
+              {searchResults.length} result{searchResults.length !== 1 ? "s" : ""} for "{search}"
+            </Text>
+          }
+          ListEmptyComponent={
+            <View style={styles.empty}>
+              <Ionicons name="search-outline" size={48} color={Colors.textMuted} />
+              <Text style={styles.emptyText}>No matching cases found</Text>
+            </View>
+          }
+        />
+      ) : (
+        <FlatList
+          data={agentSummaries}
+          keyExtractor={(item) => item.agentId}
+          renderItem={({ item }) => (
+            <AgentDashboardCard agent={item} onPress={() => goToAgent(item)} />
+          )}
+          contentContainerStyle={[
+            styles.list,
+            { paddingBottom: insets.bottom + 24 },
+            agentSummaries.length === 0 && { flex: 1 },
+          ]}
+          ListHeaderComponent={
+            <Text style={styles.countText}>
+              {overallCounts.total} case{overallCounts.total !== 1 ? "s" : ""} across {agentSummaries.length} agent{agentSummaries.length !== 1 ? "s" : ""}
             </Text>
           }
           ListEmptyComponent={
@@ -413,7 +193,6 @@ export default function TelecallerAllCasesScreen() {
               <Text style={styles.emptyText}>No allocations found</Text>
             </View>
           }
-          scrollEnabled={!!filtered.length}
         />
       )}
 
@@ -430,82 +209,27 @@ const styles = StyleSheet.create({
   },
   searchInput: { flex: 1, fontSize: 14, color: Colors.text },
   statsRow: { flexDirection: "row", gap: 8, paddingHorizontal: 12, marginBottom: 4 },
-  statBox: {
-    flex: 1, alignItems: "center", justifyContent: "center", paddingVertical: 8,
-    borderRadius: 12, borderWidth: 1.5, backgroundColor: Colors.surface, gap: 2,
-  },
-  statCount: { fontSize: 17, fontWeight: "800" },
-  statLabel: { fontSize: 10, fontWeight: "700", color: Colors.textSecondary, textTransform: "uppercase" },
   list: { padding: 12, gap: 12 },
-  agentHeader: {
-    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
-    backgroundColor: Colors.surfaceElevated, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10,
-    marginBottom: 10, gap: 8,
-  },
-  agentHeaderLeft: { flexDirection: "row", alignItems: "center", gap: 6, flexShrink: 1 },
-  agentHeaderName: { fontSize: 14, fontWeight: "800", color: Colors.text, flexShrink: 1 },
-  agentCountPill: {
-    backgroundColor: Colors.primary, borderRadius: 10, paddingHorizontal: 7, paddingVertical: 1,
-  },
-  agentCountPillText: { color: "#fff", fontSize: 11, fontWeight: "700" },
-  agentHeaderRight: { flexDirection: "row", alignItems: "center", gap: 6, flexWrap: "wrap", justifyContent: "flex-end" },
-  miniBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10 },
-  miniBadgeText: { fontSize: 10, fontWeight: "700" },
-  card: {
-    backgroundColor: Colors.surface, borderRadius: 16, padding: 14, gap: 8,
-    shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 8, elevation: 2,
-  },
-  cardTapArea: { gap: 8 },
-  cardHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  cardNameRow: { flex: 1, flexDirection: "row", alignItems: "center", gap: 8 },
-  cardName: { flex: 1, fontSize: 15, fontWeight: "700", color: Colors.text, textTransform: "uppercase" },
-  statusBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20 },
-  statusText: { fontSize: 11, fontWeight: "700" },
-  agentRow: { flexDirection: "row", alignItems: "center", gap: 5, marginTop: -2 },
-  agentName: { fontSize: 12, color: Colors.primary, fontWeight: "600" },
-  infoRow: { flexDirection: "row", gap: 6 },
-  infoCell: { flex: 1, backgroundColor: Colors.surfaceAlt, borderRadius: 8, padding: 8 },
-  infoCellSmall: { width: 52, backgroundColor: Colors.surfaceAlt, borderRadius: 8, padding: 8 },
-  infoLabel: { fontSize: 9, fontWeight: "700", color: Colors.textMuted, textTransform: "uppercase", marginBottom: 2 },
-  infoValue: { fontSize: 12, fontWeight: "700", color: Colors.text },
-  phoneRow: { flexDirection: "row", alignItems: "center", gap: 6, paddingVertical: 4 },
-  phoneText: { fontSize: 13, color: Colors.info, fontWeight: "500" },
-  feedbackRow: { flexDirection: "row", alignItems: "center" },
-  feedbackLabel: { fontSize: 12, color: Colors.textSecondary, fontWeight: "600" },
-  feedbackValue: { fontSize: 12, color: Colors.text, fontWeight: "500" },
-  cardActions: { flexDirection: "row", gap: 8, marginTop: 4 },
-  actionBtn: {
-    flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center",
-    paddingVertical: 10, borderRadius: 10, gap: 5,
-  },
-  callBtn: { backgroundColor: Colors.primary },
-  detailBtn: { backgroundColor: Colors.primary + "15", borderWidth: 1, borderColor: Colors.primary + "40" },
-  actionBtnText: { color: "#fff", fontSize: 13, fontWeight: "700" },
   countText: { fontSize: 13, color: Colors.textSecondary, fontWeight: "600", marginBottom: 4 },
   empty: { flex: 1, justifyContent: "center", alignItems: "center", gap: 12, paddingVertical: 60 },
   emptyText: { fontSize: 16, color: Colors.textMuted },
-});
 
-const detailStyles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: Colors.background },
-  header: {
-    flexDirection: "row", alignItems: "center", paddingHorizontal: 12, paddingVertical: 14, gap: 10,
+  agentCard: {
+    backgroundColor: Colors.surface, borderRadius: 16, padding: 14, gap: 12,
+    shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 8, elevation: 2,
   },
-  backBtn: { padding: 4 },
-  headerTitle: { flex: 1, fontSize: 18, fontWeight: "700", color: Colors.text },
-  statusPill: {
-    backgroundColor: Colors.surfaceElevated, borderRadius: 16,
-    paddingHorizontal: 10, paddingVertical: 4,
+  agentCardTop: { flexDirection: "row", alignItems: "center", gap: 10 },
+  agentAvatar: {
+    width: 40, height: 40, borderRadius: 20, backgroundColor: Colors.primary,
+    alignItems: "center", justifyContent: "center",
   },
-  statusPillText: { fontSize: 11, fontWeight: "800" },
-  row: {
-    flexDirection: "row", borderBottomWidth: 1, borderBottomColor: Colors.border, backgroundColor: Colors.surface,
-  },
-  labelCell: {
-    width: "42%", backgroundColor: Colors.surfaceAlt, padding: 12,
-    justifyContent: "center", borderRightWidth: 1, borderRightColor: Colors.border,
-  },
-  labelText: { fontSize: 13, fontWeight: "700", color: Colors.primary },
-  valueCell: { flex: 1, padding: 12, justifyContent: "center" },
-  valueText: { fontSize: 13, color: Colors.text, fontWeight: "400" },
+  agentCardName: { fontSize: 15, fontWeight: "800", color: Colors.text },
+  agentCardSub: { fontSize: 12, color: Colors.textMuted, marginTop: 1 },
+  progressTrack: { height: 6, borderRadius: 3, backgroundColor: Colors.surfaceAlt, overflow: "hidden" },
+  progressFill: { height: "100%", borderRadius: 3, backgroundColor: Colors.statusPaid },
+  agentCardStats: { flexDirection: "row", alignItems: "center" },
+  agentStatItem: { flex: 1, alignItems: "center", gap: 2 },
+  agentStatNum: { fontSize: 15, fontWeight: "800", color: Colors.text },
+  agentStatLabel: { fontSize: 10, fontWeight: "700", color: Colors.textMuted, textTransform: "uppercase" },
+  agentStatDivider: { width: 1, height: 24, backgroundColor: Colors.border },
 });
