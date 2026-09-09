@@ -1,8 +1,9 @@
-import React from "react";
-import { View, Text, StyleSheet, Pressable, Linking, Alert, Modal, ScrollView } from "react-native";
+import React, { useEffect, useState } from "react";
+import { View, Text, StyleSheet, Pressable, Linking, Alert, Modal, ScrollView, TextInput, ActivityIndicator, KeyboardAvoidingView, Platform } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import Colors from "@/constants/colors";
+import { api } from "@/lib/api";
 
 export const STATUS_COLORS: Record<string, string> = {
   Unpaid: Colors.statusUnpaid,
@@ -52,63 +53,308 @@ export function TableRow({ label, value, phone, even }: { label: string; value?:
   );
 }
 
-export function CaseDetailModal({ item, onClose }: { item: any; onClose: () => void }) {
+// ─── Status action row: Mark Paid / Mark Unpaid / Rollback ─────────────────
+function TelecallerStatusBar({
+  localItem, caseType, busy, onChange,
+}: { localItem: any; caseType: "loan" | "bkt"; busy: string | null; onChange: (status: "Paid" | "Unpaid", rollbackYn?: boolean | null) => void }) {
+  const isPaid = localItem.status === "Paid";
+  const isRollback = localItem.rollback_yn === true;
+  return (
+    <View style={manageStyles.statusBar}>
+      <Pressable
+        style={[manageStyles.statusBtn, isPaid ? manageStyles.statusBtnPaidActive : manageStyles.statusBtnInactive]}
+        onPress={() => onChange(isPaid ? "Unpaid" : "Paid")}
+        disabled={!!busy}
+      >
+        {busy === "Paid" ? <ActivityIndicator size="small" color={isPaid ? "#fff" : Colors.success} /> : (
+          <>
+            <Ionicons name={isPaid ? "checkmark-circle" : "checkmark-circle-outline"} size={16} color={isPaid ? "#fff" : Colors.success} />
+            <Text style={[manageStyles.statusBtnText, isPaid && { color: "#fff" }]}>{isPaid ? "Paid ✓" : "Mark Paid"}</Text>
+          </>
+        )}
+      </Pressable>
+      {isPaid && (
+        <Pressable style={[manageStyles.statusBtn, manageStyles.statusBtnUnpaid]} onPress={() => onChange("Unpaid")} disabled={!!busy}>
+          {busy === "Unpaid" ? <ActivityIndicator size="small" color="#fff" /> : (
+            <>
+              <Ionicons name="close-circle-outline" size={16} color="#fff" />
+              <Text style={[manageStyles.statusBtnText, { color: "#fff" }]}>Unpaid</Text>
+            </>
+          )}
+        </Pressable>
+      )}
+      <Pressable
+        style={[manageStyles.statusBtn, isRollback ? manageStyles.statusBtnRollbackActive : manageStyles.statusBtnInactive]}
+        onPress={() => onChange(isPaid ? "Paid" : "Unpaid", !isRollback)}
+        disabled={!!busy}
+      >
+        {busy === "rollback" ? <ActivityIndicator size="small" color={isRollback ? "#fff" : Colors.info} /> : (
+          <>
+            <Ionicons name={isRollback ? "refresh-circle" : "refresh-circle-outline"} size={16} color={isRollback ? "#fff" : Colors.info} />
+            <Text style={[manageStyles.statusBtnText, isRollback && { color: "#fff" }]}>{isRollback ? "Rollback ✓" : "Rollback"}</Text>
+          </>
+        )}
+      </Pressable>
+    </View>
+  );
+}
+
+export function CaseDetailModal({ item, onClose, onUpdated }: { item: any; onClose: () => void; onUpdated?: () => void }) {
   const insets = useSafeAreaInsets();
-  if (!item) return null;
-  const statusColor = STATUS_COLORS[item.status] || Colors.primary;
+  const [localItem, setLocalItem] = useState<any>(item);
+  const [statusBusy, setStatusBusy] = useState<string | null>(null);
+  const [feedbackText, setFeedbackText] = useState("");
+  const [commentsText, setCommentsText] = useState("");
+  const [savingFeedback, setSavingFeedback] = useState(false);
+  const [extraNumbers, setExtraNumbers] = useState<string[]>([]);
+  const [newNumber, setNewNumber] = useState("");
+  const [numberBusy, setNumberBusy] = useState<string | null>(null);
+
+  useEffect(() => {
+    setLocalItem(item);
+    setFeedbackText(item?.latest_feedback || "");
+    setCommentsText(item?.feedback_comments || "");
+    setExtraNumbers(item?.extra_numbers || []);
+    setNewNumber("");
+  }, [item?.id]);
+
+  if (!item || !localItem) return null;
+  const statusColor = STATUS_COLORS[localItem.status] || Colors.primary;
+  const caseType: "loan" | "bkt" = localItem.case_type === "bkt" ? "bkt" : "loan";
+
+  const applyUpdate = async (payload: Record<string, unknown>) => {
+    if (caseType === "bkt") await api.updateBktFeedback(localItem.id, payload);
+    else await api.updateFeedback(localItem.id, payload);
+  };
+
+  const handleStatusChange = async (status: "Paid" | "Unpaid", rollbackYn?: boolean | null) => {
+    setStatusBusy(rollbackYn !== undefined ? "rollback" : status);
+    try {
+      await applyUpdate({
+        status,
+        feedback: localItem.latest_feedback ?? null,
+        comments: localItem.feedback_comments ?? null,
+        // Leaving a case in the PTP state clears the PTP date, same as the FOS app.
+        ptp_date: localItem.status === "PTP" ? null : (localItem.ptp_date ? String(localItem.ptp_date).slice(0, 10) : null),
+        rollback_yn: rollbackYn ?? localItem.rollback_yn ?? null,
+      });
+      setLocalItem((prev: any) => ({ ...prev, status, rollback_yn: rollbackYn ?? prev.rollback_yn ?? null }));
+      onUpdated?.();
+    } catch (e: any) {
+      Alert.alert("Error", e.message || "Failed to update status");
+    } finally {
+      setStatusBusy(null);
+    }
+  };
+
+  const handleSaveFeedback = async () => {
+    setSavingFeedback(true);
+    try {
+      await applyUpdate({
+        status: localItem.status,
+        feedback: feedbackText.trim() || null,
+        comments: commentsText.trim() || null,
+        ptp_date: localItem.ptp_date ? String(localItem.ptp_date).slice(0, 10) : null,
+        rollback_yn: localItem.rollback_yn ?? null,
+      });
+      setLocalItem((prev: any) => ({ ...prev, latest_feedback: feedbackText.trim(), feedback_comments: commentsText.trim() }));
+      onUpdated?.();
+      Alert.alert("Saved", "Feedback updated.");
+    } catch (e: any) {
+      Alert.alert("Error", e.message || "Failed to save feedback");
+    } finally {
+      setSavingFeedback(false);
+    }
+  };
+
+  const handleAddNumber = async () => {
+    const trimmed = newNumber.trim();
+    if (!trimmed) return;
+    if (extraNumbers.includes(trimmed)) { setNewNumber(""); return; }
+    setNumberBusy("add");
+    try {
+      await api.addExtraNumber(localItem.id, trimmed, caseType);
+      setExtraNumbers((prev) => [...prev, trimmed]);
+      setNewNumber("");
+      onUpdated?.();
+    } catch (e: any) {
+      Alert.alert("Error", e.message || "Failed to add number");
+    } finally {
+      setNumberBusy(null);
+    }
+  };
+
+  const handleRemoveNumber = async (num: string) => {
+    setNumberBusy(num);
+    try {
+      await api.removeExtraNumber(localItem.id, num, caseType);
+      setExtraNumbers((prev) => prev.filter((n) => n !== num));
+      onUpdated?.();
+    } catch (e: any) {
+      Alert.alert("Error", e.message || "Failed to remove number");
+    } finally {
+      setNumberBusy(null);
+    }
+  };
 
   const rows = [
-    { label: "Latest Feedback", value: item.latest_feedback },
-    { label: "Comments", value: item.feedback_comments },
-    { label: "FOS Agent", value: item.agent_name },
-    { label: "Status", value: item.status },
-    { label: "Customer Name", value: item.customer_name },
-    { label: "Loan No", value: item.loan_no },
-    { label: "BKT", value: item.bkt },
-    { label: "APP ID", value: item.app_id },
-    { label: "Address", value: item.address },
-    { label: "Mobile No", value: item.mobile_no, phone: true },
-    { label: "Ref Address", value: item.reference_address },
-    { label: "POS", value: fmt(item.pos, "₹") },
-    { label: "EMI", value: fmt(item.emi_amount, "₹") },
-    { label: "EMI Due", value: fmt(item.emi_due, "₹") },
-    { label: "CBC", value: fmt(item.cbc, "₹") },
-    { label: "LPP", value: fmt(item.lpp, "₹") },
-    { label: "CBC + LPP", value: fmt(item.cbc_lpp, "₹") },
-    { label: "Rollback", value: fmt(item.rollback, "₹") },
-    { label: "Clearance", value: fmt(item.clearance, "₹") },
-    { label: "Tenor", value: item.tenor },
-    { label: "Product", value: item.pro },
-    { label: "Asset Name", value: item.asset_make },
-    { label: "Reg No", value: item.registration_no },
-    { label: "Engine No", value: item.engine_no },
-    { label: "Chassis No", value: item.chassis_no },
-    { label: "First EMI Date", value: item.first_emi_due_date },
-    { label: "Maturity Date", value: item.loan_maturity_date },
+    { label: "FOS Agent", value: localItem.agent_name },
+    { label: "Status", value: localItem.status },
+    { label: "Customer Name", value: localItem.customer_name },
+    { label: "Loan No", value: localItem.loan_no },
+    { label: "BKT", value: localItem.bkt },
+    { label: "APP ID", value: localItem.app_id },
+    { label: "Address", value: localItem.address },
+    { label: "Mobile No", value: localItem.mobile_no, phone: true },
+    { label: "Ref Address", value: localItem.reference_address },
+    { label: "POS", value: fmt(localItem.pos, "₹") },
+    { label: "EMI", value: fmt(localItem.emi_amount, "₹") },
+    { label: "EMI Due", value: fmt(localItem.emi_due, "₹") },
+    { label: "CBC", value: fmt(localItem.cbc, "₹") },
+    { label: "LPP", value: fmt(localItem.lpp, "₹") },
+    { label: "CBC + LPP", value: fmt(localItem.cbc_lpp, "₹") },
+    { label: "Rollback", value: fmt(localItem.rollback, "₹") },
+    { label: "Clearance", value: fmt(localItem.clearance, "₹") },
+    { label: "Tenor", value: localItem.tenor },
+    { label: "Product", value: localItem.pro },
+    { label: "Asset Name", value: localItem.asset_make },
+    { label: "Reg No", value: localItem.registration_no },
+    { label: "Engine No", value: localItem.engine_no },
+    { label: "Chassis No", value: localItem.chassis_no },
+    { label: "First EMI Date", value: localItem.first_emi_due_date },
+    { label: "Maturity Date", value: localItem.loan_maturity_date },
   ];
 
   return (
     <Modal visible={!!item} transparent={false} animationType="slide" onRequestClose={onClose}>
-      <View style={[detailStyles.screen, { paddingTop: insets.top }]}>
-        <View style={[detailStyles.header, { backgroundColor: statusColor }]}>
-          <Pressable onPress={onClose} style={detailStyles.backBtn}>
-            <Ionicons name="arrow-back" size={22} color="#fff" />
-          </Pressable>
-          <Text style={detailStyles.headerTitle}>Details</Text>
-          <View style={detailStyles.statusPill}>
-            <Text style={[detailStyles.statusPillText, { color: statusColor }]}>{item.status}</Text>
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+        <View style={[detailStyles.screen, { paddingTop: insets.top }]}>
+          <View style={[detailStyles.header, { backgroundColor: statusColor }]}>
+            <Pressable onPress={onClose} style={detailStyles.backBtn}>
+              <Ionicons name="arrow-back" size={22} color="#fff" />
+            </Pressable>
+            <Text style={detailStyles.headerTitle}>Details</Text>
+            <View style={detailStyles.statusPill}>
+              <Text style={[detailStyles.statusPillText, { color: statusColor }]}>{localItem.status}</Text>
+            </View>
           </View>
+          <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+            {/* ── Mark Paid / Unpaid / Rollback ─────────────────────────────── */}
+            <View style={manageStyles.section}>
+              <Text style={manageStyles.sectionTitle}>Update Status</Text>
+              <TelecallerStatusBar localItem={localItem} caseType={caseType} busy={statusBusy} onChange={handleStatusChange} />
+            </View>
+
+            {/* ── Feedback ───────────────────────────────────────────────────── */}
+            <View style={manageStyles.section}>
+              <Text style={manageStyles.sectionTitle}>Feedback</Text>
+              <TextInput
+                style={manageStyles.input}
+                placeholder="Feedback (e.g. Not reachable, Will pay tomorrow...)"
+                placeholderTextColor={Colors.textMuted}
+                value={feedbackText}
+                onChangeText={setFeedbackText}
+              />
+              <TextInput
+                style={[manageStyles.input, manageStyles.inputMultiline]}
+                placeholder="Comments"
+                placeholderTextColor={Colors.textMuted}
+                value={commentsText}
+                onChangeText={setCommentsText}
+                multiline
+              />
+              <Pressable style={manageStyles.saveBtn} onPress={handleSaveFeedback} disabled={savingFeedback}>
+                {savingFeedback ? <ActivityIndicator size="small" color="#fff" /> : (
+                  <>
+                    <Ionicons name="save-outline" size={16} color="#fff" />
+                    <Text style={manageStyles.saveBtnText}>Save Feedback</Text>
+                  </>
+                )}
+              </Pressable>
+            </View>
+
+            {/* ── Extra numbers ──────────────────────────────────────────────── */}
+            <View style={manageStyles.section}>
+              <Text style={manageStyles.sectionTitle}>Additional Numbers</Text>
+              {extraNumbers.map((num) => (
+                <View key={num} style={manageStyles.numberRow}>
+                  <Pressable style={manageStyles.numberCallArea} onPress={() => Linking.openURL(`tel:${num}`)}>
+                    <Ionicons name="call" size={14} color={Colors.info} />
+                    <Text style={manageStyles.numberText}>{num}</Text>
+                  </Pressable>
+                  <Pressable style={manageStyles.numberDeleteBtn} onPress={() => handleRemoveNumber(num)} disabled={numberBusy === num}>
+                    {numberBusy === num ? <ActivityIndicator size="small" color={Colors.danger} /> : <Ionicons name="trash-outline" size={16} color={Colors.danger} />}
+                  </Pressable>
+                </View>
+              ))}
+              <View style={manageStyles.numberAddRow}>
+                <TextInput
+                  style={[manageStyles.input, { flex: 1, marginBottom: 0 }]}
+                  placeholder="Add a phone number"
+                  placeholderTextColor={Colors.textMuted}
+                  value={newNumber}
+                  onChangeText={setNewNumber}
+                  keyboardType="phone-pad"
+                  maxLength={15}
+                />
+                <Pressable style={manageStyles.numberAddBtn} onPress={handleAddNumber} disabled={numberBusy === "add"}>
+                  {numberBusy === "add" ? <ActivityIndicator size="small" color="#fff" /> : <Ionicons name="add" size={20} color="#fff" />}
+                </Pressable>
+              </View>
+            </View>
+
+            {rows.map((r, i) => (
+              <TableRow key={r.label} label={r.label} value={r.value} phone={r.phone} even={i % 2 === 1} />
+            ))}
+            <View style={{ height: insets.bottom + 24 }} />
+          </ScrollView>
         </View>
-        <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false}>
-          {rows.map((r, i) => (
-            <TableRow key={r.label} label={r.label} value={r.value} phone={r.phone} even={i % 2 === 1} />
-          ))}
-          <View style={{ height: insets.bottom + 24 }} />
-        </ScrollView>
-      </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
+
+const manageStyles = StyleSheet.create({
+  section: { paddingHorizontal: 12, paddingTop: 14, paddingBottom: 4, gap: 8 },
+  sectionTitle: { fontSize: 12, fontWeight: "800", color: Colors.textMuted, textTransform: "uppercase", letterSpacing: 0.4 },
+  statusBar: { flexDirection: "row", gap: 8 },
+  statusBtn: {
+    flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center",
+    paddingVertical: 10, borderRadius: 10, gap: 6, borderWidth: 1.5,
+  },
+  statusBtnInactive: { backgroundColor: Colors.surface, borderColor: Colors.border },
+  statusBtnPaidActive: { backgroundColor: Colors.success, borderColor: Colors.success },
+  statusBtnUnpaid: { backgroundColor: Colors.danger, borderColor: Colors.danger },
+  statusBtnRollbackActive: { backgroundColor: Colors.info, borderColor: Colors.info },
+  statusBtnText: { fontSize: 12, fontWeight: "700", color: Colors.text },
+  input: {
+    borderWidth: 1, borderColor: Colors.border, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10,
+    fontSize: 13, color: Colors.text, backgroundColor: Colors.surface, marginBottom: 8,
+  },
+  inputMultiline: { minHeight: 70, textAlignVertical: "top" },
+  saveBtn: {
+    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6,
+    backgroundColor: Colors.primary, borderRadius: 10, paddingVertical: 11,
+  },
+  saveBtnText: { color: "#fff", fontSize: 13, fontWeight: "700" },
+  numberRow: {
+    flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 6,
+  },
+  numberCallArea: {
+    flex: 1, flexDirection: "row", alignItems: "center", gap: 8,
+    backgroundColor: Colors.primary + "12", borderRadius: 10, paddingVertical: 9, paddingHorizontal: 12,
+  },
+  numberText: { fontSize: 13, fontWeight: "700", color: Colors.primary },
+  numberDeleteBtn: {
+    width: 34, height: 34, borderRadius: 17, backgroundColor: Colors.danger + "12",
+    alignItems: "center", justifyContent: "center",
+  },
+  numberAddRow: { flexDirection: "row", gap: 8, alignItems: "center", marginTop: 2 },
+  numberAddBtn: {
+    width: 40, height: 40, borderRadius: 10, backgroundColor: Colors.primary,
+    alignItems: "center", justifyContent: "center",
+  },
+});
 
 export function CaseCard({ item, onDetails }: { item: any; onDetails: (item: any) => void }) {
   const call = () => {
