@@ -367,6 +367,115 @@ export async function getLoanCasesForTelecaller(telecallerId: number) {
   return result.rows;
 }
 
+// ── Admin: per-telecaller performance / activity summary ───────────────────
+// For every telecaller: how many cases they own (via their dedicated FOS
+// agents), the overall status split, today's activity (cases whose feedback
+// was saved today, split by resulting status), and today's attendance.
+// "Today" is measured in the database server's local date.
+export async function getTelecallerStats() {
+  const telecallers = await query(
+    "SELECT id, name, username, phone FROM fos_agents WHERE role = 'telecaller' ORDER BY name"
+  );
+  if (telecallers.rows.length === 0) return [];
+
+  const fosCounts = await query(
+    `SELECT assigned_telecaller_id AS telecaller_id, COUNT(*)::int AS fos_count
+     FROM fos_agents WHERE role = 'fos' AND assigned_telecaller_id IS NOT NULL
+     GROUP BY assigned_telecaller_id`
+  );
+  const fosCountMap = new Map<number, number>(
+    fosCounts.rows.map((r: any) => [r.telecaller_id, r.fos_count])
+  );
+
+  const cases = await query(
+    `SELECT
+        lc.id, lc.customer_name, lc.loan_no, lc.app_id, lc.mobile_no,
+        lc.pos::numeric AS pos, lc.status, lc.latest_feedback, lc.feedback_code,
+        lc.feedback_date, fa.assigned_telecaller_id AS telecaller_id,
+        fa.name AS fos_name, 'loan' AS case_type,
+        (lc.feedback_date IS NOT NULL AND lc.feedback_date::date = CURRENT_DATE) AS is_today
+     FROM loan_cases lc
+     JOIN fos_agents fa ON lc.agent_id = fa.id
+     WHERE fa.assigned_telecaller_id IS NOT NULL
+
+     UNION ALL
+
+     SELECT
+        bc.id, bc.customer_name, bc.loan_no, bc.app_id, bc.mobile_no,
+        bc.pos::numeric AS pos, bc.status, bc.latest_feedback, bc.feedback_code,
+        bc.feedback_date, fa.assigned_telecaller_id AS telecaller_id,
+        fa.name AS fos_name, 'bkt' AS case_type,
+        (bc.feedback_date IS NOT NULL AND bc.feedback_date::date = CURRENT_DATE) AS is_today
+     FROM bkt_cases bc
+     JOIN fos_agents fa ON bc.agent_id = fa.id
+     WHERE fa.assigned_telecaller_id IS NOT NULL`
+  );
+
+  const attendance = await query(
+    `SELECT agent_id, check_in, check_out FROM attendance WHERE date = CURRENT_DATE`
+  );
+  const attendanceMap = new Map<number, any>(attendance.rows.map((r: any) => [r.agent_id, r]));
+
+  const casesByTelecaller = new Map<number, any[]>();
+  for (const c of cases.rows) {
+    const tid = c.telecaller_id;
+    if (!casesByTelecaller.has(tid)) casesByTelecaller.set(tid, []);
+    casesByTelecaller.get(tid)!.push(c);
+  }
+
+  return telecallers.rows.map((tc: any) => {
+    const tcCases = casesByTelecaller.get(tc.id) || [];
+    const todayCases = tcCases.filter((c) => c.is_today);
+    const att = attendanceMap.get(tc.id) || null;
+
+    return {
+      id: tc.id,
+      name: tc.name,
+      username: tc.username,
+      phone: tc.phone,
+      fosCount: fosCountMap.get(tc.id) || 0,
+      totalCases: tcCases.length,
+      unpaidCases: tcCases.filter((c) => c.status === "Unpaid").length,
+      ptpCases: tcCases.filter((c) => c.status === "PTP").length,
+      paidCases: tcCases.filter((c) => c.status === "Paid").length,
+      todayCalledCount: todayCases.length,
+      todayPaidCount: todayCases.filter((c) => c.status === "Paid").length,
+      todayPtpCount: todayCases.filter((c) => c.status === "PTP").length,
+      todayPaidCases: todayCases
+        .filter((c) => c.status === "Paid")
+        .map((c) => ({
+          id: c.id,
+          caseType: c.case_type,
+          customerName: c.customer_name,
+          loanNo: c.loan_no,
+          appId: c.app_id,
+          mobileNo: c.mobile_no,
+          pos: c.pos,
+          feedback: c.latest_feedback,
+          feedbackCode: c.feedback_code,
+          feedbackDate: c.feedback_date,
+          fosName: c.fos_name,
+        })),
+      todayCalledCases: todayCases.map((c) => ({
+        id: c.id,
+        caseType: c.case_type,
+        customerName: c.customer_name,
+        loanNo: c.loan_no,
+        appId: c.app_id,
+        mobileNo: c.mobile_no,
+        status: c.status,
+        feedback: c.latest_feedback,
+        feedbackCode: c.feedback_code,
+        feedbackDate: c.feedback_date,
+        fosName: c.fos_name,
+      })),
+      attendance: att
+        ? { checkedIn: !!att.check_in, checkIn: att.check_in, checkOut: att.check_out }
+        : { checkedIn: false, checkIn: null, checkOut: null },
+    };
+  });
+}
+
 export async function deleteAllLoanCases() { await query("DELETE FROM loan_cases"); }
 export async function deleteAllBktCases() { await query("DELETE FROM bkt_cases"); }
 
