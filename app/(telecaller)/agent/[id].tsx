@@ -26,7 +26,7 @@ export default function TelecallerAgentDetailScreen() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("All");
   const [selectedCase, setSelectedCase] = useState<any>(null);
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, refetch } = useQuery({
     queryKey: ["/api/telecaller/cases"],
     queryFn: () => api.telecaller.getCases(),
   });
@@ -147,7 +147,7 @@ export default function TelecallerAgentDetailScreen() {
         />
       )}
 
-      <CaseDetailModal item={selectedCase} onClose={() => setSelectedCase(null)} />
+      <CaseDetailModal item={selectedCase} onClose={() => setSelectedCase(null)} onUpdated={refetch} />
     </View>
   );
 }
