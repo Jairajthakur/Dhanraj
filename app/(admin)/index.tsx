@@ -172,6 +172,7 @@ export default function AdminDashboard() {
   const insets = useSafeAreaInsets();
   const qc = useQueryClient();
   const [importVisible, setImportVisible] = useState(false);
+  const [crImportVisible, setCrImportVisible] = useState(false);
   const [feedbackDownloading, setFeedbackDownloading] = useState(false);
   const [ptpClearing, setPtpClearing] = useState(false);
   const [ptpAlertSending, setPtpAlertSending] = useState(false);
@@ -375,6 +376,18 @@ export default function AdminDashboard() {
           <Ionicons name="chevron-forward" size={22} color="rgba(255,255,255,0.7)" />
         </Pressable>
 
+        {/* Import CR (Cash Receipt) */}
+        <Pressable style={[styles.importBanner, { backgroundColor: Colors.success }]} onPress={() => setCrImportVisible(true)}>
+          <View style={styles.importBannerLeft}>
+            <Ionicons name="cash" size={28} color="#fff" />
+            <View style={styles.importBannerText}>
+              <Text style={styles.importBannerTitle}>Import CR (Cash Receipt)</Text>
+              <Text style={styles.importBannerSub}>Upload the CR Excel — every Agreement No in it is marked Paid automatically.</Text>
+            </View>
+          </View>
+          <Ionicons name="chevron-forward" size={22} color="rgba(255,255,255,0.7)" />
+        </Pressable>
+
         {/* Download Feedback */}
         <Pressable style={[styles.importBanner, { backgroundColor: Colors.info }, feedbackDownloading && { opacity: 0.7 }]} onPress={handleDownloadFeedback} disabled={feedbackDownloading}>
           <View style={styles.importBannerLeft}>
@@ -523,6 +536,23 @@ export default function AdminDashboard() {
           qc.invalidateQueries({ queryKey: ["/api/bkt-cases"] });
           qc.invalidateQueries({ queryKey: ["/api/admin/bkt-perf-summary"] });
           qc.invalidateQueries({ queryKey: ["/api/bkt-perf-summary"] });
+          refetch();
+        }}
+      />
+
+      <ImportModal
+        visible={crImportVisible}
+        onClose={() => setCrImportVisible(false)}
+        endpoint="/api/admin/import-cr"
+        title="Import CR (Cash Receipt)"
+        infoText="Upload the CR Excel exported from the loan system (columns: Agreement No, Amount, Transaction Date, Receipt No., etc). Every matching case is marked Paid — no new cases are created. Agreement Nos with no matching case show up as Skipped."
+        onDone={() => {
+          qc.invalidateQueries({ queryKey: ["/api/admin/stats"] });
+          qc.invalidateQueries({ queryKey: ["/api/admin/cases"] });
+          qc.invalidateQueries({ queryKey: ["/api/cases"] });
+          qc.invalidateQueries({ queryKey: ["/api/stats"] });
+          qc.invalidateQueries({ queryKey: ["/api/admin/bkt-cases"] });
+          qc.invalidateQueries({ queryKey: ["/api/bkt-cases"] });
           refetch();
         }}
       />
