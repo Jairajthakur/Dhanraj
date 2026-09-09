@@ -1,6 +1,6 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useCallback } from "react";
 import {
-  View, Text, StyleSheet, FlatList, Pressable, TextInput,
+  View, Text, StyleSheet, SectionList, Pressable, TextInput,
   Linking, Alert, ActivityIndicator, Modal, ScrollView, Platform
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -14,6 +14,19 @@ const STATUS_COLORS: Record<string, string> = {
   PTP: Colors.statusPTP,
   Paid: Colors.statusPaid,
 };
+
+type StatusFilter = "All" | "Unpaid" | "PTP" | "Paid";
+
+function countByStatus(cases: any[]) {
+  const counts = { total: cases.length, Unpaid: 0, PTP: 0, Paid: 0, other: 0 };
+  for (const c of cases) {
+    if (c.status === "Unpaid") counts.Unpaid++;
+    else if (c.status === "PTP") counts.PTP++;
+    else if (c.status === "Paid") counts.Paid++;
+    else counts.other++;
+  }
+  return counts;
+}
 
 function fmt(v: any, prefix = "") {
   if (v === null || v === undefined || v === "") return "";
@@ -223,28 +236,119 @@ function CaseCard({ item, onDetails }: { item: any; onDetails: (item: any) => vo
   );
 }
 
+function SummaryStat({
+  label, count, color, active, onPress,
+}: { label: string; count: number; color: string; active: boolean; onPress: () => void }) {
+  return (
+    <Pressable
+      onPress={onPress}
+      style={[
+        styles.statBox,
+        { borderColor: active ? color : Colors.border },
+        active && { backgroundColor: color + "18" },
+      ]}
+    >
+      <Text style={[styles.statCount, { color }]}>{count}</Text>
+      <Text style={styles.statLabel} numberOfLines={1}>{label}</Text>
+    </Pressable>
+  );
+}
+
+function AgentSectionHeader({
+  agentName, counts, collapsed, onToggle,
+}: { agentName: string; counts: ReturnType<typeof countByStatus>; collapsed: boolean; onToggle: () => void }) {
+  return (
+    <Pressable style={styles.agentHeader} onPress={onToggle}>
+      <View style={styles.agentHeaderLeft}>
+        <Ionicons name="person-circle-outline" size={20} color={Colors.primary} />
+        <Text style={styles.agentHeaderName} numberOfLines={1}>{agentName || "Unassigned"}</Text>
+        <View style={styles.agentCountPill}>
+          <Text style={styles.agentCountPillText}>{counts.total}</Text>
+        </View>
+      </View>
+      <View style={styles.agentHeaderRight}>
+        {counts.Unpaid > 0 && (
+          <View style={[styles.miniBadge, { backgroundColor: Colors.statusUnpaid + "22" }]}>
+            <Text style={[styles.miniBadgeText, { color: Colors.statusUnpaid }]}>{counts.Unpaid} Unpaid</Text>
+          </View>
+        )}
+        {counts.PTP > 0 && (
+          <View style={[styles.miniBadge, { backgroundColor: Colors.statusPTP + "22" }]}>
+            <Text style={[styles.miniBadgeText, { color: Colors.statusPTP }]}>{counts.PTP} PTP</Text>
+          </View>
+        )}
+        {counts.Paid > 0 && (
+          <View style={[styles.miniBadge, { backgroundColor: Colors.statusPaid + "22" }]}>
+            <Text style={[styles.miniBadgeText, { color: Colors.statusPaid }]}>{counts.Paid} Paid</Text>
+          </View>
+        )}
+        <Ionicons name={collapsed ? "chevron-down" : "chevron-up"} size={18} color={Colors.textMuted} />
+      </View>
+    </Pressable>
+  );
+}
+
 export default function TelecallerAllCasesScreen() {
   const insets = useSafeAreaInsets();
   const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("All");
   const [selectedCase, setSelectedCase] = useState<any>(null);
+  const [collapsedAgents, setCollapsedAgents] = useState<Set<string>>(new Set());
 
   const { data, isLoading } = useQuery({
     queryKey: ["/api/telecaller/cases"],
     queryFn: () => api.telecaller.getCases(),
   });
 
-  const filtered = useMemo(() => {
-    const cases = data?.cases || [];
-    if (!search) return cases;
+  const allCases = data?.cases || [];
+
+  // Search applies across all agents/statuses so the overall counts stay meaningful.
+  const searched = useMemo(() => {
+    if (!search) return allCases;
     const q = search.toLowerCase();
-    return cases.filter((c: any) =>
+    return allCases.filter((c: any) =>
       c.customer_name?.toLowerCase().includes(q) ||
       c.loan_no?.toLowerCase().includes(q) ||
       c.app_id?.toLowerCase().includes(q) ||
       c.registration_no?.toLowerCase().includes(q) ||
       c.agent_name?.toLowerCase().includes(q)
     );
-  }, [data, search]);
+  }, [allCases, search]);
+
+  const overallCounts = useMemo(() => countByStatus(searched), [searched]);
+
+  const filtered = useMemo(() => {
+    if (statusFilter === "All") return searched;
+    return searched.filter((c: any) => c.status === statusFilter);
+  }, [searched, statusFilter]);
+
+  const sections = useMemo(() => {
+    const order: string[] = [];
+    const map = new Map<string, any[]>();
+    for (const c of filtered) {
+      const key = c.agent_name || "Unassigned";
+      if (!map.has(key)) { map.set(key, []); order.push(key); }
+      map.get(key)!.push(c);
+    }
+    return order.map((agentName) => {
+      const cases = map.get(agentName)!;
+      const counts = countByStatus(cases);
+      const collapsed = collapsedAgents.has(agentName);
+      return { title: agentName, counts, collapsed, data: collapsed ? [] : cases };
+    });
+  }, [filtered, collapsedAgents]);
+
+  const toggleAgent = useCallback((agentName: string) => {
+    setCollapsedAgents((prev) => {
+      const next = new Set(prev);
+      if (next.has(agentName)) next.delete(agentName); else next.add(agentName);
+      return next;
+    });
+  }, []);
+
+  const toggleStatusFilter = (status: StatusFilter) => {
+    setStatusFilter((prev) => (prev === status ? "All" : status));
+  };
 
   return (
     <View style={{ flex: 1, backgroundColor: Colors.background }}>
@@ -264,22 +368,44 @@ export default function TelecallerAllCasesScreen() {
         ) : null}
       </View>
 
+      <View style={styles.statsRow}>
+        <SummaryStat label="Total" count={overallCounts.total} color={Colors.primary}
+          active={statusFilter === "All"} onPress={() => setStatusFilter("All")} />
+        <SummaryStat label="Unpaid" count={overallCounts.Unpaid} color={Colors.statusUnpaid}
+          active={statusFilter === "Unpaid"} onPress={() => toggleStatusFilter("Unpaid")} />
+        <SummaryStat label="PTP" count={overallCounts.PTP} color={Colors.statusPTP}
+          active={statusFilter === "PTP"} onPress={() => toggleStatusFilter("PTP")} />
+        <SummaryStat label="Paid" count={overallCounts.Paid} color={Colors.statusPaid}
+          active={statusFilter === "Paid"} onPress={() => toggleStatusFilter("Paid")} />
+      </View>
+
       {isLoading ? (
         <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
           <ActivityIndicator color={Colors.primary} size="large" />
         </View>
       ) : (
-        <FlatList
-          data={filtered}
+        <SectionList
+          sections={sections}
           keyExtractor={(item) => String(item.id)}
           renderItem={({ item }) => <CaseCard item={item} onDetails={setSelectedCase} />}
+          renderSectionHeader={({ section }) => (
+            <AgentSectionHeader
+              agentName={section.title}
+              counts={section.counts}
+              collapsed={section.collapsed}
+              onToggle={() => toggleAgent(section.title)}
+            />
+          )}
+          stickySectionHeadersEnabled
           contentContainerStyle={[
             styles.list,
             { paddingBottom: insets.bottom + 24 },
             filtered.length === 0 && { flex: 1 },
           ]}
           ListHeaderComponent={
-            <Text style={styles.countText}>{filtered.length} allocation{filtered.length !== 1 ? "s" : ""}</Text>
+            <Text style={styles.countText}>
+              {filtered.length} case{filtered.length !== 1 ? "s" : ""} across {sections.length} agent{sections.length !== 1 ? "s" : ""}
+            </Text>
           }
           ListEmptyComponent={
             <View style={styles.empty}>
@@ -303,7 +429,28 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: Colors.border,
   },
   searchInput: { flex: 1, fontSize: 14, color: Colors.text },
+  statsRow: { flexDirection: "row", gap: 8, paddingHorizontal: 12, marginBottom: 4 },
+  statBox: {
+    flex: 1, alignItems: "center", justifyContent: "center", paddingVertical: 8,
+    borderRadius: 12, borderWidth: 1.5, backgroundColor: Colors.surface, gap: 2,
+  },
+  statCount: { fontSize: 17, fontWeight: "800" },
+  statLabel: { fontSize: 10, fontWeight: "700", color: Colors.textSecondary, textTransform: "uppercase" },
   list: { padding: 12, gap: 12 },
+  agentHeader: {
+    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
+    backgroundColor: Colors.surfaceElevated, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10,
+    marginBottom: 10, gap: 8,
+  },
+  agentHeaderLeft: { flexDirection: "row", alignItems: "center", gap: 6, flexShrink: 1 },
+  agentHeaderName: { fontSize: 14, fontWeight: "800", color: Colors.text, flexShrink: 1 },
+  agentCountPill: {
+    backgroundColor: Colors.primary, borderRadius: 10, paddingHorizontal: 7, paddingVertical: 1,
+  },
+  agentCountPillText: { color: "#fff", fontSize: 11, fontWeight: "700" },
+  agentHeaderRight: { flexDirection: "row", alignItems: "center", gap: 6, flexWrap: "wrap", justifyContent: "flex-end" },
+  miniBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10 },
+  miniBadgeText: { fontSize: 10, fontWeight: "700" },
   card: {
     backgroundColor: Colors.surface, borderRadius: 16, padding: 14, gap: 8,
     shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 8, elevation: 2,
