@@ -5,97 +5,39 @@ import { Ionicons } from "@expo/vector-icons";
 import Colors from "@/constants/colors";
 import { api } from "@/lib/api";
 
-// ── Defined feedback codes & full-sentence details ──────────────────────────
-// Kept in sync with the FOS feedback codes (see app/(app)/allocation.tsx) so
-// telecallers select from the exact same defined statements instead of
-// typing free-form feedback.
+// ── Defined feedback codes ───────────────────────────────────────────────────
+// Telecallers only ever pick from this fixed, short set of call outcomes.
 interface FbCodeMeta {
   code: string;
   desc: string;
   color: string;
 }
 export const FEEDBACK_CODE_LIST: FbCodeMeta[] = [
-  { code: "PTP",   desc: "Promise To Pay",                               color: "#f59e0b" },
-  { code: "PAID",  desc: "Customer Already Paid",                         color: "#22c55e" },
-  { code: "REPO",  desc: "Vehicle Repossessed",                           color: "#dc2626" },
-  { code: "RTP",   desc: "Refuse To Pay",                                 color: "#ef4444" },
-  { code: "CAVNA", desc: "Customer Available & Vehicle Not Available",     color: "#8b5cf6" },
-  { code: "CNAVA", desc: "Customer Not Available & Vehicle Available",     color: "#f97316" },
-  { code: "ANF",   desc: "Address Not Found",                             color: "#64748b" },
-  { code: "EXP",   desc: "Expired / Deceased",                            color: "#78716c" },
-  { code: "SFT",   desc: "Customer Transferred / Shifted",                color: "#0891b2" },
-  { code: "VSL",   desc: "Visit Scheduled / Locked",                      color: "#6366f1" },
-  { code: "SKIP",  desc: "Skip Customer",                                 color: "#64748b" },
+  { code: "PTP", desc: "Promise To Pay",      color: "#f59e0b" },
+  { code: "CNR", desc: "Call Not Received",   color: "#64748b" },
+  { code: "SWO", desc: "Switched Off",        color: "#78716c" },
+  { code: "RTP", desc: "Refuse To Pay",       color: "#ef4444" },
 ];
 
-export const DETAIL_SENTENCES: Record<string, string[]> = {
-  PTP: [
-    "Customer confirmed payment will be made by this week end.",
-    "Customer is waiting for salary credit and will pay immediately after.",
-    "Customer has promised to arrange funds within 3 days.",
-    "Customer agreed to pay EMI amount after getting loan from relative.",
-    "Customer requested one more week and gave a firm promise to pay.",
-    "Customer needs more time and will call back once funds are ready.",
-  ],
-  PAID: [
-    "Customer has already paid full EMI amount this month.",
-    "Customer made a partial payment and remaining will follow shortly.",
-    "Customer completed full settlement and loan is now cleared.",
-    "Customer paid via UPI transfer and shared payment confirmation.",
-    "Customer paid cash directly and receipt has been issued.",
-  ],
-  REPO: [
-    "Vehicle has been peacefully repossessed from customer location.",
-    "Vehicle was repossessed with assistance from local police authority.",
-    "Customer voluntarily surrendered the vehicle at our office.",
-    "Repossession attempt was made but customer managed to take vehicle away.",
-  ],
-  RTP: [
-    "Customer is disputing the loan amount and refusing to pay.",
-    "Customer refused to pay without giving any valid reason.",
-    "Customer used threatening language and refused to cooperate.",
-    "Customer claims they have already paid and showed old receipt.",
-    "Customer has filed a complaint and is not responding to calls.",
-  ],
-  CAVNA: [
-    "Customer was present at home but vehicle was not found at the location.",
-    "Customer confirmed the vehicle is kept at a different location.",
-    "Customer met and spoken to but denies knowing vehicle location.",
-    "Customer available but vehicle has been given to a third party.",
-  ],
-  CNAVA: [
-    "Vehicle was found parked at customer address but customer was not home.",
-    "Vehicle is confirmed at the location but customer is unreachable on phone.",
-    "Vehicle found parked — neighbour confirmed customer will return soon.",
-    "Vehicle located near customer home but customer has gone out of town.",
-  ],
-  ANF: [
-    "Address given at time of loan does not exist at the location.",
-    "Neighbours are unaware of any such person at this address.",
-    "Building/house number does not match any residence in the area.",
-    "Area exists but no one at that address recognises the customer.",
-  ],
-  EXP: [
-    "Customer has passed away — confirmed by family members.",
-    "Family informed customer is deceased and loan should be closed.",
-  ],
-  SFT: [
-    "Customer has shifted to another city and new address is not known.",
-    "Customer confirmed they have relocated and will update new address.",
-    "Neighbours confirmed customer has vacated and moved to another state.",
-  ],
-  VSL: [
-    "Visit has been scheduled — customer requested a specific date and time.",
-    "Customer will be available for field visit on the agreed date.",
-  ],
-  SKIP: [
-    "Customer is completely untraceable and phone is switched off.",
-    "Address given at time of loan is incorrect — no such person found.",
-    "Neighbours are unaware of customer and say they never lived here.",
-    "Phone number is unreachable and no alternate contact available.",
-    "House is vacant and locked — customer appears to have vacated.",
-  ],
-};
+const PTP_DATE_REGEX = /^\d{2}-\d{2}-\d{4}$/;
+
+// "DD-MM-YYYY" → "YYYY-MM-DD" for the API; leaves other input untouched.
+function toIsoDate(val: string): string {
+  const parts = val.trim().split(/[-/]/);
+  if (parts.length === 3 && parts[2].length === 4) {
+    return `${parts[2]}-${parts[1].padStart(2, "0")}-${parts[0].padStart(2, "0")}`;
+  }
+  return val;
+}
+
+// "YYYY-MM-DD" (or a full timestamp) → "DD-MM-YYYY" for display/editing.
+function toDisplayDate(val: string | null | undefined): string {
+  if (!val) return "";
+  const iso = String(val).slice(0, 10);
+  const parts = iso.split("-");
+  if (parts.length === 3 && parts[0].length === 4) return `${parts[2]}-${parts[1]}-${parts[0]}`;
+  return "";
+}
 
 export const STATUS_COLORS: Record<string, string> = {
   Unpaid: Colors.statusUnpaid,
@@ -196,7 +138,7 @@ export function CaseDetailModal({ item, onClose, onUpdated }: { item: any; onClo
   const [localItem, setLocalItem] = useState<any>(item);
   const [statusBusy, setStatusBusy] = useState<string | null>(null);
   const [feedbackCode, setFeedbackCode] = useState("");
-  const [feedbackText, setFeedbackText] = useState("");
+  const [ptpDateText, setPtpDateText] = useState("");
   const [commentsText, setCommentsText] = useState("");
   const [savingFeedback, setSavingFeedback] = useState(false);
   const [extraNumbers, setExtraNumbers] = useState<string[]>([]);
@@ -206,7 +148,7 @@ export function CaseDetailModal({ item, onClose, onUpdated }: { item: any; onClo
   useEffect(() => {
     setLocalItem(item);
     setFeedbackCode(item?.feedback_code || "");
-    setFeedbackText(item?.latest_feedback || "");
+    setPtpDateText(toDisplayDate(item?.ptp_date));
     setCommentsText(item?.feedback_comments || "");
     setExtraNumbers(item?.extra_numbers || []);
     setNewNumber("");
@@ -247,21 +189,34 @@ export function CaseDetailModal({ item, onClose, onUpdated }: { item: any; onClo
       Alert.alert("Error", "Please select a Feedback Code");
       return;
     }
+    if (feedbackCode === "PTP" && !PTP_DATE_REGEX.test(ptpDateText.trim())) {
+      Alert.alert("Error", "Please enter a valid PTP date (DD-MM-YYYY)");
+      return;
+    }
     setSavingFeedback(true);
     try {
+      const meta = FEEDBACK_CODE_LIST.find((f) => f.code === feedbackCode);
+      // Only a PTP save (with a date the telecaller just typed) changes the
+      // stored PTP date. Any other feedback code leaves it exactly as-is —
+      // it must never be silently cleared out from under the telecaller.
+      const nextPtpDate = feedbackCode === "PTP"
+        ? toIsoDate(ptpDateText.trim())
+        : (localItem.ptp_date ? String(localItem.ptp_date).slice(0, 10) : null);
       await applyUpdate({
-        status: localItem.status,
-        feedback: feedbackText.trim() || null,
+        status: feedbackCode === "PTP" ? "PTP" : localItem.status,
+        feedback: meta?.desc ?? feedbackCode,
         feedback_code: feedbackCode,
         comments: commentsText.trim() || null,
-        ptp_date: localItem.ptp_date ? String(localItem.ptp_date).slice(0, 10) : null,
+        ptp_date: nextPtpDate,
         rollback_yn: localItem.rollback_yn ?? null,
       });
       setLocalItem((prev: any) => ({
         ...prev,
-        latest_feedback: feedbackText.trim(),
+        status: feedbackCode === "PTP" ? "PTP" : prev.status,
+        latest_feedback: meta?.desc ?? feedbackCode,
         feedback_code: feedbackCode,
         feedback_comments: commentsText.trim(),
+        ptp_date: nextPtpDate,
       }));
       onUpdated?.();
       Alert.alert("Saved", "Feedback updated.");
@@ -271,9 +226,6 @@ export function CaseDetailModal({ item, onClose, onUpdated }: { item: any; onClo
       setSavingFeedback(false);
     }
   };
-
-  const activeFbMeta = FEEDBACK_CODE_LIST.find((f) => f.code === feedbackCode);
-  const detailSentences: string[] = feedbackCode ? (DETAIL_SENTENCES[feedbackCode] ?? []) : [];
 
   const handleAddNumber = async () => {
     const trimmed = newNumber.trim();
@@ -366,11 +318,7 @@ export function CaseDetailModal({ item, onClose, onUpdated }: { item: any; onClo
                         manageStyles.fcRow,
                         selected && { borderColor: color, backgroundColor: color + "0D" },
                       ]}
-                      onPress={() => {
-                        const newCode = feedbackCode === code ? "" : code;
-                        setFeedbackCode(newCode);
-                        setFeedbackText(""); // reset detail sentence when code changes
-                      }}
+                      onPress={() => setFeedbackCode(feedbackCode === code ? "" : code)}
                     >
                       <View style={[manageStyles.fcDot, selected && { backgroundColor: color }]} />
                       <View style={{ flex: 1 }}>
@@ -383,35 +331,18 @@ export function CaseDetailModal({ item, onClose, onUpdated }: { item: any; onClo
                 })}
               </View>
 
-              {feedbackCode !== "" && (
+              {feedbackCode === "PTP" && (
                 <>
-                  <Text style={manageStyles.sectionTitle}>Detail Feedback</Text>
-                  <View style={{ gap: 6, marginTop: 4, marginBottom: 4 }}>
-                    {detailSentences.length === 0 ? (
-                      <Text style={manageStyles.noSentenceText}>No pre-defined statements for this code.</Text>
-                    ) : (
-                      detailSentences.map((sentence) => {
-                        const selected = feedbackText === sentence;
-                        const color = activeFbMeta?.color || Colors.primary;
-                        return (
-                          <Pressable
-                            key={sentence}
-                            style={[
-                              manageStyles.sentenceRow,
-                              selected && { borderColor: color, backgroundColor: color + "0D" },
-                            ]}
-                            onPress={() => setFeedbackText(selected ? "" : sentence)}
-                          >
-                            <View style={[manageStyles.sentenceDot, selected && { backgroundColor: color }]} />
-                            <Text style={[manageStyles.sentenceText, selected && { color, fontWeight: "600" }]}>
-                              {sentence}
-                            </Text>
-                            {selected && <Ionicons name="checkmark-circle" size={18} color={color} />}
-                          </Pressable>
-                        );
-                      })
-                    )}
-                  </View>
+                  <Text style={manageStyles.sectionTitle}>PTP Date</Text>
+                  <TextInput
+                    style={manageStyles.input}
+                    placeholder="DD-MM-YYYY"
+                    placeholderTextColor={Colors.textMuted}
+                    value={ptpDateText}
+                    onChangeText={setPtpDateText}
+                    keyboardType="numeric"
+                    maxLength={10}
+                  />
                 </>
               )}
 
@@ -522,14 +453,6 @@ const manageStyles = StyleSheet.create({
   fcDot: { width: 9, height: 9, borderRadius: 5, backgroundColor: Colors.border },
   fcName: { fontSize: 13, fontWeight: "700", color: Colors.text },
   fcDesc: { fontSize: 11, color: Colors.textSecondary, marginTop: 1 },
-  // Full-sentence detail rows
-  sentenceRow: {
-    flexDirection: "row", alignItems: "flex-start", gap: 10, paddingVertical: 11, paddingHorizontal: 12,
-    borderRadius: 10, borderWidth: 1.5, borderColor: Colors.border, backgroundColor: Colors.surface,
-  },
-  sentenceDot: { width: 9, height: 9, borderRadius: 5, backgroundColor: Colors.border, marginTop: 3, flexShrink: 0 },
-  sentenceText: { flex: 1, fontSize: 13, color: Colors.text, lineHeight: 19 },
-  noSentenceText: { fontSize: 12, color: Colors.textMuted, fontStyle: "italic", marginBottom: 4 },
 });
 
 export function CaseCard({ item, onDetails }: { item: any; onDetails: (item: any) => void }) {
