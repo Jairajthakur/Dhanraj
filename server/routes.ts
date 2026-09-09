@@ -2069,16 +2069,30 @@ res.json({
       if (headerRowIdx === -1) return res.status(400).json({ message: "Could not find header row." });
       const fosNamesInBktExcel = new Set<string>();
       for (const row of rawRows.slice(headerRowIdx + 1)) { const mapped: Record<string, any> = {}; for (const [colIdx, dbField] of Object.entries(colIdxMap)) { const val = row[Number(colIdx)]; mapped[dbField] = val !== undefined && val !== "" ? String(val).trim() : null; } if (mapped.fos_name && !isRepeatHeaderRow(mapped)) fosNamesInBktExcel.add(mapped.fos_name.toLowerCase().trim()); }
-      const ptpBktSave = await storage.query(`SELECT loan_no, ptp_date, telecaller_ptp_date FROM bkt_cases WHERE status='PTP'`);
-      const ptpBktMap = new Map(ptpBktSave.rows.map((r: any) => [r.loan_no, { ptpDate: r.ptp_date, telecallerPtpDate: r.telecaller_ptp_date }]));
-      await storage.deleteAllBktCases();
+
+      // ── Collect loan_nos present in the new file ───────────────────────────
+      const loanNosInBktExcel = new Set<string>();
+      for (const row of rawRows.slice(headerRowIdx + 1)) {
+        const mapped: Record<string, any> = {};
+        for (const [colIdx, dbField] of Object.entries(colIdxMap)) { const val = row[Number(colIdx)]; mapped[dbField] = val !== undefined && val !== "" ? String(val).trim() : null; }
+        if (mapped.loan_no && !isRepeatHeaderRow(mapped)) loanNosInBktExcel.add(mapped.loan_no.trim());
+      }
+
+      // ── Remove stale cases no longer in allocation — everything else is a
+      //    true upsert (see upsertBktCase) so telecaller-entered status, feedback,
+      //    rollback, and extra numbers survive a re-upload untouched. ───────────
+      if (loanNosInBktExcel.size > 0) {
+        await storage.query(`DELETE FROM bkt_cases WHERE loan_no != ALL($1::text[])`, [Array.from(loanNosInBktExcel)]);
+        console.log(`[import-bkt] 🗑️ Removed stale cases not in new allocation file`);
+      }
+
       const existingFosBktAgents = await storage.query(`SELECT id, name FROM fos_agents WHERE role='fos'`);
       let agentsRemoved = 0;
       for (const agent of existingFosBktAgents.rows) { if (!fosNamesInBktExcel.has((agent.name || "").toLowerCase().trim())) { await safeDeleteAgent(agent.id, "import-bkt"); agentsRemoved++; } }
       const { rows: existingAgents } = await storage.query(`SELECT id, name FROM fos_agents WHERE name IS NOT NULL`);
       const agentByName: Record<string, number> = {};
       for (const a of existingAgents) { if (a.name) agentByName[a.name.toLowerCase().trim()] = a.id; }
-      let imported = 0, skipped = 0, agentsCreated = 0; const errors: string[] = [];
+      let imported = 0, updated = 0, skipped = 0, agentsCreated = 0; const errors: string[] = [];
       for (let i = 0; i < rawRows.slice(headerRowIdx + 1).length; i++) {
         const row = rawRows.slice(headerRowIdx + 1)[i]; const mapped: Record<string, any> = {};
         for (const [colIdx, dbField] of Object.entries(colIdxMap)) { const val = row[Number(colIdx)]; mapped[dbField] = val !== undefined && val !== "" ? String(val).trim() : null; }
@@ -2088,11 +2102,13 @@ res.json({
         if (bktVal === 1) caseCategory = "bkt1"; else if (bktVal === 2) caseCategory = "bkt2"; else if (bktVal === 3) caseCategory = "bkt3";
         let agentId: number | null = null;
         if (mapped.fos_name) { const fosLower = mapped.fos_name.toLowerCase().trim(); if (agentByName[fosLower]) { agentId = agentByName[fosLower]; } else { try { const username = fosLower.replace(/\s+/g, ".").replace(/[^a-z0-9.]/g, ""); const newAgent = await storage.createFosAgent({ name: mapped.fos_name, username, password: randomBytes(16).toString("hex") }); agentByName[fosLower] = newAgent.id; agentId = newAgent.id; agentsCreated++; } catch { const found = await storage.getAgentByUsername(mapped.fos_name.toLowerCase().trim().replace(/\s+/g, ".").replace(/[^a-z0-9.]/g, "")); if (found) { agentByName[mapped.fos_name.toLowerCase().trim()] = found.id; agentId = found.id; } } } }
-        try { await storage.upsertBktCase({ caseCategory, agentId, fosName: mapped.fos_name || null, loanNo: mapped.loan_no, customerName: mapped.customer_name, bkt: bktVal, appId: mapped.app_id || null, address: mapped.address || null, mobileNo: mapped.mobile_no || null, ref1Name: mapped.ref1_name || null, ref1Mobile: mapped.ref1_mobile || null, ref2Name: mapped.ref2_name || null, ref2Mobile: mapped.ref2_mobile || null, referenceAddress: mapped.reference_address || null, pos: parseNum(mapped.pos), assetName: mapped.asset_name || null, assetMake: mapped.asset_make || null, registrationNo: mapped.registration_no || null, engineNo: mapped.engine_no || null, chassisNo: mapped.chassis_no || null, emiAmount: parseNum(mapped.emi_amount), emiDue: parseNum(mapped.emi_due), cbc: parseNum(mapped.cbc), lpp: parseNum(mapped.lpp), cbcLpp: parseNum(mapped.cbc_lpp), rollback: parseNum(mapped.rollback), clearance: parseNum(mapped.clearance), firstEmiDueDate: parseDate(mapped.first_emi_due_date), loanMaturityDate: parseDate(mapped.loan_maturity_date), tenor: mapped.tenor ? parseInt(mapped.tenor) || null : null, pro: mapped.pro || null, status: normalizeStatus(mapped.status), telecallerPtpDate: parseDate(mapped.telecaller_ptp_date), recDate: mapped.rec_date != null && mapped.rec_date !== "" ? (parseInt(mapped.rec_date, 10) || 0) : 0, remark: mapped.remark ? mapped.remark.trim().toUpperCase() : null }); imported++; }
+        try {
+          const upsertResult = await storage.upsertBktCase({ caseCategory, agentId, fosName: mapped.fos_name || null, loanNo: mapped.loan_no, customerName: mapped.customer_name, bkt: bktVal, appId: mapped.app_id || null, address: mapped.address || null, mobileNo: mapped.mobile_no || null, ref1Name: mapped.ref1_name || null, ref1Mobile: mapped.ref1_mobile || null, ref2Name: mapped.ref2_name || null, ref2Mobile: mapped.ref2_mobile || null, referenceAddress: mapped.reference_address || null, pos: parseNum(mapped.pos), assetName: mapped.asset_name || null, assetMake: mapped.asset_make || null, registrationNo: mapped.registration_no || null, engineNo: mapped.engine_no || null, chassisNo: mapped.chassis_no || null, emiAmount: parseNum(mapped.emi_amount), emiDue: parseNum(mapped.emi_due), cbc: parseNum(mapped.cbc), lpp: parseNum(mapped.lpp), cbcLpp: parseNum(mapped.cbc_lpp), rollback: parseNum(mapped.rollback), clearance: parseNum(mapped.clearance), firstEmiDueDate: parseDate(mapped.first_emi_due_date), loanMaturityDate: parseDate(mapped.loan_maturity_date), tenor: mapped.tenor ? parseInt(mapped.tenor) || null : null, pro: mapped.pro || null, status: normalizeStatus(mapped.status), telecallerPtpDate: parseDate(mapped.telecaller_ptp_date), recDate: mapped.rec_date != null && mapped.rec_date !== "" ? (parseInt(mapped.rec_date, 10) || 0) : 0, remark: mapped.remark ? mapped.remark.trim().toUpperCase() : null });
+          if (upsertResult === "inserted") { imported++; } else { updated++; }
+        }
         catch (e: any) { errors.push(`Row ${i + headerRowIdx + 2}: ${e.message}`); skipped++; }
       }
-      for (const [loanNo, ptpData] of ptpBktMap) { await storage.query(`UPDATE bkt_cases SET status='PTP', ptp_date=$1, telecaller_ptp_date=$2 WHERE loan_no=$3`, [ptpData.ptpDate, ptpData.telecallerPtpDate, loanNo]); }
-      res.json({ imported, updated: 0, skipped, agentsCreated, agentsRemoved, total: rawRows.slice(headerRowIdx + 1).length, errors: errors.slice(0, 20) });
+      res.json({ imported, updated, skipped, agentsCreated, agentsRemoved, total: rawRows.slice(headerRowIdx + 1).length, errors: errors.slice(0, 20) });
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
