@@ -37,6 +37,7 @@ export default function TelecallerLayout() {
       }}
     >
       <Stack.Screen name="cases" />
+      <Stack.Screen name="agent/[id]" options={{ headerShown: false }} />
     </Stack>
   );
 }
