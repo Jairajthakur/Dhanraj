@@ -25,6 +25,7 @@ const ADMIN_MENU = [
   { key: "call-logs",    label: "Call Logs",          icon: "call"             as const, screen: "/(admin)/call-logs"         },
   { key: "daily-report", label: "Daily Report",      icon: "bar-chart"        as const, screen: "/(admin)/daily-report"     },
   { key: "telecaller-assignment", label: "Telecaller Assignment", icon: "headset" as const, screen: "/(admin)/telecaller-assignment" },
+  { key: "telecaller-performance", label: "Telecaller Performance", icon: "stats-chart" as const, screen: "/(admin)/telecaller-performance" },
 ];
 
 // ─── Company Selector strip (shown inside drawer) ─────────────────────────────
@@ -234,6 +235,7 @@ useEffect(() => {
         <Stack.Screen name="call-logs"    options={{ title: "Call Logs" }} />
         <Stack.Screen name="daily-report" options={{ title: "Daily Report" }} />
         <Stack.Screen name="telecaller-assignment" options={{ title: "Telecaller Assignment" }} />
+        <Stack.Screen name="telecaller-performance" options={{ title: "Telecaller Performance" }} />
       </Stack>
 <AdminDrawer visible={drawerOpen} onClose={() => setDrawerOpen(false)} onVisible={refreshCompanies} />    </>
   );
