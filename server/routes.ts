@@ -1825,11 +1825,11 @@ app.get("/api/admin/fos-depositions", requireAdmin, async (req, res) => {
 
   app.get("/api/admin/customer-receipts/search", requireAdmin, async (req, res) => {
     try {
-      const idQuery = String(req.query.customerId || req.query.name || "").trim();
-      if (!idQuery) return res.json({ receipts: [] });
+      const q = String(req.query.q || req.query.customerId || req.query.name || "").trim();
+      if (!q) return res.json({ receipts: [] });
       const result = await storage.query(
-        `SELECT * FROM customer_receipts WHERE customer_id ILIKE $1 ORDER BY created_at DESC LIMIT 200`,
-        [`%${idQuery}%`]
+        `SELECT * FROM customer_receipts WHERE customer_id ILIKE $1 OR customer_name ILIKE $1 ORDER BY created_at DESC LIMIT 200`,
+        [`%${q}%`]
       );
       res.json({ receipts: result.rows });
     } catch (e: any) { res.status(500).json({ message: e.message }); }
