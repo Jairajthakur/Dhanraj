@@ -434,6 +434,7 @@ export const api = {
   // ─── TELECALLER ───────────────────────────────────────────────────────────
   telecaller: {
     getCases: () => apiRequest("GET", "/api/telecaller/cases"),
+    getPtpQueue: () => apiRequest("GET", "/api/telecaller/ptp-queue"),
   },
 
   // ─── ADMIN ────────────────────────────────────────────────────────────────
