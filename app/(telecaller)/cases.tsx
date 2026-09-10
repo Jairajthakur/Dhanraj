@@ -104,6 +104,7 @@ export default function TelecallerDashboardScreen() {
   });
   const ptpOverdueCount = ptpQueueData?.overdue?.length || 0;
   const ptpDueTodayCount = ptpQueueData?.dueToday?.length || 0;
+  const ptpDueTomorrowCount = ptpQueueData?.dueTomorrow?.length || 0;
 
   const allCases: any[] = data?.cases || [];
   const overallCounts = useMemo(() => countByStatus(allCases), [allCases]);
@@ -192,6 +193,16 @@ export default function TelecallerDashboardScreen() {
         </Pressable>
       )}
 
+      {ptpDueTomorrowCount > 0 && (
+        <Pressable style={styles.ptpBannerTomorrow} onPress={() => router.push("/(telecaller)/ptp-queue")}>
+          <Ionicons name="logo-whatsapp" size={22} color="#fff" />
+          <Text style={styles.ptpBannerText}>
+            {`${ptpDueTomorrowCount} PTP${ptpDueTomorrowCount !== 1 ? "s" : ""} due tomorrow — tap to send WhatsApp reminders`}
+          </Text>
+          <Ionicons name="chevron-forward" size={18} color="rgba(255,255,255,0.8)" />
+        </Pressable>
+      )}
+
       {isLoading ? (
         <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
           <ActivityIndicator color={Colors.primary} size="large" />
@@ -266,6 +277,11 @@ const styles = StyleSheet.create({
     shadowColor: Colors.danger, shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.25, shadowRadius: 8, elevation: 3,
   },
   ptpBannerText: { flex: 1, color: "#fff", fontSize: 13, fontWeight: "700" },
+  ptpBannerTomorrow: {
+    flexDirection: "row", alignItems: "center", gap: 10, marginHorizontal: 12, marginTop: 10,
+    backgroundColor: Colors.warning, borderRadius: 16, paddingHorizontal: 14, paddingVertical: 13,
+    shadowColor: Colors.warning, shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.25, shadowRadius: 8, elevation: 3,
+  },
   list: { padding: 12, gap: 12 },
   countText: { fontSize: 13, color: Colors.textSecondary, fontWeight: "600", marginBottom: 4 },
   empty: { flex: 1, justifyContent: "center", alignItems: "center", gap: 12, paddingVertical: 60 },
