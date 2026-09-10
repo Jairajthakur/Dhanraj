@@ -846,7 +846,7 @@ app.use("/api/fos-depositions", (req, res, next) => {
       const result = await storage.query(
         `SELECT lc.id, lc.customer_name, lc.loan_no, lc.mobile_no, lc.extra_numbers,
                 lc.pos, lc.emi_due, lc.ptp_date, lc.status, lc.feedback_comments,
-                fa.name AS agent_name, fa.id AS agent_id, 'loan' AS case_type
+                fa.name AS agent_name, fa.id AS agent_id, fa.phone AS agent_phone, 'loan' AS case_type
            FROM loan_cases lc JOIN fos_agents fa ON lc.agent_id = fa.id
           WHERE fa.assigned_telecaller_id = $1 AND lc.status = 'PTP'
             AND lc.ptp_date IS NOT NULL AND lc.ptp_date <= CURRENT_DATE + INTERVAL '1 day'
@@ -855,7 +855,7 @@ app.use("/api/fos-depositions", (req, res, next) => {
 
          SELECT bc.id, bc.customer_name, bc.loan_no, bc.mobile_no, bc.extra_numbers,
                 bc.pos, bc.emi_due, bc.ptp_date, bc.status, bc.feedback_comments,
-                fa.name AS agent_name, fa.id AS agent_id, 'bkt' AS case_type
+                fa.name AS agent_name, fa.id AS agent_id, fa.phone AS agent_phone, 'bkt' AS case_type
            FROM bkt_cases bc JOIN fos_agents fa ON bc.agent_id = fa.id
           WHERE fa.assigned_telecaller_id = $1 AND bc.status = 'PTP'
             AND bc.ptp_date IS NOT NULL AND bc.ptp_date <= CURRENT_DATE + INTERVAL '1 day'
