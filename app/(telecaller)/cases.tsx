@@ -104,7 +104,8 @@ export default function TelecallerDashboardScreen() {
   });
   const ptpOverdueCount = ptpQueueData?.overdue?.length || 0;
   const ptpDueTodayCount = ptpQueueData?.dueToday?.length || 0;
-  const ptpDueTomorrowCount = ptpQueueData?.dueTomorrow?.length || 0;
+  const dueTomorrow: any[] = ptpQueueData?.dueTomorrow || [];
+  const ptpDueTomorrowCount = dueTomorrow.length;
 
   const allCases: any[] = data?.cases || [];
   const overallCounts = useMemo(() => countByStatus(allCases), [allCases]);
@@ -197,7 +198,7 @@ export default function TelecallerDashboardScreen() {
         <Pressable style={styles.ptpBannerTomorrow} onPress={() => router.push("/(telecaller)/ptp-queue")}>
           <Ionicons name="logo-whatsapp" size={22} color="#fff" />
           <Text style={styles.ptpBannerText}>
-            {`${ptpDueTomorrowCount} PTP${ptpDueTomorrowCount !== 1 ? "s" : ""} due tomorrow — tap to send WhatsApp reminders`}
+            {`${ptpDueTomorrowCount} PTP${ptpDueTomorrowCount !== 1 ? "s" : ""} due tomorrow — tap to send WhatsApp reminders agent-wise`}
           </Text>
           <Ionicons name="chevron-forward" size={18} color="rgba(255,255,255,0.8)" />
         </Pressable>
