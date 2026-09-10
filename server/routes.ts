@@ -277,82 +277,167 @@ async function extractAmountFromScreenshot(imagePath: string): Promise<number | 
 // page-segmentation on this two-column layout (labels on the left, values on
 // the right) often reorders text: it reads every label top-to-bottom, then
 // every value top-to-bottom, so "Customer" / "Name:" can end up nowhere near
-// the actual "Shaikh Anwar Shaikh" / "Lalamiya" text. The one thing that
-// stays reliable across every layout variant we've seen is that the name is
-// the last real text right before the "Resend e-receipt" button (or the end
-// of the receipt, if that button wasn't picked up). So instead of anchoring
-// on the "Customer"/"Name" labels, we anchor on "Resend" and walk *upward*,
-// collecting plausible name-fragment lines until we hit something that is
-// clearly a different field (a label with a colon, a bare number, "Customer
-// ID", a divider, etc.) or the "Customer"/"Name" label itself.
+// the actual "Shaikh Anwar Shaikh" / "Lalamiya" text. We try two independent
+// strategies and use whichever produces something that actually looks like a
+// name — this makes us resilient whether or not the OCR pass reordered lines.
 // Best-effort — the admin can still edit the result before it's saved.
+const NAME_DIVIDER_RE = /^[-_~=+\s]{3,}$/;
+const OTHER_FIELD_KEYWORDS =
+  /resend|receipt|collector|charges|payment|branch|account|mode|amount|words|hero|fincorp|collections/i;
+
 function parseCustomerNameFromOcrText(text: string): string | null {
   const stripNoise = (raw: string): string =>
     raw.replace(/[^A-Za-z\s]/g, " ").replace(/\s+/g, " ").trim();
   const hasRealWord = (v: string): boolean => v.split(" ").some((w) => w.length >= 3);
-  const OTHER_FIELD_KEYWORDS =
-    /resend|receipt|collector|charges|payment|branch|account|mode|amount|words|hero|fincorp|collections/i;
+  const looksLikeName = (v: string | null): v is string => {
+    if (!v) return false;
+    const words = v.split(" ").filter(Boolean);
+    return words.length >= 1 && hasRealWord(v) && v.length <= 60 && !OTHER_FIELD_KEYWORDS.test(v);
+  };
 
   const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
 
-  let anchor = lines.findIndex((l) => /resend/i.test(l));
-  if (anchor === -1) anchor = lines.length;
+  // Method A: anchor on "Resend" and walk *upward*, collecting plausible
+  // name-fragment lines until we hit something that is clearly a different
+  // field (a label with a colon, a bare number, "Customer ID", a divider,
+  // etc.) or the "Customer"/"Name" label itself. Works when OCR preserved
+  // the receipt's original top-to-bottom line order.
+  const methodA = (): string | null => {
+    let anchor = lines.findIndex((l) => /resend/i.test(l));
+    if (anchor === -1) anchor = lines.length;
 
-  const collected: string[] = [];
-  for (let i = anchor - 1; i >= 0 && collected.length < 4; i--) {
-    const line = lines[i];
+    const collected: string[] = [];
+    for (let i = anchor - 1; i >= 0 && collected.length < 4; i--) {
+      const line = lines[i];
 
-    // A dashed/underline divider — skip past it before we've collected
-    // anything (it sits between the name and the Resend button), but stop
-    // once we've already gathered some name text (it marks the field's top).
-    if (/^[-_~=+\s]{3,}$/.test(line)) { if (collected.length) break; else continue; }
+      if (NAME_DIVIDER_RE.test(line)) { if (collected.length) break; else continue; }
 
-    // A "Name:" (or garbled "Name...", "Name -----") label line — keep only
-    // whatever value text trails it, then keep walking upward past the label.
-    const nameLabelMatch = line.match(/^name\s*[:.\-_\s]*\s*(.*)$/i);
-    if (nameLabelMatch) {
-      const v = stripNoise(nameLabelMatch[1]);
-      if (v.length >= 2 && hasRealWord(v)) collected.unshift(v);
-      continue;
+      const nameLabelMatch = line.match(/^name\s*[:.\-_\s]*\s*(.*)$/i);
+      if (nameLabelMatch) {
+        const v = stripNoise(nameLabelMatch[1]);
+        if (v.length >= 2 && hasRealWord(v)) collected.unshift(v);
+        continue;
+      }
+
+      if (/customer\s*id/i.test(line)) break;
+
+      if (/^customer\b/i.test(line)) {
+        let v = line.replace(/^customer\b\s*[:\-]?\s*/i, "");
+        v = v.replace(/^name\b\s*[:.\-_\s]*\s*/i, "");
+        v = stripNoise(v);
+        if (v.length >= 2) collected.unshift(v);
+        break;
+      }
+
+      if (/:/.test(line)) break;
+      if (/^\d+$/.test(line)) break;
+      if (OTHER_FIELD_KEYWORDS.test(line)) break;
+
+      const v = stripNoise(line);
+      if (v.length < 2 || !hasRealWord(v)) break;
+      collected.unshift(v);
     }
 
-    // "Customer ID:" is a different field entirely — stop here.
-    if (/customer\s*id/i.test(line)) break;
+    const val = stripNoise(collected.join(" "));
+    return val.length >= 2 ? val : null;
+  };
 
-    // The "Customer" label line itself (optionally with "Name:" and/or part
-    // of the value trailing it on the same line) — this is the top of the
-    // field, so grab any trailing value text and stop.
-    if (/^customer\b/i.test(line)) {
-      let v = line.replace(/^customer\b\s*[:\-]?\s*/i, "");
-      v = v.replace(/^name\b\s*[:.\-_\s]*\s*/i, "");
-      v = stripNoise(v);
-      if (v.length >= 2) collected.unshift(v);
-      break;
+  // Method B (fallback): when a receipt's big label/value gaps make Tesseract
+  // split the page into a "labels" block and a separate "values" block, the
+  // text right before "Resend" is no longer the name — it's whatever value
+  // line landed there. Instead, anchor on "Customer ID" (a reliable, unique
+  // label) as the *upper* boundary and collect plausible name text scanning
+  // *downward* from there to "Resend" (or end of text), skipping anything
+  // that looks like a different field. This doesn't depend on the name being
+  // the very last thing before the button.
+  const methodB = (): string | null => {
+    const idIdx = lines.findIndex((l) => /customer\s*id/i.test(l));
+    if (idIdx === -1) return null;
+    let anchor = lines.findIndex((l, i) => i > idIdx && /resend/i.test(l));
+    if (anchor === -1) anchor = lines.length;
+
+    const collected: string[] = [];
+    for (let i = idIdx + 1; i < anchor && collected.length < 4; i++) {
+      const line = lines[i];
+
+      if (NAME_DIVIDER_RE.test(line)) { if (collected.length) break; else continue; }
+
+      const nameLabelMatch = line.match(/^(?:customer\s*)?name\s*[:.\-_\s]*\s*(.*)$/i);
+      if (nameLabelMatch) {
+        const v = stripNoise(nameLabelMatch[1]);
+        if (v.length >= 2 && hasRealWord(v)) collected.push(v);
+        continue;
+      }
+
+      if (/^customer\b/i.test(line)) {
+        const v = stripNoise(line.replace(/^customer\b\s*[:\-]?\s*/i, ""));
+        if (v.length >= 2 && hasRealWord(v)) collected.push(v);
+        continue;
+      }
+
+      if (/:/.test(line)) break;
+      if (/^\d+$/.test(line)) break;
+      if (OTHER_FIELD_KEYWORDS.test(line)) break;
+
+      const v = stripNoise(line);
+      if (v.length < 2 || !hasRealWord(v)) continue;
+      collected.push(v);
     }
 
-    // Any other "Label: value" line, a bare number, or a known field
-    // keyword means we've walked past the name field — stop.
-    if (/:/.test(line)) break;
-    if (/^\d+$/.test(line)) break;
-    if (OTHER_FIELD_KEYWORDS.test(line)) break;
+    const val = stripNoise(collected.join(" "));
+    return val.length >= 2 ? val : null;
+  };
 
-    // Otherwise treat this as a plain name-fragment line and keep collecting.
-    const v = stripNoise(line);
-    if (v.length < 2 || !hasRealWord(v)) break;
-    collected.unshift(v);
+  const a = methodA();
+  if (looksLikeName(a)) return a;
+  const b = methodB();
+  if (looksLikeName(b)) return b;
+  return a || b || null;
+}
+
+// A shared, lazily-created Tesseract worker, reused across every OCR call in
+// this process. Besides avoiding the overhead of reloading language data on
+// every single receipt, this lets us force a page-segmentation mode suited
+// to these receipts: a single narrow column with "Label:      value" rows
+// spaced far apart. Tesseract's default automatic segmentation sometimes
+// treats that gap as two separate columns and reads all the labels first,
+// then all the values — which is what scrambles name detection. Forcing
+// PSM 4 (single column of text of variable sizes) keeps every row read in
+// its natural left-to-right, top-to-bottom order.
+let ocrWorkerPromise: Promise<any> | null = null;
+function getOcrWorker(): Promise<any> {
+  if (!ocrWorkerPromise) {
+    ocrWorkerPromise = (async () => {
+      let Tesseract: any;
+      try { Tesseract = require("tesseract.js"); } catch { console.warn("[ocr] tesseract.js not installed"); return null; }
+      try {
+        const worker = await Tesseract.createWorker("eng");
+        await worker.setParameters({ tessedit_pageseg_mode: Tesseract.PSM.SINGLE_COLUMN });
+        return worker;
+      } catch (e: any) {
+        console.warn("[ocr] worker init failed:", e.message);
+        return null;
+      }
+    })();
   }
+  return ocrWorkerPromise;
+}
 
-  const val = stripNoise(collected.join(" "));
-  return val.length >= 2 ? val : null;
+async function runOcr(image: Buffer | string): Promise<string | null> {
+  try {
+    const worker = await getOcrWorker();
+    if (!worker) return null;
+    const { data: { text } } = await worker.recognize(image);
+    return text;
+  } catch (e: any) {
+    console.warn("[ocr] recognize failed:", e.message);
+    return null;
+  }
 }
 
 async function extractCustomerNameFromScreenshot(image: Buffer | string): Promise<string | null> {
-  try {
-    let Tesseract: any;
-    try { Tesseract = require("tesseract.js"); } catch { console.warn("[ocr] tesseract.js not installed"); return null; }
-    const { data: { text } } = await Tesseract.recognize(image, "eng", { logger: () => {} });
-    return parseCustomerNameFromOcrText(text);
-  } catch { return null; }
+  const text = await runOcr(image);
+  return text ? parseCustomerNameFromOcrText(text) : null;
 }
 
 // The "Customer ID:" field on the receipt is a plain label + numeric value,
@@ -379,23 +464,16 @@ function parseCustomerIdFromOcrText(text: string): string | null {
 }
 
 async function extractCustomerIdFromScreenshot(image: Buffer | string): Promise<string | null> {
-  try {
-    let Tesseract: any;
-    try { Tesseract = require("tesseract.js"); } catch { console.warn("[ocr] tesseract.js not installed"); return null; }
-    const { data: { text } } = await Tesseract.recognize(image, "eng", { logger: () => {} });
-    return parseCustomerIdFromOcrText(text);
-  } catch { return null; }
+  const text = await runOcr(image);
+  return text ? parseCustomerIdFromOcrText(text) : null;
 }
 
 // Runs OCR once and pulls both fields out of the same pass — used wherever
 // we need name + customer ID together so we don't pay for OCR twice.
 async function extractReceiptFieldsFromScreenshot(image: Buffer | string): Promise<{ name: string | null; customerId: string | null }> {
-  try {
-    let Tesseract: any;
-    try { Tesseract = require("tesseract.js"); } catch { console.warn("[ocr] tesseract.js not installed"); return { name: null, customerId: null }; }
-    const { data: { text } } = await Tesseract.recognize(image, "eng", { logger: () => {} });
-    return { name: parseCustomerNameFromOcrText(text), customerId: parseCustomerIdFromOcrText(text) };
-  } catch { return { name: null, customerId: null }; }
+  const text = await runOcr(image);
+  if (!text) return { name: null, customerId: null };
+  return { name: parseCustomerNameFromOcrText(text), customerId: parseCustomerIdFromOcrText(text) };
 }
 
 function amountMatches(expected: number, actual: number): boolean { return Math.round(expected) === Math.round(actual); }
