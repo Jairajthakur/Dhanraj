@@ -76,6 +76,141 @@ export function sendPtpSms(item: any) {
   Linking.openURL(url).catch(() => Alert.alert("Error", "Could not open Messages."));
 }
 
+// Group a flat list of cases by their FOS agent — used to show PTP follow-ups
+// (and bulk WhatsApp sends) agent-wise instead of one long mixed list.
+export function groupCasesByAgent(items: any[]): { agentId: string; agentName: string; items: any[] }[] {
+  const order: string[] = [];
+  const map = new Map<string, any[]>();
+  for (const it of items) {
+    const key = String(it?.agent_id ?? it?.agent_name ?? "unassigned");
+    if (!map.has(key)) { map.set(key, []); order.push(key); }
+    map.get(key)!.push(it);
+  }
+  return order.map((key) => {
+    const list = map.get(key)!;
+    return { agentId: key, agentName: list[0]?.agent_name || "Unassigned", items: list };
+  });
+}
+
+// ── Bulk WhatsApp send ───────────────────────────────────────────────────────
+// wa.me links only ever open one chat at a time, so a true "send to everyone
+// at once" isn't possible — instead this walks the telecaller through each
+// recipient one tap at a time, tracking progress, so a whole agent's (or the
+// whole day's) tomorrow-PTP reminders can be fired off in one continuous flow.
+export function BulkWhatsAppModal({
+  visible, title, items, onClose,
+}: { visible: boolean; title: string; items: any[]; onClose: () => void }) {
+  const insets = useSafeAreaInsets();
+  const [index, setIndex] = useState(0);
+  const [sentCount, setSentCount] = useState(0);
+
+  useEffect(() => {
+    if (visible) { setIndex(0); setSentCount(0); }
+  }, [visible, items]);
+
+  if (!visible) return null;
+
+  const total = items.length;
+  const current = items[index];
+  const isDone = index >= total || !current;
+  const currentPhone = current ? firstPhone(current) : null;
+
+  const sendCurrent = () => {
+    if (!current) return;
+    sendPtpWhatsApp(current);
+    setSentCount((c) => c + 1);
+    setIndex((i) => i + 1);
+  };
+
+  const skipCurrent = () => setIndex((i) => i + 1);
+
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <View style={bulkStyles.overlay}>
+        <View style={[bulkStyles.sheet, { paddingBottom: insets.bottom + 16 }]}>
+          <View style={bulkStyles.header}>
+            <View style={{ flex: 1 }}>
+              <Text style={bulkStyles.title} numberOfLines={1}>{title}</Text>
+              <Text style={bulkStyles.subtitle}>
+                {isDone ? `Done — sent ${sentCount} of ${total}` : `${index + 1} of ${total} · ${sentCount} sent so far`}
+              </Text>
+            </View>
+            <Pressable onPress={onClose} style={bulkStyles.closeBtn}>
+              <Ionicons name="close" size={22} color={Colors.text} />
+            </Pressable>
+          </View>
+
+          <View style={bulkStyles.progressTrack}>
+            <View style={[bulkStyles.progressFill, { width: `${total ? Math.min(100, (index / total) * 100) : 0}%` }]} />
+          </View>
+
+          {isDone ? (
+            <View style={bulkStyles.doneBox}>
+              <Ionicons name="checkmark-done-circle" size={40} color={Colors.success} />
+              <Text style={bulkStyles.doneText}>
+                Sent reminders to {sentCount} of {total} customer{total !== 1 ? "s" : ""}.
+              </Text>
+              <Pressable style={bulkStyles.primaryBtn} onPress={onClose}>
+                <Text style={bulkStyles.primaryBtnText}>Close</Text>
+              </Pressable>
+            </View>
+          ) : (
+            <>
+              <View style={bulkStyles.currentCard}>
+                <Text style={bulkStyles.currentName} numberOfLines={1}>{current.customer_name || "Customer"}</Text>
+                <Text style={bulkStyles.currentMeta}>Loan {current.loan_no || "—"} · Due {toDisplayDate(current.ptp_date) || "—"}</Text>
+                {current.agent_name ? <Text style={bulkStyles.currentMeta}>Agent: {current.agent_name}</Text> : null}
+                <Text style={bulkStyles.currentMeta}>{currentPhone || "No number saved"}</Text>
+              </View>
+
+              <Text style={bulkStyles.hint}>
+                Tap "Send WhatsApp" to open WhatsApp with the reminder pre-filled for this customer, then come back here to move on to the next one.
+              </Text>
+
+              <View style={bulkStyles.actionsRow}>
+                <Pressable style={bulkStyles.skipBtn} onPress={skipCurrent}>
+                  <Text style={bulkStyles.skipBtnText}>Skip</Text>
+                </Pressable>
+                <Pressable
+                  style={[bulkStyles.primaryBtn, bulkStyles.whatsAppBtn, !currentPhone && { opacity: 0.5 }]}
+                  onPress={sendCurrent}
+                  disabled={!currentPhone}
+                >
+                  <Ionicons name="logo-whatsapp" size={18} color="#fff" />
+                  <Text style={bulkStyles.primaryBtnText}>Send WhatsApp</Text>
+                </Pressable>
+              </View>
+            </>
+          )}
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+const bulkStyles = StyleSheet.create({
+  overlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.45)", justifyContent: "flex-end" },
+  sheet: { backgroundColor: "#fff", borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 18, gap: 14 },
+  header: { flexDirection: "row", alignItems: "center", gap: 10 },
+  title: { fontSize: 16, fontWeight: "800", color: Colors.text },
+  subtitle: { fontSize: 12, color: Colors.textMuted, marginTop: 2, fontWeight: "600" },
+  closeBtn: { padding: 4 },
+  progressTrack: { height: 6, borderRadius: 3, backgroundColor: Colors.surfaceAlt, overflow: "hidden" },
+  progressFill: { height: "100%", borderRadius: 3, backgroundColor: "#25D366" },
+  currentCard: { backgroundColor: Colors.surfaceAlt, borderRadius: 14, padding: 14, gap: 3 },
+  currentName: { fontSize: 16, fontWeight: "800", color: Colors.text },
+  currentMeta: { fontSize: 12, color: Colors.textSecondary, fontWeight: "600" },
+  hint: { fontSize: 12, color: Colors.textMuted, lineHeight: 17 },
+  actionsRow: { flexDirection: "row", gap: 10 },
+  skipBtn: { paddingHorizontal: 16, borderRadius: 12, alignItems: "center", justifyContent: "center", backgroundColor: Colors.surfaceAlt },
+  skipBtnText: { fontSize: 13, fontWeight: "700", color: Colors.textSecondary },
+  primaryBtn: { paddingVertical: 13, borderRadius: 12, alignItems: "center", justifyContent: "center", backgroundColor: Colors.primary },
+  whatsAppBtn: { flex: 1, flexDirection: "row", gap: 8, backgroundColor: "#25D366" },
+  primaryBtnText: { color: "#fff", fontSize: 14, fontWeight: "800" },
+  doneBox: { alignItems: "center", gap: 10, paddingVertical: 14 },
+  doneText: { fontSize: 14, color: Colors.textSecondary, fontWeight: "600", textAlign: "center" },
+});
+
 export const STATUS_COLORS: Record<string, string> = {
   Unpaid: Colors.statusUnpaid,
   PTP: Colors.statusPTP,
