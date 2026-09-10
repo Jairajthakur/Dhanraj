@@ -19,51 +19,74 @@ type AgentSummary = {
   counts: ReturnType<typeof countByStatus>;
 };
 
+function initials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  return (parts[0][0] + (parts[1]?.[0] || "")).toUpperCase();
+}
+
+// Priority color: which agent most needs attention right now, at a glance.
+function priorityColor(counts: AgentSummary["counts"]): string {
+  const paidPct = counts.total ? counts.Paid / counts.total : 0;
+  if (paidPct >= 0.6) return Colors.statusPaid;
+  if (counts.Unpaid > counts.PTP + counts.Paid) return Colors.statusUnpaid;
+  return Colors.statusPTP;
+}
+
 function AgentDashboardCard({ agent, onPress }: { agent: AgentSummary; onPress: () => void }) {
   const { counts } = agent;
   const paidPct = counts.total ? Math.round((counts.Paid / counts.total) * 100) : 0;
+  const accent = priorityColor(counts);
 
   return (
     <Pressable style={styles.agentCard} onPress={onPress}>
-      <View style={styles.agentCardTop}>
-        <View style={styles.agentAvatar}>
-          <Ionicons name="person" size={20} color="#fff" />
+      <View style={[styles.agentAccentBar, { backgroundColor: accent }]} />
+      <View style={styles.agentCardBody}>
+        <View style={styles.agentCardTop}>
+          <View style={[styles.agentAvatar, { backgroundColor: accent }]}>
+            <Text style={styles.agentAvatarText}>{initials(agent.agentName)}</Text>
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.agentCardName} numberOfLines={1}>{agent.agentName}</Text>
+            <Text style={styles.agentCardSub}>{counts.total} case{counts.total !== 1 ? "s" : ""} assigned</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={20} color={Colors.textMuted} />
         </View>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.agentCardName} numberOfLines={1}>{agent.agentName}</Text>
-          <Text style={styles.agentCardSub}>{counts.total} case{counts.total !== 1 ? "s" : ""} assigned</Text>
-        </View>
-        <Ionicons name="chevron-forward" size={20} color={Colors.textMuted} />
-      </View>
 
-      <View style={styles.progressTrack}>
-        <View style={[styles.progressFill, { width: `${paidPct}%` }]} />
-      </View>
+        <View style={styles.progressTrack}>
+          <View style={[styles.progressFill, { width: `${paidPct}%` }]} />
+        </View>
 
-      <View style={styles.agentCardStats}>
-        <View style={styles.agentStatItem}>
-          <Text style={[styles.agentStatNum, { color: Colors.statusUnpaid }]}>{counts.Unpaid}</Text>
-          <Text style={styles.agentStatLabel}>Unpaid</Text>
-        </View>
-        <View style={styles.agentStatDivider} />
-        <View style={styles.agentStatItem}>
-          <Text style={[styles.agentStatNum, { color: Colors.statusPTP }]}>{counts.PTP}</Text>
-          <Text style={styles.agentStatLabel}>PTP</Text>
-        </View>
-        <View style={styles.agentStatDivider} />
-        <View style={styles.agentStatItem}>
-          <Text style={[styles.agentStatNum, { color: Colors.statusPaid }]}>{counts.Paid}</Text>
-          <Text style={styles.agentStatLabel}>Paid</Text>
-        </View>
-        <View style={styles.agentStatDivider} />
-        <View style={styles.agentStatItem}>
-          <Text style={styles.agentStatNum}>{paidPct}%</Text>
-          <Text style={styles.agentStatLabel}>Recovered</Text>
+        <View style={styles.agentCardStats}>
+          <View style={styles.agentStatItem}>
+            <Text style={[styles.agentStatNum, { color: Colors.statusUnpaid }]}>{counts.Unpaid}</Text>
+            <Text style={styles.agentStatLabel}>Unpaid</Text>
+          </View>
+          <View style={styles.agentStatDivider} />
+          <View style={styles.agentStatItem}>
+            <Text style={[styles.agentStatNum, { color: Colors.statusPTP }]}>{counts.PTP}</Text>
+            <Text style={styles.agentStatLabel}>PTP</Text>
+          </View>
+          <View style={styles.agentStatDivider} />
+          <View style={styles.agentStatItem}>
+            <Text style={[styles.agentStatNum, { color: Colors.statusPaid }]}>{counts.Paid}</Text>
+            <Text style={styles.agentStatLabel}>Paid</Text>
+          </View>
+          <View style={styles.agentStatDivider} />
+          <View style={styles.agentStatItem}>
+            <Text style={styles.agentStatNum}>{paidPct}%</Text>
+            <Text style={styles.agentStatLabel}>Recovered</Text>
+          </View>
         </View>
       </View>
     </Pressable>
   );
 }
+
+function todayLabel(): string {
+  return new Date().toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long" });
+}
+
 
 export default function TelecallerDashboardScreen() {
   const insets = useSafeAreaInsets();
@@ -128,7 +151,12 @@ export default function TelecallerDashboardScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: Colors.background }}>
-      <View style={[styles.searchContainer, { marginTop: Platform.OS === "web" ? 67 : 12 }]}>
+      <View style={[styles.greetingRow, { marginTop: insets.top + (Platform.OS === "web" ? 55 : 8) }]}>
+        <Text style={styles.greetingTitle}>{search ? "Search" : "Today's Follow-ups"}</Text>
+        <Text style={styles.greetingSub}>{todayLabel()}</Text>
+      </View>
+
+      <View style={styles.searchContainer}>
         <Ionicons name="search" size={18} color={Colors.textMuted} style={{ marginRight: 8 }} />
         <TextInput
           style={styles.searchInput}
@@ -222,16 +250,20 @@ export default function TelecallerDashboardScreen() {
 }
 
 const styles = StyleSheet.create({
+  greetingRow: { paddingHorizontal: 16, marginBottom: 10 },
+  greetingTitle: { fontSize: 22, fontWeight: "800", color: Colors.text },
+  greetingSub: { fontSize: 13, color: Colors.textMuted, marginTop: 2, fontWeight: "500" },
   searchContainer: {
-    flexDirection: "row", alignItems: "center", margin: 12,
-    backgroundColor: Colors.surface, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10,
-    borderWidth: 1, borderColor: Colors.border,
+    flexDirection: "row", alignItems: "center", marginHorizontal: 12, marginBottom: 12,
+    backgroundColor: "#fff", borderRadius: 14, paddingHorizontal: 14, paddingVertical: 12,
+    shadowColor: "#000", shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.04, shadowRadius: 4, elevation: 1,
   },
   searchInput: { flex: 1, fontSize: 14, color: Colors.text },
   statsRow: { flexDirection: "row", gap: 8, paddingHorizontal: 12, marginBottom: 4 },
   ptpBanner: {
-    flexDirection: "row", alignItems: "center", gap: 8, marginHorizontal: 12, marginTop: 10,
-    backgroundColor: Colors.danger, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12,
+    flexDirection: "row", alignItems: "center", gap: 10, marginHorizontal: 12, marginTop: 10,
+    backgroundColor: Colors.danger, borderRadius: 16, paddingHorizontal: 14, paddingVertical: 13,
+    shadowColor: Colors.danger, shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.25, shadowRadius: 8, elevation: 3,
   },
   ptpBannerText: { flex: 1, color: "#fff", fontSize: 13, fontWeight: "700" },
   list: { padding: 12, gap: 12 },
@@ -240,18 +272,21 @@ const styles = StyleSheet.create({
   emptyText: { fontSize: 16, color: Colors.textMuted },
 
   agentCard: {
-    backgroundColor: Colors.surface, borderRadius: 16, padding: 14, gap: 12,
-    shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 8, elevation: 2,
+    flexDirection: "row", backgroundColor: "#fff", borderRadius: 18, overflow: "hidden",
+    shadowColor: "#000", shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.07, shadowRadius: 10, elevation: 2,
   },
+  agentAccentBar: { width: 5 },
+  agentCardBody: { flex: 1, padding: 14, gap: 12 },
   agentCardTop: { flexDirection: "row", alignItems: "center", gap: 10 },
   agentAvatar: {
-    width: 40, height: 40, borderRadius: 20, backgroundColor: Colors.primary,
+    width: 42, height: 42, borderRadius: 21,
     alignItems: "center", justifyContent: "center",
   },
+  agentAvatarText: { color: "#fff", fontSize: 15, fontWeight: "800" },
   agentCardName: { fontSize: 15, fontWeight: "800", color: Colors.text },
   agentCardSub: { fontSize: 12, color: Colors.textMuted, marginTop: 1 },
-  progressTrack: { height: 6, borderRadius: 3, backgroundColor: Colors.surfaceAlt, overflow: "hidden" },
-  progressFill: { height: "100%", borderRadius: 3, backgroundColor: Colors.statusPaid },
+  progressTrack: { height: 7, borderRadius: 4, backgroundColor: Colors.surfaceAlt, overflow: "hidden" },
+  progressFill: { height: "100%", borderRadius: 4, backgroundColor: Colors.statusPaid },
   agentCardStats: { flexDirection: "row", alignItems: "center" },
   agentStatItem: { flex: 1, alignItems: "center", gap: 2 },
   agentStatNum: { fontSize: 15, fontWeight: "800", color: Colors.text },
