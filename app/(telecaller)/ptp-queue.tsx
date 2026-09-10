@@ -78,14 +78,14 @@ export default function PtpQueueScreen() {
 const styles = StyleSheet.create({
   header: {
     flexDirection: "row", alignItems: "center", gap: 10,
-    paddingHorizontal: 12, paddingBottom: 12, backgroundColor: Colors.surface,
+    paddingHorizontal: 16, paddingBottom: 14, backgroundColor: Colors.surface,
     borderBottomWidth: 1, borderBottomColor: Colors.border,
   },
   backBtn: { padding: 4 },
-  headerTitle: { fontSize: 16, fontWeight: "800", color: Colors.text },
-  headerSub: { fontSize: 12, color: Colors.textMuted, marginTop: 1 },
+  headerTitle: { fontSize: 17, fontWeight: "800", color: Colors.text },
+  headerSub: { fontSize: 12, color: Colors.textMuted, marginTop: 1, fontWeight: "500" },
   list: { padding: 12, gap: 12 },
-  sectionHeader: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10, marginBottom: 10, marginTop: 2 },
+  sectionHeader: { paddingHorizontal: 12, paddingVertical: 9, borderRadius: 12, marginBottom: 10, marginTop: 2 },
   sectionHeaderText: { fontSize: 12, fontWeight: "800", textTransform: "uppercase", letterSpacing: 0.6 },
   empty: { flex: 1, justifyContent: "center", alignItems: "center", gap: 12, paddingVertical: 60 },
   emptyText: { fontSize: 15, color: Colors.textMuted, textAlign: "center", paddingHorizontal: 30 },
