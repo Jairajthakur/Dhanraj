@@ -482,12 +482,51 @@ async function extractCustomerIdFromScreenshot(image: Buffer | string): Promise<
   return text ? parseCustomerIdFromOcrText(text) : null;
 }
 
-// Runs OCR once and pulls both fields out of the same pass — used wherever
-// we need name + customer ID together so we don't pay for OCR twice.
-async function extractReceiptFieldsFromScreenshot(image: Buffer | string): Promise<{ name: string | null; customerId: string | null }> {
+// The "Account No:" field on the receipt is an alphanumeric value (e.g.
+// "NNDTWL0010001686908") that's often long enough to wrap onto a second
+// OCR line. Anchor on the "account no" label, grab whatever trails it on
+// the same line, and — since the value can wrap — keep absorbing short
+// continuation lines right after it (no colon, not another labeled field)
+// until we hit something that clearly belongs to a different field.
+function parseAccountNoFromOcrText(text: string): string | null {
+  const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  const idx = lines.findIndex((l) => /account\s*no/i.test(l));
+  if (idx === -1) return null;
+
+  const clean = (v: string) => v.replace(/[^A-Za-z0-9]/g, "");
+
+  let value = "";
+  const sameLineMatch = lines[idx].match(/account\s*no\.?\s*[:.\-_\s]*\s*([A-Za-z0-9][A-Za-z0-9\s]*)/i);
+  if (sameLineMatch) value += clean(sameLineMatch[1]);
+
+  for (let i = idx + 1; i < Math.min(idx + 3, lines.length); i++) {
+    const line = lines[i];
+    if (!line || /:/.test(line) || OTHER_FIELD_KEYWORDS.test(line) || NAME_DIVIDER_RE.test(line)) break;
+    // A short, purely alphanumeric fragment right after the label is almost
+    // certainly the wrapped remainder of the account number.
+    if (/^[A-Za-z0-9]{1,10}$/.test(line)) { value += clean(line); continue; }
+    break;
+  }
+
+  return value.length >= 4 ? value : null;
+}
+
+async function extractAccountNoFromScreenshot(image: Buffer | string): Promise<string | null> {
   const text = await runOcr(image);
-  if (!text) return { name: null, customerId: null };
-  return { name: parseCustomerNameFromOcrText(text), customerId: parseCustomerIdFromOcrText(text) };
+  return text ? parseAccountNoFromOcrText(text) : null;
+}
+
+// Runs OCR once and pulls all three fields out of the same pass — used
+// wherever we need name + customer ID + account no together so we don't
+// pay for OCR twice.
+async function extractReceiptFieldsFromScreenshot(image: Buffer | string): Promise<{ name: string | null; customerId: string | null; accountNo: string | null }> {
+  const text = await runOcr(image);
+  if (!text) return { name: null, customerId: null, accountNo: null };
+  return {
+    name: parseCustomerNameFromOcrText(text),
+    customerId: parseCustomerIdFromOcrText(text),
+    accountNo: parseAccountNoFromOcrText(text),
+  };
 }
 
 function amountMatches(expected: number, actual: number): boolean { return Math.round(expected) === Math.round(actual); }
@@ -952,13 +991,16 @@ try {
       id SERIAL PRIMARY KEY,
       customer_name TEXT NOT NULL,
       customer_id TEXT,
+      account_no TEXT,
       image_url TEXT NOT NULL,
       notes TEXT,
       created_at TIMESTAMP DEFAULT NOW()
     )`);
     await storage.query(`ALTER TABLE customer_receipts ADD COLUMN IF NOT EXISTS customer_id TEXT`);
+    await storage.query(`ALTER TABLE customer_receipts ADD COLUMN IF NOT EXISTS account_no TEXT`);
     await storage.query(`CREATE INDEX IF NOT EXISTS idx_customer_receipts_name ON customer_receipts (customer_name)`);
     await storage.query(`CREATE INDEX IF NOT EXISTS idx_customer_receipts_customer_id ON customer_receipts (customer_id)`);
+    await storage.query(`CREATE INDEX IF NOT EXISTS idx_customer_receipts_account_no ON customer_receipts (account_no)`);
     console.log("[DB] customer_receipts table ready ✅");
   } catch (e: any) { console.error("[DB] customer_receipts error:", e.message); }
 
@@ -1789,8 +1831,8 @@ app.get("/api/admin/fos-depositions", requireAdmin, async (req, res) => {
   app.post("/api/admin/customer-receipts/extract-name", requireAdmin, receiptNameOcrUpload.single("image"), async (req, res) => {
     try {
       if (!req.file) return res.status(400).json({ message: "No image uploaded" });
-      const { name, customerId } = await extractReceiptFieldsFromScreenshot(req.file.buffer);
-      res.json({ name: name || null, customerId: customerId || null });
+      const { name, customerId, accountNo } = await extractReceiptFieldsFromScreenshot(req.file.buffer);
+      res.json({ name: name || null, customerId: customerId || null, accountNo: accountNo || null });
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
@@ -1799,12 +1841,14 @@ app.get("/api/admin/fos-depositions", requireAdmin, async (req, res) => {
       if (!req.file) return res.status(400).json({ message: "No image uploaded" });
       let customerName = String(req.body.customerName || "").trim();
       let customerId = String(req.body.customerId || "").trim();
-      if (!customerName || !customerId) {
+      let accountNo = String(req.body.accountNo || "").trim();
+      if (!customerName || !customerId || !accountNo) {
         // Missing fields — read them straight off the receipt screenshot instead
         // of requiring the admin to type them in.
         const detected = await extractReceiptFieldsFromScreenshot(req.file.path);
         if (!customerName) customerName = detected.name || "";
         if (!customerId) customerId = detected.customerId || "";
+        if (!accountNo) accountNo = detected.accountNo || "";
       }
       if (!customerName) {
         return res.status(400).json({ message: "Could not read a customer name off this screenshot. Please enter it manually." });
@@ -1812,24 +1856,39 @@ app.get("/api/admin/fos-depositions", requireAdmin, async (req, res) => {
       if (!customerId) {
         return res.status(400).json({ message: "Could not read a Customer ID off this screenshot. Please enter it manually." });
       }
+      // Account No is a bonus search field, not a hard requirement — some
+      // receipts crop it out or OCR misses it, and the admin can still find
+      // the receipt later by name or Customer ID.
       const notes = req.body.notes ? String(req.body.notes).trim() : null;
       const baseUrl = `${req.protocol}://${req.get("host")}`;
       const imageUrl = `${baseUrl}/uploads/customer-receipts/${req.file.filename}`;
       const result = await storage.query(
-        `INSERT INTO customer_receipts (customer_name, customer_id, image_url, notes) VALUES ($1,$2,$3,$4) RETURNING *`,
-        [customerName, customerId, imageUrl, notes]
+        `INSERT INTO customer_receipts (customer_name, customer_id, account_no, image_url, notes) VALUES ($1,$2,$3,$4,$5) RETURNING *`,
+        [customerName, customerId, accountNo || null, imageUrl, notes]
       );
       res.json({ success: true, receipt: result.rows[0] });
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
+  // Search matches Customer ID, customer name, or Account No — including a
+  // partial/substring match anywhere in the account number, plus an exact
+  // match against just the last 8 digits of the account number so the admin
+  // can search using only that tail (letters ignored) without knowing the
+  // full alphanumeric account string.
   app.get("/api/admin/customer-receipts/search", requireAdmin, async (req, res) => {
     try {
-      const q = String(req.query.q || req.query.customerId || req.query.name || "").trim();
+      const q = String(req.query.q || req.query.customerId || req.query.name || req.query.accountNo || "").trim();
       if (!q) return res.json({ receipts: [] });
+      const like = `%${q}%`;
+      const last8Digits = q.replace(/\D/g, "").slice(-8);
       const result = await storage.query(
-        `SELECT * FROM customer_receipts WHERE customer_id ILIKE $1 OR customer_name ILIKE $1 ORDER BY created_at DESC LIMIT 200`,
-        [`%${q}%`]
+        `SELECT * FROM customer_receipts
+         WHERE customer_id ILIKE $1
+            OR customer_name ILIKE $1
+            OR account_no ILIKE $1
+            OR ($2 <> '' AND LENGTH($2) = 8 AND RIGHT(REGEXP_REPLACE(COALESCE(account_no, ''), '\\D', '', 'g'), 8) = $2)
+         ORDER BY created_at DESC LIMIT 200`,
+        [like, last8Digits]
       );
       res.json({ receipts: result.rows });
     } catch (e: any) { res.status(500).json({ message: e.message }); }
