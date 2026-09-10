@@ -272,142 +272,10 @@ async function extractAmountFromScreenshot(imagePath: string): Promise<number | 
   } catch { return null; }
 }
 
-// Pull a customer name out of OCR'd receipt text, e.g. HeroFinCorp eCollections
-// receipts which print "Customer Name:". In practice, Tesseract's automatic
-// page-segmentation on this two-column layout (labels on the left, values on
-// the right) often reorders text: it reads every label top-to-bottom, then
-// every value top-to-bottom, so "Customer" / "Name:" can end up nowhere near
-// the actual "Shaikh Anwar Shaikh" / "Lalamiya" text. We try two independent
-// strategies and use whichever produces something that actually looks like a
-// name — this makes us resilient whether or not the OCR pass reordered lines.
-// Best-effort — the admin can still edit the result before it's saved.
+// Shared regex helpers used by the receipt-field OCR parsers below.
 const NAME_DIVIDER_RE = /^[-_~=+\s]{3,}$/;
-// Numbered disclaimer bullets, e.g. "1.Payment allocation is subject to
-// realization." — receipts that include a signature/T&C block between the
-// customer name and the "Resend" button use these, and without an explicit
-// stop we'd otherwise walk straight into them looking for name text.
-const NUMBERED_BULLET_RE = /^\d+[.)]/;
 const OTHER_FIELD_KEYWORDS =
   /resend|receipt|collector|charges|payment|branch|account|mode|amount|words|hero|fincorp|collections|signature|allocation|subject|sufficient|ensure|balance|realization|declaration|terms?\b|condition/i;
-
-function parseCustomerNameFromOcrText(text: string): string | null {
-  const stripNoise = (raw: string): string =>
-    raw.replace(/[^A-Za-z\s]/g, " ").replace(/\s+/g, " ").trim();
-  const hasRealWord = (v: string): boolean => v.split(" ").some((w) => w.length >= 3);
-  // Real customer names on these receipts are always "First Last" (or
-  // longer) — requiring at least 2 words filters out stray single-word
-  // fragments (like "realization") that would otherwise pass a looser check.
-  const looksLikeName = (v: string | null): v is string => {
-    if (!v) return false;
-    const words = v.split(" ").filter(Boolean);
-    return words.length >= 2 && hasRealWord(v) && v.length <= 60 && !OTHER_FIELD_KEYWORDS.test(v);
-  };
-
-  const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
-
-  // Method A: anchor on "Resend" and walk *upward*, collecting plausible
-  // name-fragment lines until we hit something that is clearly a different
-  // field (a label with a colon, a bare number, "Customer ID", a divider,
-  // etc.) or the "Customer"/"Name" label itself. Works when OCR preserved
-  // the receipt's original top-to-bottom line order.
-  const methodA = (): string | null => {
-    let anchor = lines.findIndex((l) => /resend/i.test(l));
-    if (anchor === -1) anchor = lines.length;
-
-    const collected: string[] = [];
-    for (let i = anchor - 1; i >= 0 && collected.length < 4; i--) {
-      const line = lines[i];
-
-      if (NAME_DIVIDER_RE.test(line)) { if (collected.length) break; else continue; }
-      if (NUMBERED_BULLET_RE.test(line)) break;
-
-      const nameLabelMatch = line.match(/^name\s*[:.\-_\s]*\s*(.*)$/i);
-      if (nameLabelMatch) {
-        const v = stripNoise(nameLabelMatch[1]);
-        if (v.length >= 2 && hasRealWord(v)) collected.unshift(v);
-        continue;
-      }
-
-      if (/customer\s*id/i.test(line)) break;
-
-      if (/^customer\b/i.test(line)) {
-        let v = line.replace(/^customer\b\s*[:\-]?\s*/i, "");
-        v = v.replace(/^name\b\s*[:.\-_\s]*\s*/i, "");
-        v = stripNoise(v);
-        if (v.length >= 2) collected.unshift(v);
-        break;
-      }
-
-      if (/:/.test(line)) break;
-      if (/^\d+$/.test(line)) break;
-      if (OTHER_FIELD_KEYWORDS.test(line)) break;
-
-      const v = stripNoise(line);
-      if (v.length < 2 || !hasRealWord(v)) break;
-      collected.unshift(v);
-    }
-
-    const val = stripNoise(collected.join(" "));
-    return val.length >= 2 ? val : null;
-  };
-
-  // Method B (fallback): when a receipt's big label/value gaps make Tesseract
-  // split the page into a "labels" block and a separate "values" block, the
-  // text right before "Resend" is no longer the name — it's whatever value
-  // line landed there. Instead, anchor on "Customer ID" (a reliable, unique
-  // label) as the *upper* boundary and collect plausible name text scanning
-  // *downward* from there to "Resend" (or end of text), skipping anything
-  // that looks like a different field. This doesn't depend on the name being
-  // the very last thing before the button.
-  const methodB = (): string | null => {
-    const idIdx = lines.findIndex((l) => /customer\s*id/i.test(l));
-    if (idIdx === -1) return null;
-    let anchor = lines.findIndex((l, i) => i > idIdx && /resend/i.test(l));
-    if (anchor === -1) anchor = lines.length;
-
-    const collected: string[] = [];
-    for (let i = idIdx + 1; i < anchor && collected.length < 4; i++) {
-      const line = lines[i];
-
-      if (NAME_DIVIDER_RE.test(line)) { if (collected.length) break; else continue; }
-      if (NUMBERED_BULLET_RE.test(line)) break;
-
-      const nameLabelMatch = line.match(/^(?:customer\s*)?name\s*[:.\-_\s]*\s*(.*)$/i);
-      if (nameLabelMatch) {
-        const v = stripNoise(nameLabelMatch[1]);
-        if (v.length >= 2 && hasRealWord(v)) collected.push(v);
-        continue;
-      }
-
-      if (/^customer\b/i.test(line)) {
-        const v = stripNoise(line.replace(/^customer\b\s*[:\-]?\s*/i, ""));
-        if (v.length >= 2 && hasRealWord(v)) collected.push(v);
-        continue;
-      }
-
-      if (/:/.test(line)) break;
-      if (/^\d+$/.test(line)) break;
-      if (OTHER_FIELD_KEYWORDS.test(line)) break;
-
-      const v = stripNoise(line);
-      if (v.length < 2 || !hasRealWord(v)) continue;
-      collected.push(v);
-    }
-
-    const val = stripNoise(collected.join(" "));
-    return val.length >= 2 ? val : null;
-  };
-
-  const a = methodA();
-  const b = methodB();
-  // methodB anchors on the reliable "Customer ID" label and scans forward,
-  // so it holds up even when a signature/T&C block sits between the name
-  // and the "Resend" button (which breaks methodA's proximity assumption).
-  // Prefer it when both produce something plausible.
-  if (looksLikeName(b)) return b;
-  if (looksLikeName(a)) return a;
-  return b || a || null;
-}
 
 // A shared, lazily-created Tesseract worker, reused across every OCR call in
 // this process. Besides avoiding the overhead of reloading language data on
@@ -415,9 +283,9 @@ function parseCustomerNameFromOcrText(text: string): string | null {
 // to these receipts: a single narrow column with "Label:      value" rows
 // spaced far apart. Tesseract's default automatic segmentation sometimes
 // treats that gap as two separate columns and reads all the labels first,
-// then all the values — which is what scrambles name detection. Forcing
-// PSM 4 (single column of text of variable sizes) keeps every row read in
-// its natural left-to-right, top-to-bottom order.
+// then all the values. Forcing PSM 4 (single column of text of variable
+// sizes) keeps every row read in its natural left-to-right, top-to-bottom
+// order.
 let ocrWorkerPromise: Promise<any> | null = null;
 function getOcrWorker(): Promise<any> {
   if (!ocrWorkerPromise) {
@@ -447,11 +315,6 @@ async function runOcr(image: Buffer | string): Promise<string | null> {
     console.warn("[ocr] recognize failed:", e.message);
     return null;
   }
-}
-
-async function extractCustomerNameFromScreenshot(image: Buffer | string): Promise<string | null> {
-  const text = await runOcr(image);
-  return text ? parseCustomerNameFromOcrText(text) : null;
 }
 
 // The "Customer ID:" field on the receipt is a plain label + numeric value,
@@ -516,14 +379,12 @@ async function extractAccountNoFromScreenshot(image: Buffer | string): Promise<s
   return text ? parseAccountNoFromOcrText(text) : null;
 }
 
-// Runs OCR once and pulls all three fields out of the same pass — used
-// wherever we need name + customer ID + account no together so we don't
-// pay for OCR twice.
-async function extractReceiptFieldsFromScreenshot(image: Buffer | string): Promise<{ name: string | null; customerId: string | null; accountNo: string | null }> {
+// Runs OCR once and pulls Customer ID + Account No out of the same pass —
+// customer name is no longer auto-detected; the admin always types it in.
+async function extractReceiptFieldsFromScreenshot(image: Buffer | string): Promise<{ customerId: string | null; accountNo: string | null }> {
   const text = await runOcr(image);
-  if (!text) return { name: null, customerId: null, accountNo: null };
+  if (!text) return { customerId: null, accountNo: null };
   return {
-    name: parseCustomerNameFromOcrText(text),
     customerId: parseCustomerIdFromOcrText(text),
     accountNo: parseAccountNoFromOcrText(text),
   };
@@ -1825,40 +1686,41 @@ app.get("/api/admin/fos-depositions", requireAdmin, async (req, res) => {
   // ── Admin: standalone customer receipt image search (upload + search) ──────
   // Separate from fos_depositions — admin manually uploads a receipt image
   // tagged with the customer's name, no link to any deposition record.
-  // Detects the customer name printed on a receipt screenshot via OCR, so the
-  // admin doesn't have to type it in separately — used by the app right after
-  // an image is picked, single or bulk.
+  // Detects the Customer ID and Account No printed on a receipt screenshot
+  // via OCR, so the admin doesn't have to type them in separately — used by
+  // the app right after an image is picked, single or bulk. Customer name is
+  // always typed in manually.
   app.post("/api/admin/customer-receipts/extract-name", requireAdmin, receiptNameOcrUpload.single("image"), async (req, res) => {
     try {
       if (!req.file) return res.status(400).json({ message: "No image uploaded" });
-      const { name, customerId, accountNo } = await extractReceiptFieldsFromScreenshot(req.file.buffer);
-      res.json({ name: name || null, customerId: customerId || null, accountNo: accountNo || null });
+      const { customerId, accountNo } = await extractReceiptFieldsFromScreenshot(req.file.buffer);
+      res.json({ customerId: customerId || null, accountNo: accountNo || null });
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
   app.post("/api/admin/customer-receipts", requireAdmin, customerReceiptUpload.single("image"), async (req, res) => {
     try {
       if (!req.file) return res.status(400).json({ message: "No image uploaded" });
-      let customerName = String(req.body.customerName || "").trim();
+      // Customer name is always entered manually — no OCR auto-detection.
+      const customerName = String(req.body.customerName || "").trim();
       let customerId = String(req.body.customerId || "").trim();
       let accountNo = String(req.body.accountNo || "").trim();
-      if (!customerName || !customerId || !accountNo) {
+      if (!customerId || !accountNo) {
         // Missing fields — read them straight off the receipt screenshot instead
         // of requiring the admin to type them in.
         const detected = await extractReceiptFieldsFromScreenshot(req.file.path);
-        if (!customerName) customerName = detected.name || "";
         if (!customerId) customerId = detected.customerId || "";
         if (!accountNo) accountNo = detected.accountNo || "";
       }
       if (!customerName) {
-        return res.status(400).json({ message: "Could not read a customer name off this screenshot. Please enter it manually." });
+        return res.status(400).json({ message: "Enter the customer's name." });
       }
       if (!customerId) {
         return res.status(400).json({ message: "Could not read a Customer ID off this screenshot. Please enter it manually." });
       }
       // Account No is a bonus search field, not a hard requirement — some
       // receipts crop it out or OCR misses it, and the admin can still find
-      // the receipt later by name or Customer ID.
+      // the receipt later by Customer ID.
       const notes = req.body.notes ? String(req.body.notes).trim() : null;
       const baseUrl = `${req.protocol}://${req.get("host")}`;
       const imageUrl = `${baseUrl}/uploads/customer-receipts/${req.file.filename}`;
@@ -1870,21 +1732,20 @@ app.get("/api/admin/fos-depositions", requireAdmin, async (req, res) => {
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
-  // Search matches Customer ID, customer name, or Account No — including a
-  // partial/substring match anywhere in the account number, plus an exact
-  // match against just the last 8 digits of the account number so the admin
-  // can search using only that tail (letters ignored) without knowing the
-  // full alphanumeric account string.
+  // Search matches Customer ID or Account No only (not customer name) —
+  // including a partial/substring match anywhere in the account number,
+  // plus an exact match against just the last 8 digits of the account
+  // number so the admin can search using only that tail (letters ignored)
+  // without knowing the full alphanumeric account string.
   app.get("/api/admin/customer-receipts/search", requireAdmin, async (req, res) => {
     try {
-      const q = String(req.query.q || req.query.customerId || req.query.name || req.query.accountNo || "").trim();
+      const q = String(req.query.q || req.query.customerId || req.query.accountNo || "").trim();
       if (!q) return res.json({ receipts: [] });
       const like = `%${q}%`;
       const last8Digits = q.replace(/\D/g, "").slice(-8);
       const result = await storage.query(
         `SELECT * FROM customer_receipts
          WHERE customer_id ILIKE $1
-            OR customer_name ILIKE $1
             OR account_no ILIKE $1
             OR ($2 <> '' AND LENGTH($2) = 8 AND RIGHT(REGEXP_REPLACE(COALESCE(account_no, ''), '\\D', '', 'g'), 8) = $2)
          ORDER BY created_at DESC LIMIT 200`,
