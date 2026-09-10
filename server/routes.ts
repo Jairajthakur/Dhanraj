@@ -2302,8 +2302,14 @@ res.json({
   // saved for that case (as mobile_no or an existing extra number) are skipped.
   // Never creates new cases — an unmatched Loan No is reported back, not inserted.
   // ─────────────────────────────────────────────────────────────────────────────
-  const LOAN_NO_HEADER_SET = new Set(["loanno", "loannumber", "loannum", "agreementno", "agreementnumber", "appid", "applicationid", "appno"]);
-  function isPhoneHeader(norm: string): boolean { return /mobile|phone|contact|number/.test(norm); }
+  const LOAN_NO_HEADER_SET = new Set(["loanno", "loannumber", "loannum", "agreementno", "agreementnumber"]);
+  function isPhoneHeader(norm: string): boolean {
+    // Reference contacts (Ref1/Ref2/Reference Mobile) are a different person's
+    // number, not another number for the customer — never treat these as a
+    // source of numbers to add to the case.
+    if (/^ref\d|reference/.test(norm)) return false;
+    return /mobile|phone|contact|number/.test(norm);
+  }
   function cleanPhone(raw: string): string | null {
     const cleaned = raw.replace(/[^\d+]/g, "");
     return cleaned.length >= 7 && cleaned.length <= 15 ? cleaned : null;
