@@ -568,11 +568,11 @@ export default function ReceiptSearchScreen() {
         <Ionicons name="search" size={18} color={Colors.textMuted} />
         <TextInput
           style={s.searchInput}
-          placeholder="Search Customer ID…"
+          placeholder="Search by name or Customer ID…"
           placeholderTextColor={Colors.textMuted}
           value={query}
           onChangeText={setQuery}
-          keyboardType="number-pad"
+          autoCapitalize="words"
           autoCorrect={false}
           returnKeyType="search"
         />
@@ -601,14 +601,14 @@ export default function ReceiptSearchScreen() {
       {!loading && searched && results.length === 0 && (
         <View style={s.center}>
           <Ionicons name="receipt-outline" size={40} color={Colors.textMuted} />
-          <Text style={s.emptyText}>No receipts found for Customer ID "{query.trim()}"</Text>
+          <Text style={s.emptyText}>No receipts found for "{query.trim()}"</Text>
         </View>
       )}
 
       {!loading && !searched && query.trim().length === 0 && (
         <View style={s.center}>
           <Ionicons name="search-outline" size={40} color={Colors.textMuted} />
-          <Text style={s.hintText}>Type a Customer ID to find their uploaded receipts</Text>
+          <Text style={s.hintText}>Type a customer name or Customer ID to find their uploaded receipts</Text>
         </View>
       )}
 
