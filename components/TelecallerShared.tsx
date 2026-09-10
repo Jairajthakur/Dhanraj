@@ -330,7 +330,7 @@ export function CaseDetailModal({ item, onClose, onUpdated }: { item: any; onClo
             <Pressable onPress={onClose} style={detailStyles.backBtn}>
               <Ionicons name="arrow-back" size={22} color="#fff" />
             </Pressable>
-            <Text style={detailStyles.headerTitle}>Details</Text>
+            <Text style={detailStyles.headerTitle} numberOfLines={1}>{localItem.customer_name || "Details"}</Text>
             <View style={detailStyles.statusPill}>
               <Text style={[detailStyles.statusPillText, { color: statusColor }]}>{localItem.status}</Text>
             </View>
@@ -448,9 +448,11 @@ export function CaseDetailModal({ item, onClose, onUpdated }: { item: any; onClo
               </View>
             </View>
 
-            {rows.map((r, i) => (
-              <TableRow key={r.label} label={r.label} value={r.value} phone={r.phone} even={i % 2 === 1} />
-            ))}
+            <View style={[manageStyles.section, { paddingHorizontal: 0, paddingVertical: 0, overflow: "hidden" }]}>
+              {rows.map((r, i) => (
+                <TableRow key={r.label} label={r.label} value={r.value} phone={r.phone} even={i % 2 === 1} />
+              ))}
+            </View>
             <View style={{ height: insets.bottom + 24 }} />
           </ScrollView>
         </View>
@@ -460,7 +462,11 @@ export function CaseDetailModal({ item, onClose, onUpdated }: { item: any; onClo
 }
 
 const manageStyles = StyleSheet.create({
-  section: { paddingHorizontal: 12, paddingTop: 14, paddingBottom: 4, gap: 8 },
+  section: {
+    marginHorizontal: 12, marginTop: 12, backgroundColor: "#fff", borderRadius: 16,
+    paddingHorizontal: 14, paddingTop: 14, paddingBottom: 14, gap: 8,
+    shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 6, elevation: 1,
+  },
   sectionTitle: { fontSize: 12, fontWeight: "800", color: Colors.textMuted, textTransform: "uppercase", letterSpacing: 0.4 },
   statusBar: { flexDirection: "row", gap: 8 },
   statusBtn: {
@@ -533,7 +539,8 @@ export function CaseCard({ item, onDetails }: { item: any; onDetails: (item: any
             <Ionicons name="person-circle" size={20} color={Colors.primary} />
             <Text style={cardStyles.cardName} numberOfLines={1}>{item.customer_name}</Text>
           </View>
-          <View style={[cardStyles.statusBadge, { backgroundColor: statusColor + "22" }]}>
+          <View style={[cardStyles.statusBadge, { backgroundColor: statusColor + "1A" }]}>
+            <View style={[cardStyles.statusDot, { backgroundColor: statusColor }]} />
             <Text style={[cardStyles.statusText, { color: statusColor }]}>{item.status}</Text>
           </View>
         </View>
@@ -545,15 +552,11 @@ export function CaseCard({ item, onDetails }: { item: any; onDetails: (item: any
           </View>
         ) : null}
 
-        {/* Row 1: Loan No + APP ID + BKT */}
+        {/* Loan No + BKT */}
         <View style={cardStyles.infoRow}>
           <View style={cardStyles.infoCell}>
             <Text style={cardStyles.infoLabel}>LOAN NO</Text>
             <Text style={cardStyles.infoValue} numberOfLines={1}>{item.loan_no || "—"}</Text>
-          </View>
-          <View style={cardStyles.infoCell}>
-            <Text style={cardStyles.infoLabel}>APP ID</Text>
-            <Text style={cardStyles.infoValue} numberOfLines={1}>{item.app_id || "—"}</Text>
           </View>
           <View style={cardStyles.infoCellSmall}>
             <Text style={cardStyles.infoLabel}>BKT</Text>
@@ -561,12 +564,8 @@ export function CaseCard({ item, onDetails }: { item: any; onDetails: (item: any
           </View>
         </View>
 
-        {/* Row 2: EMI + EMI Due + POS */}
+        {/* EMI Due + POS — the two numbers that matter most on a call */}
         <View style={cardStyles.infoRow}>
-          <View style={cardStyles.infoCell}>
-            <Text style={cardStyles.infoLabel}>EMI</Text>
-            <Text style={cardStyles.infoValue}>{fmt(item.emi_amount, "₹")}</Text>
-          </View>
           <View style={cardStyles.infoCell}>
             <Text style={cardStyles.infoLabel}>EMI DUE</Text>
             <Text style={[cardStyles.infoValue, { color: Colors.danger }]}>{fmt(item.emi_due, "₹")}</Text>
@@ -574,38 +573,6 @@ export function CaseCard({ item, onDetails }: { item: any; onDetails: (item: any
           <View style={cardStyles.infoCell}>
             <Text style={cardStyles.infoLabel}>POS</Text>
             <Text style={cardStyles.infoValue}>{fmt(item.pos, "₹")}</Text>
-          </View>
-        </View>
-
-        {/* Row 3: CBC + LPP + CBC+LPP */}
-        <View style={cardStyles.infoRow}>
-          <View style={cardStyles.infoCell}>
-            <Text style={cardStyles.infoLabel}>CBC</Text>
-            <Text style={cardStyles.infoValue}>{fmt(item.cbc, "₹")}</Text>
-          </View>
-          <View style={cardStyles.infoCell}>
-            <Text style={cardStyles.infoLabel}>LPP</Text>
-            <Text style={cardStyles.infoValue}>{fmt(item.lpp, "₹")}</Text>
-          </View>
-          <View style={cardStyles.infoCell}>
-            <Text style={cardStyles.infoLabel}>CBC+LPP</Text>
-            <Text style={[cardStyles.infoValue, { color: Colors.warning }]}>{fmt(item.cbc_lpp, "₹")}</Text>
-          </View>
-        </View>
-
-        {/* Row 4: Rollback + Clearance + Tenor */}
-        <View style={cardStyles.infoRow}>
-          <View style={cardStyles.infoCell}>
-            <Text style={cardStyles.infoLabel}>ROLLBACK</Text>
-            <Text style={cardStyles.infoValue}>{fmt(item.rollback, "₹")}</Text>
-          </View>
-          <View style={cardStyles.infoCell}>
-            <Text style={cardStyles.infoLabel}>CLEARANCE</Text>
-            <Text style={[cardStyles.infoValue, { color: Colors.success }]}>{fmt(item.clearance, "₹")}</Text>
-          </View>
-          <View style={cardStyles.infoCellSmall}>
-            <Text style={cardStyles.infoLabel}>TEN</Text>
-            <Text style={cardStyles.infoValue}>{item.tenor ?? "—"}</Text>
           </View>
         </View>
       </Pressable>
@@ -619,8 +586,8 @@ export function CaseCard({ item, onDetails }: { item: any; onDetails: (item: any
 
       {item.latest_feedback ? (
         <View style={cardStyles.feedbackRow}>
-          <Text style={cardStyles.feedbackLabel}>Detail FB: </Text>
-          <Text style={cardStyles.feedbackValue}>{item.latest_feedback}</Text>
+          <Ionicons name="chatbubble-ellipses-outline" size={14} color={Colors.textSecondary} style={{ marginTop: 1 }} />
+          <Text style={cardStyles.feedbackValue} numberOfLines={2}>{item.latest_feedback}</Text>
         </View>
       ) : null}
 
@@ -655,7 +622,8 @@ export function PtpQueueCard({ item, overdue, onDetails }: { item: any; overdue:
             <Ionicons name="person-circle" size={20} color={Colors.primary} />
             <Text style={cardStyles.cardName} numberOfLines={1}>{item.customer_name}</Text>
           </View>
-          <View style={[cardStyles.statusBadge, { backgroundColor: (overdue ? Colors.danger : Colors.statusPTP) + "22" }]}>
+          <View style={[cardStyles.statusBadge, { backgroundColor: (overdue ? Colors.danger : Colors.statusPTP) + "1A" }]}>
+            <View style={[cardStyles.statusDot, { backgroundColor: overdue ? Colors.danger : Colors.statusPTP }]} />
             <Text style={[cardStyles.statusText, { color: overdue ? Colors.danger : Colors.statusPTP }]}>
               {overdue ? `${daysLate}d overdue` : "Due today"}
             </Text>
@@ -702,19 +670,28 @@ export function PtpQueueCard({ item, overdue, onDetails }: { item: any; overdue:
   );
 }
 
+const STAT_ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
+  Total: "layers-outline",
+  Unpaid: "alert-circle-outline",
+  PTP: "time-outline",
+  Paid: "checkmark-circle-outline",
+};
+
 export function StatBox({
   label, count, color, active, onPress,
 }: { label: string; count: number; color: string; active: boolean; onPress?: () => void }) {
   const Wrapper: any = onPress ? Pressable : View;
+  const icon = STAT_ICONS[label];
   return (
     <Wrapper
       onPress={onPress}
       style={[
         cardStyles.statBox,
-        { borderColor: active ? color : Colors.border },
-        active && { backgroundColor: color + "18" },
+        { borderColor: active ? color : "transparent", backgroundColor: color + "12" },
+        active && { backgroundColor: color + "20" },
       ]}
     >
+      {icon ? <Ionicons name={icon} size={14} color={color} style={{ marginBottom: 1 }} /> : null}
       <Text style={[cardStyles.statCount, { color }]}>{count}</Text>
       <Text style={cardStyles.statLabel} numberOfLines={1}>{label}</Text>
     </Wrapper>
@@ -723,40 +700,47 @@ export function StatBox({
 
 const cardStyles = StyleSheet.create({
   statBox: {
-    flex: 1, alignItems: "center", justifyContent: "center", paddingVertical: 10,
-    borderRadius: 12, borderWidth: 1.5, backgroundColor: Colors.surface, gap: 2,
+    flex: 1, alignItems: "center", justifyContent: "center", paddingVertical: 12,
+    borderRadius: 14, borderWidth: 1.5, backgroundColor: "#fff", gap: 3,
   },
-  statCount: { fontSize: 18, fontWeight: "800" },
-  statLabel: { fontSize: 10, fontWeight: "700", color: Colors.textSecondary, textTransform: "uppercase" },
+  statCount: { fontSize: 19, fontWeight: "800" },
+  statLabel: { fontSize: 10, fontWeight: "700", color: Colors.textSecondary, textTransform: "uppercase", letterSpacing: 0.3 },
   card: {
-    backgroundColor: Colors.surface, borderRadius: 16, padding: 14, gap: 8,
-    shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 8, elevation: 2,
+    backgroundColor: "#fff", borderRadius: 18, padding: 16, gap: 10,
+    shadowColor: "#000", shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.07, shadowRadius: 10, elevation: 2,
   },
-  cardTapArea: { gap: 8 },
+  cardTapArea: { gap: 10 },
   cardHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   cardNameRow: { flex: 1, flexDirection: "row", alignItems: "center", gap: 8 },
-  cardName: { flex: 1, fontSize: 15, fontWeight: "700", color: Colors.text, textTransform: "uppercase" },
-  statusBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20 },
+  cardName: { flex: 1, fontSize: 16, fontWeight: "800", color: Colors.text },
+  statusBadge: { flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 20 },
+  statusDot: { width: 6, height: 6, borderRadius: 3 },
   statusText: { fontSize: 11, fontWeight: "700" },
-  agentRow: { flexDirection: "row", alignItems: "center", gap: 5, marginTop: -2 },
+  agentRow: { flexDirection: "row", alignItems: "center", gap: 5, marginTop: -4 },
   agentName: { fontSize: 12, color: Colors.primary, fontWeight: "600" },
-  infoRow: { flexDirection: "row", gap: 6 },
-  infoCell: { flex: 1, backgroundColor: Colors.surfaceAlt, borderRadius: 8, padding: 8 },
-  infoCellSmall: { width: 52, backgroundColor: Colors.surfaceAlt, borderRadius: 8, padding: 8 },
-  infoLabel: { fontSize: 9, fontWeight: "700", color: Colors.textMuted, textTransform: "uppercase", marginBottom: 2 },
-  infoValue: { fontSize: 12, fontWeight: "700", color: Colors.text },
-  phoneRow: { flexDirection: "row", alignItems: "center", gap: 6, paddingVertical: 4 },
-  phoneText: { fontSize: 13, color: Colors.info, fontWeight: "500" },
-  feedbackRow: { flexDirection: "row", alignItems: "center" },
-  feedbackLabel: { fontSize: 12, color: Colors.textSecondary, fontWeight: "600" },
-  feedbackValue: { fontSize: 12, color: Colors.text, fontWeight: "500" },
-  cardActions: { flexDirection: "row", gap: 8, marginTop: 4 },
+  infoRow: { flexDirection: "row", gap: 8 },
+  infoCell: { flex: 1, backgroundColor: Colors.surfaceAlt, borderRadius: 10, padding: 10 },
+  infoCellSmall: { width: 56, backgroundColor: Colors.surfaceAlt, borderRadius: 10, padding: 10, alignItems: "center" },
+  infoLabel: { fontSize: 9, fontWeight: "700", color: Colors.textMuted, textTransform: "uppercase", letterSpacing: 0.3, marginBottom: 3 },
+  infoValue: { fontSize: 13, fontWeight: "700", color: Colors.text },
+  phoneRow: {
+    flexDirection: "row", alignItems: "center", gap: 6, alignSelf: "flex-start",
+    backgroundColor: Colors.info + "12", borderRadius: 10, paddingVertical: 6, paddingHorizontal: 10,
+  },
+  phoneText: { fontSize: 13, color: Colors.info, fontWeight: "700" },
+  feedbackRow: {
+    flexDirection: "row", alignItems: "flex-start", gap: 6,
+    backgroundColor: Colors.surfaceAlt, borderRadius: 10, padding: 10,
+  },
+  feedbackLabel: { fontSize: 12, color: Colors.textSecondary, fontWeight: "700" },
+  feedbackValue: { flex: 1, fontSize: 12, color: Colors.text, fontWeight: "500" },
+  cardActions: { flexDirection: "row", gap: 8, marginTop: 2 },
   actionBtn: {
     flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center",
-    paddingVertical: 10, borderRadius: 10, gap: 5,
+    paddingVertical: 11, borderRadius: 12, gap: 5,
   },
   callBtn: { backgroundColor: Colors.primary },
-  detailBtn: { backgroundColor: Colors.primary + "15", borderWidth: 1, borderColor: Colors.primary + "40" },
+  detailBtn: { backgroundColor: Colors.primary + "12", borderWidth: 1, borderColor: Colors.primary + "30" },
   actionBtnText: { color: "#fff", fontSize: 13, fontWeight: "700" },
 });
 
