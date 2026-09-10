@@ -36,9 +36,9 @@ function guessNameFromFilename(filename?: string | null): string {
   return base.replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
-// ─── OCR: read the customer name straight off the receipt screenshot ──────────
-// so the admin doesn't have to type it in separately.
-async function extractNameFromImage(asset: any): Promise<string | null> {
+// ─── OCR: read the customer name + Customer ID straight off the receipt ───────
+// screenshot so the admin doesn't have to type them in separately.
+async function extractFieldsFromImage(asset: any): Promise<{ name: string | null; customerId: string | null }> {
   try {
     const base = getApiUrl();
     const token = Platform.OS !== "web" ? await tokenStore.get() : null;
@@ -54,7 +54,7 @@ async function extractNameFromImage(asset: any): Promise<string | null> {
         const blob = await response.blob();
         form.append("image", blob, asset.fileName || "receipt.jpg");
       } else {
-        return null;
+        return { name: null, customerId: null };
       }
     } else {
       const ext = asset.uri.split(".").pop()?.toLowerCase() || "jpg";
@@ -66,16 +66,16 @@ async function extractNameFromImage(asset: any): Promise<string | null> {
       method: "POST", body: form, credentials: "include",
       headers: Object.keys(headers).length > 0 ? headers : undefined,
     });
-    if (!res.ok) return null;
+    if (!res.ok) return { name: null, customerId: null };
     const j = await res.json().catch(() => ({}));
-    return j.name || null;
+    return { name: j.name || null, customerId: j.customerId || null };
   } catch {
-    return null;
+    return { name: null, customerId: null };
   }
 }
 
 // ─── Multipart upload — mirrors the pattern used elsewhere in the admin app ────
-async function uploadReceiptImage(asset: any, customerName: string, notes?: string): Promise<any> {
+async function uploadReceiptImage(asset: any, customerName: string, customerId: string, notes?: string): Promise<any> {
   const base = getApiUrl();
   const token = Platform.OS !== "web" ? await tokenStore.get() : null;
   const headers: Record<string, string> = {};
@@ -83,6 +83,7 @@ async function uploadReceiptImage(asset: any, customerName: string, notes?: stri
 
   const form = new FormData();
   form.append("customerName", customerName);
+  form.append("customerId", customerId);
   if (notes) form.append("notes", notes);
 
   if (Platform.OS === "web") {
@@ -117,17 +118,20 @@ interface BulkItem {
   key: string;
   asset: any;
   name: string;
+  customerId: string;
   status: BulkStatus;
   error?: string;
   detecting?: boolean;
   nameEdited?: boolean; // true once the admin has typed over the auto-detected/guessed name
+  customerIdEdited?: boolean; // true once the admin has typed over the auto-detected Customer ID
 }
 
-// Runs OCR name-detection on a batch of items with limited concurrency so a
-// 100–200 image bulk pick doesn't hammer the server all at once.
+// Runs OCR field-detection (name + Customer ID) on a batch of items with
+// limited concurrency so a 100–200 image bulk pick doesn't hammer the server
+// all at once.
 async function detectNamesForItems(
   batch: BulkItem[],
-  onDetected: (key: string, name: string) => void,
+  onDetected: (key: string, name: string | null, customerId: string | null) => void,
   onSettled: (key: string) => void,
   concurrency = 4
 ) {
@@ -137,8 +141,8 @@ async function detectNamesForItems(
       const it = queue.shift();
       if (!it) break;
       try {
-        const detected = await extractNameFromImage(it.asset);
-        if (detected) onDetected(it.key, detected);
+        const { name, customerId } = await extractFieldsFromImage(it.asset);
+        if (name || customerId) onDetected(it.key, name, customerId);
       } finally {
         onSettled(it.key);
       }
@@ -153,11 +157,13 @@ function UploadModal({ visible, onClose, onUploaded }: { visible: boolean; onClo
 
   // single-mode state
   const [customerName, setCustomerName] = useState("");
+  const [customerId, setCustomerId] = useState("");
   const [notes, setNotes] = useState("");
   const [asset, setAsset] = useState<any>(null);
   const [uploading, setUploading] = useState(false);
   const [detectingName, setDetectingName] = useState(false);
   const nameEditedRef = useRef(false); // tracks whether the admin typed over the auto-detected name
+  const idEditedRef = useRef(false); // tracks whether the admin typed over the auto-detected Customer ID
 
   // bulk-mode state
   const [items, setItems] = useState<BulkItem[]>([]);
@@ -166,7 +172,7 @@ function UploadModal({ visible, onClose, onUploaded }: { visible: boolean; onClo
   const [bulkDone, setBulkDone] = useState(0);
   const cancelRef = useRef(false);
 
-  const resetSingle = () => { setCustomerName(""); setNotes(""); setAsset(null); setDetectingName(false); nameEditedRef.current = false; };
+  const resetSingle = () => { setCustomerName(""); setCustomerId(""); setNotes(""); setAsset(null); setDetectingName(false); nameEditedRef.current = false; idEditedRef.current = false; };
   const resetBulk = () => { setItems([]); setApplyAllName(""); setBulkDone(0); };
   const resetAll = () => { resetSingle(); resetBulk(); setMode("single"); };
 
@@ -176,12 +182,14 @@ function UploadModal({ visible, onClose, onUploaded }: { visible: boolean; onClo
     const picked = result.assets[0];
     setAsset(picked);
     nameEditedRef.current = false;
+    idEditedRef.current = false;
     setDetectingName(true);
-    const detected = await extractNameFromImage(picked);
+    const { name, customerId: detectedId } = await extractFieldsFromImage(picked);
     setDetectingName(false);
-    // Only auto-fill if the admin hasn't already started typing their own name
-    // in the meantime, and don't stomp on a name they'd already entered.
-    if (detected && !nameEditedRef.current) setCustomerName(detected);
+    // Only auto-fill if the admin hasn't already started typing their own
+    // value in the meantime, and don't stomp on something they'd already entered.
+    if (name && !nameEditedRef.current) setCustomerName(name);
+    if (detectedId && !idEditedRef.current) setCustomerId(detectedId);
   };
 
   const pickBulkImages = async () => {
@@ -195,18 +203,26 @@ function UploadModal({ visible, onClose, onUploaded }: { visible: boolean; onClo
       asset: a,
       // Filename guess is just a placeholder while OCR runs in the background below.
       name: guessNameFromFilename(a.fileName || a.uri?.split("/").pop()),
+      customerId: "",
       status: "pending",
       detecting: true,
     }));
     setItems((prev) => [...prev, ...newItems]);
 
-    // Read each receipt's customer name straight off the screenshot via OCR,
-    // so the admin doesn't have to type every name in by hand.
+    // Read each receipt's customer name + Customer ID straight off the
+    // screenshot via OCR, so the admin doesn't have to type them in by hand.
     detectNamesForItems(
       newItems,
-      (key, detected) => {
+      (key, detectedName, detectedId) => {
         setItems((prev) =>
-          prev.map((it) => (it.key === key && !it.nameEdited ? { ...it, name: detected } : it))
+          prev.map((it) => {
+            if (it.key !== key) return it;
+            return {
+              ...it,
+              name: detectedName && !it.nameEdited ? detectedName : it.name,
+              customerId: detectedId && !it.customerIdEdited ? detectedId : it.customerId,
+            };
+          })
         );
       },
       (key) => {
@@ -217,6 +233,10 @@ function UploadModal({ visible, onClose, onUploaded }: { visible: boolean; onClo
 
   const updateItemName = (key: string, name: string) => {
     setItems((prev) => prev.map((it) => (it.key === key ? { ...it, name, nameEdited: true } : it)));
+  };
+
+  const updateItemCustomerId = (key: string, customerId: string) => {
+    setItems((prev) => prev.map((it) => (it.key === key ? { ...it, customerId, customerIdEdited: true } : it)));
   };
 
   const removeItem = (key: string) => {
@@ -230,10 +250,11 @@ function UploadModal({ visible, onClose, onUploaded }: { visible: boolean; onClo
 
   const handleSingleUpload = async () => {
     if (!customerName.trim()) { Alert.alert("Missing name", "Enter the customer's name."); return; }
+    if (!customerId.trim()) { Alert.alert("Missing Customer ID", "Enter the customer's ID."); return; }
     if (!asset) { Alert.alert("Missing image", "Select a receipt image to upload."); return; }
     setUploading(true);
     try {
-      await uploadReceiptImage(asset, customerName.trim(), notes.trim() || undefined);
+      await uploadReceiptImage(asset, customerName.trim(), customerId.trim(), notes.trim() || undefined);
       resetSingle();
       onUploaded();
       onClose();
@@ -253,7 +274,7 @@ function UploadModal({ visible, onClose, onUploaded }: { visible: boolean; onClo
       const it = batch[i];
       setItems((prev) => prev.map((p) => (p.key === it.key ? { ...p, status: "uploading" } : p)));
       try {
-        await uploadReceiptImage(it.asset, it.name.trim());
+        await uploadReceiptImage(it.asset, it.name.trim(), it.customerId.trim());
         ok++;
         setItems((prev) => prev.map((p) => (p.key === it.key ? { ...p, status: "done" } : p)));
       } catch (e: any) {
@@ -273,9 +294,9 @@ function UploadModal({ visible, onClose, onUploaded }: { visible: boolean; onClo
       Alert.alert("Still reading names", `Still detecting names for ${stillDetecting.length} image(s). Please wait a moment and try again.`);
       return;
     }
-    const missing = items.filter((it) => !it.name.trim());
+    const missing = items.filter((it) => !it.name.trim() || !it.customerId.trim());
     if (missing.length > 0) {
-      Alert.alert("Missing names", `Couldn't read a name off ${missing.length} image(s) — please fill those in before uploading.`);
+      Alert.alert("Missing details", `Couldn't read a name and/or Customer ID off ${missing.length} image(s) — please fill those in before uploading.`);
       return;
     }
     if (items.length === 0) return;
@@ -341,6 +362,21 @@ function UploadModal({ visible, onClose, onUploaded }: { visible: boolean; onClo
                   {detectingName && (
                     <ActivityIndicator size="small" color={Colors.primary} style={{ position: "absolute", right: 12 }} />
                   )}
+                </View>
+
+                <Text style={m.label}>
+                  Customer ID{detectingName ? " — reading from screenshot…" : ""}
+                </Text>
+                <View style={{ position: "relative", justifyContent: "center" }}>
+                  <TextInput
+                    style={m.input}
+                    placeholder={detectingName ? "Detecting Customer ID from receipt…" : "e.g. 72218577"}
+                    placeholderTextColor={Colors.textMuted}
+                    value={customerId}
+                    onChangeText={(t) => { idEditedRef.current = true; setCustomerId(t); }}
+                    keyboardType="number-pad"
+                    editable={!detectingName}
+                  />
                 </View>
 
                 <Text style={m.label}>Notes (optional)</Text>
@@ -414,15 +450,26 @@ function UploadModal({ visible, onClose, onUploaded }: { visible: boolean; onClo
                       renderItem={({ item }) => (
                         <View style={m.bulkRow}>
                           <Image source={{ uri: item.asset.uri }} style={m.bulkThumb} resizeMode="cover" />
-                          <TextInput
-                            style={m.bulkNameInput}
-                            placeholder={item.detecting ? "Reading name from screenshot…" : "Customer name"}
-                            placeholderTextColor={Colors.textMuted}
-                            value={item.name}
-                            onChangeText={(t) => updateItemName(item.key, t)}
-                            autoCapitalize="words"
-                            editable={!bulkRunning}
-                          />
+                          <View style={{ flex: 1, gap: 4 }}>
+                            <TextInput
+                              style={m.bulkNameInput}
+                              placeholder={item.detecting ? "Reading name from screenshot…" : "Customer name"}
+                              placeholderTextColor={Colors.textMuted}
+                              value={item.name}
+                              onChangeText={(t) => updateItemName(item.key, t)}
+                              autoCapitalize="words"
+                              editable={!bulkRunning}
+                            />
+                            <TextInput
+                              style={m.bulkNameInput}
+                              placeholder={item.detecting ? "Reading Customer ID…" : "Customer ID"}
+                              placeholderTextColor={Colors.textMuted}
+                              value={item.customerId}
+                              onChangeText={(t) => updateItemCustomerId(item.key, t)}
+                              keyboardType="number-pad"
+                              editable={!bulkRunning}
+                            />
+                          </View>
                           {item.detecting && <ActivityIndicator size="small" color={Colors.primary} />}
                           {item.status === "uploading" && <ActivityIndicator size="small" color={Colors.primary} />}
                           {item.status === "done" && <Ionicons name="checkmark-circle" size={20} color={Colors.success} />}
@@ -521,11 +568,11 @@ export default function ReceiptSearchScreen() {
         <Ionicons name="search" size={18} color={Colors.textMuted} />
         <TextInput
           style={s.searchInput}
-          placeholder="Search customer name…"
+          placeholder="Search Customer ID…"
           placeholderTextColor={Colors.textMuted}
           value={query}
           onChangeText={setQuery}
-          autoCapitalize="words"
+          keyboardType="number-pad"
           autoCorrect={false}
           returnKeyType="search"
         />
@@ -554,14 +601,14 @@ export default function ReceiptSearchScreen() {
       {!loading && searched && results.length === 0 && (
         <View style={s.center}>
           <Ionicons name="receipt-outline" size={40} color={Colors.textMuted} />
-          <Text style={s.emptyText}>No receipts found for "{query.trim()}"</Text>
+          <Text style={s.emptyText}>No receipts found for Customer ID "{query.trim()}"</Text>
         </View>
       )}
 
       {!loading && !searched && query.trim().length === 0 && (
         <View style={s.center}>
           <Ionicons name="search-outline" size={40} color={Colors.textMuted} />
-          <Text style={s.hintText}>Type a customer name to find their uploaded receipts</Text>
+          <Text style={s.hintText}>Type a Customer ID to find their uploaded receipts</Text>
         </View>
       )}
 
@@ -579,6 +626,7 @@ export default function ReceiptSearchScreen() {
               <View style={s.cardBody}>
                 <View style={{ flex: 1 }}>
                   <Text style={s.cardName}>{item.customer_name}</Text>
+                  {item.customer_id && <Text style={s.cardMeta}>Customer ID: {item.customer_id}</Text>}
                   {item.notes && <Text style={s.cardMeta}>{item.notes}</Text>}
                   <Text style={s.cardMeta}>{fmtDate(item.created_at)}</Text>
                 </View>
