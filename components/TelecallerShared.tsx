@@ -68,6 +68,29 @@ export function sendPtpWhatsApp(item: any) {
   Linking.openURL(url).catch(() => Alert.alert("Error", "Could not open WhatsApp. Is it installed?"));
 }
 
+// ── Agent PTP summary (WhatsApp to the FOS agent, not the customer) ────────
+// Telecallers also need to hand an agent their own list of tomorrow's PTPs —
+// e.g. "Satish has 3 PTPs tomorrow" — as one consolidated WhatsApp message to
+// that agent's own number, rather than one reminder per customer.
+export function buildAgentPtpSummaryMessage(agentName: string, items: any[]): string {
+  const dateText = toDisplayDate(items[0]?.ptp_date) || "tomorrow";
+  const lines = items.map((it, i) => {
+    const dueAmount = Number(it?.emi_due) > 0 ? Number(it.emi_due) : Number(it?.pos) > 0 ? Number(it.pos) : null;
+    const amountText = dueAmount ? `₹${dueAmount.toLocaleString("en-IN")}` : "amount not set";
+    return `${i + 1}. ${it.customer_name || "Customer"} — Loan ${it.loan_no || "—"} — ${amountText}`;
+  });
+  return `Hi ${agentName}, you have ${items.length} PTP${items.length !== 1 ? "s" : ""} due on ${dateText}:\n\n${lines.join("\n")}\n\nPlease follow up with these customers. Thank you.`;
+}
+
+export function sendAgentPtpSummaryWhatsApp(items: any[]) {
+  if (!items.length) return;
+  const agentName = items[0]?.agent_name || "Agent";
+  const agentPhone = firstPhone({ mobile_no: items[0]?.agent_phone });
+  if (!agentPhone) { Alert.alert("No number available", `${agentName} doesn't have a phone number saved.`); return; }
+  const url = `https://wa.me/${toWhatsAppNumber(agentPhone)}?text=${encodeURIComponent(buildAgentPtpSummaryMessage(agentName, items))}`;
+  Linking.openURL(url).catch(() => Alert.alert("Error", "Could not open WhatsApp. Is it installed?"));
+}
+
 export function sendPtpSms(item: any) {
   const phone = firstPhone(item);
   if (!phone) { Alert.alert("No number available", "This case has no mobile number saved."); return; }
@@ -98,8 +121,17 @@ export function groupCasesByAgent(items: any[]): { agentId: string; agentName: s
 // recipient one tap at a time, tracking progress, so a whole agent's (or the
 // whole day's) tomorrow-PTP reminders can be fired off in one continuous flow.
 export function BulkWhatsAppModal({
-  visible, title, items, onClose,
-}: { visible: boolean; title: string; items: any[]; onClose: () => void }) {
+  visible, title, items, onClose, mode = "customer",
+}: {
+  visible: boolean;
+  title: string;
+  // "customer" mode: array of PTP case rows, one WhatsApp reminder each.
+  // "agent" mode: array of { agentId, agentName, items }, one consolidated
+  // WhatsApp summary per agent (sent to the agent's own number).
+  items: any[];
+  onClose: () => void;
+  mode?: "customer" | "agent";
+}) {
   const insets = useSafeAreaInsets();
   const [index, setIndex] = useState(0);
   const [sentCount, setSentCount] = useState(0);
@@ -113,11 +145,14 @@ export function BulkWhatsAppModal({
   const total = items.length;
   const current = items[index];
   const isDone = index >= total || !current;
-  const currentPhone = current ? firstPhone(current) : null;
+  const currentPhone = !current ? null : mode === "agent"
+    ? firstPhone({ mobile_no: current.items?.[0]?.agent_phone })
+    : firstPhone(current);
 
   const sendCurrent = () => {
     if (!current) return;
-    sendPtpWhatsApp(current);
+    if (mode === "agent") sendAgentPtpSummaryWhatsApp(current.items);
+    else sendPtpWhatsApp(current);
     setSentCount((c) => c + 1);
     setIndex((i) => i + 1);
   };
@@ -148,7 +183,9 @@ export function BulkWhatsAppModal({
             <View style={bulkStyles.doneBox}>
               <Ionicons name="checkmark-done-circle" size={40} color={Colors.success} />
               <Text style={bulkStyles.doneText}>
-                Sent reminders to {sentCount} of {total} customer{total !== 1 ? "s" : ""}.
+                {mode === "agent"
+                  ? `Sent PTP summaries to ${sentCount} of ${total} agent${total !== 1 ? "s" : ""}.`
+                  : `Sent reminders to ${sentCount} of ${total} customer${total !== 1 ? "s" : ""}.`}
               </Text>
               <Pressable style={bulkStyles.primaryBtn} onPress={onClose}>
                 <Text style={bulkStyles.primaryBtnText}>Close</Text>
@@ -157,14 +194,27 @@ export function BulkWhatsAppModal({
           ) : (
             <>
               <View style={bulkStyles.currentCard}>
-                <Text style={bulkStyles.currentName} numberOfLines={1}>{current.customer_name || "Customer"}</Text>
-                <Text style={bulkStyles.currentMeta}>Loan {current.loan_no || "—"} · Due {toDisplayDate(current.ptp_date) || "—"}</Text>
-                {current.agent_name ? <Text style={bulkStyles.currentMeta}>Agent: {current.agent_name}</Text> : null}
+                {mode === "agent" ? (
+                  <>
+                    <Text style={bulkStyles.currentName} numberOfLines={1}>{current.agentName}</Text>
+                    <Text style={bulkStyles.currentMeta}>
+                      {current.items.length} PTP{current.items.length !== 1 ? "s" : ""} due · consolidated summary
+                    </Text>
+                  </>
+                ) : (
+                  <>
+                    <Text style={bulkStyles.currentName} numberOfLines={1}>{current.customer_name || "Customer"}</Text>
+                    <Text style={bulkStyles.currentMeta}>Loan {current.loan_no || "—"} · Due {toDisplayDate(current.ptp_date) || "—"}</Text>
+                    {current.agent_name ? <Text style={bulkStyles.currentMeta}>Agent: {current.agent_name}</Text> : null}
+                  </>
+                )}
                 <Text style={bulkStyles.currentMeta}>{currentPhone || "No number saved"}</Text>
               </View>
 
               <Text style={bulkStyles.hint}>
-                Tap "Send WhatsApp" to open WhatsApp with the reminder pre-filled for this customer, then come back here to move on to the next one.
+                {mode === "agent"
+                  ? "Tap \"Send WhatsApp\" to open WhatsApp with this agent's full PTP list pre-filled, then come back here to move on to the next agent."
+                  : "Tap \"Send WhatsApp\" to open WhatsApp with the reminder pre-filled for this customer, then come back here to move on to the next one."}
               </Text>
 
               <View style={bulkStyles.actionsRow}>
