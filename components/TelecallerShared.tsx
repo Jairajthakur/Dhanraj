@@ -606,13 +606,28 @@ export function CaseCard({ item, onDetails }: { item: any; onDetails: (item: any
 }
 
 // ─── PTP queue card — used on the overdue/due-today follow-up screen ────────
-export function PtpQueueCard({ item, overdue, onDetails }: { item: any; overdue: boolean; onDetails: (item: any) => void }) {
+export type PtpQueueVariant = "overdue" | "dueToday" | "dueTomorrow";
+
+export function PtpQueueCard({
+  item, overdue, variant, onDetails,
+}: {
+  item: any;
+  // Kept for backward compatibility — prefer `variant`. If only `overdue` is
+  // passed, `true` maps to "overdue" and `false` maps to "dueToday".
+  overdue?: boolean;
+  variant?: PtpQueueVariant;
+  onDetails: (item: any) => void;
+}) {
+  const resolvedVariant: PtpQueueVariant = variant ?? (overdue ? "overdue" : "dueToday");
+  const isOverdue = resolvedVariant === "overdue";
   const call = () => {
     const phone = String(item.mobile_no || "").split(",")[0]?.trim();
     if (!phone) { Alert.alert("No number available"); return; }
     Linking.openURL(`tel:${phone}`);
   };
-  const daysLate = overdue ? Math.max(1, Math.round((Date.now() - new Date(item.ptp_date).getTime()) / 86400000)) : 0;
+  const daysLate = isOverdue ? Math.max(1, Math.round((Date.now() - new Date(item.ptp_date).getTime()) / 86400000)) : 0;
+  const badgeColor = resolvedVariant === "overdue" ? Colors.danger : resolvedVariant === "dueTomorrow" ? Colors.warning : Colors.statusPTP;
+  const badgeText = resolvedVariant === "overdue" ? `${daysLate}d overdue` : resolvedVariant === "dueTomorrow" ? "Due tomorrow" : "Due today";
 
   return (
     <View style={cardStyles.card}>
@@ -622,10 +637,10 @@ export function PtpQueueCard({ item, overdue, onDetails }: { item: any; overdue:
             <Ionicons name="person-circle" size={20} color={Colors.primary} />
             <Text style={cardStyles.cardName} numberOfLines={1}>{item.customer_name}</Text>
           </View>
-          <View style={[cardStyles.statusBadge, { backgroundColor: (overdue ? Colors.danger : Colors.statusPTP) + "1A" }]}>
-            <View style={[cardStyles.statusDot, { backgroundColor: overdue ? Colors.danger : Colors.statusPTP }]} />
-            <Text style={[cardStyles.statusText, { color: overdue ? Colors.danger : Colors.statusPTP }]}>
-              {overdue ? `${daysLate}d overdue` : "Due today"}
+          <View style={[cardStyles.statusBadge, { backgroundColor: badgeColor + "1A" }]}>
+            <View style={[cardStyles.statusDot, { backgroundColor: badgeColor }]} />
+            <Text style={[cardStyles.statusText, { color: badgeColor }]}>
+              {badgeText}
             </Text>
           </View>
         </View>
@@ -642,7 +657,7 @@ export function PtpQueueCard({ item, overdue, onDetails }: { item: any; overdue:
           </View>
           <View style={cardStyles.infoCell}>
             <Text style={cardStyles.infoLabel}>PTP DATE</Text>
-            <Text style={[cardStyles.infoValue, { color: overdue ? Colors.danger : Colors.statusPTP }]}>{toDisplayDate(item.ptp_date) || "—"}</Text>
+            <Text style={[cardStyles.infoValue, { color: badgeColor }]}>{toDisplayDate(item.ptp_date) || "—"}</Text>
           </View>
           <View style={cardStyles.infoCell}>
             <Text style={cardStyles.infoLabel}>EMI DUE</Text>
