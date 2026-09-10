@@ -8,7 +8,9 @@ import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import Colors from "@/constants/colors";
 import { api } from "@/lib/api";
-import { PtpQueueCard, CaseDetailModal, BulkWhatsAppModal, groupCasesByAgent } from "@/components/TelecallerShared";
+import {
+  PtpQueueCard, CaseDetailModal, BulkWhatsAppModal, groupCasesByAgent, sendAgentPtpSummaryWhatsApp,
+} from "@/components/TelecallerShared";
 
 type PtpSection = {
   title: string;
@@ -17,10 +19,12 @@ type PtpSection = {
   data: any[];
 };
 
+type BulkTarget = { title: string; items: any[]; mode: "customer" | "agent" };
+
 export default function PtpQueueScreen() {
   const insets = useSafeAreaInsets();
   const [selectedCase, setSelectedCase] = useState<any>(null);
-  const [bulkTarget, setBulkTarget] = useState<{ title: string; items: any[] } | null>(null);
+  const [bulkTarget, setBulkTarget] = useState<BulkTarget | null>(null);
 
   const { data, isLoading, refetch } = useQuery({
     queryKey: ["/api/telecaller/ptp-queue"],
@@ -31,9 +35,10 @@ export default function PtpQueueScreen() {
   const dueToday: any[] = data?.dueToday || [];
   const dueTomorrow: any[] = data?.dueTomorrow || [];
 
-  // Tomorrow's PTPs are the ones telecallers get ahead of with a WhatsApp
-  // reminder, so they're grouped agent-wise — one section per FOS agent —
-  // and each group (plus the whole day) gets a "Send All" bulk-WhatsApp entry point.
+  // Tomorrow's PTPs are grouped agent-wise — e.g. Satish has 3, Jai has 5 —
+  // so each agent gets their own section, and their own "Notify Agent" button
+  // that sends them (not the customer) one consolidated WhatsApp message
+  // listing all of their PTPs due tomorrow.
   const dueTomorrowByAgent = useMemo(() => groupCasesByAgent(dueTomorrow), [dueTomorrow]);
 
   const sections = useMemo<PtpSection[]>(() => {
@@ -64,16 +69,37 @@ export default function PtpQueueScreen() {
       </View>
 
       {dueTomorrow.length > 0 ? (
-        <Pressable
-          style={styles.bulkBanner}
-          onPress={() => setBulkTarget({ title: "Tomorrow's PTP Reminders", items: dueTomorrow })}
-        >
-          <Ionicons name="logo-whatsapp" size={20} color="#fff" />
-          <Text style={styles.bulkBannerText}>
-            Send all {dueTomorrow.length} tomorrow's PTP{dueTomorrow.length !== 1 ? "s" : ""} on WhatsApp ({dueTomorrowByAgent.length} agent{dueTomorrowByAgent.length !== 1 ? "s" : ""})
-          </Text>
-          <Ionicons name="chevron-forward" size={16} color="rgba(255,255,255,0.85)" />
-        </Pressable>
+        <View style={styles.bulkBannerGroup}>
+          <Pressable
+            style={[styles.bulkBanner, { backgroundColor: Colors.warning }]}
+            onPress={() => setBulkTarget({
+              title: "Notify Agents — Tomorrow's PTPs",
+              items: dueTomorrowByAgent,
+              mode: "agent",
+            })}
+          >
+            <Ionicons name="person-circle" size={20} color="#fff" />
+            <Text style={styles.bulkBannerText}>
+              Notify each agent on WhatsApp ({dueTomorrowByAgent.length} agent{dueTomorrowByAgent.length !== 1 ? "s" : ""})
+            </Text>
+            <Ionicons name="chevron-forward" size={16} color="rgba(255,255,255,0.85)" />
+          </Pressable>
+
+          <Pressable
+            style={styles.bulkBanner}
+            onPress={() => setBulkTarget({
+              title: "Tomorrow's PTP Reminders",
+              items: dueTomorrow,
+              mode: "customer",
+            })}
+          >
+            <Ionicons name="logo-whatsapp" size={20} color="#fff" />
+            <Text style={styles.bulkBannerText}>
+              Remind all {dueTomorrow.length} customer{dueTomorrow.length !== 1 ? "s" : ""} directly
+            </Text>
+            <Ionicons name="chevron-forward" size={16} color="rgba(255,255,255,0.85)" />
+          </Pressable>
+        </View>
       ) : null}
 
       {isLoading ? (
@@ -92,17 +118,28 @@ export default function PtpQueueScreen() {
             const headerColor = s.variant === "overdue" ? Colors.danger : s.variant === "dueTomorrow" ? Colors.warning : Colors.statusPTP;
             return (
               <View style={[styles.sectionHeader, { backgroundColor: headerColor + "18" }]}>
-                <Text style={[styles.sectionHeaderText, { color: headerColor }]} numberOfLines={1}>
-                  {s.variant === "dueTomorrow" ? `${s.title} · Due Tomorrow` : s.title} ({s.data.length})
-                </Text>
+                <View style={styles.sectionHeaderTopRow}>
+                  <Text style={[styles.sectionHeaderText, { color: headerColor }]} numberOfLines={1}>
+                    {s.variant === "dueTomorrow" ? `${s.title} · Due Tomorrow` : s.title} ({s.data.length})
+                  </Text>
+                </View>
                 {s.variant === "dueTomorrow" ? (
-                  <Pressable
-                    style={styles.sectionSendAllBtn}
-                    onPress={() => setBulkTarget({ title: `${s.title} — Tomorrow's PTPs`, items: s.data })}
-                  >
-                    <Ionicons name="logo-whatsapp" size={13} color="#fff" />
-                    <Text style={styles.sectionSendAllText}>Send All</Text>
-                  </Pressable>
+                  <View style={styles.sectionHeaderActions}>
+                    <Pressable
+                      style={[styles.sectionActionBtn, { backgroundColor: Colors.warning }]}
+                      onPress={() => sendAgentPtpSummaryWhatsApp(s.data)}
+                    >
+                      <Ionicons name="person-circle" size={13} color="#fff" />
+                      <Text style={styles.sectionActionText}>Notify {s.title}</Text>
+                    </Pressable>
+                    <Pressable
+                      style={[styles.sectionActionBtn, { backgroundColor: "#25D366" }]}
+                      onPress={() => setBulkTarget({ title: `${s.title} — Tomorrow's PTPs`, items: s.data, mode: "customer" })}
+                    >
+                      <Ionicons name="logo-whatsapp" size={13} color="#fff" />
+                      <Text style={styles.sectionActionText}>Remind Customers</Text>
+                    </Pressable>
+                  </View>
                 ) : null}
               </View>
             );
@@ -123,6 +160,7 @@ export default function PtpQueueScreen() {
         visible={!!bulkTarget}
         title={bulkTarget?.title || ""}
         items={bulkTarget?.items || []}
+        mode={bulkTarget?.mode || "customer"}
         onClose={() => setBulkTarget(null)}
       />
     </View>
@@ -138,23 +176,25 @@ const styles = StyleSheet.create({
   backBtn: { padding: 4 },
   headerTitle: { fontSize: 17, fontWeight: "800", color: Colors.text },
   headerSub: { fontSize: 12, color: Colors.textMuted, marginTop: 1, fontWeight: "500" },
+  bulkBannerGroup: { marginHorizontal: 12, marginTop: 12, gap: 8 },
   bulkBanner: {
-    flexDirection: "row", alignItems: "center", gap: 10, marginHorizontal: 12, marginTop: 12,
+    flexDirection: "row", alignItems: "center", gap: 10,
     backgroundColor: "#25D366", borderRadius: 14, paddingHorizontal: 14, paddingVertical: 12,
-    shadowColor: "#25D366", shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.25, shadowRadius: 8, elevation: 3,
+    shadowColor: "#000", shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.12, shadowRadius: 8, elevation: 3,
   },
   bulkBannerText: { flex: 1, color: "#fff", fontSize: 12.5, fontWeight: "700" },
   list: { padding: 12, gap: 12 },
   sectionHeader: {
-    flexDirection: "row", alignItems: "center", gap: 8,
-    paddingHorizontal: 12, paddingVertical: 9, borderRadius: 12, marginBottom: 10, marginTop: 2,
+    gap: 8, paddingHorizontal: 12, paddingVertical: 9, borderRadius: 12, marginBottom: 10, marginTop: 2,
   },
+  sectionHeaderTopRow: { flexDirection: "row", alignItems: "center" },
   sectionHeaderText: { flex: 1, fontSize: 12, fontWeight: "800", textTransform: "uppercase", letterSpacing: 0.6 },
-  sectionSendAllBtn: {
+  sectionHeaderActions: { flexDirection: "row", gap: 8, flexWrap: "wrap" },
+  sectionActionBtn: {
     flexDirection: "row", alignItems: "center", gap: 4,
-    backgroundColor: "#25D366", borderRadius: 20, paddingHorizontal: 10, paddingVertical: 5,
+    borderRadius: 20, paddingHorizontal: 10, paddingVertical: 6,
   },
-  sectionSendAllText: { color: "#fff", fontSize: 10.5, fontWeight: "800", textTransform: "uppercase" },
+  sectionActionText: { color: "#fff", fontSize: 10.5, fontWeight: "800" },
   empty: { flex: 1, justifyContent: "center", alignItems: "center", gap: 12, paddingVertical: 60 },
   emptyText: { fontSize: 15, color: Colors.textMuted, textAlign: "center", paddingHorizontal: 30 },
 });
