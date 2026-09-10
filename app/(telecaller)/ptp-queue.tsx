@@ -8,11 +8,19 @@ import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import Colors from "@/constants/colors";
 import { api } from "@/lib/api";
-import { PtpQueueCard, CaseDetailModal } from "@/components/TelecallerShared";
+import { PtpQueueCard, CaseDetailModal, BulkWhatsAppModal, groupCasesByAgent } from "@/components/TelecallerShared";
+
+type PtpSection = {
+  title: string;
+  key: string;
+  variant: "overdue" | "dueToday" | "dueTomorrow";
+  data: any[];
+};
 
 export default function PtpQueueScreen() {
   const insets = useSafeAreaInsets();
   const [selectedCase, setSelectedCase] = useState<any>(null);
+  const [bulkTarget, setBulkTarget] = useState<{ title: string; items: any[] } | null>(null);
 
   const { data, isLoading, refetch } = useQuery({
     queryKey: ["/api/telecaller/ptp-queue"],
@@ -23,13 +31,25 @@ export default function PtpQueueScreen() {
   const dueToday: any[] = data?.dueToday || [];
   const dueTomorrow: any[] = data?.dueTomorrow || [];
 
-  const sections = useMemo(() => {
-    const list = [];
-    if (overdue.length) list.push({ title: "Overdue", key: "overdue", data: overdue });
-    if (dueToday.length) list.push({ title: "Due Today", key: "dueToday", data: dueToday });
-    if (dueTomorrow.length) list.push({ title: "Due Tomorrow", key: "dueTomorrow", data: dueTomorrow });
+  // Tomorrow's PTPs are the ones telecallers get ahead of with a WhatsApp
+  // reminder, so they're grouped agent-wise — one section per FOS agent —
+  // and each group (plus the whole day) gets a "Send All" bulk-WhatsApp entry point.
+  const dueTomorrowByAgent = useMemo(() => groupCasesByAgent(dueTomorrow), [dueTomorrow]);
+
+  const sections = useMemo<PtpSection[]>(() => {
+    const list: PtpSection[] = [];
+    if (overdue.length) list.push({ title: "Overdue", key: "overdue", variant: "overdue", data: overdue });
+    if (dueToday.length) list.push({ title: "Due Today", key: "dueToday", variant: "dueToday", data: dueToday });
+    for (const group of dueTomorrowByAgent) {
+      list.push({
+        title: group.agentName,
+        key: `dueTomorrow-${group.agentId}`,
+        variant: "dueTomorrow",
+        data: group.items,
+      });
+    }
     return list;
-  }, [overdue, dueToday, dueTomorrow]);
+  }, [overdue, dueToday, dueTomorrowByAgent]);
 
   return (
     <View style={{ flex: 1, backgroundColor: Colors.background }}>
@@ -43,6 +63,19 @@ export default function PtpQueueScreen() {
         </View>
       </View>
 
+      {dueTomorrow.length > 0 ? (
+        <Pressable
+          style={styles.bulkBanner}
+          onPress={() => setBulkTarget({ title: "Tomorrow's PTP Reminders", items: dueTomorrow })}
+        >
+          <Ionicons name="logo-whatsapp" size={20} color="#fff" />
+          <Text style={styles.bulkBannerText}>
+            Send all {dueTomorrow.length} tomorrow's PTP{dueTomorrow.length !== 1 ? "s" : ""} on WhatsApp ({dueTomorrowByAgent.length} agent{dueTomorrowByAgent.length !== 1 ? "s" : ""})
+          </Text>
+          <Ionicons name="chevron-forward" size={16} color="rgba(255,255,255,0.85)" />
+        </Pressable>
+      ) : null}
+
       {isLoading ? (
         <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
           <ActivityIndicator color={Colors.primary} size="large" />
@@ -52,15 +85,25 @@ export default function PtpQueueScreen() {
           sections={sections}
           keyExtractor={(item) => `${item.case_type}-${item.id}`}
           renderItem={({ item, section }) => (
-            <PtpQueueCard item={item} variant={section.key as any} onDetails={setSelectedCase} />
+            <PtpQueueCard item={item} variant={(section as PtpSection).variant} onDetails={setSelectedCase} />
           )}
           renderSectionHeader={({ section }) => {
-            const headerColor = section.key === "overdue" ? Colors.danger : section.key === "dueTomorrow" ? Colors.warning : Colors.statusPTP;
+            const s = section as PtpSection;
+            const headerColor = s.variant === "overdue" ? Colors.danger : s.variant === "dueTomorrow" ? Colors.warning : Colors.statusPTP;
             return (
               <View style={[styles.sectionHeader, { backgroundColor: headerColor + "18" }]}>
-                <Text style={[styles.sectionHeaderText, { color: headerColor }]}>
-                  {section.title} ({section.data.length})
+                <Text style={[styles.sectionHeaderText, { color: headerColor }]} numberOfLines={1}>
+                  {s.variant === "dueTomorrow" ? `${s.title} · Due Tomorrow` : s.title} ({s.data.length})
                 </Text>
+                {s.variant === "dueTomorrow" ? (
+                  <Pressable
+                    style={styles.sectionSendAllBtn}
+                    onPress={() => setBulkTarget({ title: `${s.title} — Tomorrow's PTPs`, items: s.data })}
+                  >
+                    <Ionicons name="logo-whatsapp" size={13} color="#fff" />
+                    <Text style={styles.sectionSendAllText}>Send All</Text>
+                  </Pressable>
+                ) : null}
               </View>
             );
           }}
@@ -76,6 +119,12 @@ export default function PtpQueueScreen() {
       )}
 
       <CaseDetailModal item={selectedCase} onClose={() => setSelectedCase(null)} onUpdated={refetch} />
+      <BulkWhatsAppModal
+        visible={!!bulkTarget}
+        title={bulkTarget?.title || ""}
+        items={bulkTarget?.items || []}
+        onClose={() => setBulkTarget(null)}
+      />
     </View>
   );
 }
@@ -89,9 +138,23 @@ const styles = StyleSheet.create({
   backBtn: { padding: 4 },
   headerTitle: { fontSize: 17, fontWeight: "800", color: Colors.text },
   headerSub: { fontSize: 12, color: Colors.textMuted, marginTop: 1, fontWeight: "500" },
+  bulkBanner: {
+    flexDirection: "row", alignItems: "center", gap: 10, marginHorizontal: 12, marginTop: 12,
+    backgroundColor: "#25D366", borderRadius: 14, paddingHorizontal: 14, paddingVertical: 12,
+    shadowColor: "#25D366", shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.25, shadowRadius: 8, elevation: 3,
+  },
+  bulkBannerText: { flex: 1, color: "#fff", fontSize: 12.5, fontWeight: "700" },
   list: { padding: 12, gap: 12 },
-  sectionHeader: { paddingHorizontal: 12, paddingVertical: 9, borderRadius: 12, marginBottom: 10, marginTop: 2 },
-  sectionHeaderText: { fontSize: 12, fontWeight: "800", textTransform: "uppercase", letterSpacing: 0.6 },
+  sectionHeader: {
+    flexDirection: "row", alignItems: "center", gap: 8,
+    paddingHorizontal: 12, paddingVertical: 9, borderRadius: 12, marginBottom: 10, marginTop: 2,
+  },
+  sectionHeaderText: { flex: 1, fontSize: 12, fontWeight: "800", textTransform: "uppercase", letterSpacing: 0.6 },
+  sectionSendAllBtn: {
+    flexDirection: "row", alignItems: "center", gap: 4,
+    backgroundColor: "#25D366", borderRadius: 20, paddingHorizontal: 10, paddingVertical: 5,
+  },
+  sectionSendAllText: { color: "#fff", fontSize: 10.5, fontWeight: "800", textTransform: "uppercase" },
   empty: { flex: 1, justifyContent: "center", alignItems: "center", gap: 12, paddingVertical: 60 },
   emptyText: { fontSize: 15, color: Colors.textMuted, textAlign: "center", paddingHorizontal: 30 },
 });
