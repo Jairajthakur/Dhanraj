@@ -571,6 +571,12 @@ export const api = {
     setReceiptPermission: (agentId: number, enabled: boolean) =>
       apiRequest("PUT", `/api/admin/agents/${agentId}/receipt-permission`, { enabled }),
 
+    // ── Customer receipt image search (standalone, admin-uploaded) ────────────
+    searchCustomerReceipts: (name: string) =>
+      apiRequest("GET", `/api/admin/customer-receipts/search${qs({ name })}`),
+    deleteCustomerReceipt: (id: number) =>
+      apiRequest("DELETE", `/api/admin/customer-receipts/${id}`),
+
     // ── Exports ──────────────────────────────────────────────────────────────
     exportPtp: async () => {
       const baseUrl = getApiUrl();
