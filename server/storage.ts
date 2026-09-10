@@ -245,6 +245,13 @@ export async function initDatabase() {
     `CREATE INDEX IF NOT EXISTS idx_call_logs_case    ON call_logs(case_id, case_type)`,
     `CREATE INDEX IF NOT EXISTS idx_call_logs_agent   ON call_logs(agent_id)`,
     `CREATE INDEX IF NOT EXISTS idx_call_logs_logged  ON call_logs(logged_at DESC)`,
+    // Who actually saved this feedback (may differ from `agent_id`, the case's
+    // assigned FOS agent) — lets the telecaller dashboard count only the
+    // telecaller's own calls instead of every update on their cases,
+    // including the FOS agent's own field-visit feedback.
+    `ALTER TABLE call_logs ADD COLUMN IF NOT EXISTS actor_id   INTEGER REFERENCES fos_agents(id)`,
+    `ALTER TABLE call_logs ADD COLUMN IF NOT EXISTS actor_role TEXT`,
+    `CREATE INDEX IF NOT EXISTS idx_call_logs_actor   ON call_logs(actor_id, actor_role)`,
     `CREATE TABLE IF NOT EXISTS activity_logs (
       id          SERIAL PRIMARY KEY,
       agent_id    INTEGER REFERENCES fos_agents(id) ON DELETE SET NULL,
@@ -369,9 +376,12 @@ export async function getLoanCasesForTelecaller(telecallerId: number) {
 
 // ── Admin: per-telecaller performance / activity summary ───────────────────
 // For every telecaller: how many cases they own (via their dedicated FOS
-// agents), the overall status split, today's activity (cases whose feedback
-// was saved today, split by resulting status), and today's attendance.
-// "Today" is measured in the database server's local date.
+// agents), the overall status split, and today's activity — but "today's
+// activity" now comes from call_logs rows the telecaller themselves logged
+// (actor_role = 'telecaller'), not from the case's feedback_date. A case's
+// feedback_date also moves when its own FOS agent saves field-visit feedback
+// on the same case, which isn't a telecaller call and shouldn't be counted
+// as one. "Today" is measured in Asia/Kolkata local time.
 export async function getTelecallerStats() {
   const telecallers = await query(
     "SELECT id, name, username, phone FROM fos_agents WHERE role = 'telecaller' ORDER BY name"
@@ -387,13 +397,10 @@ export async function getTelecallerStats() {
     fosCounts.rows.map((r: any) => [r.telecaller_id, r.fos_count])
   );
 
+  // Overall (all-time) case ownership + status split per telecaller.
   const cases = await query(
     `SELECT
-        lc.id, lc.customer_name, lc.loan_no, lc.app_id, lc.mobile_no,
-        lc.pos::numeric AS pos, lc.status, lc.latest_feedback, lc.feedback_code,
-        lc.feedback_date, fa.assigned_telecaller_id AS telecaller_id,
-        fa.name AS fos_name, 'loan' AS case_type,
-        (lc.feedback_date IS NOT NULL AND lc.feedback_date::date = CURRENT_DATE) AS is_today
+        lc.id, lc.status, fa.assigned_telecaller_id AS telecaller_id
      FROM loan_cases lc
      JOIN fos_agents fa ON lc.agent_id = fa.id
      WHERE fa.assigned_telecaller_id IS NOT NULL
@@ -401,14 +408,26 @@ export async function getTelecallerStats() {
      UNION ALL
 
      SELECT
-        bc.id, bc.customer_name, bc.loan_no, bc.app_id, bc.mobile_no,
-        bc.pos::numeric AS pos, bc.status, bc.latest_feedback, bc.feedback_code,
-        bc.feedback_date, fa.assigned_telecaller_id AS telecaller_id,
-        fa.name AS fos_name, 'bkt' AS case_type,
-        (bc.feedback_date IS NOT NULL AND bc.feedback_date::date = CURRENT_DATE) AS is_today
+        bc.id, bc.status, fa.assigned_telecaller_id AS telecaller_id
      FROM bkt_cases bc
      JOIN fos_agents fa ON bc.agent_id = fa.id
      WHERE fa.assigned_telecaller_id IS NOT NULL`
+  );
+
+  // Today's activity — only rows this telecaller personally logged.
+  const todayLogs = await query(
+    `SELECT cl.case_id, cl.case_type, cl.loan_no, cl.customer_name, cl.status,
+            cl.outcome, cl.comments, cl.logged_at, cl.actor_id,
+            fa.name AS fos_name,
+            CASE WHEN cl.case_type = 'bkt' THEN bc.app_id ELSE lc.app_id END AS app_id,
+            CASE WHEN cl.case_type = 'bkt' THEN bc.mobile_no ELSE lc.mobile_no END AS mobile_no,
+            CASE WHEN cl.case_type = 'bkt' THEN bc.pos ELSE lc.pos END::numeric AS pos
+       FROM call_logs cl
+       JOIN fos_agents fa ON fa.id = cl.agent_id
+       LEFT JOIN loan_cases lc ON cl.case_type = 'loan' AND lc.id = cl.case_id
+       LEFT JOIN bkt_cases  bc ON cl.case_type = 'bkt'  AND bc.id = cl.case_id
+      WHERE cl.actor_role = 'telecaller'
+        AND DATE(cl.logged_at AT TIME ZONE 'Asia/Kolkata') = DATE(NOW() AT TIME ZONE 'Asia/Kolkata')`
   );
 
   const attendance = await query(
@@ -423,9 +442,17 @@ export async function getTelecallerStats() {
     casesByTelecaller.get(tid)!.push(c);
   }
 
+  const todayLogsByTelecaller = new Map<number, any[]>();
+  for (const l of todayLogs.rows) {
+    const tid = l.actor_id;
+    if (tid == null) continue;
+    if (!todayLogsByTelecaller.has(tid)) todayLogsByTelecaller.set(tid, []);
+    todayLogsByTelecaller.get(tid)!.push(l);
+  }
+
   return telecallers.rows.map((tc: any) => {
     const tcCases = casesByTelecaller.get(tc.id) || [];
-    const todayCases = tcCases.filter((c) => c.is_today);
+    const todayCases = todayLogsByTelecaller.get(tc.id) || [];
     const att = attendanceMap.get(tc.id) || null;
 
     return {
@@ -444,29 +471,29 @@ export async function getTelecallerStats() {
       todayPaidCases: todayCases
         .filter((c) => c.status === "Paid")
         .map((c) => ({
-          id: c.id,
+          id: c.case_id,
           caseType: c.case_type,
           customerName: c.customer_name,
           loanNo: c.loan_no,
           appId: c.app_id,
           mobileNo: c.mobile_no,
           pos: c.pos,
-          feedback: c.latest_feedback,
-          feedbackCode: c.feedback_code,
-          feedbackDate: c.feedback_date,
+          feedback: c.outcome,
+          feedbackCode: null,
+          feedbackDate: c.logged_at,
           fosName: c.fos_name,
         })),
       todayCalledCases: todayCases.map((c) => ({
-        id: c.id,
+        id: c.case_id,
         caseType: c.case_type,
         customerName: c.customer_name,
         loanNo: c.loan_no,
         appId: c.app_id,
         mobileNo: c.mobile_no,
         status: c.status,
-        feedback: c.latest_feedback,
-        feedbackCode: c.feedback_code,
-        feedbackDate: c.feedback_date,
+        feedback: c.outcome,
+        feedbackCode: null,
+        feedbackDate: c.logged_at,
         fosName: c.fos_name,
       })),
       attendance: att
@@ -1042,12 +1069,14 @@ export async function insertCallLog(data: {
   caseId: number; caseType: "loan" | "bkt"; agentId: number;
   loanNo: string | null; customerName: string | null;
   outcome: string | null; comments: string | null; ptpDate: string | null; status: string | null;
+  actorId?: number | null; actorRole?: string | null;
 }) {
   await query(
-    `INSERT INTO call_logs (case_id, case_type, agent_id, loan_no, customer_name, outcome, comments, ptp_date, status)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+    `INSERT INTO call_logs (case_id, case_type, agent_id, loan_no, customer_name, outcome, comments, ptp_date, status, actor_id, actor_role)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
     [data.caseId, data.caseType, data.agentId, data.loanNo, data.customerName,
-     data.outcome, data.comments, data.ptpDate || null, data.status]
+     data.outcome, data.comments, data.ptpDate || null, data.status,
+     data.actorId ?? null, data.actorRole ?? null]
   );
 }
 
