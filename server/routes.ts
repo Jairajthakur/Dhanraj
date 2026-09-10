@@ -98,6 +98,8 @@ const customerReceiptUpload = multer({
   }),
   limits: { fileSize: 10 * 1024 * 1024 },
 });
+// In-memory upload just for OCR name detection — nothing is written to disk here
+const receiptNameOcrUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 
 function getISTHour(): { hour: number; todayKey: string } {
   const now = new Date();
@@ -267,6 +269,50 @@ async function extractAmountFromScreenshot(imagePath: string): Promise<number | 
     for (const c of candidates) { const key = c.toFixed(2); freq[key] = (freq[key] || 0) + 1; }
     const sorted = Object.entries(freq).sort((a, b) => b[1] - a[1] || parseFloat(b[0]) - parseFloat(a[0]));
     return parseFloat(sorted[0][0]);
+  } catch { return null; }
+}
+
+// Pull a customer name out of OCR'd receipt text, e.g. HeroFinCorp eCollections
+// receipts which print "Customer Name:" (sometimes wrapping onto the next
+// line as "Customer" / "Name:   Shaikh Anwar Shaikh Lalamiya"). Best-effort —
+// the admin can still edit the result before it's saved.
+function parseCustomerNameFromOcrText(text: string): string | null {
+  const cleanName = (raw: string): string | null => {
+    let v = raw.split(/[-_]{3,}/)[0]; // stop at a dashed divider line
+    v = v.replace(/[^A-Za-z.\s]/g, " ").replace(/\s+/g, " ").trim();
+    if (v.length < 3 || /^\d+$/.test(v)) return null;
+    if (/^(name|customer|customer name)$/i.test(v)) return null;
+    return v;
+  };
+  const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (/customer/i.test(line) && /name/i.test(line)) {
+      const m = line.match(/name\s*[:\-]?\s*(.+)$/i);
+      const val = m ? cleanName(m[1]) : null;
+      if (val) return val;
+      if (i + 1 < lines.length) {
+        const next = lines[i + 1];
+        const m2 = next.match(/name\s*[:\-]?\s*(.+)$/i);
+        const val2 = cleanName(m2 ? m2[1] : next);
+        if (val2) return val2;
+      }
+    }
+    if (/^name\s*[:\-]/i.test(line) && i > 0 && /customer/i.test(lines[i - 1])) {
+      const m = line.match(/name\s*[:\-]?\s*(.+)$/i);
+      const val = cleanName(m ? m[1] : "");
+      if (val) return val;
+    }
+  }
+  return null;
+}
+
+async function extractCustomerNameFromScreenshot(image: Buffer | string): Promise<string | null> {
+  try {
+    let Tesseract: any;
+    try { Tesseract = require("tesseract.js"); } catch { console.warn("[ocr] tesseract.js not installed"); return null; }
+    const { data: { text } } = await Tesseract.recognize(image, "eng", { logger: () => {} });
+    return parseCustomerNameFromOcrText(text);
   } catch { return null; }
 }
 
@@ -1560,11 +1606,29 @@ app.get("/api/admin/fos-depositions", requireAdmin, async (req, res) => {
   // ── Admin: standalone customer receipt image search (upload + search) ──────
   // Separate from fos_depositions — admin manually uploads a receipt image
   // tagged with the customer's name, no link to any deposition record.
+  // Detects the customer name printed on a receipt screenshot via OCR, so the
+  // admin doesn't have to type it in separately — used by the app right after
+  // an image is picked, single or bulk.
+  app.post("/api/admin/customer-receipts/extract-name", requireAdmin, receiptNameOcrUpload.single("image"), async (req, res) => {
+    try {
+      if (!req.file) return res.status(400).json({ message: "No image uploaded" });
+      const name = await extractCustomerNameFromScreenshot(req.file.buffer);
+      res.json({ name: name || null });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
   app.post("/api/admin/customer-receipts", requireAdmin, customerReceiptUpload.single("image"), async (req, res) => {
     try {
       if (!req.file) return res.status(400).json({ message: "No image uploaded" });
-      const customerName = String(req.body.customerName || "").trim();
-      if (!customerName) return res.status(400).json({ message: "customerName is required" });
+      let customerName = String(req.body.customerName || "").trim();
+      if (!customerName) {
+        // No name supplied — read it straight off the receipt screenshot instead
+        // of requiring the admin to type it.
+        customerName = (await extractCustomerNameFromScreenshot(req.file.path)) || "";
+      }
+      if (!customerName) {
+        return res.status(400).json({ message: "Could not read a customer name off this screenshot. Please enter it manually." });
+      }
       const notes = req.body.notes ? String(req.body.notes).trim() : null;
       const baseUrl = `${req.protocol}://${req.get("host")}`;
       const imageUrl = `${baseUrl}/uploads/customer-receipts/${req.file.filename}`;
