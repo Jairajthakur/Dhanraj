@@ -36,6 +36,44 @@ function guessNameFromFilename(filename?: string | null): string {
   return base.replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
+// ─── OCR: read the customer name straight off the receipt screenshot ──────────
+// so the admin doesn't have to type it in separately.
+async function extractNameFromImage(asset: any): Promise<string | null> {
+  try {
+    const base = getApiUrl();
+    const token = Platform.OS !== "web" ? await tokenStore.get() : null;
+    const headers: Record<string, string> = {};
+    if (token) headers["Authorization"] = `Bearer ${token}`;
+
+    const form = new FormData();
+    if (Platform.OS === "web") {
+      if (asset.file instanceof File) {
+        form.append("image", asset.file, asset.fileName || "receipt.jpg");
+      } else if (asset.uri?.startsWith("blob:") || asset.uri?.startsWith("data:")) {
+        const response = await fetch(asset.uri);
+        const blob = await response.blob();
+        form.append("image", blob, asset.fileName || "receipt.jpg");
+      } else {
+        return null;
+      }
+    } else {
+      const ext = asset.uri.split(".").pop()?.toLowerCase() || "jpg";
+      const mimeType = ext === "png" ? "image/png" : "image/jpeg";
+      form.append("image", { uri: asset.uri, name: `receipt.${ext}`, type: mimeType } as any);
+    }
+
+    const res = await fetch(`${base}/api/admin/customer-receipts/extract-name`, {
+      method: "POST", body: form, credentials: "include",
+      headers: Object.keys(headers).length > 0 ? headers : undefined,
+    });
+    if (!res.ok) return null;
+    const j = await res.json().catch(() => ({}));
+    return j.name || null;
+  } catch {
+    return null;
+  }
+}
+
 // ─── Multipart upload — mirrors the pattern used elsewhere in the admin app ────
 async function uploadReceiptImage(asset: any, customerName: string, notes?: string): Promise<any> {
   const base = getApiUrl();
@@ -81,6 +119,32 @@ interface BulkItem {
   name: string;
   status: BulkStatus;
   error?: string;
+  detecting?: boolean;
+  nameEdited?: boolean; // true once the admin has typed over the auto-detected/guessed name
+}
+
+// Runs OCR name-detection on a batch of items with limited concurrency so a
+// 100–200 image bulk pick doesn't hammer the server all at once.
+async function detectNamesForItems(
+  batch: BulkItem[],
+  onDetected: (key: string, name: string) => void,
+  onSettled: (key: string) => void,
+  concurrency = 4
+) {
+  const queue = [...batch];
+  const workers = Array.from({ length: Math.min(concurrency, queue.length) }, async () => {
+    while (queue.length) {
+      const it = queue.shift();
+      if (!it) break;
+      try {
+        const detected = await extractNameFromImage(it.asset);
+        if (detected) onDetected(it.key, detected);
+      } finally {
+        onSettled(it.key);
+      }
+    }
+  });
+  await Promise.all(workers);
 }
 
 // ─── Upload sheet (single image, or bulk 100-200) ──────────────────────────────
@@ -92,6 +156,8 @@ function UploadModal({ visible, onClose, onUploaded }: { visible: boolean; onClo
   const [notes, setNotes] = useState("");
   const [asset, setAsset] = useState<any>(null);
   const [uploading, setUploading] = useState(false);
+  const [detectingName, setDetectingName] = useState(false);
+  const nameEditedRef = useRef(false); // tracks whether the admin typed over the auto-detected name
 
   // bulk-mode state
   const [items, setItems] = useState<BulkItem[]>([]);
@@ -100,13 +166,22 @@ function UploadModal({ visible, onClose, onUploaded }: { visible: boolean; onClo
   const [bulkDone, setBulkDone] = useState(0);
   const cancelRef = useRef(false);
 
-  const resetSingle = () => { setCustomerName(""); setNotes(""); setAsset(null); };
+  const resetSingle = () => { setCustomerName(""); setNotes(""); setAsset(null); setDetectingName(false); nameEditedRef.current = false; };
   const resetBulk = () => { setItems([]); setApplyAllName(""); setBulkDone(0); };
   const resetAll = () => { resetSingle(); resetBulk(); setMode("single"); };
 
   const pickImage = async () => {
     const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], quality: 0.85 });
-    if (!result.canceled && result.assets?.[0]) setAsset(result.assets[0]);
+    if (result.canceled || !result.assets?.[0]) return;
+    const picked = result.assets[0];
+    setAsset(picked);
+    nameEditedRef.current = false;
+    setDetectingName(true);
+    const detected = await extractNameFromImage(picked);
+    setDetectingName(false);
+    // Only auto-fill if the admin hasn't already started typing their own name
+    // in the meantime, and don't stomp on a name they'd already entered.
+    if (detected && !nameEditedRef.current) setCustomerName(detected);
   };
 
   const pickBulkImages = async () => {
@@ -118,14 +193,30 @@ function UploadModal({ visible, onClose, onUploaded }: { visible: boolean; onClo
     const newItems: BulkItem[] = result.assets.map((a, i) => ({
       key: `${Date.now()}-${i}-${Math.random().toString(36).slice(2, 7)}`,
       asset: a,
+      // Filename guess is just a placeholder while OCR runs in the background below.
       name: guessNameFromFilename(a.fileName || a.uri?.split("/").pop()),
       status: "pending",
+      detecting: true,
     }));
     setItems((prev) => [...prev, ...newItems]);
+
+    // Read each receipt's customer name straight off the screenshot via OCR,
+    // so the admin doesn't have to type every name in by hand.
+    detectNamesForItems(
+      newItems,
+      (key, detected) => {
+        setItems((prev) =>
+          prev.map((it) => (it.key === key && !it.nameEdited ? { ...it, name: detected } : it))
+        );
+      },
+      (key) => {
+        setItems((prev) => prev.map((it) => (it.key === key ? { ...it, detecting: false } : it)));
+      }
+    );
   };
 
   const updateItemName = (key: string, name: string) => {
-    setItems((prev) => prev.map((it) => (it.key === key ? { ...it, name } : it)));
+    setItems((prev) => prev.map((it) => (it.key === key ? { ...it, name, nameEdited: true } : it)));
   };
 
   const removeItem = (key: string) => {
@@ -134,7 +225,7 @@ function UploadModal({ visible, onClose, onUploaded }: { visible: boolean; onClo
 
   const applyNameToAll = () => {
     if (!applyAllName.trim()) return;
-    setItems((prev) => prev.map((it) => ({ ...it, name: applyAllName.trim() })));
+    setItems((prev) => prev.map((it) => ({ ...it, name: applyAllName.trim(), nameEdited: true })));
   };
 
   const handleSingleUpload = async () => {
@@ -177,9 +268,14 @@ function UploadModal({ visible, onClose, onUploaded }: { visible: boolean; onClo
   };
 
   const handleBulkUpload = async () => {
+    const stillDetecting = items.filter((it) => it.detecting);
+    if (stillDetecting.length > 0) {
+      Alert.alert("Still reading names", `Still detecting names for ${stillDetecting.length} image(s). Please wait a moment and try again.`);
+      return;
+    }
     const missing = items.filter((it) => !it.name.trim());
     if (missing.length > 0) {
-      Alert.alert("Missing names", `${missing.length} image(s) still need a customer name before uploading.`);
+      Alert.alert("Missing names", `Couldn't read a name off ${missing.length} image(s) — please fill those in before uploading.`);
       return;
     }
     if (items.length === 0) return;
@@ -229,15 +325,23 @@ function UploadModal({ visible, onClose, onUploaded }: { visible: boolean; onClo
 
             {mode === "single" ? (
               <>
-                <Text style={m.label}>Customer name</Text>
-                <TextInput
-                  style={m.input}
-                  placeholder="e.g. Rahul Sharma"
-                  placeholderTextColor={Colors.textMuted}
-                  value={customerName}
-                  onChangeText={setCustomerName}
-                  autoCapitalize="words"
-                />
+                <Text style={m.label}>
+                  Customer name{detectingName ? " — reading from screenshot…" : ""}
+                </Text>
+                <View style={{ position: "relative", justifyContent: "center" }}>
+                  <TextInput
+                    style={m.input}
+                    placeholder={detectingName ? "Detecting name from receipt…" : "e.g. Rahul Sharma"}
+                    placeholderTextColor={Colors.textMuted}
+                    value={customerName}
+                    onChangeText={(t) => { nameEditedRef.current = true; setCustomerName(t); }}
+                    autoCapitalize="words"
+                    editable={!detectingName}
+                  />
+                  {detectingName && (
+                    <ActivityIndicator size="small" color={Colors.primary} style={{ position: "absolute", right: 12 }} />
+                  )}
+                </View>
 
                 <Text style={m.label}>Notes (optional)</Text>
                 <TextInput
@@ -263,7 +367,11 @@ function UploadModal({ visible, onClose, onUploaded }: { visible: boolean; onClo
                   <Pressable style={m.cancelBtn} onPress={closeModal} disabled={uploading}>
                     <Text style={m.cancelText}>Cancel</Text>
                   </Pressable>
-                  <Pressable style={[m.uploadBtn, uploading && { opacity: 0.6 }]} onPress={handleSingleUpload} disabled={uploading}>
+                  <Pressable
+                    style={[m.uploadBtn, (uploading || detectingName) && { opacity: 0.6 }]}
+                    onPress={handleSingleUpload}
+                    disabled={uploading || detectingName}
+                  >
                     {uploading ? <ActivityIndicator color="#fff" /> : <Text style={m.uploadText}>Upload</Text>}
                   </Pressable>
                 </View>
@@ -308,13 +416,14 @@ function UploadModal({ visible, onClose, onUploaded }: { visible: boolean; onClo
                           <Image source={{ uri: item.asset.uri }} style={m.bulkThumb} resizeMode="cover" />
                           <TextInput
                             style={m.bulkNameInput}
-                            placeholder="Customer name"
+                            placeholder={item.detecting ? "Reading name from screenshot…" : "Customer name"}
                             placeholderTextColor={Colors.textMuted}
                             value={item.name}
                             onChangeText={(t) => updateItemName(item.key, t)}
                             autoCapitalize="words"
                             editable={!bulkRunning}
                           />
+                          {item.detecting && <ActivityIndicator size="small" color={Colors.primary} />}
                           {item.status === "uploading" && <ActivityIndicator size="small" color={Colors.primary} />}
                           {item.status === "done" && <Ionicons name="checkmark-circle" size={20} color={Colors.success} />}
                           {item.status === "error" && <Ionicons name="alert-circle" size={20} color={Colors.danger} />}
