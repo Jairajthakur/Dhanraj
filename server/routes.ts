@@ -273,38 +273,77 @@ async function extractAmountFromScreenshot(imagePath: string): Promise<number | 
 }
 
 // Pull a customer name out of OCR'd receipt text, e.g. HeroFinCorp eCollections
-// receipts which print "Customer Name:" (sometimes wrapping onto the next
-// line as "Customer" / "Name:   Shaikh Anwar Shaikh Lalamiya"). Best-effort —
-// the admin can still edit the result before it's saved.
+// receipts which print "Customer Name:". In practice, Tesseract's automatic
+// page-segmentation on this two-column layout (labels on the left, values on
+// the right) often reorders text: it reads every label top-to-bottom, then
+// every value top-to-bottom, so "Customer" / "Name:" can end up nowhere near
+// the actual "Shaikh Anwar Shaikh" / "Lalamiya" text. The one thing that
+// stays reliable across every layout variant we've seen is that the name is
+// the last real text right before the "Resend e-receipt" button (or the end
+// of the receipt, if that button wasn't picked up). So instead of anchoring
+// on the "Customer"/"Name" labels, we anchor on "Resend" and walk *upward*,
+// collecting plausible name-fragment lines until we hit something that is
+// clearly a different field (a label with a colon, a bare number, "Customer
+// ID", a divider, etc.) or the "Customer"/"Name" label itself.
+// Best-effort — the admin can still edit the result before it's saved.
 function parseCustomerNameFromOcrText(text: string): string | null {
-  const cleanName = (raw: string): string | null => {
-    let v = raw.split(/[-_]{3,}/)[0]; // stop at a dashed divider line
-    v = v.replace(/[^A-Za-z.\s]/g, " ").replace(/\s+/g, " ").trim();
-    if (v.length < 3 || /^\d+$/.test(v)) return null;
-    if (/^(name|customer|customer name)$/i.test(v)) return null;
-    return v;
-  };
+  const stripNoise = (raw: string): string =>
+    raw.replace(/[^A-Za-z\s]/g, " ").replace(/\s+/g, " ").trim();
+  const hasRealWord = (v: string): boolean => v.split(" ").some((w) => w.length >= 3);
+  const OTHER_FIELD_KEYWORDS =
+    /resend|receipt|collector|charges|payment|branch|account|mode|amount|words|hero|fincorp|collections/i;
+
   const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
-  for (let i = 0; i < lines.length; i++) {
+
+  let anchor = lines.findIndex((l) => /resend/i.test(l));
+  if (anchor === -1) anchor = lines.length;
+
+  const collected: string[] = [];
+  for (let i = anchor - 1; i >= 0 && collected.length < 4; i--) {
     const line = lines[i];
-    if (/customer/i.test(line) && /name/i.test(line)) {
-      const m = line.match(/name\s*[:\-]?\s*(.+)$/i);
-      const val = m ? cleanName(m[1]) : null;
-      if (val) return val;
-      if (i + 1 < lines.length) {
-        const next = lines[i + 1];
-        const m2 = next.match(/name\s*[:\-]?\s*(.+)$/i);
-        const val2 = cleanName(m2 ? m2[1] : next);
-        if (val2) return val2;
-      }
+
+    // A dashed/underline divider — skip past it before we've collected
+    // anything (it sits between the name and the Resend button), but stop
+    // once we've already gathered some name text (it marks the field's top).
+    if (/^[-_~=+\s]{3,}$/.test(line)) { if (collected.length) break; else continue; }
+
+    // A "Name:" (or garbled "Name...", "Name -----") label line — keep only
+    // whatever value text trails it, then keep walking upward past the label.
+    const nameLabelMatch = line.match(/^name\s*[:.\-_\s]*\s*(.*)$/i);
+    if (nameLabelMatch) {
+      const v = stripNoise(nameLabelMatch[1]);
+      if (v.length >= 2 && hasRealWord(v)) collected.unshift(v);
+      continue;
     }
-    if (/^name\s*[:\-]/i.test(line) && i > 0 && /customer/i.test(lines[i - 1])) {
-      const m = line.match(/name\s*[:\-]?\s*(.+)$/i);
-      const val = cleanName(m ? m[1] : "");
-      if (val) return val;
+
+    // "Customer ID:" is a different field entirely — stop here.
+    if (/customer\s*id/i.test(line)) break;
+
+    // The "Customer" label line itself (optionally with "Name:" and/or part
+    // of the value trailing it on the same line) — this is the top of the
+    // field, so grab any trailing value text and stop.
+    if (/^customer\b/i.test(line)) {
+      let v = line.replace(/^customer\b\s*[:\-]?\s*/i, "");
+      v = v.replace(/^name\b\s*[:.\-_\s]*\s*/i, "");
+      v = stripNoise(v);
+      if (v.length >= 2) collected.unshift(v);
+      break;
     }
+
+    // Any other "Label: value" line, a bare number, or a known field
+    // keyword means we've walked past the name field — stop.
+    if (/:/.test(line)) break;
+    if (/^\d+$/.test(line)) break;
+    if (OTHER_FIELD_KEYWORDS.test(line)) break;
+
+    // Otherwise treat this as a plain name-fragment line and keep collecting.
+    const v = stripNoise(line);
+    if (v.length < 2 || !hasRealWord(v)) break;
+    collected.unshift(v);
   }
-  return null;
+
+  const val = stripNoise(collected.join(" "));
+  return val.length >= 2 ? val : null;
 }
 
 async function extractCustomerNameFromScreenshot(image: Buffer | string): Promise<string | null> {
