@@ -831,6 +831,45 @@ app.use("/api/fos-depositions", (req, res, next) => {
     catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
+  // ── Telecaller: PTP follow-up queue ─────────────────────────────────────────
+  // Every case assigned to this telecaller (via their FOS agents) that is
+  // still marked PTP but whose promised date has already passed or is today —
+  // i.e. broken/due promises that need a follow-up call. Split into "overdue"
+  // and "dueToday" so the UI can show overdue ones first. Covers both
+  // loan_cases and bkt_cases (the main /api/telecaller/cases list currently
+  // only covers loan_cases).
+  app.get("/api/telecaller/ptp-queue", requireTelecaller, async (req, res) => {
+    try {
+      const telecallerId = req.session.agentId!;
+      const result = await storage.query(
+        `SELECT lc.id, lc.customer_name, lc.loan_no, lc.mobile_no, lc.extra_numbers,
+                lc.pos, lc.emi_due, lc.ptp_date, lc.status, lc.feedback_comments,
+                fa.name AS agent_name, fa.id AS agent_id, 'loan' AS case_type
+           FROM loan_cases lc JOIN fos_agents fa ON lc.agent_id = fa.id
+          WHERE fa.assigned_telecaller_id = $1 AND lc.status = 'PTP'
+            AND lc.ptp_date IS NOT NULL AND lc.ptp_date <= CURRENT_DATE
+
+         UNION ALL
+
+         SELECT bc.id, bc.customer_name, bc.loan_no, bc.mobile_no, bc.extra_numbers,
+                bc.pos, bc.emi_due, bc.ptp_date, bc.status, bc.feedback_comments,
+                fa.name AS agent_name, fa.id AS agent_id, 'bkt' AS case_type
+           FROM bkt_cases bc JOIN fos_agents fa ON bc.agent_id = fa.id
+          WHERE fa.assigned_telecaller_id = $1 AND bc.status = 'PTP'
+            AND bc.ptp_date IS NOT NULL AND bc.ptp_date <= CURRENT_DATE
+
+          ORDER BY ptp_date ASC`,
+        [telecallerId]
+      );
+      const overdue: any[] = []; const dueToday: any[] = [];
+      for (const row of result.rows) {
+        const isToday = new Date(row.ptp_date).toISOString().slice(0, 10) === new Date().toISOString().slice(0, 10);
+        (isToday ? dueToday : overdue).push(row);
+      }
+      res.json({ overdue, dueToday });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
   // ── Admin: FOS → Telecaller dedicated assignment ──────────────────────────
   app.get("/api/admin/telecallers", requireAdmin, async (req, res) => {
     try { res.json({ telecallers: await storage.getAllTelecallers() }); }
@@ -2249,6 +2288,99 @@ res.json({
       res.json({
         imported: 0, updated, skipped, agentsCreated: 0,
         total: crRows.length,
+        unmatched: unmatched.slice(0, 30),
+        errors: errors.slice(0, 20),
+      });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // IMPORT NEW NUMBERS (bulk) — Excel with a Loan No / Agreement No column plus
+  // one or more phone/mobile columns. Every recognized number is appended to
+  // the matching case's extra_numbers (same list the "Add New Number" screen
+  // writes to) — the original mobile_no is never touched, and numbers already
+  // saved for that case (as mobile_no or an existing extra number) are skipped.
+  // Never creates new cases — an unmatched Loan No is reported back, not inserted.
+  // ─────────────────────────────────────────────────────────────────────────────
+  const LOAN_NO_HEADER_SET = new Set(["loanno", "loannumber", "loannum", "agreementno", "agreementnumber", "appid", "applicationid", "appno"]);
+  function isPhoneHeader(norm: string): boolean { return /mobile|phone|contact|number/.test(norm); }
+  function cleanPhone(raw: string): string | null {
+    const cleaned = raw.replace(/[^\d+]/g, "");
+    return cleaned.length >= 7 && cleaned.length <= 15 ? cleaned : null;
+  }
+  app.post("/api/admin/import-numbers", requireAdmin, upload.single("file"), async (req, res) => {
+    try {
+      if (!req.file) return res.status(400).json({ message: "No file uploaded" });
+      const numWorkbook = new ExcelJS.Workbook();
+      await numWorkbook.xlsx.load(req.file.buffer);
+
+      // loan_no -> set of newly-seen phone numbers, merged across every sheet
+      const numbersByLoan = new Map<string, Set<string>>();
+
+      for (const worksheet of numWorkbook.worksheets) {
+        const rawRows: any[][] = worksheetToRows(worksheet, true);
+        if (rawRows.length === 0) continue;
+        let headerRowIdx = -1; let loanColIdx = -1; let phoneColIdxs: number[] = [];
+        for (let r = 0; r < Math.min(rawRows.length, 10); r++) {
+          const row = rawRows[r]; let tempLoanIdx = -1; const tempPhoneIdxs: number[] = [];
+          for (let c = 0; c < row.length; c++) {
+            const norm = normalizeHeader(String(row[c] || ""));
+            if (tempLoanIdx === -1 && LOAN_NO_HEADER_SET.has(norm)) tempLoanIdx = c;
+            else if (isPhoneHeader(norm)) tempPhoneIdxs.push(c);
+          }
+          if (tempLoanIdx !== -1 && tempPhoneIdxs.length > 0) { headerRowIdx = r; loanColIdx = tempLoanIdx; phoneColIdxs = tempPhoneIdxs; break; }
+        }
+        if (headerRowIdx === -1) continue; // not a recognizable sheet — skip it
+
+        for (const row of rawRows.slice(headerRowIdx + 1)) {
+          const loanNo = String(row[loanColIdx] ?? "").trim();
+          if (!loanNo || /^(loan|agreement)\s*no\.?$/i.test(loanNo)) continue;
+          const set = numbersByLoan.get(loanNo) ?? new Set<string>();
+          for (const idx of phoneColIdxs) {
+            const raw = row[idx]; if (raw === undefined || raw === null || raw === "") continue;
+            for (const part of String(raw).split(/[,/|]+/)) {
+              const cleaned = cleanPhone(part);
+              if (cleaned) set.add(cleaned);
+            }
+          }
+          if (set.size > 0) numbersByLoan.set(loanNo, set);
+        }
+      }
+
+      if (numbersByLoan.size === 0) return res.status(400).json({ message: "Could not find a header row with a Loan No / Agreement No column plus a phone/mobile column." });
+
+      let updated = 0, skipped = 0, numbersAdded = 0, alreadyPresent = 0;
+      const unmatched: string[] = []; const errors: string[] = [];
+      for (const [loanNo, numberSet] of numbersByLoan) {
+        try {
+          let table: "loan_cases" | "bkt_cases" | null = null; let caseRow: any = null;
+          let found = await storage.query(`SELECT id, mobile_no, extra_numbers FROM loan_cases WHERE loan_no = $1`, [loanNo]);
+          if (found.rows.length > 0) { table = "loan_cases"; caseRow = found.rows[0]; }
+          else {
+            found = await storage.query(`SELECT id, mobile_no, extra_numbers FROM bkt_cases WHERE loan_no = $1`, [loanNo]);
+            if (found.rows.length > 0) { table = "bkt_cases"; caseRow = found.rows[0]; }
+          }
+          if (!table || !caseRow) { skipped++; unmatched.push(loanNo); continue; }
+
+          const existing = new Set<string>([
+            ...String(caseRow.mobile_no || "").split(",").map((s: string) => s.trim()).filter(Boolean),
+            ...(caseRow.extra_numbers || []),
+          ]);
+          const toAdd: string[] = [];
+          for (const num of numberSet) { if (!existing.has(num)) { toAdd.push(num); existing.add(num); } }
+
+          if (toAdd.length > 0) {
+            await storage.query(`UPDATE ${table} SET extra_numbers = COALESCE(extra_numbers, '{}') || $1::text[] WHERE id = $2`, [toAdd, caseRow.id]);
+            updated++; numbersAdded += toAdd.length;
+          } else {
+            alreadyPresent++;
+          }
+        } catch (e: any) { errors.push(`${loanNo}: ${e.message}`); skipped++; }
+      }
+
+      res.json({
+        imported: 0, updated, skipped, agentsCreated: 0,
+        total: numbersByLoan.size, numbersAdded, alreadyPresent,
         unmatched: unmatched.slice(0, 30),
         errors: errors.slice(0, 20),
       });
