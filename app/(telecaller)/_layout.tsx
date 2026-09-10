@@ -38,6 +38,7 @@ export default function TelecallerLayout() {
     >
       <Stack.Screen name="cases" />
       <Stack.Screen name="agent/[id]" options={{ headerShown: false }} />
+      <Stack.Screen name="ptp-queue" options={{ headerShown: false }} />
     </Stack>
   );
 }
