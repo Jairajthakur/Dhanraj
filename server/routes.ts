@@ -1062,6 +1062,7 @@ app.get("/api/companies", requireAuth, async (req, res) => {
               loanNo: cr.loan_no, customerName: cr.customer_name,
               outcome: logOutcome, comments: logComments,
               ptpDate: ptp_date || null, status,
+              actorId: req.session.agentId ?? null, actorRole: req.session.role ?? null,
             });
           }
         }
@@ -1195,7 +1196,7 @@ app.get("/api/broken-ptps", requireAuth, async (req, res) => {
     res.json({ success: true });
   } catch (e: any) { res.status(500).json({ message: e.message }); }
 });
-app.get("/api/today-ptp", requireAuth, async (req, res) => {
+app.get("/api/tomorrow-ptp", requireAuth, async (req, res) => {
   try {
     const agentId = req.session.agentId!;
     const company = (req.query.company as string) || null;
@@ -1208,8 +1209,8 @@ app.get("/api/today-ptp", requireAuth, async (req, res) => {
       FROM loan_cases lc
       WHERE agent_id = $1
         AND (
-          (status = 'PTP' AND ptp_date = CURRENT_DATE)
-          OR (status = 'PTP' AND telecaller_ptp_date = CURRENT_DATE)
+          (status = 'PTP' AND ptp_date = CURRENT_DATE + INTERVAL '1 day')
+          OR (status = 'PTP' AND telecaller_ptp_date = CURRENT_DATE + INTERVAL '1 day')
         )
         ${companyClause}
       UNION ALL
@@ -1218,8 +1219,8 @@ app.get("/api/today-ptp", requireAuth, async (req, res) => {
       FROM bkt_cases
       WHERE agent_id = $1
         AND (
-          (status = 'PTP' AND ptp_date = CURRENT_DATE)
-          OR (status = 'PTP' AND telecaller_ptp_date = CURRENT_DATE)
+          (status = 'PTP' AND ptp_date = CURRENT_DATE + INTERVAL '1 day')
+          OR (status = 'PTP' AND telecaller_ptp_date = CURRENT_DATE + INTERVAL '1 day')
         )
       ORDER BY customer_name
     `, [agentId]);
@@ -1933,6 +1934,7 @@ app.put("/api/fos-depositions/:id/pay-both", requireAuth, screenshotUpload.singl
               loanNo: cr.loan_no, customerName: cr.customer_name,
               outcome: logOutcome, comments: logComments,
               ptpDate: ptp_date || null, status,
+              actorId: req.session.agentId ?? null, actorRole: req.session.role ?? null,
             });
           }
         }
