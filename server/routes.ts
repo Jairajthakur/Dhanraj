@@ -355,6 +355,49 @@ async function extractCustomerNameFromScreenshot(image: Buffer | string): Promis
   } catch { return null; }
 }
 
+// The "Customer ID:" field on the receipt is a plain label + numeric value,
+// e.g. "Customer ID:    72218577" — sometimes the value wraps to the next
+// line if OCR splits it. Anchor on the "customer id" label and grab the
+// first run of digits either trailing on the same line or on the next
+// non-empty line.
+function parseCustomerIdFromOcrText(text: string): string | null {
+  const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  const idx = lines.findIndex((l) => /customer\s*id/i.test(l));
+  if (idx === -1) return null;
+
+  const sameLineMatch = lines[idx].match(/customer\s*id\s*[:.\-_\s]*\s*([0-9][0-9\s]*[0-9]|[0-9])/i);
+  if (sameLineMatch) {
+    const digits = sameLineMatch[1].replace(/\s+/g, "");
+    if (digits.length >= 3) return digits;
+  }
+
+  for (let i = idx + 1; i < Math.min(idx + 3, lines.length); i++) {
+    const m = lines[i].match(/\d{3,}/);
+    if (m) return m[0];
+  }
+  return null;
+}
+
+async function extractCustomerIdFromScreenshot(image: Buffer | string): Promise<string | null> {
+  try {
+    let Tesseract: any;
+    try { Tesseract = require("tesseract.js"); } catch { console.warn("[ocr] tesseract.js not installed"); return null; }
+    const { data: { text } } = await Tesseract.recognize(image, "eng", { logger: () => {} });
+    return parseCustomerIdFromOcrText(text);
+  } catch { return null; }
+}
+
+// Runs OCR once and pulls both fields out of the same pass — used wherever
+// we need name + customer ID together so we don't pay for OCR twice.
+async function extractReceiptFieldsFromScreenshot(image: Buffer | string): Promise<{ name: string | null; customerId: string | null }> {
+  try {
+    let Tesseract: any;
+    try { Tesseract = require("tesseract.js"); } catch { console.warn("[ocr] tesseract.js not installed"); return { name: null, customerId: null }; }
+    const { data: { text } } = await Tesseract.recognize(image, "eng", { logger: () => {} });
+    return { name: parseCustomerNameFromOcrText(text), customerId: parseCustomerIdFromOcrText(text) };
+  } catch { return { name: null, customerId: null }; }
+}
+
 function amountMatches(expected: number, actual: number): boolean { return Math.round(expected) === Math.round(actual); }
 function normalizeHeader(h: string): string { return h.toString().toLowerCase().replace(/[\s_\-\.\/\\+]/g, ""); }
 function parseNum(val: any): string | null {
@@ -816,11 +859,14 @@ try {
     await storage.query(`CREATE TABLE IF NOT EXISTS customer_receipts (
       id SERIAL PRIMARY KEY,
       customer_name TEXT NOT NULL,
+      customer_id TEXT,
       image_url TEXT NOT NULL,
       notes TEXT,
       created_at TIMESTAMP DEFAULT NOW()
     )`);
+    await storage.query(`ALTER TABLE customer_receipts ADD COLUMN IF NOT EXISTS customer_id TEXT`);
     await storage.query(`CREATE INDEX IF NOT EXISTS idx_customer_receipts_name ON customer_receipts (customer_name)`);
+    await storage.query(`CREATE INDEX IF NOT EXISTS idx_customer_receipts_customer_id ON customer_receipts (customer_id)`);
     console.log("[DB] customer_receipts table ready ✅");
   } catch (e: any) { console.error("[DB] customer_receipts error:", e.message); }
 
@@ -1651,8 +1697,8 @@ app.get("/api/admin/fos-depositions", requireAdmin, async (req, res) => {
   app.post("/api/admin/customer-receipts/extract-name", requireAdmin, receiptNameOcrUpload.single("image"), async (req, res) => {
     try {
       if (!req.file) return res.status(400).json({ message: "No image uploaded" });
-      const name = await extractCustomerNameFromScreenshot(req.file.buffer);
-      res.json({ name: name || null });
+      const { name, customerId } = await extractReceiptFieldsFromScreenshot(req.file.buffer);
+      res.json({ name: name || null, customerId: customerId || null });
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
@@ -1660,20 +1706,26 @@ app.get("/api/admin/fos-depositions", requireAdmin, async (req, res) => {
     try {
       if (!req.file) return res.status(400).json({ message: "No image uploaded" });
       let customerName = String(req.body.customerName || "").trim();
-      if (!customerName) {
-        // No name supplied — read it straight off the receipt screenshot instead
-        // of requiring the admin to type it.
-        customerName = (await extractCustomerNameFromScreenshot(req.file.path)) || "";
+      let customerId = String(req.body.customerId || "").trim();
+      if (!customerName || !customerId) {
+        // Missing fields — read them straight off the receipt screenshot instead
+        // of requiring the admin to type them in.
+        const detected = await extractReceiptFieldsFromScreenshot(req.file.path);
+        if (!customerName) customerName = detected.name || "";
+        if (!customerId) customerId = detected.customerId || "";
       }
       if (!customerName) {
         return res.status(400).json({ message: "Could not read a customer name off this screenshot. Please enter it manually." });
+      }
+      if (!customerId) {
+        return res.status(400).json({ message: "Could not read a Customer ID off this screenshot. Please enter it manually." });
       }
       const notes = req.body.notes ? String(req.body.notes).trim() : null;
       const baseUrl = `${req.protocol}://${req.get("host")}`;
       const imageUrl = `${baseUrl}/uploads/customer-receipts/${req.file.filename}`;
       const result = await storage.query(
-        `INSERT INTO customer_receipts (customer_name, image_url, notes) VALUES ($1,$2,$3) RETURNING *`,
-        [customerName, imageUrl, notes]
+        `INSERT INTO customer_receipts (customer_name, customer_id, image_url, notes) VALUES ($1,$2,$3,$4) RETURNING *`,
+        [customerName, customerId, imageUrl, notes]
       );
       res.json({ success: true, receipt: result.rows[0] });
     } catch (e: any) { res.status(500).json({ message: e.message }); }
@@ -1681,11 +1733,11 @@ app.get("/api/admin/fos-depositions", requireAdmin, async (req, res) => {
 
   app.get("/api/admin/customer-receipts/search", requireAdmin, async (req, res) => {
     try {
-      const nameQuery = String(req.query.name || "").trim();
-      if (!nameQuery) return res.json({ receipts: [] });
+      const idQuery = String(req.query.customerId || req.query.name || "").trim();
+      if (!idQuery) return res.json({ receipts: [] });
       const result = await storage.query(
-        `SELECT * FROM customer_receipts WHERE customer_name ILIKE $1 ORDER BY created_at DESC LIMIT 200`,
-        [`%${nameQuery}%`]
+        `SELECT * FROM customer_receipts WHERE customer_id ILIKE $1 ORDER BY created_at DESC LIMIT 200`,
+        [`%${idQuery}%`]
       );
       res.json({ receipts: result.rows });
     } catch (e: any) { res.status(500).json({ message: e.message }); }
