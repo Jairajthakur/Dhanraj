@@ -102,8 +102,6 @@ export default function TelecallerDashboardScreen() {
     queryKey: ["/api/telecaller/ptp-queue"],
     queryFn: () => api.telecaller.getPtpQueue(),
   });
-  const ptpOverdueCount = ptpQueueData?.overdue?.length || 0;
-  const ptpDueTodayCount = ptpQueueData?.dueToday?.length || 0;
   const dueTomorrow: any[] = ptpQueueData?.dueTomorrow || [];
   const ptpDueTomorrowCount = dueTomorrow.length;
 
@@ -180,19 +178,6 @@ export default function TelecallerDashboardScreen() {
         <StatBox label="PTP" count={overallCounts.PTP} color={Colors.statusPTP} active={false} />
         <StatBox label="Paid" count={overallCounts.Paid} color={Colors.statusPaid} active={false} />
       </View>
-
-      {(ptpOverdueCount > 0 || ptpDueTodayCount > 0) && (
-        <Pressable style={styles.ptpBanner} onPress={() => router.push("/(telecaller)/ptp-queue")}>
-          <Ionicons name="alert-circle" size={22} color="#fff" />
-          <Text style={styles.ptpBannerText}>
-            {ptpOverdueCount > 0 ? `${ptpOverdueCount} overdue PTP${ptpOverdueCount !== 1 ? "s" : ""}` : ""}
-            {ptpOverdueCount > 0 && ptpDueTodayCount > 0 ? " · " : ""}
-            {ptpDueTodayCount > 0 ? `${ptpDueTodayCount} due today` : ""}
-            {" — tap to follow up"}
-          </Text>
-          <Ionicons name="chevron-forward" size={18} color="rgba(255,255,255,0.8)" />
-        </Pressable>
-      )}
 
       {ptpDueTomorrowCount > 0 && (
         <Pressable style={styles.ptpBannerTomorrow} onPress={() => router.push("/(telecaller)/ptp-queue")}>
