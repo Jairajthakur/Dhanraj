@@ -39,6 +39,43 @@ function toDisplayDate(val: string | null | undefined): string {
   return "";
 }
 
+// ─── PTP reminder (WhatsApp / SMS) ──────────────────────────────────────────
+function firstPhone(item: any): string | null {
+  const raw = String(item?.mobile_no || "").split(",")[0]?.trim();
+  return raw || null;
+}
+
+// wa.me needs a country code prefix — assume India (+91) for a bare 10-digit
+// number, same assumption the rest of the app makes about local numbers.
+function toWhatsAppNumber(num: string): string {
+  const digits = num.replace(/\D/g, "");
+  if (digits.length === 10) return `91${digits}`;
+  return digits;
+}
+
+export function buildPtpReminderMessage(item: any): string {
+  const name = item?.customer_name || "Customer";
+  const dueAmount = Number(item?.emi_due) > 0 ? Number(item.emi_due) : Number(item?.pos) > 0 ? Number(item.pos) : null;
+  const amountText = dueAmount ? `₹${dueAmount.toLocaleString("en-IN")}` : "the due amount";
+  const dateText = toDisplayDate(item?.ptp_date) || "the promised date";
+  return `Dear ${name}, this is a reminder regarding loan ${item?.loan_no || ""}. You had promised to pay ${amountText} on ${dateText}. Kindly complete the payment at the earliest. Thank you.`;
+}
+
+export function sendPtpWhatsApp(item: any) {
+  const phone = firstPhone(item);
+  if (!phone) { Alert.alert("No number available", "This case has no mobile number saved."); return; }
+  const url = `https://wa.me/${toWhatsAppNumber(phone)}?text=${encodeURIComponent(buildPtpReminderMessage(item))}`;
+  Linking.openURL(url).catch(() => Alert.alert("Error", "Could not open WhatsApp. Is it installed?"));
+}
+
+export function sendPtpSms(item: any) {
+  const phone = firstPhone(item);
+  if (!phone) { Alert.alert("No number available", "This case has no mobile number saved."); return; }
+  const sep = Platform.OS === "ios" ? "&" : "?";
+  const url = `sms:${phone}${sep}body=${encodeURIComponent(buildPtpReminderMessage(item))}`;
+  Linking.openURL(url).catch(() => Alert.alert("Error", "Could not open Messages."));
+}
+
 export const STATUS_COLORS: Record<string, string> = {
   Unpaid: Colors.statusUnpaid,
   PTP: Colors.statusPTP,
@@ -305,6 +342,23 @@ export function CaseDetailModal({ item, onClose, onUpdated }: { item: any; onClo
               <TelecallerStatusBar localItem={localItem} caseType={caseType} busy={statusBusy} onChange={handleStatusChange} />
             </View>
 
+            {/* ── PTP reminder ───────────────────────────────────────────────── */}
+            {localItem.status === "PTP" && localItem.ptp_date ? (
+              <View style={manageStyles.section}>
+                <Text style={manageStyles.sectionTitle}>PTP Reminder · {toDisplayDate(localItem.ptp_date)}</Text>
+                <View style={manageStyles.reminderRow}>
+                  <Pressable style={[manageStyles.reminderBtn, { backgroundColor: "#25D366" }]} onPress={() => sendPtpWhatsApp(localItem)}>
+                    <Ionicons name="logo-whatsapp" size={16} color="#fff" />
+                    <Text style={manageStyles.reminderBtnText}>WhatsApp</Text>
+                  </Pressable>
+                  <Pressable style={[manageStyles.reminderBtn, { backgroundColor: Colors.info }]} onPress={() => sendPtpSms(localItem)}>
+                    <Ionicons name="chatbox-ellipses" size={16} color="#fff" />
+                    <Text style={manageStyles.reminderBtnText}>SMS</Text>
+                  </Pressable>
+                </View>
+              </View>
+            ) : null}
+
             {/* ── Feedback ───────────────────────────────────────────────────── */}
             <View style={manageStyles.section}>
               <Text style={manageStyles.sectionTitle}>Feedback Code</Text>
@@ -445,6 +499,12 @@ const manageStyles = StyleSheet.create({
     width: 40, height: 40, borderRadius: 10, backgroundColor: Colors.primary,
     alignItems: "center", justifyContent: "center",
   },
+  reminderRow: { flexDirection: "row", gap: 8 },
+  reminderBtn: {
+    flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center",
+    paddingVertical: 10, borderRadius: 10, gap: 6,
+  },
+  reminderBtnText: { color: "#fff", fontSize: 12, fontWeight: "700" },
   // Feedback code rows
   fcRow: {
     flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 11, paddingHorizontal: 12,
@@ -571,6 +631,70 @@ export function CaseCard({ item, onDetails }: { item: any; onDetails: (item: any
         </Pressable>
         <Pressable style={[cardStyles.actionBtn, cardStyles.detailBtn]} onPress={() => onDetails(item)}>
           <Ionicons name="eye" size={16} color={Colors.primary} />
+          <Text style={[cardStyles.actionBtnText, { color: Colors.primary }]}>Details</Text>
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
+// ─── PTP queue card — used on the overdue/due-today follow-up screen ────────
+export function PtpQueueCard({ item, overdue, onDetails }: { item: any; overdue: boolean; onDetails: (item: any) => void }) {
+  const call = () => {
+    const phone = String(item.mobile_no || "").split(",")[0]?.trim();
+    if (!phone) { Alert.alert("No number available"); return; }
+    Linking.openURL(`tel:${phone}`);
+  };
+  const daysLate = overdue ? Math.max(1, Math.round((Date.now() - new Date(item.ptp_date).getTime()) / 86400000)) : 0;
+
+  return (
+    <View style={cardStyles.card}>
+      <Pressable style={cardStyles.cardTapArea} onPress={() => onDetails(item)}>
+        <View style={cardStyles.cardHeader}>
+          <View style={cardStyles.cardNameRow}>
+            <Ionicons name="person-circle" size={20} color={Colors.primary} />
+            <Text style={cardStyles.cardName} numberOfLines={1}>{item.customer_name}</Text>
+          </View>
+          <View style={[cardStyles.statusBadge, { backgroundColor: (overdue ? Colors.danger : Colors.statusPTP) + "22" }]}>
+            <Text style={[cardStyles.statusText, { color: overdue ? Colors.danger : Colors.statusPTP }]}>
+              {overdue ? `${daysLate}d overdue` : "Due today"}
+            </Text>
+          </View>
+        </View>
+        {item.agent_name ? (
+          <View style={cardStyles.agentRow}>
+            <Ionicons name="person" size={12} color={Colors.primary} />
+            <Text style={cardStyles.agentName}>{item.agent_name}</Text>
+          </View>
+        ) : null}
+        <View style={cardStyles.infoRow}>
+          <View style={cardStyles.infoCell}>
+            <Text style={cardStyles.infoLabel}>LOAN NO</Text>
+            <Text style={cardStyles.infoValue} numberOfLines={1}>{item.loan_no || "—"}</Text>
+          </View>
+          <View style={cardStyles.infoCell}>
+            <Text style={cardStyles.infoLabel}>PTP DATE</Text>
+            <Text style={[cardStyles.infoValue, { color: overdue ? Colors.danger : Colors.statusPTP }]}>{toDisplayDate(item.ptp_date) || "—"}</Text>
+          </View>
+          <View style={cardStyles.infoCell}>
+            <Text style={cardStyles.infoLabel}>EMI DUE</Text>
+            <Text style={cardStyles.infoValue}>{fmt(item.emi_due || item.pos, "₹")}</Text>
+          </View>
+        </View>
+      </Pressable>
+
+      <View style={cardStyles.cardActions}>
+        <Pressable style={[cardStyles.actionBtn, cardStyles.callBtn]} onPress={call}>
+          <Ionicons name="call" size={15} color="#fff" />
+        </Pressable>
+        <Pressable style={[cardStyles.actionBtn, { backgroundColor: "#25D366" }]} onPress={() => sendPtpWhatsApp(item)}>
+          <Ionicons name="logo-whatsapp" size={15} color="#fff" />
+        </Pressable>
+        <Pressable style={[cardStyles.actionBtn, { backgroundColor: Colors.info }]} onPress={() => sendPtpSms(item)}>
+          <Ionicons name="chatbox-ellipses" size={15} color="#fff" />
+        </Pressable>
+        <Pressable style={[cardStyles.actionBtn, cardStyles.detailBtn, { flex: 1.4 }]} onPress={() => onDetails(item)}>
+          <Ionicons name="eye" size={15} color={Colors.primary} />
           <Text style={[cardStyles.actionBtnText, { color: Colors.primary }]}>Details</Text>
         </Pressable>
       </View>
