@@ -75,6 +75,13 @@ export default function TelecallerDashboardScreen() {
     queryFn: () => api.telecaller.getCases(),
   });
 
+  const { data: ptpQueueData } = useQuery({
+    queryKey: ["/api/telecaller/ptp-queue"],
+    queryFn: () => api.telecaller.getPtpQueue(),
+  });
+  const ptpOverdueCount = ptpQueueData?.overdue?.length || 0;
+  const ptpDueTodayCount = ptpQueueData?.dueToday?.length || 0;
+
   const allCases: any[] = data?.cases || [];
   const overallCounts = useMemo(() => countByStatus(allCases), [allCases]);
 
@@ -144,6 +151,19 @@ export default function TelecallerDashboardScreen() {
         <StatBox label="Paid" count={overallCounts.Paid} color={Colors.statusPaid} active={false} />
       </View>
 
+      {(ptpOverdueCount > 0 || ptpDueTodayCount > 0) && (
+        <Pressable style={styles.ptpBanner} onPress={() => router.push("/(telecaller)/ptp-queue")}>
+          <Ionicons name="alert-circle" size={22} color="#fff" />
+          <Text style={styles.ptpBannerText}>
+            {ptpOverdueCount > 0 ? `${ptpOverdueCount} overdue PTP${ptpOverdueCount !== 1 ? "s" : ""}` : ""}
+            {ptpOverdueCount > 0 && ptpDueTodayCount > 0 ? " · " : ""}
+            {ptpDueTodayCount > 0 ? `${ptpDueTodayCount} due today` : ""}
+            {" — tap to follow up"}
+          </Text>
+          <Ionicons name="chevron-forward" size={18} color="rgba(255,255,255,0.8)" />
+        </Pressable>
+      )}
+
       {isLoading ? (
         <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
           <ActivityIndicator color={Colors.primary} size="large" />
@@ -209,6 +229,11 @@ const styles = StyleSheet.create({
   },
   searchInput: { flex: 1, fontSize: 14, color: Colors.text },
   statsRow: { flexDirection: "row", gap: 8, paddingHorizontal: 12, marginBottom: 4 },
+  ptpBanner: {
+    flexDirection: "row", alignItems: "center", gap: 8, marginHorizontal: 12, marginTop: 10,
+    backgroundColor: Colors.danger, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12,
+  },
+  ptpBannerText: { flex: 1, color: "#fff", fontSize: 13, fontWeight: "700" },
   list: { padding: 12, gap: 12 },
   countText: { fontSize: 13, color: Colors.textSecondary, fontWeight: "600", marginBottom: 4 },
   empty: { flex: 1, justifyContent: "center", alignItems: "center", gap: 12, paddingVertical: 60 },
