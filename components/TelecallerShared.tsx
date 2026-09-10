@@ -40,9 +40,32 @@ function toDisplayDate(val: string | null | undefined): string {
 }
 
 // ─── PTP reminder (WhatsApp / SMS) ──────────────────────────────────────────
+// A case's mobile_no field can hold several comma-separated numbers. When
+// there's more than one, the telecaller is asked which one to use instead of
+// silently always picking the first.
+function getPhoneList(item: any): string[] {
+  return String(item?.mobile_no || "")
+    .split(",")
+    .map((p) => p.trim())
+    .filter(Boolean);
+}
+
 function firstPhone(item: any): string | null {
-  const raw = String(item?.mobile_no || "").split(",")[0]?.trim();
-  return raw || null;
+  return getPhoneList(item)[0] || null;
+}
+
+function chooseNumberThen(item: any, onChosen: (phone: string) => void) {
+  const phones = getPhoneList(item);
+  if (!phones.length) { Alert.alert("No number available", "This case has no mobile number saved."); return; }
+  if (phones.length === 1) { onChosen(phones[0]); return; }
+  Alert.alert(
+    "Choose a number",
+    `${item?.customer_name || "This customer"} has ${phones.length} numbers saved. Which one do you want to send to?`,
+    [
+      ...phones.map((phone) => ({ text: phone, onPress: () => onChosen(phone) })),
+      { text: "Cancel", style: "cancel" as const },
+    ],
+  );
 }
 
 // wa.me needs a country code prefix — assume India (+91) for a bare 10-digit
@@ -62,10 +85,10 @@ export function buildPtpReminderMessage(item: any): string {
 }
 
 export function sendPtpWhatsApp(item: any) {
-  const phone = firstPhone(item);
-  if (!phone) { Alert.alert("No number available", "This case has no mobile number saved."); return; }
-  const url = `https://wa.me/${toWhatsAppNumber(phone)}?text=${encodeURIComponent(buildPtpReminderMessage(item))}`;
-  Linking.openURL(url).catch(() => Alert.alert("Error", "Could not open WhatsApp. Is it installed?"));
+  chooseNumberThen(item, (phone) => {
+    const url = `https://wa.me/${toWhatsAppNumber(phone)}?text=${encodeURIComponent(buildPtpReminderMessage(item))}`;
+    Linking.openURL(url).catch(() => Alert.alert("Error", "Could not open WhatsApp. Is it installed?"));
+  });
 }
 
 // ── Agent PTP summary (WhatsApp to the FOS agent, not the customer) ────────
@@ -92,11 +115,11 @@ export function sendAgentPtpSummaryWhatsApp(items: any[]) {
 }
 
 export function sendPtpSms(item: any) {
-  const phone = firstPhone(item);
-  if (!phone) { Alert.alert("No number available", "This case has no mobile number saved."); return; }
-  const sep = Platform.OS === "ios" ? "&" : "?";
-  const url = `sms:${phone}${sep}body=${encodeURIComponent(buildPtpReminderMessage(item))}`;
-  Linking.openURL(url).catch(() => Alert.alert("Error", "Could not open Messages."));
+  chooseNumberThen(item, (phone) => {
+    const sep = Platform.OS === "ios" ? "&" : "?";
+    const url = `sms:${phone}${sep}body=${encodeURIComponent(buildPtpReminderMessage(item))}`;
+    Linking.openURL(url).catch(() => Alert.alert("Error", "Could not open Messages."));
+  });
 }
 
 // Group a flat list of cases by their FOS agent — used to show PTP follow-ups
