@@ -23,22 +23,10 @@ function resolveImageUrl(url: string | null | undefined): string | null {
   return `${base}${path}`;
 }
 
-// Best-effort guess of a customer name from the original filename, so a bulk
-// batch doesn't start with every field blank. Admin still reviews/edits each
-// one before uploading — this is just a time-saving starting point.
-function guessNameFromFilename(filename?: string | null): string {
-  if (!filename) return "";
-  let base = filename.replace(/\.[a-zA-Z0-9]+$/, "");
-  base = base.replace(/^(IMG|WhatsApp\s*Image|WhatsApp|Screenshot|Photo|PXL|VID)[\s_\-]*/i, "");
-  base = base.replace(/\d{4}[-_]?\d{2}[-_]?\d{2}.*/g, ""); // strip trailing date/time stamps
-  base = base.replace(/[_\-]+/g, " ").replace(/\s+/g, " ").trim();
-  if (!base || /^\d+$/.test(base)) return "";
-  return base.replace(/\b\w/g, (c) => c.toUpperCase());
-}
-
-// ─── OCR: read the customer name + Customer ID + Account No straight off ──────
-// the receipt screenshot so the admin doesn't have to type them in separately.
-async function extractFieldsFromImage(asset: any): Promise<{ name: string | null; customerId: string | null; accountNo: string | null }> {
+// ─── OCR: read the Customer ID + Account No straight off the receipt ──────────
+// screenshot so the admin doesn't have to type them in separately. Customer
+// name is always entered manually — no auto-detection.
+async function extractFieldsFromImage(asset: any): Promise<{ customerId: string | null; accountNo: string | null }> {
   try {
     const base = getApiUrl();
     const token = Platform.OS !== "web" ? await tokenStore.get() : null;
@@ -54,7 +42,7 @@ async function extractFieldsFromImage(asset: any): Promise<{ name: string | null
         const blob = await response.blob();
         form.append("image", blob, asset.fileName || "receipt.jpg");
       } else {
-        return { name: null, customerId: null, accountNo: null };
+        return { customerId: null, accountNo: null };
       }
     } else {
       const ext = asset.uri.split(".").pop()?.toLowerCase() || "jpg";
@@ -66,11 +54,11 @@ async function extractFieldsFromImage(asset: any): Promise<{ name: string | null
       method: "POST", body: form, credentials: "include",
       headers: Object.keys(headers).length > 0 ? headers : undefined,
     });
-    if (!res.ok) return { name: null, customerId: null, accountNo: null };
+    if (!res.ok) return { customerId: null, accountNo: null };
     const j = await res.json().catch(() => ({}));
-    return { name: j.name || null, customerId: j.customerId || null, accountNo: j.accountNo || null };
+    return { customerId: j.customerId || null, accountNo: j.accountNo || null };
   } catch {
-    return { name: null, customerId: null, accountNo: null };
+    return { customerId: null, accountNo: null };
   }
 }
 
@@ -124,17 +112,16 @@ interface BulkItem {
   status: BulkStatus;
   error?: string;
   detecting?: boolean;
-  nameEdited?: boolean; // true once the admin has typed over the auto-detected/guessed name
   customerIdEdited?: boolean; // true once the admin has typed over the auto-detected Customer ID
   accountNoEdited?: boolean; // true once the admin has typed over the auto-detected Account No
 }
 
-// Runs OCR field-detection (name + Customer ID + Account No) on a batch of
-// items with limited concurrency so a 100–200 image bulk pick doesn't hammer
-// the server all at once.
-async function detectNamesForItems(
+// Runs OCR field-detection (Customer ID + Account No) on a batch of items
+// with limited concurrency so a 100–200 image bulk pick doesn't hammer the
+// server all at once. Customer name is always typed in manually.
+async function detectFieldsForItems(
   batch: BulkItem[],
-  onDetected: (key: string, name: string | null, customerId: string | null, accountNo: string | null) => void,
+  onDetected: (key: string, customerId: string | null, accountNo: string | null) => void,
   onSettled: (key: string) => void,
   concurrency = 4
 ) {
@@ -144,8 +131,8 @@ async function detectNamesForItems(
       const it = queue.shift();
       if (!it) break;
       try {
-        const { name, customerId, accountNo } = await extractFieldsFromImage(it.asset);
-        if (name || customerId || accountNo) onDetected(it.key, name, customerId, accountNo);
+        const { customerId, accountNo } = await extractFieldsFromImage(it.asset);
+        if (customerId || accountNo) onDetected(it.key, customerId, accountNo);
       } finally {
         onSettled(it.key);
       }
@@ -165,8 +152,7 @@ function UploadModal({ visible, onClose, onUploaded }: { visible: boolean; onClo
   const [notes, setNotes] = useState("");
   const [asset, setAsset] = useState<any>(null);
   const [uploading, setUploading] = useState(false);
-  const [detectingName, setDetectingName] = useState(false);
-  const nameEditedRef = useRef(false); // tracks whether the admin typed over the auto-detected name
+  const [detectingFields, setDetectingFields] = useState(false);
   const idEditedRef = useRef(false); // tracks whether the admin typed over the auto-detected Customer ID
   const accountNoEditedRef = useRef(false); // tracks whether the admin typed over the auto-detected Account No
 
@@ -177,7 +163,7 @@ function UploadModal({ visible, onClose, onUploaded }: { visible: boolean; onClo
   const [bulkDone, setBulkDone] = useState(0);
   const cancelRef = useRef(false);
 
-  const resetSingle = () => { setCustomerName(""); setCustomerId(""); setAccountNo(""); setNotes(""); setAsset(null); setDetectingName(false); nameEditedRef.current = false; idEditedRef.current = false; accountNoEditedRef.current = false; };
+  const resetSingle = () => { setCustomerName(""); setCustomerId(""); setAccountNo(""); setNotes(""); setAsset(null); setDetectingFields(false); idEditedRef.current = false; accountNoEditedRef.current = false; };
   const resetBulk = () => { setItems([]); setApplyAllName(""); setBulkDone(0); };
   const resetAll = () => { resetSingle(); resetBulk(); setMode("single"); };
 
@@ -186,15 +172,13 @@ function UploadModal({ visible, onClose, onUploaded }: { visible: boolean; onClo
     if (result.canceled || !result.assets?.[0]) return;
     const picked = result.assets[0];
     setAsset(picked);
-    nameEditedRef.current = false;
     idEditedRef.current = false;
     accountNoEditedRef.current = false;
-    setDetectingName(true);
-    const { name, customerId: detectedId, accountNo: detectedAccountNo } = await extractFieldsFromImage(picked);
-    setDetectingName(false);
+    setDetectingFields(true);
+    const { customerId: detectedId, accountNo: detectedAccountNo } = await extractFieldsFromImage(picked);
+    setDetectingFields(false);
     // Only auto-fill if the admin hasn't already started typing their own
     // value in the meantime, and don't stomp on something they'd already entered.
-    if (name && !nameEditedRef.current) setCustomerName(name);
     if (detectedId && !idEditedRef.current) setCustomerId(detectedId);
     if (detectedAccountNo && !accountNoEditedRef.current) setAccountNo(detectedAccountNo);
   };
@@ -208,8 +192,7 @@ function UploadModal({ visible, onClose, onUploaded }: { visible: boolean; onClo
     const newItems: BulkItem[] = result.assets.map((a, i) => ({
       key: `${Date.now()}-${i}-${Math.random().toString(36).slice(2, 7)}`,
       asset: a,
-      // Filename guess is just a placeholder while OCR runs in the background below.
-      name: guessNameFromFilename(a.fileName || a.uri?.split("/").pop()),
+      name: "",
       customerId: "",
       accountNo: "",
       status: "pending",
@@ -217,18 +200,17 @@ function UploadModal({ visible, onClose, onUploaded }: { visible: boolean; onClo
     }));
     setItems((prev) => [...prev, ...newItems]);
 
-    // Read each receipt's customer name + Customer ID + Account No straight
-    // off the screenshot via OCR, so the admin doesn't have to type them in
-    // by hand.
-    detectNamesForItems(
+    // Read each receipt's Customer ID + Account No straight off the
+    // screenshot via OCR, so the admin doesn't have to type them in by
+    // hand. Customer name is always typed in manually for every item.
+    detectFieldsForItems(
       newItems,
-      (key, detectedName, detectedId, detectedAccountNo) => {
+      (key, detectedId, detectedAccountNo) => {
         setItems((prev) =>
           prev.map((it) => {
             if (it.key !== key) return it;
             return {
               ...it,
-              name: detectedName && !it.nameEdited ? detectedName : it.name,
               customerId: detectedId && !it.customerIdEdited ? detectedId : it.customerId,
               accountNo: detectedAccountNo && !it.accountNoEdited ? detectedAccountNo : it.accountNo,
             };
@@ -242,7 +224,7 @@ function UploadModal({ visible, onClose, onUploaded }: { visible: boolean; onClo
   };
 
   const updateItemName = (key: string, name: string) => {
-    setItems((prev) => prev.map((it) => (it.key === key ? { ...it, name, nameEdited: true } : it)));
+    setItems((prev) => prev.map((it) => (it.key === key ? { ...it, name } : it)));
   };
 
   const updateItemCustomerId = (key: string, customerId: string) => {
@@ -259,7 +241,7 @@ function UploadModal({ visible, onClose, onUploaded }: { visible: boolean; onClo
 
   const applyNameToAll = () => {
     if (!applyAllName.trim()) return;
-    setItems((prev) => prev.map((it) => ({ ...it, name: applyAllName.trim(), nameEdited: true })));
+    setItems((prev) => prev.map((it) => ({ ...it, name: applyAllName.trim() })));
   };
 
   const handleSingleUpload = async () => {
@@ -360,51 +342,46 @@ function UploadModal({ visible, onClose, onUploaded }: { visible: boolean; onClo
 
             {mode === "single" ? (
               <>
+                <Text style={m.label}>Customer name</Text>
+                <TextInput
+                  style={m.input}
+                  placeholder="e.g. Rahul Sharma"
+                  placeholderTextColor={Colors.textMuted}
+                  value={customerName}
+                  onChangeText={setCustomerName}
+                  autoCapitalize="words"
+                />
+
                 <Text style={m.label}>
-                  Customer name{detectingName ? " — reading from screenshot…" : ""}
+                  Customer ID{detectingFields ? " — reading from screenshot…" : ""}
                 </Text>
                 <View style={{ position: "relative", justifyContent: "center" }}>
                   <TextInput
                     style={m.input}
-                    placeholder={detectingName ? "Detecting name from receipt…" : "e.g. Rahul Sharma"}
+                    placeholder={detectingFields ? "Detecting Customer ID from receipt…" : "e.g. 72218577"}
                     placeholderTextColor={Colors.textMuted}
-                    value={customerName}
-                    onChangeText={(t) => { nameEditedRef.current = true; setCustomerName(t); }}
-                    autoCapitalize="words"
-                    editable={!detectingName}
+                    value={customerId}
+                    onChangeText={(t) => { idEditedRef.current = true; setCustomerId(t); }}
+                    keyboardType="number-pad"
+                    editable={!detectingFields}
                   />
-                  {detectingName && (
+                  {detectingFields && (
                     <ActivityIndicator size="small" color={Colors.primary} style={{ position: "absolute", right: 12 }} />
                   )}
                 </View>
 
                 <Text style={m.label}>
-                  Customer ID{detectingName ? " — reading from screenshot…" : ""}
+                  Account No (optional){detectingFields ? " — reading from screenshot…" : ""}
                 </Text>
                 <View style={{ position: "relative", justifyContent: "center" }}>
                   <TextInput
                     style={m.input}
-                    placeholder={detectingName ? "Detecting Customer ID from receipt…" : "e.g. 72218577"}
-                    placeholderTextColor={Colors.textMuted}
-                    value={customerId}
-                    onChangeText={(t) => { idEditedRef.current = true; setCustomerId(t); }}
-                    keyboardType="number-pad"
-                    editable={!detectingName}
-                  />
-                </View>
-
-                <Text style={m.label}>
-                  Account No (optional){detectingName ? " — reading from screenshot…" : ""}
-                </Text>
-                <View style={{ position: "relative", justifyContent: "center" }}>
-                  <TextInput
-                    style={m.input}
-                    placeholder={detectingName ? "Detecting Account No from receipt…" : "e.g. NNDTWL0010001686908"}
+                    placeholder={detectingFields ? "Detecting Account No from receipt…" : "e.g. NNDTWL0010001686908"}
                     placeholderTextColor={Colors.textMuted}
                     value={accountNo}
                     onChangeText={(t) => { accountNoEditedRef.current = true; setAccountNo(t); }}
                     autoCapitalize="characters"
-                    editable={!detectingName}
+                    editable={!detectingFields}
                   />
                 </View>
 
@@ -433,9 +410,9 @@ function UploadModal({ visible, onClose, onUploaded }: { visible: boolean; onClo
                     <Text style={m.cancelText}>Cancel</Text>
                   </Pressable>
                   <Pressable
-                    style={[m.uploadBtn, (uploading || detectingName) && { opacity: 0.6 }]}
+                    style={[m.uploadBtn, (uploading || detectingFields) && { opacity: 0.6 }]}
                     onPress={handleSingleUpload}
-                    disabled={uploading || detectingName}
+                    disabled={uploading || detectingFields}
                   >
                     {uploading ? <ActivityIndicator color="#fff" /> : <Text style={m.uploadText}>Upload</Text>}
                   </Pressable>
@@ -482,7 +459,7 @@ function UploadModal({ visible, onClose, onUploaded }: { visible: boolean; onClo
                           <View style={{ flex: 1, gap: 4 }}>
                             <TextInput
                               style={m.bulkNameInput}
-                              placeholder={item.detecting ? "Reading name from screenshot…" : "Customer name"}
+                              placeholder="Customer name"
                               placeholderTextColor={Colors.textMuted}
                               value={item.name}
                               onChangeText={(t) => updateItemName(item.key, t)}
@@ -606,7 +583,7 @@ export default function ReceiptSearchScreen() {
         <Ionicons name="search" size={18} color={Colors.textMuted} />
         <TextInput
           style={s.searchInput}
-          placeholder="Search by name, Customer ID, or Account No (last 8 digits)…"
+          placeholder="Search by Customer ID or Account No (last 8 digits)…"
           placeholderTextColor={Colors.textMuted}
           value={query}
           onChangeText={setQuery}
@@ -646,7 +623,7 @@ export default function ReceiptSearchScreen() {
       {!loading && !searched && query.trim().length === 0 && (
         <View style={s.center}>
           <Ionicons name="search-outline" size={40} color={Colors.textMuted} />
-          <Text style={s.hintText}>Type a customer name, Customer ID, or Account No (even just the last 8 digits) to find their uploaded receipts</Text>
+          <Text style={s.hintText}>Type a Customer ID or Account No (even just the last 8 digits) to find their uploaded receipts</Text>
         </View>
       )}
 
