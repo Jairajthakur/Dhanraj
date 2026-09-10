@@ -833,11 +833,13 @@ app.use("/api/fos-depositions", (req, res, next) => {
 
   // ── Telecaller: PTP follow-up queue ─────────────────────────────────────────
   // Every case assigned to this telecaller (via their FOS agents) that is
-  // still marked PTP but whose promised date has already passed or is today —
-  // i.e. broken/due promises that need a follow-up call. Split into "overdue"
-  // and "dueToday" so the UI can show overdue ones first. Covers both
-  // loan_cases and bkt_cases (the main /api/telecaller/cases list currently
-  // only covers loan_cases).
+  // still marked PTP and whose promised date has already passed, is today, or
+  // is tomorrow — i.e. broken/due promises plus the ones coming up next that
+  // are worth a reminder. Split into "overdue", "dueToday" and "dueTomorrow"
+  // so the UI can show overdue ones first while still letting the telecaller
+  // send a WhatsApp reminder a day ahead. Covers both loan_cases and
+  // bkt_cases (the main /api/telecaller/cases list currently only covers
+  // loan_cases).
   app.get("/api/telecaller/ptp-queue", requireTelecaller, async (req, res) => {
     try {
       const telecallerId = req.session.agentId!;
@@ -847,7 +849,7 @@ app.use("/api/fos-depositions", (req, res, next) => {
                 fa.name AS agent_name, fa.id AS agent_id, 'loan' AS case_type
            FROM loan_cases lc JOIN fos_agents fa ON lc.agent_id = fa.id
           WHERE fa.assigned_telecaller_id = $1 AND lc.status = 'PTP'
-            AND lc.ptp_date IS NOT NULL AND lc.ptp_date <= CURRENT_DATE
+            AND lc.ptp_date IS NOT NULL AND lc.ptp_date <= CURRENT_DATE + INTERVAL '1 day'
 
          UNION ALL
 
@@ -856,17 +858,21 @@ app.use("/api/fos-depositions", (req, res, next) => {
                 fa.name AS agent_name, fa.id AS agent_id, 'bkt' AS case_type
            FROM bkt_cases bc JOIN fos_agents fa ON bc.agent_id = fa.id
           WHERE fa.assigned_telecaller_id = $1 AND bc.status = 'PTP'
-            AND bc.ptp_date IS NOT NULL AND bc.ptp_date <= CURRENT_DATE
+            AND bc.ptp_date IS NOT NULL AND bc.ptp_date <= CURRENT_DATE + INTERVAL '1 day'
 
           ORDER BY ptp_date ASC`,
         [telecallerId]
       );
-      const overdue: any[] = []; const dueToday: any[] = [];
+      const overdue: any[] = []; const dueToday: any[] = []; const dueTomorrow: any[] = [];
+      const todayStr = new Date().toISOString().slice(0, 10);
+      const tomorrowStr = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
       for (const row of result.rows) {
-        const isToday = new Date(row.ptp_date).toISOString().slice(0, 10) === new Date().toISOString().slice(0, 10);
-        (isToday ? dueToday : overdue).push(row);
+        const ptpStr = new Date(row.ptp_date).toISOString().slice(0, 10);
+        if (ptpStr === todayStr) dueToday.push(row);
+        else if (ptpStr === tomorrowStr) dueTomorrow.push(row);
+        else overdue.push(row);
       }
-      res.json({ overdue, dueToday });
+      res.json({ overdue, dueToday, dueTomorrow });
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
