@@ -282,17 +282,25 @@ async function extractAmountFromScreenshot(imagePath: string): Promise<number | 
 // name — this makes us resilient whether or not the OCR pass reordered lines.
 // Best-effort — the admin can still edit the result before it's saved.
 const NAME_DIVIDER_RE = /^[-_~=+\s]{3,}$/;
+// Numbered disclaimer bullets, e.g. "1.Payment allocation is subject to
+// realization." — receipts that include a signature/T&C block between the
+// customer name and the "Resend" button use these, and without an explicit
+// stop we'd otherwise walk straight into them looking for name text.
+const NUMBERED_BULLET_RE = /^\d+[.)]/;
 const OTHER_FIELD_KEYWORDS =
-  /resend|receipt|collector|charges|payment|branch|account|mode|amount|words|hero|fincorp|collections/i;
+  /resend|receipt|collector|charges|payment|branch|account|mode|amount|words|hero|fincorp|collections|signature|allocation|subject|sufficient|ensure|balance|realization|declaration|terms?\b|condition/i;
 
 function parseCustomerNameFromOcrText(text: string): string | null {
   const stripNoise = (raw: string): string =>
     raw.replace(/[^A-Za-z\s]/g, " ").replace(/\s+/g, " ").trim();
   const hasRealWord = (v: string): boolean => v.split(" ").some((w) => w.length >= 3);
+  // Real customer names on these receipts are always "First Last" (or
+  // longer) — requiring at least 2 words filters out stray single-word
+  // fragments (like "realization") that would otherwise pass a looser check.
   const looksLikeName = (v: string | null): v is string => {
     if (!v) return false;
     const words = v.split(" ").filter(Boolean);
-    return words.length >= 1 && hasRealWord(v) && v.length <= 60 && !OTHER_FIELD_KEYWORDS.test(v);
+    return words.length >= 2 && hasRealWord(v) && v.length <= 60 && !OTHER_FIELD_KEYWORDS.test(v);
   };
 
   const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
@@ -311,6 +319,7 @@ function parseCustomerNameFromOcrText(text: string): string | null {
       const line = lines[i];
 
       if (NAME_DIVIDER_RE.test(line)) { if (collected.length) break; else continue; }
+      if (NUMBERED_BULLET_RE.test(line)) break;
 
       const nameLabelMatch = line.match(/^name\s*[:.\-_\s]*\s*(.*)$/i);
       if (nameLabelMatch) {
@@ -361,6 +370,7 @@ function parseCustomerNameFromOcrText(text: string): string | null {
       const line = lines[i];
 
       if (NAME_DIVIDER_RE.test(line)) { if (collected.length) break; else continue; }
+      if (NUMBERED_BULLET_RE.test(line)) break;
 
       const nameLabelMatch = line.match(/^(?:customer\s*)?name\s*[:.\-_\s]*\s*(.*)$/i);
       if (nameLabelMatch) {
@@ -389,10 +399,14 @@ function parseCustomerNameFromOcrText(text: string): string | null {
   };
 
   const a = methodA();
-  if (looksLikeName(a)) return a;
   const b = methodB();
+  // methodB anchors on the reliable "Customer ID" label and scans forward,
+  // so it holds up even when a signature/T&C block sits between the name
+  // and the "Resend" button (which breaks methodA's proximity assumption).
+  // Prefer it when both produce something plausible.
   if (looksLikeName(b)) return b;
-  return a || b || null;
+  if (looksLikeName(a)) return a;
+  return b || a || null;
 }
 
 // A shared, lazily-created Tesseract worker, reused across every OCR call in
