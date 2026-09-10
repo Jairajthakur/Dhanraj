@@ -119,7 +119,6 @@ function CaseListModal({
 
 function TelecallerCard({ tc }: { tc: TelecallerStat }) {
   const [listModal, setListModal] = useState<"paid" | "called" | null>(null);
-  const recoveredPct = tc.totalCases ? Math.round((tc.paidCases / tc.totalCases) * 100) : 0;
 
   return (
     <View style={styles.card}>
@@ -164,32 +163,6 @@ function TelecallerCard({ tc }: { tc: TelecallerStat }) {
         <View style={[styles.todayBox, { borderColor: Colors.statusPTP + "50", backgroundColor: Colors.statusPTP + "0D" }]}>
           <Text style={[styles.todayNum, { color: Colors.statusPTP }]}>{tc.todayPtpCount}</Text>
           <Text style={styles.todayLabel}>PTP Today</Text>
-        </View>
-      </View>
-
-      {/* Overall split */}
-      <View style={styles.progressTrack}>
-        <View style={[styles.progressFill, { width: `${recoveredPct}%` }]} />
-      </View>
-      <View style={styles.overallRow}>
-        <View style={styles.overallItem}>
-          <Text style={[styles.overallNum, { color: Colors.statusUnpaid }]}>{tc.unpaidCases}</Text>
-          <Text style={styles.overallLabel}>Unpaid</Text>
-        </View>
-        <View style={styles.overallDivider} />
-        <View style={styles.overallItem}>
-          <Text style={[styles.overallNum, { color: Colors.statusPTP }]}>{tc.ptpCases}</Text>
-          <Text style={styles.overallLabel}>PTP</Text>
-        </View>
-        <View style={styles.overallDivider} />
-        <View style={styles.overallItem}>
-          <Text style={[styles.overallNum, { color: Colors.statusPaid }]}>{tc.paidCases}</Text>
-          <Text style={styles.overallLabel}>Paid</Text>
-        </View>
-        <View style={styles.overallDivider} />
-        <View style={styles.overallItem}>
-          <Text style={styles.overallNum}>{recoveredPct}%</Text>
-          <Text style={styles.overallLabel}>Recovered</Text>
         </View>
       </View>
 
@@ -313,15 +286,6 @@ const styles = StyleSheet.create({
   todayBox: { flex: 1, borderRadius: 12, borderWidth: 1.5, paddingVertical: 10, alignItems: "center" },
   todayNum: { fontSize: 18, fontWeight: "800", color: Colors.text },
   todayLabel: { fontSize: 10, fontWeight: "700", color: Colors.textSecondary, marginTop: 2, textTransform: "uppercase" },
-
-  progressTrack: { height: 5, borderRadius: 3, backgroundColor: Colors.surfaceAlt, overflow: "hidden" },
-  progressFill: { height: "100%", backgroundColor: Colors.success, borderRadius: 3 },
-
-  overallRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  overallItem: { flex: 1, alignItems: "center" },
-  overallDivider: { width: StyleSheet.hairlineWidth, height: 24, backgroundColor: Colors.border },
-  overallNum: { fontSize: 15, fontWeight: "800", color: Colors.text },
-  overallLabel: { fontSize: 10, color: Colors.textMuted, fontWeight: "600", marginTop: 1 },
 });
 
 const modalStyles = StyleSheet.create({
