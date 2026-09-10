@@ -21,6 +21,7 @@ const ADMIN_MENU = [
   { key: "depositions",  label: "Depositions",       icon: "cash"             as const, screen: "/(admin)/depositions"      },
   { key: "attendance",   label: "Attendance",        icon: "checkmark-circle" as const, screen: "/(admin)/attendance"       },
   { key: "receipts",     label: "Receipt Requests",  icon: "receipt-outline"  as const, screen: "/(admin)/receipt-requests" },
+  { key: "receipt-search", label: "Search Receipts", icon: "search"           as const, screen: "/(admin)/receipt-search"   },
   { key: "field-visits", label: "Field Visits",      icon: "location"         as const, screen: "/(admin)/field-visits"     },
   { key: "call-logs",    label: "Call Logs",          icon: "call"             as const, screen: "/(admin)/call-logs"         },
   { key: "daily-report", label: "Daily Report",      icon: "bar-chart"        as const, screen: "/(admin)/daily-report"     },
@@ -231,6 +232,7 @@ useEffect(() => {
         <Stack.Screen name="attendance" />
         <Stack.Screen name="agent/[id]" options={{ headerLeft: undefined, headerBackTitle: "Back" }} />
         <Stack.Screen name="receipt-requests" options={{ title: "Receipt Requests" }} />
+        <Stack.Screen name="receipt-search" options={{ title: "Search Receipts" }} />
         <Stack.Screen name="field-visits" options={{ title: "Field Visit Tracker" }} />
         <Stack.Screen name="call-logs"    options={{ title: "Call Logs" }} />
         <Stack.Screen name="daily-report" options={{ title: "Daily Report" }} />
