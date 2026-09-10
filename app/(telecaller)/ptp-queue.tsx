@@ -21,13 +21,15 @@ export default function PtpQueueScreen() {
 
   const overdue: any[] = data?.overdue || [];
   const dueToday: any[] = data?.dueToday || [];
+  const dueTomorrow: any[] = data?.dueTomorrow || [];
 
   const sections = useMemo(() => {
     const list = [];
     if (overdue.length) list.push({ title: "Overdue", key: "overdue", data: overdue });
     if (dueToday.length) list.push({ title: "Due Today", key: "dueToday", data: dueToday });
+    if (dueTomorrow.length) list.push({ title: "Due Tomorrow", key: "dueTomorrow", data: dueTomorrow });
     return list;
-  }, [overdue, dueToday]);
+  }, [overdue, dueToday, dueTomorrow]);
 
   return (
     <View style={{ flex: 1, backgroundColor: Colors.background }}>
@@ -37,7 +39,7 @@ export default function PtpQueueScreen() {
         </Pressable>
         <View style={{ flex: 1 }}>
           <Text style={styles.headerTitle}>PTP Follow-ups</Text>
-          <Text style={styles.headerSub}>{overdue.length} overdue · {dueToday.length} due today</Text>
+          <Text style={styles.headerSub}>{overdue.length} overdue · {dueToday.length} due today · {dueTomorrow.length} due tomorrow</Text>
         </View>
       </View>
 
@@ -50,21 +52,24 @@ export default function PtpQueueScreen() {
           sections={sections}
           keyExtractor={(item) => `${item.case_type}-${item.id}`}
           renderItem={({ item, section }) => (
-            <PtpQueueCard item={item} overdue={section.key === "overdue"} onDetails={setSelectedCase} />
+            <PtpQueueCard item={item} variant={section.key as any} onDetails={setSelectedCase} />
           )}
-          renderSectionHeader={({ section }) => (
-            <View style={[styles.sectionHeader, { backgroundColor: (section.key === "overdue" ? Colors.danger : Colors.statusPTP) + "18" }]}>
-              <Text style={[styles.sectionHeaderText, { color: section.key === "overdue" ? Colors.danger : Colors.statusPTP }]}>
-                {section.title} ({section.data.length})
-              </Text>
-            </View>
-          )}
+          renderSectionHeader={({ section }) => {
+            const headerColor = section.key === "overdue" ? Colors.danger : section.key === "dueTomorrow" ? Colors.warning : Colors.statusPTP;
+            return (
+              <View style={[styles.sectionHeader, { backgroundColor: headerColor + "18" }]}>
+                <Text style={[styles.sectionHeaderText, { color: headerColor }]}>
+                  {section.title} ({section.data.length})
+                </Text>
+              </View>
+            );
+          }}
           stickySectionHeadersEnabled
           contentContainerStyle={[styles.list, { paddingBottom: insets.bottom + 24 }, sections.length === 0 && { flex: 1 }]}
           ListEmptyComponent={
             <View style={styles.empty}>
               <Ionicons name="checkmark-done-circle-outline" size={48} color={Colors.textMuted} />
-              <Text style={styles.emptyText}>No broken or due-today PTPs — nice work.</Text>
+              <Text style={styles.emptyText}>No broken, due-today, or due-tomorrow PTPs — nice work.</Text>
             </View>
           }
         />
