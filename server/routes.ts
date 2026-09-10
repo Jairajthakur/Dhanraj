@@ -88,6 +88,17 @@ const screenshotUpload = multer({
   limits: { fileSize: 10 * 1024 * 1024 },
 });
 
+// Standalone customer-receipt image uploads (admin-only, unrelated to fos_depositions)
+const customerReceiptDir = path.join(process.cwd(), "server/uploads/customer-receipts");
+fs.mkdirSync(customerReceiptDir, { recursive: true });
+const customerReceiptUpload = multer({
+  storage: multer.diskStorage({
+    destination: (_req, _file, cb) => cb(null, customerReceiptDir),
+    filename: (_req, file, cb) => cb(null, `${Date.now()}-${Math.random().toString(36).slice(2, 9)}${path.extname(file.originalname)}`),
+  }),
+  limits: { fileSize: 10 * 1024 * 1024 },
+});
+
 function getISTHour(): { hour: number; todayKey: string } {
   const now = new Date();
   const ist = new Date(now.getTime() + 5.5 * 60 * 60 * 1000);
@@ -715,6 +726,19 @@ try {
     )`);
     console.log("[DB] fos_depositions table ready ✅");
   } catch (e: any) { console.error("[DB] fos_depositions error:", e.message); }
+
+  try {
+    await storage.query(`CREATE TABLE IF NOT EXISTS customer_receipts (
+      id SERIAL PRIMARY KEY,
+      customer_name TEXT NOT NULL,
+      image_url TEXT NOT NULL,
+      notes TEXT,
+      created_at TIMESTAMP DEFAULT NOW()
+    )`);
+    await storage.query(`CREATE INDEX IF NOT EXISTS idx_customer_receipts_name ON customer_receipts (customer_name)`);
+    console.log("[DB] customer_receipts table ready ✅");
+  } catch (e: any) { console.error("[DB] customer_receipts error:", e.message); }
+
 
   try {
     const salaryDetailAlters = [
@@ -1533,6 +1557,51 @@ app.get("/api/admin/fos-depositions", requireAdmin, async (req, res) => {
       res.json({ depositions: result.rows });
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
+  // ── Admin: standalone customer receipt image search (upload + search) ──────
+  // Separate from fos_depositions — admin manually uploads a receipt image
+  // tagged with the customer's name, no link to any deposition record.
+  app.post("/api/admin/customer-receipts", requireAdmin, customerReceiptUpload.single("image"), async (req, res) => {
+    try {
+      if (!req.file) return res.status(400).json({ message: "No image uploaded" });
+      const customerName = String(req.body.customerName || "").trim();
+      if (!customerName) return res.status(400).json({ message: "customerName is required" });
+      const notes = req.body.notes ? String(req.body.notes).trim() : null;
+      const baseUrl = `${req.protocol}://${req.get("host")}`;
+      const imageUrl = `${baseUrl}/uploads/customer-receipts/${req.file.filename}`;
+      const result = await storage.query(
+        `INSERT INTO customer_receipts (customer_name, image_url, notes) VALUES ($1,$2,$3) RETURNING *`,
+        [customerName, imageUrl, notes]
+      );
+      res.json({ success: true, receipt: result.rows[0] });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  app.get("/api/admin/customer-receipts/search", requireAdmin, async (req, res) => {
+    try {
+      const nameQuery = String(req.query.name || "").trim();
+      if (!nameQuery) return res.json({ receipts: [] });
+      const result = await storage.query(
+        `SELECT * FROM customer_receipts WHERE customer_name ILIKE $1 ORDER BY created_at DESC LIMIT 200`,
+        [`%${nameQuery}%`]
+      );
+      res.json({ receipts: result.rows });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  app.delete("/api/admin/customer-receipts/:id", requireAdmin, async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const existing = await storage.query(`SELECT image_url FROM customer_receipts WHERE id=$1`, [id]);
+      await storage.query(`DELETE FROM customer_receipts WHERE id=$1`, [id]);
+      const url: string | undefined = existing.rows[0]?.image_url;
+      if (url) {
+        const filename = url.split("/uploads/customer-receipts/")[1];
+        if (filename) { try { fs.unlinkSync(path.join(customerReceiptDir, filename)); } catch {} }
+      }
+      res.json({ success: true });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
   app.post("/api/admin/fos-depositions", requireAdmin, async (req, res) => {
     try {
       const { agentId, loanNo, customerName, bkt, source, amount, cashAmount, onlineAmount, paymentMethod, notes, depositionDate } = req.body;
