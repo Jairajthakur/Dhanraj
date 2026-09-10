@@ -54,13 +54,13 @@ function firstPhone(item: any): string | null {
   return getPhoneList(item)[0] || null;
 }
 
-function chooseNumberThen(item: any, onChosen: (phone: string) => void) {
+function chooseNumberThen(item: any, onChosen: (phone: string) => void, emptyMessage?: string) {
   const phones = getPhoneList(item);
-  if (!phones.length) { Alert.alert("No number available", "This case has no mobile number saved."); return; }
+  if (!phones.length) { Alert.alert("No number available", emptyMessage || "This case has no mobile number saved."); return; }
   if (phones.length === 1) { onChosen(phones[0]); return; }
   Alert.alert(
     "Choose a number",
-    `${item?.customer_name || "This customer"} has ${phones.length} numbers saved. Which one do you want to send to?`,
+    `${item?.customer_name || "This contact"} has ${phones.length} numbers saved. Which one do you want to send to?`,
     [
       ...phones.map((phone) => ({ text: phone, onPress: () => onChosen(phone) })),
       { text: "Cancel", style: "cancel" as const },
@@ -105,13 +105,22 @@ export function buildAgentPtpSummaryMessage(agentName: string, items: any[]): st
   return `Hi ${agentName}, you have ${items.length} PTP${items.length !== 1 ? "s" : ""} due on ${dateText}:\n\n${lines.join("\n")}\n\nPlease follow up with these customers. Thank you.`;
 }
 
-export function sendAgentPtpSummaryWhatsApp(items: any[]) {
+// Rather than guessing which of an agent's saved numbers is right (or even
+// whether it's current), this opens WhatsApp's own chat list with the summary
+// pre-filled so the telecaller picks the agent's chat themselves.
+export async function sendAgentPtpSummaryWhatsApp(items: any[]) {
   if (!items.length) return;
   const agentName = items[0]?.agent_name || "Agent";
-  const agentPhone = firstPhone({ mobile_no: items[0]?.agent_phone });
-  if (!agentPhone) { Alert.alert("No number available", `${agentName} doesn't have a phone number saved.`); return; }
-  const url = `https://wa.me/${toWhatsAppNumber(agentPhone)}?text=${encodeURIComponent(buildAgentPtpSummaryMessage(agentName, items))}`;
-  Linking.openURL(url).catch(() => Alert.alert("Error", "Could not open WhatsApp. Is it installed?"));
+  const msg = buildAgentPtpSummaryMessage(agentName, items);
+  const waUrl = `whatsapp://send?text=${encodeURIComponent(msg)}`;
+  try {
+    const canWA = await Linking.canOpenURL(waUrl);
+    if (canWA) { await Linking.openURL(waUrl); return; }
+  } catch {
+    // fall through to web link below
+  }
+  const webWaUrl = `https://wa.me/?text=${encodeURIComponent(msg)}`;
+  Linking.openURL(webWaUrl).catch(() => Alert.alert("Error", "Could not open WhatsApp. Is it installed?"));
 }
 
 export function sendPtpSms(item: any) {
@@ -168,9 +177,10 @@ export function BulkWhatsAppModal({
   const total = items.length;
   const current = items[index];
   const isDone = index >= total || !current;
-  const currentPhone = !current ? null : mode === "agent"
-    ? firstPhone({ mobile_no: current.items?.[0]?.agent_phone })
-    : firstPhone(current);
+  // Agent sends no longer target a stored number — WhatsApp's own chat list
+  // is used instead, so there's nothing to look up or gate the button on.
+  const currentPhone = !current || mode === "agent" ? null : firstPhone(current);
+  const canSend = !!current && (mode === "agent" || !!currentPhone);
 
   const sendCurrent = () => {
     if (!current) return;
@@ -231,12 +241,14 @@ export function BulkWhatsAppModal({
                     {current.agent_name ? <Text style={bulkStyles.currentMeta}>Agent: {current.agent_name}</Text> : null}
                   </>
                 )}
-                <Text style={bulkStyles.currentMeta}>{currentPhone || "No number saved"}</Text>
+                {mode !== "agent" && (
+                  <Text style={bulkStyles.currentMeta}>{currentPhone || "No number saved"}</Text>
+                )}
               </View>
 
               <Text style={bulkStyles.hint}>
                 {mode === "agent"
-                  ? "Tap \"Send WhatsApp\" to open WhatsApp with this agent's full PTP list pre-filled, then come back here to move on to the next agent."
+                  ? "Tap \"Send WhatsApp\" to open WhatsApp with this agent's full PTP list pre-filled — pick the agent's chat there — then come back here to move on to the next agent."
                   : "Tap \"Send WhatsApp\" to open WhatsApp with the reminder pre-filled for this customer, then come back here to move on to the next one."}
               </Text>
 
@@ -245,9 +257,9 @@ export function BulkWhatsAppModal({
                   <Text style={bulkStyles.skipBtnText}>Skip</Text>
                 </Pressable>
                 <Pressable
-                  style={[bulkStyles.primaryBtn, bulkStyles.whatsAppBtn, !currentPhone && { opacity: 0.5 }]}
+                  style={[bulkStyles.primaryBtn, bulkStyles.whatsAppBtn, !canSend && { opacity: 0.5 }]}
                   onPress={sendCurrent}
-                  disabled={!currentPhone}
+                  disabled={!canSend}
                 >
                   <Ionicons name="logo-whatsapp" size={18} color="#fff" />
                   <Text style={bulkStyles.primaryBtnText}>Send WhatsApp</Text>
