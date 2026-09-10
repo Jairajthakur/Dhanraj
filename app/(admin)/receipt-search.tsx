@@ -23,6 +23,19 @@ function resolveImageUrl(url: string | null | undefined): string | null {
   return `${base}${path}`;
 }
 
+// Best-effort guess of a customer name from the original filename, so a bulk
+// batch doesn't start with every field blank. Admin still reviews/edits each
+// one before uploading — this is just a time-saving starting point.
+function guessNameFromFilename(filename?: string | null): string {
+  if (!filename) return "";
+  let base = filename.replace(/\.[a-zA-Z0-9]+$/, "");
+  base = base.replace(/^(IMG|WhatsApp\s*Image|WhatsApp|Screenshot|Photo|PXL|VID)[\s_\-]*/i, "");
+  base = base.replace(/\d{4}[-_]?\d{2}[-_]?\d{2}.*/g, ""); // strip trailing date/time stamps
+  base = base.replace(/[_\-]+/g, " ").replace(/\s+/g, " ").trim();
+  if (!base || /^\d+$/.test(base)) return "";
+  return base.replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
 // ─── Multipart upload — mirrors the pattern used elsewhere in the admin app ────
 async function uploadReceiptImage(asset: any, customerName: string, notes?: string): Promise<any> {
   const base = getApiUrl();
@@ -61,27 +74,76 @@ async function uploadReceiptImage(asset: any, customerName: string, notes?: stri
   return res.json();
 }
 
-// ─── Upload sheet ───────────────────────────────────────────────────────────────
+type BulkStatus = "pending" | "uploading" | "done" | "error";
+interface BulkItem {
+  key: string;
+  asset: any;
+  name: string;
+  status: BulkStatus;
+  error?: string;
+}
+
+// ─── Upload sheet (single image, or bulk 100-200) ──────────────────────────────
 function UploadModal({ visible, onClose, onUploaded }: { visible: boolean; onClose: () => void; onUploaded: () => void }) {
+  const [mode, setMode] = useState<"single" | "bulk">("single");
+
+  // single-mode state
   const [customerName, setCustomerName] = useState("");
   const [notes, setNotes] = useState("");
   const [asset, setAsset] = useState<any>(null);
   const [uploading, setUploading] = useState(false);
 
-  const reset = () => { setCustomerName(""); setNotes(""); setAsset(null); };
+  // bulk-mode state
+  const [items, setItems] = useState<BulkItem[]>([]);
+  const [applyAllName, setApplyAllName] = useState("");
+  const [bulkRunning, setBulkRunning] = useState(false);
+  const [bulkDone, setBulkDone] = useState(0);
+  const cancelRef = useRef(false);
+
+  const resetSingle = () => { setCustomerName(""); setNotes(""); setAsset(null); };
+  const resetBulk = () => { setItems([]); setApplyAllName(""); setBulkDone(0); };
+  const resetAll = () => { resetSingle(); resetBulk(); setMode("single"); };
 
   const pickImage = async () => {
     const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], quality: 0.85 });
     if (!result.canceled && result.assets?.[0]) setAsset(result.assets[0]);
   };
 
-  const handleUpload = async () => {
+  const pickBulkImages = async () => {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ["images"], quality: 0.85,
+      allowsMultipleSelection: true, selectionLimit: 0,
+    });
+    if (result.canceled || !result.assets?.length) return;
+    const newItems: BulkItem[] = result.assets.map((a, i) => ({
+      key: `${Date.now()}-${i}-${Math.random().toString(36).slice(2, 7)}`,
+      asset: a,
+      name: guessNameFromFilename(a.fileName || a.uri?.split("/").pop()),
+      status: "pending",
+    }));
+    setItems((prev) => [...prev, ...newItems]);
+  };
+
+  const updateItemName = (key: string, name: string) => {
+    setItems((prev) => prev.map((it) => (it.key === key ? { ...it, name } : it)));
+  };
+
+  const removeItem = (key: string) => {
+    setItems((prev) => prev.filter((it) => it.key !== key));
+  };
+
+  const applyNameToAll = () => {
+    if (!applyAllName.trim()) return;
+    setItems((prev) => prev.map((it) => ({ ...it, name: applyAllName.trim() })));
+  };
+
+  const handleSingleUpload = async () => {
     if (!customerName.trim()) { Alert.alert("Missing name", "Enter the customer's name."); return; }
     if (!asset) { Alert.alert("Missing image", "Select a receipt image to upload."); return; }
     setUploading(true);
     try {
       await uploadReceiptImage(asset, customerName.trim(), notes.trim() || undefined);
-      reset();
+      resetSingle();
       onUploaded();
       onClose();
     } catch (e: any) {
@@ -91,52 +153,206 @@ function UploadModal({ visible, onClose, onUploaded }: { visible: boolean; onClo
     }
   };
 
+  const runBatch = async (batch: BulkItem[]) => {
+    cancelRef.current = false;
+    setBulkRunning(true);
+    let ok = 0, failed = 0;
+    for (let i = 0; i < batch.length; i++) {
+      if (cancelRef.current) break;
+      const it = batch[i];
+      setItems((prev) => prev.map((p) => (p.key === it.key ? { ...p, status: "uploading" } : p)));
+      try {
+        await uploadReceiptImage(it.asset, it.name.trim());
+        ok++;
+        setItems((prev) => prev.map((p) => (p.key === it.key ? { ...p, status: "done" } : p)));
+      } catch (e: any) {
+        failed++;
+        setItems((prev) => prev.map((p) => (p.key === it.key ? { ...p, status: "error", error: e.message } : p)));
+      }
+      setBulkDone((d) => d + 1);
+    }
+    setBulkRunning(false);
+    onUploaded();
+    return { ok, failed };
+  };
+
+  const handleBulkUpload = async () => {
+    const missing = items.filter((it) => !it.name.trim());
+    if (missing.length > 0) {
+      Alert.alert("Missing names", `${missing.length} image(s) still need a customer name before uploading.`);
+      return;
+    }
+    if (items.length === 0) return;
+    setBulkDone(0);
+    const { ok, failed } = await runBatch(items);
+    if (failed === 0) {
+      Alert.alert("Done", `Uploaded ${ok} receipt(s).`);
+      resetAll();
+      onClose();
+    } else {
+      Alert.alert("Finished with errors", `${ok} uploaded, ${failed} failed. Retry the failed ones or remove them.`);
+    }
+  };
+
+  const retryFailed = async () => {
+    const failedItems = items.filter((it) => it.status === "error");
+    if (failedItems.length === 0) return;
+    const { ok, failed } = await runBatch(failedItems);
+    if (failed === 0) Alert.alert("Done", `Uploaded ${ok} more receipt(s).`);
+  };
+
+  const closeModal = () => {
+    if (bulkRunning) cancelRef.current = true;
+    resetAll();
+    onClose();
+  };
+
+  const pendingCount = items.filter((it) => it.status === "pending").length;
+  const doneCount = items.filter((it) => it.status === "done").length;
+  const errorCount = items.filter((it) => it.status === "error").length;
+
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={closeModal}>
       <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={{ flex: 1 }}>
         <View style={m.overlay}>
-          <View style={m.sheet}>
+          <View style={[m.sheet, mode === "bulk" && m.sheetTall]}>
             <View style={m.handle} />
-            <Text style={m.title}>Upload Receipt</Text>
 
-            <Text style={m.label}>Customer name</Text>
-            <TextInput
-              style={m.input}
-              placeholder="e.g. Rahul Sharma"
-              placeholderTextColor={Colors.textMuted}
-              value={customerName}
-              onChangeText={setCustomerName}
-              autoCapitalize="words"
-            />
-
-            <Text style={m.label}>Notes (optional)</Text>
-            <TextInput
-              style={m.input}
-              placeholder="Loan no., BKT, or any reference"
-              placeholderTextColor={Colors.textMuted}
-              value={notes}
-              onChangeText={setNotes}
-            />
-
-            <Pressable style={m.pickBtn} onPress={pickImage}>
-              {asset ? (
-                <Image source={{ uri: asset.uri }} style={m.previewImg} resizeMode="cover" />
-              ) : (
-                <>
-                  <Ionicons name="image-outline" size={26} color={Colors.textMuted} />
-                  <Text style={m.pickText}>Tap to select receipt image</Text>
-                </>
-              )}
-            </Pressable>
-
-            <View style={m.actions}>
-              <Pressable style={m.cancelBtn} onPress={() => { reset(); onClose(); }} disabled={uploading}>
-                <Text style={m.cancelText}>Cancel</Text>
+            <View style={m.modeRow}>
+              <Pressable style={[m.modeBtn, mode === "single" && m.modeBtnActive]} onPress={() => setMode("single")}>
+                <Text style={[m.modeBtnText, mode === "single" && m.modeBtnTextActive]}>Single</Text>
               </Pressable>
-              <Pressable style={[m.uploadBtn, uploading && { opacity: 0.6 }]} onPress={handleUpload} disabled={uploading}>
-                {uploading ? <ActivityIndicator color="#fff" /> : <Text style={m.uploadText}>Upload</Text>}
+              <Pressable style={[m.modeBtn, mode === "bulk" && m.modeBtnActive]} onPress={() => setMode("bulk")}>
+                <Text style={[m.modeBtnText, mode === "bulk" && m.modeBtnTextActive]}>Bulk (multiple)</Text>
               </Pressable>
             </View>
+
+            {mode === "single" ? (
+              <>
+                <Text style={m.label}>Customer name</Text>
+                <TextInput
+                  style={m.input}
+                  placeholder="e.g. Rahul Sharma"
+                  placeholderTextColor={Colors.textMuted}
+                  value={customerName}
+                  onChangeText={setCustomerName}
+                  autoCapitalize="words"
+                />
+
+                <Text style={m.label}>Notes (optional)</Text>
+                <TextInput
+                  style={m.input}
+                  placeholder="Loan no., BKT, or any reference"
+                  placeholderTextColor={Colors.textMuted}
+                  value={notes}
+                  onChangeText={setNotes}
+                />
+
+                <Pressable style={m.pickBtn} onPress={pickImage}>
+                  {asset ? (
+                    <Image source={{ uri: asset.uri }} style={m.previewImg} resizeMode="cover" />
+                  ) : (
+                    <>
+                      <Ionicons name="image-outline" size={26} color={Colors.textMuted} />
+                      <Text style={m.pickText}>Tap to select receipt image</Text>
+                    </>
+                  )}
+                </Pressable>
+
+                <View style={m.actions}>
+                  <Pressable style={m.cancelBtn} onPress={closeModal} disabled={uploading}>
+                    <Text style={m.cancelText}>Cancel</Text>
+                  </Pressable>
+                  <Pressable style={[m.uploadBtn, uploading && { opacity: 0.6 }]} onPress={handleSingleUpload} disabled={uploading}>
+                    {uploading ? <ActivityIndicator color="#fff" /> : <Text style={m.uploadText}>Upload</Text>}
+                  </Pressable>
+                </View>
+              </>
+            ) : (
+              <View style={{ flex: 1 }}>
+                <Pressable style={m.bulkPickBtn} onPress={pickBulkImages} disabled={bulkRunning}>
+                  <Ionicons name="images-outline" size={18} color={Colors.primary} />
+                  <Text style={m.bulkPickText}>
+                    {items.length === 0 ? "Select images (100–200 at once)" : `Add more images (${items.length} selected)`}
+                  </Text>
+                </Pressable>
+
+                {items.length > 0 && (
+                  <>
+                    <View style={m.applyAllRow}>
+                      <TextInput
+                        style={[m.input, { flex: 1 }]}
+                        placeholder="Apply one name to all selected"
+                        placeholderTextColor={Colors.textMuted}
+                        value={applyAllName}
+                        onChangeText={setApplyAllName}
+                        autoCapitalize="words"
+                        editable={!bulkRunning}
+                      />
+                      <Pressable style={m.applyAllBtn} onPress={applyNameToAll} disabled={bulkRunning}>
+                        <Text style={m.applyAllBtnText}>Apply</Text>
+                      </Pressable>
+                    </View>
+
+                    <Text style={m.bulkSummary}>
+                      {pendingCount} pending · {doneCount} uploaded{errorCount > 0 ? ` · ${errorCount} failed` : ""}
+                    </Text>
+
+                    <FlatList
+                      data={items}
+                      keyExtractor={(it) => it.key}
+                      style={{ flex: 1 }}
+                      contentContainerStyle={{ gap: 8, paddingBottom: 8 }}
+                      renderItem={({ item }) => (
+                        <View style={m.bulkRow}>
+                          <Image source={{ uri: item.asset.uri }} style={m.bulkThumb} resizeMode="cover" />
+                          <TextInput
+                            style={m.bulkNameInput}
+                            placeholder="Customer name"
+                            placeholderTextColor={Colors.textMuted}
+                            value={item.name}
+                            onChangeText={(t) => updateItemName(item.key, t)}
+                            autoCapitalize="words"
+                            editable={!bulkRunning}
+                          />
+                          {item.status === "uploading" && <ActivityIndicator size="small" color={Colors.primary} />}
+                          {item.status === "done" && <Ionicons name="checkmark-circle" size={20} color={Colors.success} />}
+                          {item.status === "error" && <Ionicons name="alert-circle" size={20} color={Colors.danger} />}
+                          {item.status === "pending" && !bulkRunning && (
+                            <Pressable onPress={() => removeItem(item.key)} hitSlop={8}>
+                              <Ionicons name="close-circle-outline" size={20} color={Colors.textMuted} />
+                            </Pressable>
+                          )}
+                        </View>
+                      )}
+                    />
+                  </>
+                )}
+
+                <View style={m.actions}>
+                  <Pressable style={m.cancelBtn} onPress={closeModal}>
+                    <Text style={m.cancelText}>{bulkRunning ? "Stop" : "Close"}</Text>
+                  </Pressable>
+                  {errorCount > 0 && !bulkRunning ? (
+                    <Pressable style={[m.uploadBtn, { backgroundColor: Colors.warning }]} onPress={retryFailed}>
+                      <Text style={m.uploadText}>Retry Failed</Text>
+                    </Pressable>
+                  ) : (
+                    <Pressable
+                      style={[m.uploadBtn, (bulkRunning || items.length === 0) && { opacity: 0.6 }]}
+                      onPress={handleBulkUpload}
+                      disabled={bulkRunning || items.length === 0}
+                    >
+                      {bulkRunning ? (
+                        <Text style={m.uploadText}>Uploading {bulkDone}/{items.length}…</Text>
+                      ) : (
+                        <Text style={m.uploadText}>Upload All ({items.length})</Text>
+                      )}
+                    </Pressable>
+                  )}
+                </View>
+              </View>
+            )}
           </View>
         </View>
       </KeyboardAvoidingView>
@@ -172,9 +388,6 @@ export default function ReceiptSearchScreen() {
   }, [query]);
 
   const handleDelete = (id: number) => {
-    const confirmed = Platform.OS === "web"
-      ? window.confirm("Delete this receipt?")
-      : undefined;
     const doDelete = async () => {
       try {
         await api.admin.deleteCustomerReceipt(id);
@@ -184,7 +397,7 @@ export default function ReceiptSearchScreen() {
       }
     };
     if (Platform.OS === "web") {
-      if (confirmed) doDelete();
+      if (window.confirm("Delete this receipt?")) doDelete();
     } else {
       Alert.alert("Delete Receipt", "Are you sure you want to delete this receipt?", [
         { text: "Cancel", style: "cancel" },
@@ -310,18 +523,32 @@ const s = StyleSheet.create({
 });
 
 const m = StyleSheet.create({
-  overlay:      { flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "flex-end" },
-  sheet:        { backgroundColor: Colors.surface, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, gap: 10 },
-  handle:       { width: 40, height: 4, borderRadius: 2, backgroundColor: Colors.border, alignSelf: "center", marginBottom: 6 },
-  title:        { fontSize: 17, fontWeight: "800", color: Colors.text, marginBottom: 4 },
-  label:        { fontSize: 12, fontWeight: "700", color: Colors.textSecondary, marginTop: 6 },
-  input:        { backgroundColor: Colors.surfaceAlt, borderRadius: 10, borderWidth: 1, borderColor: Colors.border, paddingHorizontal: 12, paddingVertical: 10, fontSize: 14, color: Colors.text },
-  pickBtn:      { marginTop: 12, height: 140, borderRadius: 12, borderWidth: 1, borderColor: Colors.border, borderStyle: "dashed", alignItems: "center", justifyContent: "center", overflow: "hidden", backgroundColor: Colors.surfaceAlt },
-  pickText:     { fontSize: 12, color: Colors.textMuted, marginTop: 6 },
-  previewImg:   { width: "100%", height: "100%" },
-  actions:      { flexDirection: "row", gap: 10, marginTop: 14 },
-  cancelBtn:    { flex: 1, alignItems: "center", paddingVertical: 13, borderRadius: 12, borderWidth: 1, borderColor: Colors.border },
-  cancelText:   { color: Colors.textSecondary, fontWeight: "700" },
-  uploadBtn:    { flex: 1, alignItems: "center", paddingVertical: 13, borderRadius: 12, backgroundColor: Colors.primary },
-  uploadText:   { color: "#fff", fontWeight: "700" },
+  overlay:        { flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "flex-end" },
+  sheet:          { backgroundColor: Colors.surface, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, gap: 10 },
+  sheetTall:      { height: "88%" },
+  handle:         { width: 40, height: 4, borderRadius: 2, backgroundColor: Colors.border, alignSelf: "center", marginBottom: 4 },
+  modeRow:        { flexDirection: "row", gap: 8, marginBottom: 4 },
+  modeBtn:        { flex: 1, alignItems: "center", paddingVertical: 9, borderRadius: 10, backgroundColor: Colors.surfaceAlt, borderWidth: 1, borderColor: Colors.border },
+  modeBtnActive:  { backgroundColor: Colors.primary, borderColor: Colors.primary },
+  modeBtnText:    { fontSize: 12, fontWeight: "700", color: Colors.textSecondary },
+  modeBtnTextActive: { color: "#fff" },
+  label:          { fontSize: 12, fontWeight: "700", color: Colors.textSecondary, marginTop: 6 },
+  input:          { backgroundColor: Colors.surfaceAlt, borderRadius: 10, borderWidth: 1, borderColor: Colors.border, paddingHorizontal: 12, paddingVertical: 10, fontSize: 14, color: Colors.text },
+  pickBtn:        { marginTop: 12, height: 140, borderRadius: 12, borderWidth: 1, borderColor: Colors.border, borderStyle: "dashed", alignItems: "center", justifyContent: "center", overflow: "hidden", backgroundColor: Colors.surfaceAlt },
+  pickText:       { fontSize: 12, color: Colors.textMuted, marginTop: 6 },
+  previewImg:     { width: "100%", height: "100%" },
+  actions:        { flexDirection: "row", gap: 10, marginTop: 12 },
+  cancelBtn:      { flex: 1, alignItems: "center", paddingVertical: 13, borderRadius: 12, borderWidth: 1, borderColor: Colors.border },
+  cancelText:     { color: Colors.textSecondary, fontWeight: "700" },
+  uploadBtn:      { flex: 1, alignItems: "center", paddingVertical: 13, borderRadius: 12, backgroundColor: Colors.primary },
+  uploadText:     { color: "#fff", fontWeight: "700" },
+  bulkPickBtn:    { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingVertical: 14, borderRadius: 12, borderWidth: 1, borderColor: Colors.primary, borderStyle: "dashed", backgroundColor: Colors.primary + "10" },
+  bulkPickText:   { fontSize: 13, fontWeight: "700", color: Colors.primary },
+  applyAllRow:    { flexDirection: "row", gap: 8, marginTop: 10 },
+  applyAllBtn:    { paddingHorizontal: 16, borderRadius: 10, backgroundColor: Colors.surfaceAlt, borderWidth: 1, borderColor: Colors.border, alignItems: "center", justifyContent: "center" },
+  applyAllBtnText:{ fontSize: 12, fontWeight: "700", color: Colors.text },
+  bulkSummary:    { fontSize: 11, color: Colors.textMuted, marginTop: 8, marginBottom: 4 },
+  bulkRow:        { flexDirection: "row", alignItems: "center", gap: 10, backgroundColor: Colors.surfaceAlt, borderRadius: 10, padding: 8, borderWidth: 1, borderColor: Colors.border },
+  bulkThumb:      { width: 44, height: 44, borderRadius: 8, backgroundColor: Colors.border },
+  bulkNameInput:  { flex: 1, fontSize: 13, color: Colors.text, paddingVertical: 4 },
 });
