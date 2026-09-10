@@ -572,8 +572,9 @@ export const api = {
       apiRequest("PUT", `/api/admin/agents/${agentId}/receipt-permission`, { enabled }),
 
     // ── Customer receipt image search (standalone, admin-uploaded) ────────────
-    searchCustomerReceipts: (customerId: string) =>
-      apiRequest("GET", `/api/admin/customer-receipts/search${qs({ customerId })}`),
+    // Matches against Customer ID or customer name.
+    searchCustomerReceipts: (q: string) =>
+      apiRequest("GET", `/api/admin/customer-receipts/search${qs({ q })}`),
     deleteCustomerReceipt: (id: number) =>
       apiRequest("DELETE", `/api/admin/customer-receipts/${id}`),
     // OCR endpoint path used directly by receipt-search.tsx (needs raw FormData,
