@@ -576,6 +576,9 @@ export const api = {
       apiRequest("GET", `/api/admin/customer-receipts/search${qs({ name })}`),
     deleteCustomerReceipt: (id: number) =>
       apiRequest("DELETE", `/api/admin/customer-receipts/${id}`),
+    // OCR endpoint path used directly by receipt-search.tsx (needs raw FormData,
+    // not the JSON apiRequest helper) — kept here just for reference:
+    // POST /api/admin/customer-receipts/extract-name
 
     // ── Exports ──────────────────────────────────────────────────────────────
     exportPtp: async () => {
