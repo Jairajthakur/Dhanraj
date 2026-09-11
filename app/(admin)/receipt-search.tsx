@@ -24,8 +24,9 @@ function resolveImageUrl(url: string | null | undefined): string | null {
 }
 
 // ─── OCR: read the Customer ID + Account No straight off the receipt ──────────
-// screenshot so the admin doesn't have to type them in separately. Customer
-// name is always entered manually — no auto-detection.
+// screenshot so the admin doesn't have to type them in. Account No is the
+// only field ever shown to the admin; Customer ID is stored silently as a
+// bonus search field when OCR manages to find it.
 async function extractFieldsFromImage(asset: any): Promise<{ customerId: string | null; accountNo: string | null }> {
   try {
     const base = getApiUrl();
@@ -63,16 +64,17 @@ async function extractFieldsFromImage(asset: any): Promise<{ customerId: string 
 }
 
 // ─── Multipart upload — mirrors the pattern used elsewhere in the admin app ────
-async function uploadReceiptImage(asset: any, customerName: string, customerId: string, accountNo?: string, notes?: string): Promise<any> {
+// Account No is the only field the admin fills in. Customer ID is carried
+// along only if OCR happened to detect it, purely as a bonus search field.
+async function uploadReceiptImage(asset: any, accountNo: string, customerId?: string, notes?: string): Promise<any> {
   const base = getApiUrl();
   const token = Platform.OS !== "web" ? await tokenStore.get() : null;
   const headers: Record<string, string> = {};
   if (token) headers["Authorization"] = `Bearer ${token}`;
 
   const form = new FormData();
-  form.append("customerName", customerName);
-  form.append("customerId", customerId);
-  if (accountNo) form.append("accountNo", accountNo);
+  form.append("accountNo", accountNo);
+  if (customerId) form.append("customerId", customerId);
   if (notes) form.append("notes", notes);
 
   if (Platform.OS === "web") {
@@ -106,19 +108,18 @@ type BulkStatus = "pending" | "uploading" | "done" | "error";
 interface BulkItem {
   key: string;
   asset: any;
-  name: string;
-  customerId: string;
-  accountNo: string;
+  customerId: string; // auto-detected only, not shown/edited in the UI
+  accountNo: string; // the only field the admin can see and edit
   status: BulkStatus;
   error?: string;
   detecting?: boolean;
-  customerIdEdited?: boolean; // true once the admin has typed over the auto-detected Customer ID
   accountNoEdited?: boolean; // true once the admin has typed over the auto-detected Account No
 }
 
 // Runs OCR field-detection (Customer ID + Account No) on a batch of items
 // with limited concurrency so a 100–200 image bulk pick doesn't hammer the
-// server all at once. Customer name is always typed in manually.
+// server all at once. Account No is the only field the admin ever has to
+// fill in by hand.
 async function detectFieldsForItems(
   batch: BulkItem[],
   onDetected: (key: string, customerId: string | null, accountNo: string | null) => void,
@@ -145,26 +146,25 @@ async function detectFieldsForItems(
 function UploadModal({ visible, onClose, onUploaded }: { visible: boolean; onClose: () => void; onUploaded: () => void }) {
   const [mode, setMode] = useState<"single" | "bulk">("single");
 
-  // single-mode state
-  const [customerName, setCustomerName] = useState("");
+  // single-mode state — Account No is the only field the admin sees/fills in.
+  // Customer ID is still detected via OCR and sent along silently as a bonus
+  // search field, but it's never shown or editable.
   const [customerId, setCustomerId] = useState("");
   const [accountNo, setAccountNo] = useState("");
   const [notes, setNotes] = useState("");
   const [asset, setAsset] = useState<any>(null);
   const [uploading, setUploading] = useState(false);
   const [detectingFields, setDetectingFields] = useState(false);
-  const idEditedRef = useRef(false); // tracks whether the admin typed over the auto-detected Customer ID
   const accountNoEditedRef = useRef(false); // tracks whether the admin typed over the auto-detected Account No
 
   // bulk-mode state
   const [items, setItems] = useState<BulkItem[]>([]);
-  const [applyAllName, setApplyAllName] = useState("");
   const [bulkRunning, setBulkRunning] = useState(false);
   const [bulkDone, setBulkDone] = useState(0);
   const cancelRef = useRef(false);
 
-  const resetSingle = () => { setCustomerName(""); setCustomerId(""); setAccountNo(""); setNotes(""); setAsset(null); setDetectingFields(false); idEditedRef.current = false; accountNoEditedRef.current = false; };
-  const resetBulk = () => { setItems([]); setApplyAllName(""); setBulkDone(0); };
+  const resetSingle = () => { setCustomerId(""); setAccountNo(""); setNotes(""); setAsset(null); setDetectingFields(false); accountNoEditedRef.current = false; };
+  const resetBulk = () => { setItems([]); setBulkDone(0); };
   const resetAll = () => { resetSingle(); resetBulk(); setMode("single"); };
 
   const pickImage = async () => {
@@ -172,14 +172,13 @@ function UploadModal({ visible, onClose, onUploaded }: { visible: boolean; onClo
     if (result.canceled || !result.assets?.[0]) return;
     const picked = result.assets[0];
     setAsset(picked);
-    idEditedRef.current = false;
     accountNoEditedRef.current = false;
     setDetectingFields(true);
     const { customerId: detectedId, accountNo: detectedAccountNo } = await extractFieldsFromImage(picked);
     setDetectingFields(false);
     // Only auto-fill if the admin hasn't already started typing their own
     // value in the meantime, and don't stomp on something they'd already entered.
-    if (detectedId && !idEditedRef.current) setCustomerId(detectedId);
+    if (detectedId) setCustomerId(detectedId);
     if (detectedAccountNo && !accountNoEditedRef.current) setAccountNo(detectedAccountNo);
   };
 
@@ -192,7 +191,6 @@ function UploadModal({ visible, onClose, onUploaded }: { visible: boolean; onClo
     const newItems: BulkItem[] = result.assets.map((a, i) => ({
       key: `${Date.now()}-${i}-${Math.random().toString(36).slice(2, 7)}`,
       asset: a,
-      name: "",
       customerId: "",
       accountNo: "",
       status: "pending",
@@ -201,8 +199,8 @@ function UploadModal({ visible, onClose, onUploaded }: { visible: boolean; onClo
     setItems((prev) => [...prev, ...newItems]);
 
     // Read each receipt's Customer ID + Account No straight off the
-    // screenshot via OCR, so the admin doesn't have to type them in by
-    // hand. Customer name is always typed in manually for every item.
+    // screenshot via OCR, so the admin doesn't have to type anything in by
+    // hand. Account No is the only field shown/editable per item.
     detectFieldsForItems(
       newItems,
       (key, detectedId, detectedAccountNo) => {
@@ -211,7 +209,7 @@ function UploadModal({ visible, onClose, onUploaded }: { visible: boolean; onClo
             if (it.key !== key) return it;
             return {
               ...it,
-              customerId: detectedId && !it.customerIdEdited ? detectedId : it.customerId,
+              customerId: detectedId || it.customerId,
               accountNo: detectedAccountNo && !it.accountNoEdited ? detectedAccountNo : it.accountNo,
             };
           })
@@ -223,14 +221,6 @@ function UploadModal({ visible, onClose, onUploaded }: { visible: boolean; onClo
     );
   };
 
-  const updateItemName = (key: string, name: string) => {
-    setItems((prev) => prev.map((it) => (it.key === key ? { ...it, name } : it)));
-  };
-
-  const updateItemCustomerId = (key: string, customerId: string) => {
-    setItems((prev) => prev.map((it) => (it.key === key ? { ...it, customerId, customerIdEdited: true } : it)));
-  };
-
   const updateItemAccountNo = (key: string, accountNo: string) => {
     setItems((prev) => prev.map((it) => (it.key === key ? { ...it, accountNo, accountNoEdited: true } : it)));
   };
@@ -239,18 +229,12 @@ function UploadModal({ visible, onClose, onUploaded }: { visible: boolean; onClo
     setItems((prev) => prev.filter((it) => it.key !== key));
   };
 
-  const applyNameToAll = () => {
-    if (!applyAllName.trim()) return;
-    setItems((prev) => prev.map((it) => ({ ...it, name: applyAllName.trim() })));
-  };
-
   const handleSingleUpload = async () => {
-    if (!customerName.trim()) { Alert.alert("Missing name", "Enter the customer's name."); return; }
-    if (!customerId.trim()) { Alert.alert("Missing Customer ID", "Enter the customer's ID."); return; }
+    if (!accountNo.trim()) { Alert.alert("Missing Account No", "Enter the account number."); return; }
     if (!asset) { Alert.alert("Missing image", "Select a receipt image to upload."); return; }
     setUploading(true);
     try {
-      await uploadReceiptImage(asset, customerName.trim(), customerId.trim(), accountNo.trim() || undefined, notes.trim() || undefined);
+      await uploadReceiptImage(asset, accountNo.trim(), customerId.trim() || undefined, notes.trim() || undefined);
       resetSingle();
       onUploaded();
       onClose();
@@ -270,7 +254,7 @@ function UploadModal({ visible, onClose, onUploaded }: { visible: boolean; onClo
       const it = batch[i];
       setItems((prev) => prev.map((p) => (p.key === it.key ? { ...p, status: "uploading" } : p)));
       try {
-        await uploadReceiptImage(it.asset, it.name.trim(), it.customerId.trim(), it.accountNo.trim() || undefined);
+        await uploadReceiptImage(it.asset, it.accountNo.trim(), it.customerId.trim() || undefined);
         ok++;
         setItems((prev) => prev.map((p) => (p.key === it.key ? { ...p, status: "done" } : p)));
       } catch (e: any) {
@@ -287,12 +271,12 @@ function UploadModal({ visible, onClose, onUploaded }: { visible: boolean; onClo
   const handleBulkUpload = async () => {
     const stillDetecting = items.filter((it) => it.detecting);
     if (stillDetecting.length > 0) {
-      Alert.alert("Still reading names", `Still detecting names for ${stillDetecting.length} image(s). Please wait a moment and try again.`);
+      Alert.alert("Still reading receipts", `Still detecting Account No for ${stillDetecting.length} image(s). Please wait a moment and try again.`);
       return;
     }
-    const missing = items.filter((it) => !it.name.trim() || !it.customerId.trim());
+    const missing = items.filter((it) => !it.accountNo.trim());
     if (missing.length > 0) {
-      Alert.alert("Missing details", `Couldn't read a name and/or Customer ID off ${missing.length} image(s) — please fill those in before uploading.`);
+      Alert.alert("Missing Account No", `Couldn't read an Account No off ${missing.length} image(s) — please fill those in before uploading.`);
       return;
     }
     if (items.length === 0) return;
@@ -342,36 +326,8 @@ function UploadModal({ visible, onClose, onUploaded }: { visible: boolean; onClo
 
             {mode === "single" ? (
               <>
-                <Text style={m.label}>Customer name</Text>
-                <TextInput
-                  style={m.input}
-                  placeholder="e.g. Rahul Sharma"
-                  placeholderTextColor={Colors.textMuted}
-                  value={customerName}
-                  onChangeText={setCustomerName}
-                  autoCapitalize="words"
-                />
-
                 <Text style={m.label}>
-                  Customer ID{detectingFields ? " — reading from screenshot…" : ""}
-                </Text>
-                <View style={{ position: "relative", justifyContent: "center" }}>
-                  <TextInput
-                    style={m.input}
-                    placeholder={detectingFields ? "Detecting Customer ID from receipt…" : "e.g. 72218577"}
-                    placeholderTextColor={Colors.textMuted}
-                    value={customerId}
-                    onChangeText={(t) => { idEditedRef.current = true; setCustomerId(t); }}
-                    keyboardType="number-pad"
-                    editable={!detectingFields}
-                  />
-                  {detectingFields && (
-                    <ActivityIndicator size="small" color={Colors.primary} style={{ position: "absolute", right: 12 }} />
-                  )}
-                </View>
-
-                <Text style={m.label}>
-                  Account No (optional){detectingFields ? " — reading from screenshot…" : ""}
+                  Account No{detectingFields ? " — reading from screenshot…" : ""}
                 </Text>
                 <View style={{ position: "relative", justifyContent: "center" }}>
                   <TextInput
@@ -383,6 +339,9 @@ function UploadModal({ visible, onClose, onUploaded }: { visible: boolean; onClo
                     autoCapitalize="characters"
                     editable={!detectingFields}
                   />
+                  {detectingFields && (
+                    <ActivityIndicator size="small" color={Colors.primary} style={{ position: "absolute", right: 12 }} />
+                  )}
                 </View>
 
                 <Text style={m.label}>Notes (optional)</Text>
@@ -429,21 +388,6 @@ function UploadModal({ visible, onClose, onUploaded }: { visible: boolean; onClo
 
                 {items.length > 0 && (
                   <>
-                    <View style={m.applyAllRow}>
-                      <TextInput
-                        style={[m.input, { flex: 1 }]}
-                        placeholder="Apply one name to all selected"
-                        placeholderTextColor={Colors.textMuted}
-                        value={applyAllName}
-                        onChangeText={setApplyAllName}
-                        autoCapitalize="words"
-                        editable={!bulkRunning}
-                      />
-                      <Pressable style={m.applyAllBtn} onPress={applyNameToAll} disabled={bulkRunning}>
-                        <Text style={m.applyAllBtnText}>Apply</Text>
-                      </Pressable>
-                    </View>
-
                     <Text style={m.bulkSummary}>
                       {pendingCount} pending · {doneCount} uploaded{errorCount > 0 ? ` · ${errorCount} failed` : ""}
                     </Text>
@@ -459,25 +403,7 @@ function UploadModal({ visible, onClose, onUploaded }: { visible: boolean; onClo
                           <View style={{ flex: 1, gap: 4 }}>
                             <TextInput
                               style={m.bulkNameInput}
-                              placeholder="Customer name"
-                              placeholderTextColor={Colors.textMuted}
-                              value={item.name}
-                              onChangeText={(t) => updateItemName(item.key, t)}
-                              autoCapitalize="words"
-                              editable={!bulkRunning}
-                            />
-                            <TextInput
-                              style={m.bulkNameInput}
-                              placeholder={item.detecting ? "Reading Customer ID…" : "Customer ID"}
-                              placeholderTextColor={Colors.textMuted}
-                              value={item.customerId}
-                              onChangeText={(t) => updateItemCustomerId(item.key, t)}
-                              keyboardType="number-pad"
-                              editable={!bulkRunning}
-                            />
-                            <TextInput
-                              style={m.bulkNameInput}
-                              placeholder={item.detecting ? "Reading Account No…" : "Account No (optional)"}
+                              placeholder={item.detecting ? "Reading Account No…" : "Account No"}
                               placeholderTextColor={Colors.textMuted}
                               value={item.accountNo}
                               onChangeText={(t) => updateItemAccountNo(item.key, t)}
@@ -640,9 +566,9 @@ export default function ReceiptSearchScreen() {
               </Pressable>
               <View style={s.cardBody}>
                 <View style={{ flex: 1 }}>
-                  <Text style={s.cardName}>{item.customer_name}</Text>
+                  <Text style={s.cardName}>{item.account_no || item.customer_name || "Receipt"}</Text>
+                  {item.customer_name && item.account_no && <Text style={s.cardMeta}>{item.customer_name}</Text>}
                   {item.customer_id && <Text style={s.cardMeta}>Customer ID: {item.customer_id}</Text>}
-                  {item.account_no && <Text style={s.cardMeta}>Account No: {item.account_no}</Text>}
                   {item.notes && <Text style={s.cardMeta}>{item.notes}</Text>}
                   <Text style={s.cardMeta}>{fmtDate(item.created_at)}</Text>
                 </View>
@@ -717,9 +643,6 @@ const m = StyleSheet.create({
   uploadText:     { color: "#fff", fontWeight: "700" },
   bulkPickBtn:    { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingVertical: 14, borderRadius: 12, borderWidth: 1, borderColor: Colors.primary, borderStyle: "dashed", backgroundColor: Colors.primary + "10" },
   bulkPickText:   { fontSize: 13, fontWeight: "700", color: Colors.primary },
-  applyAllRow:    { flexDirection: "row", gap: 8, marginTop: 10 },
-  applyAllBtn:    { paddingHorizontal: 16, borderRadius: 10, backgroundColor: Colors.surfaceAlt, borderWidth: 1, borderColor: Colors.border, alignItems: "center", justifyContent: "center" },
-  applyAllBtnText:{ fontSize: 12, fontWeight: "700", color: Colors.text },
   bulkSummary:    { fontSize: 11, color: Colors.textMuted, marginTop: 8, marginBottom: 4 },
   bulkRow:        { flexDirection: "row", alignItems: "center", gap: 10, backgroundColor: Colors.surfaceAlt, borderRadius: 10, padding: 8, borderWidth: 1, borderColor: Colors.border },
   bulkThumb:      { width: 44, height: 44, borderRadius: 8, backgroundColor: Colors.border },
