@@ -1721,8 +1721,12 @@ app.get("/api/admin/fos-depositions", requireAdmin, async (req, res) => {
         return res.status(400).json({ message: "Could not read an Account No off this screenshot. Please enter it manually." });
       }
       const notes = req.body.notes ? String(req.body.notes).trim() : null;
-      const baseUrl = `${req.protocol}://${req.get("host")}`;
-      const imageUrl = `${baseUrl}/uploads/customer-receipts/${req.file.filename}`;
+      // Store a relative path, not an absolute URL built from req.protocol/host.
+      // Behind a proxy or tunnel, req.protocol/host can be wrong (http vs https,
+      // or an internal hostname the browser can't reach), which silently breaks
+      // the thumbnail later. The client resolves this relative path against its
+      // own known-good API URL at render time instead.
+      const imageUrl = `/uploads/customer-receipts/${req.file.filename}`;
       const result = await storage.query(
         `INSERT INTO customer_receipts (customer_name, customer_id, account_no, image_url, notes) VALUES ($1,$2,$3,$4,$5) RETURNING *`,
         [customerName || null, customerId || null, accountNo, imageUrl, notes]
