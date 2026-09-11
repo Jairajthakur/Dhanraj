@@ -850,7 +850,7 @@ try {
   try {
     await storage.query(`CREATE TABLE IF NOT EXISTS customer_receipts (
       id SERIAL PRIMARY KEY,
-      customer_name TEXT NOT NULL,
+      customer_name TEXT,
       customer_id TEXT,
       account_no TEXT,
       image_url TEXT NOT NULL,
@@ -859,6 +859,9 @@ try {
     )`);
     await storage.query(`ALTER TABLE customer_receipts ADD COLUMN IF NOT EXISTS customer_id TEXT`);
     await storage.query(`ALTER TABLE customer_receipts ADD COLUMN IF NOT EXISTS account_no TEXT`);
+    // Customer name used to be required; the upload flow now only asks for
+    // the Account No, so relax the old NOT NULL constraint on existing DBs.
+    await storage.query(`ALTER TABLE customer_receipts ALTER COLUMN customer_name DROP NOT NULL`);
     await storage.query(`CREATE INDEX IF NOT EXISTS idx_customer_receipts_name ON customer_receipts (customer_name)`);
     await storage.query(`CREATE INDEX IF NOT EXISTS idx_customer_receipts_customer_id ON customer_receipts (customer_id)`);
     await storage.query(`CREATE INDEX IF NOT EXISTS idx_customer_receipts_account_no ON customer_receipts (account_no)`);
@@ -1684,12 +1687,12 @@ app.get("/api/admin/fos-depositions", requireAdmin, async (req, res) => {
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
   // ── Admin: standalone customer receipt image search (upload + search) ──────
-  // Separate from fos_depositions — admin manually uploads a receipt image
-  // tagged with the customer's name, no link to any deposition record.
-  // Detects the Customer ID and Account No printed on a receipt screenshot
-  // via OCR, so the admin doesn't have to type them in separately — used by
-  // the app right after an image is picked, single or bulk. Customer name is
-  // always typed in manually.
+  // Separate from fos_depositions — admin uploads a receipt image tagged
+  // with just the Account No, no link to any deposition record. Detects the
+  // Customer ID and Account No printed on a receipt screenshot via OCR, so
+  // the admin doesn't have to type anything in most of the time — used by
+  // the app right after an image is picked, single or bulk. Account No is
+  // the only field the admin ever has to fill in by hand.
   app.post("/api/admin/customer-receipts/extract-name", requireAdmin, receiptNameOcrUpload.single("image"), async (req, res) => {
     try {
       if (!req.file) return res.status(400).json({ message: "No image uploaded" });
@@ -1701,9 +1704,11 @@ app.get("/api/admin/fos-depositions", requireAdmin, async (req, res) => {
   app.post("/api/admin/customer-receipts", requireAdmin, customerReceiptUpload.single("image"), async (req, res) => {
     try {
       if (!req.file) return res.status(400).json({ message: "No image uploaded" });
-      // Customer name is always entered manually — no OCR auto-detection.
-      const customerName = String(req.body.customerName || "").trim();
-      let customerId = String(req.body.customerId || "").trim();
+      // Account No is the only required field — name and Customer ID are
+      // no longer collected from the admin. Customer ID is still stored
+      // when OCR happens to pick it up, purely as a bonus search field.
+      const customerName = req.body.customerName ? String(req.body.customerName).trim() : "";
+      let customerId = req.body.customerId ? String(req.body.customerId).trim() : "";
       let accountNo = String(req.body.accountNo || "").trim();
       if (!customerId || !accountNo) {
         // Missing fields — read them straight off the receipt screenshot instead
@@ -1712,21 +1717,15 @@ app.get("/api/admin/fos-depositions", requireAdmin, async (req, res) => {
         if (!customerId) customerId = detected.customerId || "";
         if (!accountNo) accountNo = detected.accountNo || "";
       }
-      if (!customerName) {
-        return res.status(400).json({ message: "Enter the customer's name." });
+      if (!accountNo) {
+        return res.status(400).json({ message: "Could not read an Account No off this screenshot. Please enter it manually." });
       }
-      if (!customerId) {
-        return res.status(400).json({ message: "Could not read a Customer ID off this screenshot. Please enter it manually." });
-      }
-      // Account No is a bonus search field, not a hard requirement — some
-      // receipts crop it out or OCR misses it, and the admin can still find
-      // the receipt later by Customer ID.
       const notes = req.body.notes ? String(req.body.notes).trim() : null;
       const baseUrl = `${req.protocol}://${req.get("host")}`;
       const imageUrl = `${baseUrl}/uploads/customer-receipts/${req.file.filename}`;
       const result = await storage.query(
         `INSERT INTO customer_receipts (customer_name, customer_id, account_no, image_url, notes) VALUES ($1,$2,$3,$4,$5) RETURNING *`,
-        [customerName, customerId, accountNo || null, imageUrl, notes]
+        [customerName || null, customerId || null, accountNo, imageUrl, notes]
       );
       res.json({ success: true, receipt: result.rows[0] });
     } catch (e: any) { res.status(500).json({ message: e.message }); }
