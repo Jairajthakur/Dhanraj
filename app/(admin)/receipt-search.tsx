@@ -23,6 +23,21 @@ function resolveImageUrl(url: string | null | undefined): string | null {
   return `${base}${path}`;
 }
 
+// Renders a receipt thumbnail, falling back to a visible "broken image" icon
+// instead of a silent blank box if the URL ever fails to load (e.g. a stale
+// absolute URL from before this was switched to relative paths).
+function ReceiptThumb({ uri, style }: { uri: string; style: any }) {
+  const [failed, setFailed] = useState(false);
+  if (failed) {
+    return (
+      <View style={[style, { alignItems: "center", justifyContent: "center" }]}>
+        <Ionicons name="image-outline" size={22} color={Colors.textMuted} />
+      </View>
+    );
+  }
+  return <Image source={{ uri }} style={style} resizeMode="cover" onError={() => setFailed(true)} />;
+}
+
 // ─── OCR: read the Customer ID + Account No straight off the receipt ──────────
 // screenshot so the admin doesn't have to type them in. Account No is the
 // only field ever shown to the admin; Customer ID is stored silently as a
@@ -562,7 +577,7 @@ export default function ReceiptSearchScreen() {
           return (
             <View style={s.card}>
               <Pressable onPress={() => imgSrc && setViewerUrl(imgSrc)} style={s.cardImgWrap}>
-                {imgSrc && <Image source={{ uri: imgSrc }} style={s.cardImg} resizeMode="cover" />}
+                {imgSrc && <ReceiptThumb uri={imgSrc} style={s.cardImg} />}
               </Pressable>
               <View style={s.cardBody}>
                 <View style={{ flex: 1 }}>
