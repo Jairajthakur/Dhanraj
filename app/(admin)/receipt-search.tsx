@@ -45,7 +45,10 @@ function ReceiptThumb({ uri, style }: { uri: string; style: any }) {
 async function extractFieldsFromImage(asset: any): Promise<{ customerId: string | null; accountNo: string | null }> {
   try {
     const base = getApiUrl();
-    const token = Platform.OS !== "web" ? await tokenStore.get() : null;
+    // Read the token on every platform — on web there's no session cookie
+    // tying the browser to the API (they can be on different origins), so
+    // skipping this here silently 401s the request.
+    const token = await tokenStore.get();
     const headers: Record<string, string> = {};
     if (token) headers["Authorization"] = `Bearer ${token}`;
 
@@ -83,7 +86,8 @@ async function extractFieldsFromImage(asset: any): Promise<{ customerId: string 
 // along only if OCR happened to detect it, purely as a bonus search field.
 async function uploadReceiptImage(asset: any, accountNo: string, customerId?: string, notes?: string): Promise<any> {
   const base = getApiUrl();
-  const token = Platform.OS !== "web" ? await tokenStore.get() : null;
+  // Read the token on every platform — see note in extractFieldsFromImage above.
+  const token = await tokenStore.get();
   const headers: Record<string, string> = {};
   if (token) headers["Authorization"] = `Bearer ${token}`;
 
