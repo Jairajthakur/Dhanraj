@@ -18,7 +18,12 @@ interface Agent {
 
 async function authedFetch(path: string, init: RequestInit = {}) {
   const base = getApiUrl().replace(/\/+$/, "");
-  const token = Platform.OS !== "web" ? await tokenStore.get() : null;
+  // Always read the token regardless of platform — web has no session cookie
+  // here (API and web app can be on different origins), so it needs the
+  // Bearer token from localStorage just like native reads it from
+  // AsyncStorage. Skipping this on web is what silently breaks admin-only
+  // fetches in the browser (401 with no visible error).
+  const token = await tokenStore.get();
   const headers: Record<string, string> = { "Content-Type": "application/json", ...(init.headers as any) };
   if (token) headers["Authorization"] = `Bearer ${token}`;
   const res = await fetch(`${base}${path}`, { ...init, headers });
