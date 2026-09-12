@@ -95,6 +95,17 @@ module.exports = ({ config }) => {
           smallIcons: ["./assets/images/dhanraj-logo.png"],
         },
       ],
+      [
+        // Bundles the custom "spoken word" alert sound into the native
+        // Android (res/raw) and iOS app bundles at prebuild time. The
+        // "ptp_alerts" channel (lib/notificationChannels.ts) references this
+        // same filename (without extension) so PTP break alerts play a
+        // voice saying the alert instead of a plain beep/default tone.
+        "expo-notifications",
+        {
+          sounds: ["./assets/sounds/ptp_voice_alert.wav"],
+        },
+      ],
     ],
     experiments: {
       typedRoutes: true,
