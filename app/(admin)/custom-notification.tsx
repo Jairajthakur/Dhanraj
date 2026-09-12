@@ -9,6 +9,32 @@ import Colors from "@/constants/colors";
 import { getApiUrl } from "@/lib/query-client";
 import { tokenStore } from "@/lib/api";
 
+// react-native-web's Alert.alert doesn't reliably render a visible popup in
+// the browser, especially for multi-button confirms — clicking Send would
+// silently do nothing from the user's perspective even though the request
+// went through. These fall back to the browser's native alert/confirm on
+// web so there's always a visible result, and use the normal native Alert
+// everywhere else.
+function notify(title: string, message: string) {
+  if (Platform.OS === "web") {
+    window.alert(`${title}\n\n${message}`);
+  } else {
+    Alert.alert(title, message);
+  }
+}
+
+function confirmAsync(title: string, message: string): Promise<boolean> {
+  if (Platform.OS === "web") {
+    return Promise.resolve(window.confirm(`${title}\n\n${message}`));
+  }
+  return new Promise((resolve) => {
+    Alert.alert(title, message, [
+      { text: "Cancel", style: "cancel", onPress: () => resolve(false) },
+      { text: "Send", style: "destructive", onPress: () => resolve(true) },
+    ]);
+  });
+}
+
 interface Agent {
   id: number;
   name: string;
@@ -54,7 +80,7 @@ export default function CustomNotificationScreen() {
         const data = await authedFetch("/api/admin/agents");
         setAgents(data.agents || []);
       } catch (e: any) {
-        Alert.alert("Failed to load agents", e.message || "Something went wrong");
+        notify("Failed to load agents", e.message || "Something went wrong");
       } finally {
         setLoadingAgents(false);
       }
@@ -86,9 +112,9 @@ export default function CustomNotificationScreen() {
   const clearSelection = () => setSelectedIds(new Set());
 
   const handleSend = async () => {
-    if (selectedIds.size === 0) { Alert.alert("No agents selected", "Pick at least one agent to notify."); return; }
-    if (!title.trim()) { Alert.alert("Missing title", "Enter a notification title."); return; }
-    if (!message.trim()) { Alert.alert("Missing message", "Enter a notification message."); return; }
+    if (selectedIds.size === 0) { notify("No agents selected", "Pick at least one agent to notify."); return; }
+    if (!title.trim()) { notify("Missing title", "Enter a notification title."); return; }
+    if (!message.trim()) { notify("Missing message", "Enter a notification message."); return; }
 
     const doSend = async () => {
       setSending(true);
@@ -103,27 +129,24 @@ export default function CustomNotificationScreen() {
           }),
         });
         const missingNote = result.missingDevices > 0 ? ` (${result.missingDevices} selected agent(s) have no registered device and were skipped.)` : "";
-        Alert.alert("Sent", `Delivered to ${result.sent}/${result.total} device(s).${missingNote}`);
+        notify("Sent", `Delivered to ${result.sent}/${result.total} device(s).${missingNote}`);
         setTitle("");
         setMessage("");
         setVoiceAlert(false);
         clearSelection();
       } catch (e: any) {
-        Alert.alert("Failed to send", e.message || "Something went wrong");
+        notify("Failed to send", e.message || "Something went wrong");
       } finally {
         setSending(false);
       }
     };
 
     if (voiceAlert) {
-      Alert.alert(
+      const confirmed = await confirmAsync(
         "Send as voice alert?",
-        `This will play a loud, spoken-word alert on ${selectedIds.size} agent's device(s), like the PTP break alert. Continue?`,
-        [
-          { text: "Cancel", style: "cancel" },
-          { text: "Send", style: "destructive", onPress: doSend },
-        ]
+        `This will play a loud, spoken-word alert on ${selectedIds.size} agent's device(s), like the PTP break alert. Continue?`
       );
+      if (confirmed) doSend();
     } else {
       doSend();
     }
