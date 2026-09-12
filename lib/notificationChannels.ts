@@ -1,12 +1,17 @@
 // lib/notificationChannels.ts
 //
 // Registers a custom Android notification channel with IMPORTANCE_MAX so that
-// PTP break alerts play a loud sound and vibrate like PhonePe/BharatPe.
+// PTP break alerts play a loud, spoken-word alert and vibrate like
+// PhonePe/BharatPe.
 //
 // On Android 8+, per-notification priority is IGNORED — sound and vibration
-// are controlled entirely by the channel's importance level set at registration
-// time.  The OneSignal SDK's default channel uses IMPORTANCE_DEFAULT (silent).
-// This creates a fresh "ptp_alerts" channel at MAX importance instead.
+// are controlled entirely by the channel's importance level (and sound) set
+// at registration time. The OneSignal SDK's default channel uses
+// IMPORTANCE_DEFAULT (silent). This creates a fresh "ptp_alerts" channel at
+// MAX importance instead, with a custom voice-alert sound bundled via the
+// expo-notifications config plugin (see app.config.js "sounds") from
+// assets/sounds/ptp_voice_alert.wav — referenced below WITHOUT the file
+// extension, which is how Android looks up the res/raw resource.
 //
 // expo-notifications (v0.32.16) is present in node_modules as a transitive
 // dependency of expo SDK 54, so no extra install is needed.
@@ -27,7 +32,9 @@ export function registerNotificationChannels(): void {
       importance:           Notifications.AndroidImportance.MAX,   // heads-up + loud
       vibrationPattern:     [0, 500, 200, 500],                    // like PhonePe
       enableVibrate:        true,
-      sound:                "default",
+      // Filename WITHOUT extension — must match the bundled res/raw resource
+      // name produced by the expo-notifications "sounds" config plugin.
+      sound:                "ptp_voice_alert",
       showBadge:            true,
       // Show on lock screen even when phone is locked
       lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
