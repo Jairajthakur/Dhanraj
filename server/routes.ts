@@ -183,6 +183,15 @@ async function sendUrgentPush(
         // Without specifying the channel OneSignal falls back to its default
         // IMPORTANCE_DEFAULT channel which plays no sound on Android 8+.
         android_channel_id:        "ptp_alerts",
+        // On Android 8+ the channel's own sound (registered client-side in
+        // lib/notificationChannels.ts) wins, but android_sound still covers
+        // pre-Oreo devices, and ios_sound is what actually plays the voice
+        // alert on iPhones (iOS has no channel concept). Both reference the
+        // same "ptp_voice_alert" file bundled via the expo-notifications
+        // config plugin (app.config.js) — Android wants it without the
+        // extension (res/raw lookup), iOS wants the extension included.
+        android_sound:             "ptp_voice_alert",
+        ios_sound:                 "ptp_voice_alert.wav",
         priority:                  10,
         android_visibility:        1,        // shows on lock screen
         android_led_color:         "FFFF0000",     // red LED
@@ -208,12 +217,18 @@ async function sendUrgentPush(
   }
 }
 
-async function sendPushToMany(playerIds: string[], title: string, body: string, data: Record<string, any> = {}): Promise<{ sent: number; total: number }> {
+async function sendPushToMany(
+  playerIds: string[],
+  title: string,
+  body: string,
+  data: Record<string, any> = {},
+  options: { voiceAlert?: boolean } = {}
+): Promise<{ sent: number; total: number }> {
   const appId = process.env.ONESIGNAL_APP_ID;
   const apiKey = process.env.ONESIGNAL_API_KEY;
   if (!appId || !apiKey || playerIds.length === 0) { console.warn("[push-many] ⚠️ OneSignal not configured or no playerIds for:", title); return { sent: 0, total: 0 }; }
   const validIds = playerIds.filter((id) => id?.trim());
-  console.log(`[push-many] Sending "${title}" to ${validIds.length} devices`);
+  console.log(`[push-many] Sending "${title}" to ${validIds.length} devices${options.voiceAlert ? " (voice alert)" : ""}`);
   try {
     const res = await fetch("https://onesignal.com/api/v1/notifications", {
       method: "POST",
@@ -231,6 +246,18 @@ async function sendPushToMany(playerIds: string[], title: string, body: string, 
         large_icon: "ic_launcher",
         small_icon: "ic_stat_onesignal_default",
         android_accent_color: "FFFF6B00",
+        // Only notifications explicitly marked as a voice alert use the loud
+        // "ptp_alerts" channel + spoken-word sound. Everything else keeps the
+        // normal, quiet default notification sound — voice alerts are the
+        // exception, not the default, for custom admin-sent notifications.
+        ...(options.voiceAlert
+          ? {
+              android_channel_id: "ptp_alerts",
+              android_sound:      "ptp_voice_alert",
+              ios_sound:          "ptp_voice_alert.wav",
+              android_vibration_pattern: [0, 500, 200, 500],
+            }
+          : {}),
       }),
     });
     const json: any = await res.json().catch(() => ({}));
@@ -2054,6 +2081,46 @@ app.put("/api/fos-depositions/:id/pay-both", requireAuth, screenshotUpload.singl
       if (agents.rows.length === 0) return res.json({ sent: 0, total: 0 });
       const result = await sendPushToMany(agents.rows.map((a: any) => a.push_token), "🔔 Test Notification", "Admin sent a test notification.", { type: "test" });
       res.json({ sent: result.sent, total: result.total });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  // ── Admin: Custom notification to selected agents ─────────────────────────
+  // Lets the admin write an arbitrary title/message and send it only to the
+  // agents they pick, with an optional "voice alert" toggle. Voice alert is
+  // opt-in per-send — most custom notifications should stay a normal, quiet
+  // push; only this explicit toggle routes it through the loud "ptp_alerts"
+  // channel with the spoken-word sound.
+  app.post("/api/admin/custom-notification", requireAdmin, async (req, res) => {
+    try {
+      const agentIds: number[] = Array.isArray(req.body.agentIds) ? req.body.agentIds.map(Number).filter((n: number) => !isNaN(n)) : [];
+      const title = String(req.body.title || "").trim();
+      const message = String(req.body.message || "").trim();
+      const voiceAlert = !!req.body.voiceAlert;
+
+      if (agentIds.length === 0) return res.status(400).json({ message: "Select at least one agent." });
+      if (!title) return res.status(400).json({ message: "Enter a notification title." });
+      if (!message) return res.status(400).json({ message: "Enter a notification message." });
+
+      const placeholders = agentIds.map((_, i) => `$${i + 1}`).join(",");
+      const agentRows = await storage.query(
+        `SELECT id, name, push_token FROM fos_agents WHERE id IN (${placeholders}) AND push_token IS NOT NULL AND push_token<>''`,
+        agentIds
+      );
+      const playerIds = agentRows.rows.map((a: any) => a.push_token);
+      const missingCount = agentIds.length - agentRows.rows.length;
+
+      if (playerIds.length === 0) {
+        return res.status(400).json({ message: "None of the selected agents have a registered device to notify." });
+      }
+
+      const result = await sendPushToMany(
+        playerIds,
+        title,
+        message,
+        { type: "custom_admin_notification" },
+        { voiceAlert }
+      );
+      res.json({ success: true, sent: result.sent, total: result.total, missingDevices: missingCount });
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
