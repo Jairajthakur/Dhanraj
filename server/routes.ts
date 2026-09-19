@@ -2319,7 +2319,7 @@ app.put("/api/fos-depositions/:id/pay-both", requireAuth, screenshotUpload.singl
       const { rows: existingAgents } = await storage.query(`SELECT id, name FROM fos_agents WHERE name IS NOT NULL`);
       const agentByName: Record<string, number> = {};
       for (const a of existingAgents) { if (a.name) agentByName[a.name.toLowerCase().trim()] = a.id; }
-      let imported = 0, updated = 0, skipped = 0, agentsCreated = 0; const errors: string[] = [];
+      let imported = 0, updated = 0, skipped = 0, agentsCreated = 0, markedPaid = 0; const errors: string[] = [];
       for (let i = 0; i < rawRows.slice(headerRowIdx + 1).length; i++) {
         const row = rawRows.slice(headerRowIdx + 1)[i]; const mapped: Record<string, any> = {};
         for (const [colIdx, dbField] of Object.entries(colIdxMap)) { const val = row[Number(colIdx)]; mapped[dbField] = val !== undefined && val !== "" ? String(val).trim() : null; }
@@ -2369,7 +2369,8 @@ app.put("/api/fos-depositions/:id/pay-both", requireAuth, screenshotUpload.singl
             recDate: mapped.rec_date != null && mapped.rec_date !== "" ? (parseInt(mapped.rec_date, 10) || 0) : 0,
             remark: mapped.remark ? mapped.remark.trim().toUpperCase() : null,
           });
-          if (upsertResult === "inserted") { imported++; } else { updated++; }
+          if (upsertResult.kind === "inserted") { imported++; } else { updated++; }
+          if (upsertResult.statusUpgradedToPaid) { markedPaid++; }
         } catch (e: any) { errors.push(`Row ${i + headerRowIdx + 2}: ${e.message}`); skipped++; }
       }
 
@@ -2447,7 +2448,7 @@ for (const [agIdStr, d] of Object.entries(penalByAgent)) {
 console.log(`[import] ✅ Penal perf upserted for ${Object.keys(penalByAgent).length} agents from allocation`);
 try { await recalcBktPerfFromAllocation(); } catch (e: any) { console.warn("[import] BKT recalc warning:", e.message); }
 res.json({
-  imported, updated, skipped, agentsCreated, agentsRemoved,
+  imported, updated, skipped, agentsCreated, agentsRemoved, markedPaid,
   total: rawRows.slice(headerRowIdx + 1).length,
   errors: errors.slice(0, 20),
   ...(hadActiveFilter ? { warning: "The uploaded sheet had an active Excel filter. All rows were still imported regardless of which ones the filter was hiding — but if you only meant to upload the filtered subset, clear the filter and re-check the file." } : {}),
