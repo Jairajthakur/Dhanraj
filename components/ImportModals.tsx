@@ -191,6 +191,7 @@ export function ImportModal({
                 {[
                   { label: "New Cases",   val: result.imported,      color: Colors.success },
                   { label: "Updated",     val: result.updated,       color: Colors.info },
+                  { label: "Marked Paid", val: result.markedPaid,    color: Colors.success },
                   { label: "Skipped",     val: result.skipped,       color: Colors.warning },
                   { label: "FOS Created", val: result.agentsCreated, color: Colors.primary },
                 ].map((s) => (
