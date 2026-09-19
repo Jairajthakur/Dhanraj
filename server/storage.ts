@@ -760,9 +760,10 @@ export async function upsertLoanCase(data: {
   feedbackComments?: string | null; ptpDate?: string | null; telecallerPtpDate?: string | null;
   rollbackYn?: boolean | null; companyName?: string | null; collAmount?: string | null;
   recDate?: number | null; remark?: string | null;
-}): Promise<"inserted" | "updated"> {
+}): Promise<{ kind: "inserted" | "updated"; statusUpgradedToPaid: boolean }> {
   const result = await query(
-    `INSERT INTO loan_cases (
+    `WITH old AS (SELECT status FROM loan_cases WHERE loan_no = $3)
+    INSERT INTO loan_cases (
       agent_id, fos_name, loan_no, customer_name, bkt, app_id, address, mobile_no,
       reference_address, pos, asset_make, registration_no, engine_no, chassis_no,
       emi_amount, emi_due, cbc, lpp, cbc_lpp, rollback, clearance,
@@ -799,17 +800,26 @@ export async function upsertLoanCase(data: {
       loan_maturity_date  = EXCLUDED.loan_maturity_date,
       tenor               = EXCLUDED.tenor,
       pro                 = EXCLUDED.pro,
-      -- Telecaller-owned fields: status (Paid/Unpaid/PTP/Rollback), the telecaller's
-      -- own ptp_date, and rollback_yn are NEVER overwritten by a re-import. They are
-      -- only set the first time a case is created and afterwards only change when the
-      -- telecaller updates them from the app. latest_feedback / feedback_comments are
-      -- also telecaller-owned and are intentionally left out of this SET clause.
+      -- Telecaller-owned fields: status, the telecaller's own ptp_date, and
+      -- rollback_yn are NOT freely overwritten by a re-import — EXCEPT status
+      -- is allowed to be *upgraded* to 'Paid' when the incoming file says so.
+      -- This lets an admin's allocation/paid-status re-import mark cases paid
+      -- without ever downgrading a case a telecaller has already marked Paid,
+      -- PTP, or Rollback in the app (that would only happen via the app itself
+      -- or the dedicated Cash Receipt import). latest_feedback / feedback_comments
+      -- are also telecaller-owned and are intentionally left out of this SET clause.
+      status = CASE
+                 WHEN EXCLUDED.status = 'Paid' AND loan_cases.status IS DISTINCT FROM 'Paid'
+                   THEN 'Paid'
+                 ELSE loan_cases.status
+               END,
       telecaller_ptp_date = EXCLUDED.telecaller_ptp_date,
       company_name        = EXCLUDED.company_name,
       coll_amount         = EXCLUDED.coll_amount,
       rec_date            = EXCLUDED.rec_date,
       remark              = EXCLUDED.remark
-    RETURNING (xmax = 0) AS is_insert`,
+    RETURNING (xmax = 0) AS is_insert,
+              (SELECT status FROM old) AS old_status`,
     [
       data.agentId, data.fosName, data.loanNo, data.customerName,
       data.bkt, data.appId, data.address, data.mobileNo,
@@ -826,7 +836,12 @@ export async function upsertLoanCase(data: {
       data.remark || null,
     ]
   );
-  return result.rows[0]?.is_insert ? "inserted" : "updated";
+  const row = result.rows[0];
+  const isInsert = !!row?.is_insert;
+  // Only an existing row (update, not insert) can be "upgraded" — a brand-new
+  // case's status is just whatever the file said, set once at INSERT time.
+  const statusUpgradedToPaid = !isInsert && data.status === "Paid" && row?.old_status !== "Paid";
+  return { kind: isInsert ? "inserted" : "updated", statusUpgradedToPaid };
 }
 
 export async function getRequiredDeposits(agentId: number) {
