@@ -361,14 +361,13 @@ export default function AgencyTargetScreen() {
       if (String(c.pro ?? "").trim().toUpperCase() !== "TW") continue;
       if (!map[bktRaw]) map[bktRaw] = { totalPOS: 0, paidPOS: 0, unpaidPOS: 0, ptpPOS: 0, rollbackPOS: 0, caseCount: 0, paidCount: 0 };
       const pos = parseFloat(c.pos || 0);
-      const rb  = parseFloat(c.rollback || 0);
       map[bktRaw].totalPOS  += pos;
       map[bktRaw].caseCount += 1;
       if (c.status === "Paid")     { map[bktRaw].paidPOS += pos; map[bktRaw].paidCount += 1; }
       else if (c.status === "PTP") { map[bktRaw].ptpPOS  += pos; }
       else                         { map[bktRaw].unpaidPOS += pos; }
       if (c.rollback_yn === true || c.rollback_yn === "true" || c.rollback_yn === "t") {
-        map[bktRaw].rollbackPOS += rb > 0 ? rb : pos;
+        map[bktRaw].rollbackPOS += pos; // TW case POS only, not the rollback amount column
       }
     }
     return map;
