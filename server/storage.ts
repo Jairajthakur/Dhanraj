@@ -760,6 +760,7 @@ export async function upsertLoanCase(data: {
   feedbackComments?: string | null; ptpDate?: string | null; telecallerPtpDate?: string | null;
   rollbackYn?: boolean | null; companyName?: string | null; collAmount?: string | null;
   recDate?: number | null; remark?: string | null;
+  statusProvided?: boolean; rollbackProvided?: boolean;
 }): Promise<{ kind: "inserted" | "updated"; statusUpgradedToPaid: boolean }> {
   const result = await query(
     `WITH old AS (SELECT status FROM loan_cases WHERE loan_no = $3)
@@ -800,19 +801,11 @@ export async function upsertLoanCase(data: {
       loan_maturity_date  = EXCLUDED.loan_maturity_date,
       tenor               = EXCLUDED.tenor,
       pro                 = EXCLUDED.pro,
-      -- Telecaller-owned fields: status, the telecaller's own ptp_date, and
-      -- rollback_yn are NOT freely overwritten by a re-import — EXCEPT status
-      -- is allowed to be *upgraded* to 'Paid' when the incoming file says so.
-      -- This lets an admin's allocation/paid-status re-import mark cases paid
-      -- without ever downgrading a case a telecaller has already marked Paid,
-      -- PTP, or Rollback in the app (that would only happen via the app itself
-      -- or the dedicated Cash Receipt import). latest_feedback / feedback_comments
-      -- are also telecaller-owned and are intentionally left out of this SET clause.
-      status = CASE
-                 WHEN EXCLUDED.status = 'Paid' AND loan_cases.status IS DISTINCT FROM 'Paid'
-                   THEN 'Paid'
-                 ELSE loan_cases.status
-               END,
+      -- Allocation file is the source of truth: Paid / Unpaid / PTP status and
+      -- Rollback flag are OVERWRITTEN from the file (both directions), as long
+      -- as the file actually carries a value for that column ($36 / $37).
+      status = CASE WHEN $36::boolean THEN EXCLUDED.status ELSE loan_cases.status END,
+      rollback_yn = CASE WHEN $37::boolean THEN EXCLUDED.rollback_yn ELSE loan_cases.rollback_yn END,
       telecaller_ptp_date = EXCLUDED.telecaller_ptp_date,
       company_name        = EXCLUDED.company_name,
       coll_amount         = EXCLUDED.coll_amount,
@@ -834,6 +827,8 @@ export async function upsertLoanCase(data: {
       data.collAmount != null ? parseFloat(data.collAmount) || null : null,
       data.recDate ?? 0,
       data.remark || null,
+      data.statusProvided ?? true,
+      data.rollbackProvided ?? true,
     ]
   );
   const row = result.rows[0];
@@ -882,11 +877,11 @@ export async function upsertBktCase(data: any) {
        pos, asset_name, asset_make, registration_no, engine_no, chassis_no,
        emi_amount, emi_due, cbc, lpp, cbc_lpp, rollback, clearance,
        first_emi_due_date, loan_maturity_date, tenor, pro, status, ptp_date, telecaller_ptp_date,
-       rec_date, remark
+       rec_date, remark, rollback_yn
      ) VALUES (
        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,
        $15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,
-       $35,$36
+       $35,$36,$37
      )
      ON CONFLICT (loan_no) DO UPDATE SET
        case_category = EXCLUDED.case_category,
@@ -919,10 +914,10 @@ export async function upsertBktCase(data: any) {
        loan_maturity_date = COALESCE(EXCLUDED.loan_maturity_date, bkt_cases.loan_maturity_date),
        tenor = COALESCE(EXCLUDED.tenor, bkt_cases.tenor),
        pro = COALESCE(EXCLUDED.pro, bkt_cases.pro),
-       -- Telecaller-owned fields (status, the telecaller's own ptp_date, rollback_yn,
-       -- latest_feedback, feedback_comments, extra_numbers) are intentionally left out
-       -- of this SET clause so a re-import never wipes what the telecaller has entered.
-       -- They're only set once, when a case is first inserted.
+       -- Allocation file overwrites status (Paid/Unpaid/PTP) and rollback_yn.
+       -- Feedback text / extra numbers stay telecaller-owned.
+       status = CASE WHEN $38::boolean THEN EXCLUDED.status ELSE bkt_cases.status END,
+       rollback_yn = CASE WHEN $39::boolean THEN EXCLUDED.rollback_yn ELSE bkt_cases.rollback_yn END,
        telecaller_ptp_date = EXCLUDED.telecaller_ptp_date,
        rec_date = EXCLUDED.rec_date,
        remark = EXCLUDED.remark
@@ -935,7 +930,8 @@ export async function upsertBktCase(data: any) {
       data.emiAmount, data.emiDue, data.cbc, data.lpp, data.cbcLpp,
       data.rollback, data.clearance, data.firstEmiDueDate, data.loanMaturityDate,
       data.tenor, data.pro, data.status, data.ptpDate || null, data.telecallerPtpDate || null,
-      data.recDate ?? 0, data.remark || null,
+      data.recDate ?? 0, data.remark || null, data.rollbackYn ?? null,
+      data.statusProvided ?? true, data.rollbackProvided ?? true,
     ]
   );
   return result.rows[0]?.is_new ? "inserted" : "updated";
