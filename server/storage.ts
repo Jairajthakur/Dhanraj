@@ -807,6 +807,10 @@ export async function upsertLoanCase(data: {
       status = CASE WHEN $36::boolean THEN EXCLUDED.status ELSE loan_cases.status END,
       rollback_yn = CASE WHEN $37::boolean THEN EXCLUDED.rollback_yn ELSE loan_cases.rollback_yn END,
       telecaller_ptp_date = EXCLUDED.telecaller_ptp_date,
+      -- Detail feedback comes ONLY from the allocation file. If the file has no
+      -- Detail Feedback column (or the cell is blank) this is NULL, so old
+      -- feedback from a previous month no longer lingers on re-import.
+      latest_feedback     = EXCLUDED.latest_feedback,
       company_name        = EXCLUDED.company_name,
       coll_amount         = EXCLUDED.coll_amount,
       rec_date            = EXCLUDED.rec_date,
