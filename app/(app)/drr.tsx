@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import {
   View, Text, StyleSheet, ScrollView, RefreshControl,
-  ActivityIndicator, Platform, Pressable, Alert, Linking, TextInput,
+  ActivityIndicator, Platform, Pressable, Alert, Linking, TextInput, AppState,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -115,9 +115,14 @@ function BktCard({ bkt, paid, total, today }: {
   );
 }
 
-function fmtK(n: number) {
-  if (!n) return "0";
-  return n >= 1000 ? `${Math.round(n / 1000)} k` : String(Math.round(n));
+// Current date in India (yyyy-mm-dd) — the daily list rolls over at midnight IST
+function istDate() {
+  return new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
+}
+
+// Full amount (no "k"), e.g. 50000 -> "50,000"
+function fmtFull(n: number) {
+  return Math.round(n || 0).toLocaleString("en-IN");
 }
 
 function buildDrrMessage(location: string, fosName: string, items: any[]) {
@@ -127,7 +132,7 @@ function buildDrrMessage(location: string, fosName: string, items: any[]) {
     const rows = items.filter((i) => String(i.bkt) === String(b));
     const pos = rows.reduce((a, r) => a + (r.pos || 0), 0);
     lines.push(`*Bkt${b} DRR Count* - ${pad(rows.length)}`);
-    lines.push(`*Bkt${b} DRR POS* - ${fmtK(pos)}`);
+    lines.push(`*Bkt${b} DRR POS* - ${fmtFull(pos)}`);
     lines.push("");
   }
   return lines.join("\n").trim();
@@ -223,7 +228,7 @@ function TodayPaymentsCard({
               return (
                 <View key={b} style={s.cell}>
                   <Text style={s.cellLabel}>BKT {b}</Text>
-                  <Text style={s.cellVal}>{rows.length} · {fmtK(pos)}</Text>
+                  <Text style={s.cellVal}>{rows.length} · {fmtFull(pos)}</Text>
                 </View>
               );
             })}
@@ -297,11 +302,22 @@ export default function FosDRRScreen() {
   // ── Today's expected payments ───────────────────────────────────────────────
   const qc = useQueryClient();
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [dayKey, setDayKey] = useState(istDate());
 
   const { data: todayData, isLoading: todayLoading, refetch: refetchToday } = useQuery({
-    queryKey: ["/api/drr/today-payments"],
+    queryKey: ["/api/drr/today-payments", dayKey],
     queryFn:  () => api.getDrrTodayPayments(),
   });
+
+  // New day (or app brought back to the foreground) → load today's list fresh
+  useEffect(() => {
+    const check = () => setDayKey(istDate());
+    const sub = AppState.addEventListener("change", (st) => {
+      if (st === "active") { check(); refetchToday(); }
+    });
+    const timer = setInterval(check, 60 * 1000);
+    return () => { sub.remove(); clearInterval(timer); };
+  }, []);
 
   const removeMut = useMutation({
     mutationFn: (item: any) => api.removeDrrTodayPayment(item.source, item.id),
