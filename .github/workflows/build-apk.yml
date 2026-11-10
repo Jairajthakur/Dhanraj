@@ -64,7 +64,6 @@ jobs:
           org.gradle.jvmargs=-Xmx6g -XX:MaxMetaspaceSize=1g
           org.gradle.parallel=true
           org.gradle.caching=true
-          org.gradle.configureondemand=true
           kotlin.daemon.jvm.options=-Xmx4g -XX:MaxMetaspaceSize=1g
           kotlin.incremental=true
           GRADLE
@@ -105,10 +104,22 @@ jobs:
           ls -la android/
           ls -la android/app/
 
-      - name: Build APK
+      - name: Generate native codegen (all libraries)
+        # Runs react-native-share / reanimated / etc. codegen BEFORE the app's
+        # CMake configure step, which needs those generated folders to exist.
         run: |
           cd android
           chmod +x gradlew
+          ./gradlew generateCodegenArtifactsFromSchema \
+            --no-daemon \
+            --stacktrace
+        env:
+          GRADLE_OPTS: "-Xmx6g -XX:MaxMetaspaceSize=1g"
+          EXPO_PUBLIC_API_URL: ${{ env.EXPO_PUBLIC_API_URL }}
+
+      - name: Build APK
+        run: |
+          cd android
           ./gradlew assembleRelease \
             --no-daemon \
             --parallel \
