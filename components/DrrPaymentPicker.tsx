@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
   View, Text, StyleSheet, Modal, Pressable, TextInput, FlatList,
-  ActivityIndicator, Alert, Platform, KeyboardAvoidingView, ScrollView,
+  ActivityIndicator, Alert, Platform, KeyboardAvoidingView,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -174,7 +174,7 @@ export function DrrPaymentPicker({ visible, onClose }: Props) {
         </View>
 
         {/* Filter chips */}
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0 }} contentContainerStyle={s.chipRow}>
+        <View style={s.chipRow}>
           {chips.map((ch) => (
             <Pressable
               key={ch.key}
@@ -184,7 +184,7 @@ export function DrrPaymentPicker({ visible, onClose }: Props) {
               <Text style={[s.chipText, filter === ch.key && s.chipTextActive]}>{ch.label}</Text>
             </Pressable>
           ))}
-        </ScrollView>
+        </View>
 
         {!isLoading && !isError && list.length > 0 && (
           <Pressable style={s.selAll} onPress={toggleAllShown}>
@@ -308,8 +308,8 @@ const s = StyleSheet.create({
   sub:           { fontSize: 12, color: Colors.textSecondary, marginTop: 1 },
   searchWrap:    { flexDirection: "row", alignItems: "center", gap: 8, margin: 12, marginBottom: 6, paddingHorizontal: 12, height: 42, backgroundColor: Colors.surface, borderRadius: 12, borderWidth: 1, borderColor: Colors.border },
   searchInput:   { flex: 1, fontSize: 14, color: Colors.text, paddingVertical: 0 },
-  chipRow:       { flexDirection: "row", gap: 8, paddingHorizontal: 12, paddingVertical: 6 },
-  chip:          { paddingHorizontal: 12, paddingVertical: 7, borderRadius: 18, backgroundColor: Colors.surface, borderWidth: 1, borderColor: Colors.border },
+  chipRow:       { flexDirection: "row", flexWrap: "wrap", gap: 8, paddingHorizontal: 12, paddingVertical: 6 },
+  chip:          { paddingHorizontal: 12, paddingVertical: 7, flexShrink: 0, borderRadius: 18, backgroundColor: Colors.surface, borderWidth: 1, borderColor: Colors.border },
   chipActive:    { backgroundColor: Colors.primary, borderColor: Colors.primary },
   selAll:        { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 14, paddingVertical: 6 },
   selAllText:    { fontSize: 13, fontWeight: "700", color: Colors.textSecondary },
