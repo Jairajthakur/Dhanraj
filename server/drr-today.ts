@@ -48,13 +48,15 @@ async function getTodaySelections(agentId: number) {
   const result = await storage.query(
     `
     SELECT 'loan' AS source, c.id, c.customer_name, c.loan_no, c.bkt, c.status,
-           c.mobile_no, c.company_name, c.ptp_date, s.expected_amount
+           c.mobile_no, c.company_name, c.ptp_date, s.expected_amount,
+           COALESCE(${num("c.pos")}, 0) AS pos
     FROM drr_today_payments s
     JOIN loan_cases c ON s.source = 'loan' AND c.id = s.case_id AND c.agent_id = s.agent_id
     WHERE s.agent_id = $1 AND s.selection_date = ${TODAY}
     UNION ALL
     SELECT 'bkt' AS source, c.id, c.customer_name, c.loan_no, c.bkt, c.status,
-           c.mobile_no, c.company_name, c.ptp_date, s.expected_amount
+           c.mobile_no, c.company_name, c.ptp_date, s.expected_amount,
+           COALESCE(${num("c.pos")}, 0) AS pos
     FROM drr_today_payments s
     JOIN bkt_cases c ON s.source = 'bkt' AND c.id = s.case_id AND c.agent_id = s.agent_id
     WHERE s.agent_id = $1 AND s.selection_date = ${TODAY}
@@ -66,6 +68,7 @@ async function getTodaySelections(agentId: number) {
   const items = result.rows.map((r: any) => ({
     ...r,
     expected_amount: parseFloat(r.expected_amount) || 0,
+    pos: parseFloat(r.pos) || 0,
     received: r.status === "Paid",
   }));
 
@@ -108,6 +111,7 @@ export function registerDrrTodayRoutes(
         `
         SELECT 'loan' AS source, c.id, c.customer_name, c.loan_no, c.bkt, c.status,
                c.mobile_no, c.company_name, c.ptp_date,
+               COALESCE(${num("c.pos")}, 0) AS pos,
                ${defaultAmt("c")} AS default_amount,
                s.expected_amount, (s.id IS NOT NULL) AS selected,
                (c.ptp_date = ${TODAY}) AS ptp_today
@@ -117,6 +121,7 @@ export function registerDrrTodayRoutes(
         UNION ALL
         SELECT 'bkt' AS source, c.id, c.customer_name, c.loan_no, c.bkt, c.status,
                c.mobile_no, c.company_name, c.ptp_date,
+               COALESCE(${num("c.pos")}, 0) AS pos,
                ${defaultAmt("c")} AS default_amount,
                s.expected_amount, (s.id IS NOT NULL) AS selected,
                (c.ptp_date = ${TODAY}) AS ptp_today
@@ -131,6 +136,7 @@ export function registerDrrTodayRoutes(
       const cases = result.rows.map((r: any) => ({
         ...r,
         default_amount: parseFloat(r.default_amount) || 0,
+        pos: parseFloat(r.pos) || 0,
         expected_amount: r.expected_amount != null ? parseFloat(r.expected_amount) : null,
         ptp_today: r.ptp_today === true,
         selected: r.selected === true,
