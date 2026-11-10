@@ -411,6 +411,14 @@ export const api = {
   getBktTwCollectionSummary: (params?: { company?: string | null }) =>
     apiRequest("GET", `/api/bkt-tw-collection-summary${qs({ company: params?.company })}`),
 
+  // ── Today's DRR (expected payments for today) ─────────────────────────────
+  getDrrTodayPayments:   () => apiRequest("GET", "/api/drr/today-payments"),
+  getDrrTodayCandidates: () => apiRequest("GET", "/api/drr/today-candidates"),
+  saveDrrTodayPayments:  (items: { source: string; id: number; expected_amount?: number | null }[]) =>
+    apiRequest("PUT", "/api/drr/today-payments", { items }),
+  removeDrrTodayPayment: (source: string, id: number) =>
+    apiRequest("DELETE", `/api/drr/today-payments/${source}/${id}`),
+
   // ── Push token ────────────────────────────────────────────────────────────
   savePushToken: (token: string) => apiRequest("POST", "/api/push-token", { token }),
 
