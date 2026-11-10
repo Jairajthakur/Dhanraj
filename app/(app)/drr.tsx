@@ -1,14 +1,16 @@
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
   View, Text, StyleSheet, ScrollView, RefreshControl,
-  ActivityIndicator, Platform, Pressable, Alert,
+  ActivityIndicator, Platform, Pressable, Alert, Linking, TextInput,
 } from "react-native";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Ionicons } from "@expo/vector-icons";
 import Colors from "@/constants/colors";
 import { api } from "@/lib/api";
 import { useCompany } from "@/context/CompanyContext";
+import { useAuth } from "@/context/AuthContext";
 import { CompanyFilterBar } from "@/components/CompanyFilterBar";
 import { DrrPaymentPicker } from "@/components/DrrPaymentPicker";
 
@@ -113,6 +115,36 @@ function BktCard({ bkt, paid, total, today }: {
   );
 }
 
+function fmtK(n: number) {
+  if (!n) return "0";
+  return n >= 1000 ? `${Math.round(n / 1000)} k` : String(Math.round(n));
+}
+
+function buildDrrMessage(location: string, fosName: string, items: any[]) {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const lines = [`*Today's DRR*`, `*Location* - ${location.trim() || "-"}`, `*FOS Name* - ${fosName}`, ""];
+  for (const b of [1, 2, 3]) {
+    const rows = items.filter((i) => String(i.bkt) === String(b));
+    const pos = rows.reduce((a, r) => a + (r.pos || 0), 0);
+    lines.push(`*Bkt${b} DRR Count* - ${pad(rows.length)}`);
+    lines.push(`*Bkt${b} DRR POS* - ${fmtK(pos)}`);
+    lines.push("");
+  }
+  return lines.join("\n").trim();
+}
+
+async function shareOnWhatsApp(text: string) {
+  const enc = encodeURIComponent(text);
+  try {
+    if (Platform.OS !== "web" && (await Linking.canOpenURL("whatsapp://send"))) {
+      return Linking.openURL(`whatsapp://send?text=${enc}`);
+    }
+    return Linking.openURL(`https://wa.me/?text=${enc}`);
+  } catch {
+    Alert.alert("WhatsApp", "Could not open WhatsApp.");
+  }
+}
+
 // ─── Today's expected payments ────────────────────────────────────────────────
 function TodayPaymentsCard({
   data, loading, dailyNeed, onEdit, onRemove, removing,
@@ -122,6 +154,10 @@ function TodayPaymentsCard({
 }) {
   const items: any[] = data?.items ?? [];
   const t = data?.totals ?? { count: 0, received_count: 0, expected: 0, received: 0, pending: 0 };
+  const { agent } = useAuth();
+  const [location, setLocation] = useState("");
+  useEffect(() => { AsyncStorage.getItem("drr_location").then((v) => { if (v) setLocation(v); }).catch(() => {}); }, []);
+  const onLocation = (v: string) => { setLocation(v); AsyncStorage.setItem("drr_location", v).catch(() => {}); };
   const coverage = dailyNeed > 0 ? Math.min(100, (t.expected / dailyNeed) * 100) : 0;
   const covered  = dailyNeed > 0 && t.expected >= dailyNeed;
 
@@ -178,6 +214,36 @@ function TodayPaymentsCard({
               </Text>
             </View>
           )}
+
+          {/* BKT-wise summary */}
+          <View style={s.row3}>
+            {[1, 2, 3].map((b) => {
+              const rows = items.filter((i) => String(i.bkt) === String(b));
+              const pos = rows.reduce((a, r) => a + (r.pos || 0), 0);
+              return (
+                <View key={b} style={s.cell}>
+                  <Text style={s.cellLabel}>BKT {b}</Text>
+                  <Text style={s.cellVal}>{rows.length} · {fmtK(pos)}</Text>
+                </View>
+              );
+            })}
+          </View>
+
+          {/* Share on WhatsApp */}
+          <TextInput
+            style={s.locInput}
+            value={location}
+            onChangeText={onLocation}
+            placeholder="Location (e.g. Himayatnagar)"
+            placeholderTextColor={Colors.textMuted}
+          />
+          <Pressable
+            style={s.waBtn}
+            onPress={() => shareOnWhatsApp(buildDrrMessage(location, agent?.name || "", items))}
+          >
+            <Ionicons name="logo-whatsapp" size={18} color="#fff" />
+            <Text style={s.waBtnText}>Share Today's DRR on WhatsApp</Text>
+          </Pressable>
 
           {items.map((it) => (
             <View key={`${it.source}:${it.id}`} style={[s.todayRow, it.received && { opacity: 0.75 }]}>
@@ -440,6 +506,9 @@ const s = StyleSheet.create({
   todayBtnText:        { color: "#fff", fontSize: 13, fontWeight: "800" },
   todayEmpty:          { alignItems: "center", paddingVertical: 14, gap: 6 },
   coverText:           { fontSize: 11, fontWeight: "600", color: Colors.textSecondary },
+  locInput:            { height: 40, borderRadius: 10, borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.background, paddingHorizontal: 12, fontSize: 14, color: Colors.text },
+  waBtn:               { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, height: 44, borderRadius: 12, backgroundColor: "#25D366" },
+  waBtnText:           { color: "#fff", fontSize: 14, fontWeight: "800" },
   todayRow:            { flexDirection: "row", alignItems: "center", gap: 10, backgroundColor: Colors.surfaceAlt, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10 },
   todayName:           { fontSize: 13, fontWeight: "800", color: Colors.text },
   todayMeta:           { fontSize: 11, color: Colors.textSecondary, marginTop: 1 },
