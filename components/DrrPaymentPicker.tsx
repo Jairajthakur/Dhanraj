@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
   View, Text, StyleSheet, Modal, Pressable, TextInput, FlatList,
-  ActivityIndicator, Alert, Platform, KeyboardAvoidingView,
+  ActivityIndicator, Alert, Platform, KeyboardAvoidingView, ScrollView,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -15,7 +15,7 @@ interface Props {
   onClose: () => void;
 }
 
-type Filter = "all" | "ptp" | "selected";
+type Filter = "all" | "ptp" | "selected" | "1" | "2" | "3";
 
 const fmt = (n: number) => `₹${Math.round(n || 0).toLocaleString("en-IN")}`;
 const keyOf = (c: any) => `${c.source}:${c.id}`;
@@ -100,6 +100,7 @@ export function DrrPaymentPicker({ visible, onClose }: Props) {
     let rows = cases.filter((c) => {
       if (filter === "ptp" && !c.ptp_today) return false;
       if (filter === "selected" && selected[keyOf(c)] === undefined) return false;
+      if ((filter === "1" || filter === "2" || filter === "3") && String(c.bkt) !== filter) return false;
       if (!q) return true;
       return (
         (c.customer_name || "").toLowerCase().includes(q) ||
@@ -116,8 +117,23 @@ export function DrrPaymentPicker({ visible, onClose }: Props) {
   const totalAmount = selectedKeys.reduce((a, k) => a + (parseFloat(selected[k]) || 0), 0);
   const ptpCount = cases.filter((c) => c.ptp_today).length;
 
+  const bktCount = (n: string) => cases.filter((c) => String(c.bkt) === n).length;
+  const allShownSelected = list.length > 0 && list.every((c) => selected[keyOf(c)] !== undefined);
+  const toggleAllShown = () =>
+    setSelected((prev) => {
+      const next = { ...prev };
+      for (const c of list) {
+        if (allShownSelected) delete next[keyOf(c)];
+        else if (next[keyOf(c)] === undefined) next[keyOf(c)] = String(Math.round(c.default_amount || 0));
+      }
+      return next;
+    });
+
   const chips: { key: Filter; label: string }[] = [
     { key: "all", label: `All (${cases.length})` },
+    { key: "1", label: `BKT 1 (${bktCount("1")})` },
+    { key: "2", label: `BKT 2 (${bktCount("2")})` },
+    { key: "3", label: `BKT 3 (${bktCount("3")})` },
     { key: "ptp", label: `PTP Today (${ptpCount})` },
     { key: "selected", label: `Selected (${selectedKeys.length})` },
   ];
@@ -158,7 +174,7 @@ export function DrrPaymentPicker({ visible, onClose }: Props) {
         </View>
 
         {/* Filter chips */}
-        <View style={s.chipRow}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0 }} contentContainerStyle={s.chipRow}>
           {chips.map((ch) => (
             <Pressable
               key={ch.key}
@@ -168,7 +184,16 @@ export function DrrPaymentPicker({ visible, onClose }: Props) {
               <Text style={[s.chipText, filter === ch.key && s.chipTextActive]}>{ch.label}</Text>
             </Pressable>
           ))}
-        </View>
+        </ScrollView>
+
+        {!isLoading && !isError && list.length > 0 && (
+          <Pressable style={s.selAll} onPress={toggleAllShown}>
+            <Ionicons name={allShownSelected ? "checkbox" : "square-outline"} size={20} color={allShownSelected ? Colors.success : Colors.textSecondary} />
+            <Text style={s.selAllText}>
+              {allShownSelected ? "Clear" : "Select all"} {list.length} shown
+            </Text>
+          </Pressable>
+        )}
 
         {/* List */}
         {isLoading ? (
@@ -217,7 +242,7 @@ export function DrrPaymentPicker({ visible, onClose }: Props) {
                     <View style={{ flex: 1 }}>
                       <Text style={s.name} numberOfLines={1}>{item.customer_name}</Text>
                       <Text style={s.meta} numberOfLines={1}>
-                        {item.loan_no}{item.company_name ? ` · ${item.company_name}` : ""}
+                        {item.loan_no}{item.pos ? ` · POS ${fmt(item.pos)}` : ""}{item.company_name ? ` · ${item.company_name}` : ""}
                       </Text>
                       <View style={s.tagRow}>
                         {item.bkt != null && (
@@ -286,6 +311,8 @@ const s = StyleSheet.create({
   chipRow:       { flexDirection: "row", gap: 8, paddingHorizontal: 12, paddingVertical: 6 },
   chip:          { paddingHorizontal: 12, paddingVertical: 7, borderRadius: 18, backgroundColor: Colors.surface, borderWidth: 1, borderColor: Colors.border },
   chipActive:    { backgroundColor: Colors.primary, borderColor: Colors.primary },
+  selAll:        { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 14, paddingVertical: 6 },
+  selAllText:    { fontSize: 13, fontWeight: "700", color: Colors.textSecondary },
   chipText:      { fontSize: 12, fontWeight: "700", color: Colors.textSecondary },
   chipTextActive:{ color: "#fff" },
   center:        { flex: 1, alignItems: "center", justifyContent: "center", paddingVertical: 50, gap: 10 },
