@@ -10,7 +10,7 @@ import { useCompany } from "@/context/CompanyContext";
 import { CompanyFilterBar } from "@/components/CompanyFilterBar";
 
 const BKT_TARGETS: Record<string, { resolution: number; rollback?: number }> = {
-  bkt1:  { resolution: 92, rollback: 22 },
+  bkt1:  { resolution: 92, rollback: 17 },
   bkt2:  { resolution: 80, rollback: 18 },
   bkt3:  { resolution: 75, rollback: 17 },
   penal: { resolution: 3.5 },
