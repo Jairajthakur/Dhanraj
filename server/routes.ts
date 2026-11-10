@@ -6,6 +6,7 @@ import connectPgSimple from "connect-pg-simple";
 import multer from "multer";
 import ExcelJS from "exceljs";
 import * as storage from "./storage";
+import { initDrrTodayTable, registerDrrTodayRoutes } from "./drr-today";
 import path from "node:path";
 import fs from "node:fs";
 import express from "express";
@@ -752,6 +753,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   await storage.initBktPerfSummaryTable();
 
   try {
+    await initDrrTodayTable();
+    console.log("[DB] drr_today_payments table ready ✅");
+  } catch (e: any) { console.error("[DB] drr_today_payments migration:", e.message); }
+
+  try {
     await storage.query(`ALTER TABLE required_deposits ADD COLUMN IF NOT EXISTS cash_collected BOOLEAN DEFAULT FALSE, ADD COLUMN IF NOT EXISTS cash_collected_at TIMESTAMP`);
     console.log("[DB] cash_collected columns ready ✅");
   } catch (e: any) { console.error("[DB] Migration error:", e.message); }
@@ -1408,6 +1414,9 @@ app.get("/api/tomorrow-ptp", requireAuth, async (req, res) => {
     res.json({ count: result.rows.length, cases: result.rows });
   } catch (e: any) { res.status(500).json({ message: e.message }); }
 });
+
+  // ── Today's DRR: agent selects which customers' payments are expected today ──
+  registerDrrTodayRoutes(app, requireAuth);
 
   app.get("/api/attendance/today", requireAuth, async (req, res) => {
     try { res.json({ attendance: await storage.getTodayAttendance(req.session.agentId!) }); }
